@@ -265,7 +265,7 @@ func TestOutcome(t *testing.T) {
 	}
 	var n int
 	if err := b.Raw().QueryRow(`SELECT count(*) FROM facts WHERE harness='opencode' AND
-		event IN ('experimental.chat.system.transform','chat.params','chat.headers','shell.env','message.part.delta')`).Scan(&n); err != nil {
+		event IN ('experimental.chat.system.transform','chat.params','chat.headers','shell.env','message.part.delta','message.part.updated','session.status','session.updated','session.diff')`).Scan(&n); err != nil {
 		t.Fatal(err)
 	}
 	if n != 0 {

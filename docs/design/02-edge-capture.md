@@ -217,8 +217,8 @@ Each harness ships its own hook config, passing a literal `--harness`.
 
 The OpenCode plugin does not forward the `remove` events of the ingest policy
 ([design 1](01-event-model-and-ingest.md#hook-event-policy)): `experimental.chat.system.transform`,
-`chat.params`, `chat.headers`, `shell.env` and `message.part.delta`, by event name, so hook and bus
-forms alike. The list is declared once in the plugin between `remove-list` markers, and a test
+`chat.params`, `chat.headers`, `shell.env`, `message.part.delta`, `message.part.updated`,
+`session.status`, `session.updated` and `session.diff`, by event name, so hook and bus forms alike. The list is declared once in the plugin between `remove-list` markers, and a test
 asserts it equals the ingest table's.
 
 It also trims the `trim` events of the policy: `message.updated` is spooled without

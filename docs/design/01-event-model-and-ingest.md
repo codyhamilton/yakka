@@ -132,12 +132,20 @@ One table in `internal/ingest` maps `(harness, event)` to `keep`, `remove` or `t
 `keep`.
 
 - **`remove`** applies to OpenCode `experimental.chat.system.transform`, `chat.params`,
-  `chat.headers`, `shell.env` and `message.part.delta`. The first is a redundant prompt body, the
-  next two and `shell.env` carry request headers and environment secrets, and the streamed deltas
-  are redundant with `message.part.updated`, which carries the finished part. The OpenCode plugin
-  does not forward them ([design 2](02-edge-capture.md)); ingest answers any that arrive (older
-  plugins, other clients) `accepted` and stores nothing: no fact and no archive line. A test asserts
-  the plugin's remove list equals the table's.
+  `chat.headers`, `shell.env`, `message.part.delta`, `message.part.updated`, `session.status`,
+  `session.updated` and `session.diff`. The first is a redundant prompt body, the next two and
+  `shell.env` carry request headers and environment secrets, and the rest are chatter that the
+  other events already cover. The streamed deltas and `message.part.updated` repeat a part as it
+  builds; the finished text is `experimental.text.complete`, the prompt is `chat.message`, tool
+  calls are `tool.execute.before` and `after`, and each assistant message with its tokens, model
+  and cost is the transcript's `transcript.assistant_message`. `session.status` and
+  `session.updated` repeat session state, and `session.diff` repeats the cumulative patches that
+  artifact versions and commits already hold. Together the last four were about 840k of 1.44M hook events
+  in the first measured ledger. The OpenCode plugin does not forward them ([design
+  2](02-edge-capture.md)); ingest answers any that arrive (older plugins, other clients)
+  `accepted` and stores nothing: no fact and no archive line. A test asserts the plugin's remove
+  list equals the table's. The plugin still reads `message.part.updated` to derive the
+  `PostToolBatch` marker at a `step-finish` part; only the stored row is dropped.
 - **`keep`** stores the event as an envelope plus extracted fields. Row-hash identity is the
   full received envelope's, as above.
 - **`trim`** applies to OpenCode `message.updated`. OpenCode repeats the session's cumulative

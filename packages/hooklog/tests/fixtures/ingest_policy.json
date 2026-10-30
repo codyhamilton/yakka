@@ -614,20 +614,18 @@
    "type": "hook_event",
    "conversation_id": "fx-conv-opencode",
    "harness": "opencode",
-   "event": "message.part.updated",
+   "event": "permission.asked",
    "ts": 1791100035.0,
    "payload": {
     "cwd": "/work/fixture",
     "session_id": "fx-conv-opencode",
-    "hook_event_name": "message.part.updated",
+    "hook_event_name": "permission.asked",
     "source": "bus",
     "event": {
-     "type": "message.part.updated",
+     "type": "permission.asked",
      "properties": {
-      "part": {
-       "id": "prt_1",
-       "type": "text"
-      }
+      "id": "per_1",
+      "sessionID": "fx-conv-opencode"
      }
     }
    }
@@ -1596,7 +1594,7 @@
   {
    "id": "fx-opencode-36",
    "policy": "keep",
-   "norm_event": "message_part",
+   "norm_event": "other",
    "tool": "",
    "model": "",
    "tok_in": 0,

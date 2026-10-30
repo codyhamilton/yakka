@@ -35,6 +35,10 @@ var policyTable = map[policyKey]Action{
 	{"opencode", "chat.headers"}:                       Remove,
 	{"opencode", "shell.env"}:                          Remove,
 	{"opencode", "message.part.delta"}:                 Remove,
+	{"opencode", "message.part.updated"}:               Remove,
+	{"opencode", "session.status"}:                     Remove,
+	{"opencode", "session.updated"}:                    Remove,
+	{"opencode", "session.diff"}:                       Remove,
 	{"opencode", "message.updated"}:                    Trimmed,
 }
 

@@ -81,7 +81,7 @@ function snapshotOf(payload: Record<string, unknown>): string {
 
 // Secret-bearing or redundant events are never forwarded. Mirrored by the Go policy; a test asserts equality.
 // remove-list:begin
-const REMOVE_EVENTS = ["experimental.chat.system.transform", "chat.params", "chat.headers", "shell.env", "message.part.delta"] as const
+const REMOVE_EVENTS = ["experimental.chat.system.transform", "chat.params", "chat.headers", "shell.env", "message.part.delta", "message.part.updated", "session.status", "session.updated", "session.diff"] as const
 // remove-list:end
 
 // Events whose payload carries dead weight: OpenCode repeats the session's cumulative patches in

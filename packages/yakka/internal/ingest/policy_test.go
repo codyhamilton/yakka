@@ -285,7 +285,7 @@ func TestIngestPolicyFixture(t *testing.T) {
 // (g) a hook body containing a secret is rejected and not archived.
 func TestIngestSecretHookNotArchived(t *testing.T) {
 	tn := open(t)
-	f := map[string]any{"id": "s#0", "type": "hook_event", "conversation_id": "sec", "harness": "opencode", "event": "session.status", "ts": 5,
+	f := map[string]any{"id": "s#0", "type": "hook_event", "conversation_id": "sec", "harness": "opencode", "event": "tool.execute.after", "ts": 5,
 		"payload": map[string]any{"event": map[string]any{"properties": map[string]any{"messageID": "m", "partID": "p", "field": "text", "delta": "k " + secretText()}}}}
 	res, err := Ingest(context.Background(), tn, marshal(t, f))
 	if err != nil {

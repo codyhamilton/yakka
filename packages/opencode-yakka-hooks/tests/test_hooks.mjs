@@ -10,7 +10,7 @@ import plugin from '../src/index.ts'
 
 const named = 'event config dispose chat.message chat.params chat.headers permission.ask command.execute.before tool.execute.before tool.execute.after tool.definition shell.env experimental.chat.messages.transform experimental.chat.system.transform experimental.session.compacting experimental.compaction.autocontinue experimental.text.complete experimental.provider.small_model'.split(' ')
 const bus = 'command.executed file.edited file.watcher.updated installation.updated lsp.client.diagnostics lsp.updated message.part.removed message.part.updated message.removed message.updated permission.asked permission.replied server.connected session.created session.compacted session.deleted session.diff session.error session.idle session.status session.updated todo.updated shell.env tool.execute.before tool.execute.after tui.prompt.append tui.command.execute tui.toast.show'.split(' ')
-const removed = ['experimental.chat.system.transform', 'chat.params', 'chat.headers', 'shell.env', 'message.part.delta']
+const removed = ['experimental.chat.system.transform', 'chat.params', 'chat.headers', 'shell.env', 'message.part.delta', 'message.part.updated', 'session.status', 'session.updated', 'session.diff']
 const spoolSh = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'packages', 'hooklog', 'spool.sh')
 const sleep = (ms) => new Promise(r => setTimeout(r, ms))
 
@@ -122,17 +122,21 @@ test('a record without a sessionID is dropped', async () => {
   } finally { await sb.done() }
 })
 
-test('message.part.delta queues nothing while message.part.updated still queues', async () => {
+test('streamed part, status and session-snapshot events queue nothing; message.updated still queues', async () => {
   const sb = await sandbox()
   try {
     const hooks = await plugin({ directory: '/tmp/project' })
     await hooks.event({ event: { type: 'message.part.delta', properties: { sessionID: 's', partID: 'p', field: 'text', delta: 'hi' } } })
-    assert.equal((await evts(sb.queue)).length, 0)
     await hooks.event({ event: { type: 'message.part.updated', properties: { part: { id: 'part', sessionID: 's', type: 'text' } } } })
+    await hooks.event({ event: { type: 'session.status', properties: { sessionID: 's', status: { type: 'busy' } } } })
+    await hooks.event({ event: { type: 'session.updated', properties: { info: { id: 's' } } } })
+    await hooks.event({ event: { type: 'session.diff', properties: { sessionID: 's', diff: [] } } })
+    assert.equal((await evts(sb.queue)).length, 0)
+    await hooks.event({ event: { type: 'message.updated', properties: { info: { id: 'm', sessionID: 's' } } } })
     const names = await evts(sb.queue)
     assert.equal(names.length, 1)
     const [env] = await read(sb.queue, names[0])
-    assert.equal(env.event, 'message.part.updated')
+    assert.equal(env.event, 'message.updated')
   } finally { await sb.done() }
 })
 
