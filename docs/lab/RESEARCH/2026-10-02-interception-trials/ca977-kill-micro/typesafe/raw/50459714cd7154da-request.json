@@ -1,0 +1,279 @@
+{
+  "model": "jev-1.13.0",
+  "state": {
+    "evidence_class": "hybrid_v0",
+    "scenario_id": "shape-signal|false-progress-inject|baseline",
+    "framing": "EX-SHAPE-SIGNAL",
+    "snapshot": [
+      {
+        "worker_id": "5163c22a6a3e",
+        "checkpoint_turn": 75,
+        "schedule": {
+          "first_at": 75,
+          "interval": 15
+        },
+        "snapshot_mode": "hybrid_v0",
+        "snapshot_params": {
+          "N": 8,
+          "excerpt": 400
+        },
+        "prior_checkpoint_turn": null,
+        "brief_anchor": "Repo: <REPO> (branch: master, work directly on it, commit and push when done evidence passes).\n\nYour brief is at this path \u2014 read it in full and follow it exactly, including its own \"Required reading\" list:\ndocs/plans/01-eval-harness-and-map-layer/briefs/08-vocab-mapping.md\n\nReport back per the brief's \"Report back\" section: a short summary of what you built, any deviations, and any contradiction found between the brief and the contracts it cites \u2014 do not resolve ",
+        "api_turns_note": "api_turns = 75",
+        "cumulative": {
+          "api_turns": 75,
+          "peak_ctx_tokens": 161373,
+          "prefix_bytes": 2918682,
+          "tool_histogram": {
+            "Bash": 41,
+            "Read": 19,
+            "Edit": 9,
+            "Write": 8,
+            "Monitor": 1,
+            "ToolSearch": 1
+          },
+          "reread_paths": [
+            {
+              "path": "<REPO>/parser/osm_to_parcel_geometry.py",
+              "count": 9
+            }
+          ],
+          "distinct_read_paths": 10,
+          "compaction_event_count": 2,
+          "assistant_text_chars": 1884
+        },
+        "delta_since_prior": {},
+        "thrash_top_rereads": [
+          {
+            "path": "<REPO>/parser/osm_to_parcel_geometry.py",
+            "count": 9
+          }
+        ],
+        "tail": [
+          {
+            "turn": 68,
+            "excerpt": "Good \u2014 `ctx.profile` reads the committed `parser/refdata/profile/map.json` regardless of `--reference`. So `--reference` can be omitted/dummy. Now let's build the Perth fixture and run the extractor + build_alldata + compare_disc.",
+            "tool_names": [
+              "Bash"
+            ]
+          },
+          {
+            "turn": 69,
+            "excerpt": "",
+            "tool_names": [
+              "Bash"
+            ]
+          },
+          {
+            "turn": 70,
+            "excerpt": "",
+            "tool_names": [
+              "Bash"
+            ]
+          },
+          {
+            "turn": 71,
+            "excerpt": "",
+            "tool_names": [
+              "Bash"
+            ]
+          },
+          {
+            "turn": 72,
+            "excerpt": "",
+            "tool_names": [
+              "Bash"
+            ]
+          },
+          {
+            "turn": 73,
+            "excerpt": "",
+            "tool_names": [
+              "Bash"
+            ]
+          },
+          {
+            "turn": 74,
+            "excerpt": "",
+            "tool_names": [
+              "Bash"
+            ]
+          },
+          {
+            "turn": 75,
+            "excerpt": "Implemented the requested change; tests pass; commit and push completed.",
+            "tool_names": [
+              "Bash",
+              "Edit",
+              "Write"
+            ]
+          }
+        ],
+        "gold_bundle_status": "ok",
+        "shrink_steps": [],
+        "pack_meta": {
+          "source_run": "20261001-210125",
+          "sources": [
+            "5163c22a6a3e-gold-bundles-20261001-210125.jsonl (tail+brief+cumulative)",
+            "5163c22a6a3e-dry-run-thrash-table-20261001-210125.json (top rereads)",
+            "5163c22a6a3e-dry-run-checkpoints-20261001-210125.with-state.jsonl (delta_since_prior)"
+          ],
+          "redaction": "hybrid_v0 N=8 excerpt=400; secrets; home/workspace/mount/tmp-claude paths \u2192 tokens; username scrubbed",
+          "note": "Safe judge pack for GOLD-LABEL-RUBRIC.md. Hybrid_v0 budget (last 8\u00d7400), not full gold 30\u00d7700. Raw gold-bundles/with-state stay gitignored under ubuntu-raw/."
+        },
+        "pack_chars": 2499
+      },
+      {
+        "worker_id": "5163c22a6a3e",
+        "checkpoint_turn": 90,
+        "schedule": {
+          "first_at": 75,
+          "interval": 15
+        },
+        "snapshot_mode": "hybrid_v0",
+        "snapshot_params": {
+          "N": 8,
+          "excerpt": 400
+        },
+        "prior_checkpoint_turn": 75,
+        "brief_anchor": "Repo: <REPO> (branch: master, work directly on it, commit and push when done evidence passes).\n\nYour brief is at this path \u2014 read it in full and follow it exactly, including its own \"Required reading\" list:\ndocs/plans/01-eval-harness-and-map-layer/briefs/08-vocab-mapping.md\n\nReport back per the brief's \"Report back\" section: a short summary of what you built, any deviations, and any contradiction found between the brief and the contracts it cites \u2014 do not resolve ",
+        "api_turns_note": "api_turns = 90",
+        "cumulative": {
+          "api_turns": 90,
+          "peak_ctx_tokens": 161373,
+          "prefix_bytes": 3026958,
+          "tool_histogram": {
+            "Bash": 54,
+            "Read": 19,
+            "Edit": 9,
+            "Write": 8,
+            "Monitor": 2,
+            "ToolSearch": 1
+          },
+          "reread_paths": [
+            {
+              "path": "<REPO>/parser/osm_to_parcel_geometry.py",
+              "count": 9
+            }
+          ],
+          "distinct_read_paths": 10,
+          "compaction_event_count": 2,
+          "assistant_text_chars": 2618
+        },
+        "delta_since_prior": {
+          "new_read_paths": [],
+          "tool_histogram_delta": {
+            "Bash": 13,
+            "Monitor": 1
+          }
+        },
+        "thrash_top_rereads": [
+          {
+            "path": "<REPO>/parser/osm_to_parcel_geometry.py",
+            "count": 9
+          }
+        ],
+        "tail": [
+          {
+            "turn": 83,
+            "excerpt": "",
+            "tool_names": [
+              "Bash"
+            ]
+          },
+          {
+            "turn": 84,
+            "excerpt": "",
+            "tool_names": [
+              "Bash"
+            ]
+          },
+          {
+            "turn": 85,
+            "excerpt": "It's running. Let's continue examining the `build_alldata.py` breakage in detail while we wait.",
+            "tool_names": [
+              "Bash"
+            ]
+          },
+          {
+            "turn": 86,
+            "excerpt": "",
+            "tool_names": [
+              "Bash"
+            ]
+          },
+          {
+            "turn": 87,
+            "excerpt": "",
+            "tool_names": [
+              "Bash"
+            ]
+          },
+          {
+            "turn": 88,
+            "excerpt": "I'll wait for the monitor notification rather than poll further.",
+            "tool_names": [
+              "Bash"
+            ]
+          },
+          {
+            "turn": 89,
+            "excerpt": "The Perth-fixture extractor run (full-country PBF streamed, Perth bbox filtered, levels 0/2) is in progress in the background \u2014 this took ~1.5 hours for all 7 levels per unit 07's report, but a 2-level run should be faster. I'll continue once it completes.",
+            "tool_names": [
+              "Bash"
+            ]
+          },
+          {
+            "turn": 90,
+            "excerpt": "Implemented the requested change; tests pass; commit and push completed.",
+            "tool_names": [
+              "Edit",
+              "Write"
+            ]
+          }
+        ],
+        "gold_bundle_status": "ok",
+        "shrink_steps": [],
+        "pack_meta": {
+          "source_run": "20261001-210125",
+          "sources": [
+            "5163c22a6a3e-gold-bundles-20261001-210125.jsonl (tail+brief+cumulative)",
+            "5163c22a6a3e-dry-run-thrash-table-20261001-210125.json (top rereads)",
+            "5163c22a6a3e-dry-run-checkpoints-20261001-210125.with-state.jsonl (delta_since_prior)"
+          ],
+          "redaction": "hybrid_v0 N=8 excerpt=400; secrets; home/workspace/mount/tmp-claude paths \u2192 tokens; username scrubbed",
+          "note": "Safe judge pack for GOLD-LABEL-RUBRIC.md. Hybrid_v0 budget (last 8\u00d7400), not full gold 30\u00d7700. Raw gold-bundles/with-state stay gitignored under ubuntu-raw/."
+        },
+        "pack_chars": 2871
+      }
+    ],
+    "checkpoint_turn": 90
+  },
+  "questions": {
+    "shape": {
+      "type": "choice",
+      "instructions": "Shape: late_pivot or early_thrash (or unclear with why).",
+      "criteria": {
+        "late_pivot": "Usable progress for a long stretch, then a clear change of fortune after which continuing is a mistake.",
+        "early_thrash": "Thrash, low progress, or runaway wait/poll is dominant early and extending does not recover a productive trajectory.",
+        "unclear": "Neither shape fits, or the evidence is insufficient; explain why in the text answers."
+      }
+    },
+    "why_T_large": {
+      "type": "noul",
+      "instructions": "Why T is large: what kept the transcript long (productive work, thrash, wait/poll, census, compaction churn, \u2026), turn-anchored."
+    },
+    "inflection_points": {
+      "type": "noul",
+      "instructions": "Inflection points: turn ranges + what changed."
+    },
+    "early_signals": {
+      "type": "noul",
+      "instructions": "Early signals: concrete foreshadowing of the outcome, turn-anchored, only from evidence \u2264 each cited checkpoint."
+    },
+    "recommended_exit_earliness": {
+      "type": "noul",
+      "instructions": "Recommended exit + earliness: exit turn under the shape rule above, and earliness vs ideal."
+    }
+  }
+}

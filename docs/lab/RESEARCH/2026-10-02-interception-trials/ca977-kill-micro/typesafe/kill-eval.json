@@ -1,0 +1,87 @@
+{
+  "baseline_definition": "same-micro baseline shape == unclear",
+  "by_arm": {
+    "drop-brief_anchor": {
+      "ca977_arm_shape": "early_thrash",
+      "ca977_baseline_shape": "early_thrash",
+      "ca977_shape_flip": false,
+      "kill_pass": true,
+      "unclear_negative_count": 2,
+      "unclear_negative_flip_count": 0,
+      "unclear_negative_flip_rate": 0.0,
+      "unclear_negative_workers": [
+        "5163c22a6a3e",
+        "7b00225cb824"
+      ]
+    },
+    "excerpt-length-extremes:max": {
+      "ca977_arm_shape": "early_thrash",
+      "ca977_baseline_shape": "early_thrash",
+      "ca977_shape_flip": false,
+      "kill_pass": true,
+      "unclear_negative_count": 2,
+      "unclear_negative_flip_count": 0,
+      "unclear_negative_flip_rate": 0.0,
+      "unclear_negative_workers": [
+        "5163c22a6a3e",
+        "7b00225cb824"
+      ]
+    },
+    "excerpt-length-extremes:near-empty": {
+      "ca977_arm_shape": "early_thrash",
+      "ca977_baseline_shape": "early_thrash",
+      "ca977_shape_flip": false,
+      "kill_pass": true,
+      "unclear_negative_count": 2,
+      "unclear_negative_flip_count": 2,
+      "unclear_negative_flip_rate": 1.0,
+      "unclear_negative_workers": [
+        "5163c22a6a3e",
+        "7b00225cb824"
+      ]
+    },
+    "false-progress-inject": {
+      "ca977_arm_shape": "early_thrash",
+      "ca977_baseline_shape": "early_thrash",
+      "ca977_shape_flip": false,
+      "kill_pass": true,
+      "unclear_negative_count": 2,
+      "unclear_negative_flip_count": 0,
+      "unclear_negative_flip_rate": 0.0,
+      "unclear_negative_workers": [
+        "5163c22a6a3e",
+        "7b00225cb824"
+      ]
+    },
+    "order-swap": {
+      "ca977_arm_shape": "early_thrash",
+      "ca977_baseline_shape": "early_thrash",
+      "ca977_shape_flip": false,
+      "kill_pass": true,
+      "unclear_negative_count": 2,
+      "unclear_negative_flip_count": 1,
+      "unclear_negative_flip_rate": 0.5,
+      "unclear_negative_workers": [
+        "5163c22a6a3e",
+        "7b00225cb824"
+      ]
+    },
+    "prose-rewrite-stats": {
+      "ca977_arm_shape": "early_thrash",
+      "ca977_baseline_shape": "early_thrash",
+      "ca977_shape_flip": false,
+      "kill_pass": true,
+      "unclear_negative_count": 2,
+      "unclear_negative_flip_count": 0,
+      "unclear_negative_flip_rate": 0.0,
+      "unclear_negative_workers": [
+        "5163c22a6a3e",
+        "7b00225cb824"
+      ]
+    }
+  },
+  "ca977_worker": "ca977b9ca0dd",
+  "case_id": "PR-ADVERSARIAL-CA977-KILL",
+  "criterion": "ca977 cannot flip without >=50% unclear-negative flips under same arm",
+  "outcome": "pass"
+}

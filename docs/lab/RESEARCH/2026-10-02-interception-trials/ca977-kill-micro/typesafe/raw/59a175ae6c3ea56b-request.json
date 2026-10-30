@@ -1,0 +1,665 @@
+{
+  "model": "jev-1.13.0",
+  "state": {
+    "evidence_class": "hybrid_v0",
+    "scenario_id": "shape-signal|order-swap|baseline",
+    "framing": "EX-SHAPE-SIGNAL",
+    "snapshot": [
+      {
+        "pack_chars": 2660,
+        "pack_meta": {
+          "note": "Safe judge pack for GOLD-LABEL-RUBRIC.md. Hybrid_v0 budget (last 8\u00d7400), not full gold 30\u00d7700. Raw gold-bundles/with-state stay gitignored under ubuntu-raw/.",
+          "redaction": "hybrid_v0 N=8 excerpt=400; secrets; home/workspace/mount/tmp-claude paths \u2192 tokens; username scrubbed",
+          "sources": [
+            "7b00225cb824-dry-run-checkpoints-20261001-204508.with-state.jsonl (delta_since_prior)",
+            "7b00225cb824-dry-run-thrash-table-20261001-204508.json (top rereads)",
+            "7b00225cb824-gold-bundles-20261001-204508.jsonl (tail+brief+cumulative)"
+          ],
+          "source_run": "20261001-204508"
+        },
+        "shrink_steps": [],
+        "gold_bundle_status": "ok",
+        "tail": [
+          {
+            "tool_names": [
+              "Bash"
+            ],
+            "excerpt": "",
+            "turn": 135
+          },
+          {
+            "tool_names": [
+              "Bash"
+            ],
+            "excerpt": "This matches the sanctioned scope exactly. Now let's commit and push.",
+            "turn": 134
+          },
+          {
+            "tool_names": [
+              "Bash"
+            ],
+            "excerpt": "",
+            "turn": 133
+          },
+          {
+            "tool_names": [
+              "Bash"
+            ],
+            "excerpt": "",
+            "turn": 132
+          },
+          {
+            "tool_names": [
+              "Bash"
+            ],
+            "excerpt": "All 227 pass. Now let's clean up the scratchpad-related nohup artifacts in repo dir (none), and check git status before committing.",
+            "turn": 131
+          },
+          {
+            "tool_names": [
+              "Bash"
+            ],
+            "excerpt": "",
+            "turn": 130
+          },
+          {
+            "tool_names": [
+              "Bash"
+            ],
+            "excerpt": "",
+            "turn": 129
+          },
+          {
+            "tool_names": [
+              "Bash"
+            ],
+            "excerpt": "",
+            "turn": 128
+          }
+        ],
+        "thrash_top_rereads": [
+          {
+            "count": 3,
+            "path": "<REPO>/parser/kiwiw/selection.py"
+          },
+          {
+            "count": 7,
+            "path": "<REPO>/parser/osm_to_parcel_geometry.py"
+          }
+        ],
+        "delta_since_prior": {
+          "tool_histogram_delta": {
+            "Read": 1,
+            "Edit": 4,
+            "Bash": 10
+          },
+          "new_read_paths": []
+        },
+        "cumulative": {
+          "assistant_text_chars": 3466,
+          "compaction_event_count": 2,
+          "distinct_read_paths": 12,
+          "reread_paths": [
+            {
+              "count": 3,
+              "path": "<REPO>/parser/kiwiw/selection.py"
+            },
+            {
+              "count": 7,
+              "path": "<REPO>/parser/osm_to_parcel_geometry.py"
+            }
+          ],
+          "tool_histogram": {
+            "ToolSearch": 1,
+            "Write": 3,
+            "Edit": 16,
+            "Read": 22,
+            "Bash": 95
+          },
+          "prefix_bytes": 1622898,
+          "peak_ctx_tokens": 162349,
+          "api_turns": 135
+        },
+        "api_turns_note": "api_turns = 135",
+        "brief_anchor": "Repo: <REPO> (branch: master, currently clean at commit 74e7393).\n\nYour task is fully specified in this brief file \u2014 read it first, in full, before doing anything else:\ndocs/plans/01-eval-harness-and-map-layer/briefs/14-per-level-selection.md\n\nFollow it exactly: read its \"Required reading, in order\" list (including the Amendment section) before writing any code, implement only within its stated owned paths, run its stated done evidence, and commit + push to master",
+        "prior_checkpoint_turn": 120,
+        "snapshot_params": {
+          "excerpt": 400,
+          "N": 8
+        },
+        "snapshot_mode": "hybrid_v0",
+        "schedule": {
+          "interval": 15,
+          "first_at": 75
+        },
+        "checkpoint_turn": 135,
+        "worker_id": "7b00225cb824"
+      },
+      {
+        "pack_chars": 2745,
+        "pack_meta": {
+          "note": "Safe judge pack for GOLD-LABEL-RUBRIC.md. Hybrid_v0 budget (last 8\u00d7400), not full gold 30\u00d7700. Raw gold-bundles/with-state stay gitignored under ubuntu-raw/.",
+          "redaction": "hybrid_v0 N=8 excerpt=400; secrets; home/workspace/mount/tmp-claude paths \u2192 tokens; username scrubbed",
+          "sources": [
+            "7b00225cb824-dry-run-checkpoints-20261001-204508.with-state.jsonl (delta_since_prior)",
+            "7b00225cb824-dry-run-thrash-table-20261001-204508.json (top rereads)",
+            "7b00225cb824-gold-bundles-20261001-204508.jsonl (tail+brief+cumulative)"
+          ],
+          "source_run": "20261001-204508"
+        },
+        "shrink_steps": [],
+        "gold_bundle_status": "ok",
+        "tail": [
+          {
+            "tool_names": [
+              "Edit"
+            ],
+            "excerpt": "",
+            "turn": 120
+          },
+          {
+            "tool_names": [
+              "Read"
+            ],
+            "excerpt": "",
+            "turn": 119
+          },
+          {
+            "tool_names": [
+              "Edit"
+            ],
+            "excerpt": "",
+            "turn": 118
+          },
+          {
+            "tool_names": [
+              "Edit"
+            ],
+            "excerpt": "",
+            "turn": 117
+          },
+          {
+            "tool_names": [
+              "Edit"
+            ],
+            "excerpt": "Now let's implement `background_all`.",
+            "turn": 116
+          },
+          {
+            "tool_names": [
+              "Read"
+            ],
+            "excerpt": "",
+            "turn": 115
+          },
+          {
+            "tool_names": [
+              "Bash"
+            ],
+            "excerpt": "Now let's find the `_LevelRule`, `_validate_and_build`, and `level_filter` implementations to add the `background_all` mechanism.",
+            "turn": 114
+          },
+          {
+            "tool_names": [
+              "Read"
+            ],
+            "excerpt": "",
+            "turn": 113
+          }
+        ],
+        "thrash_top_rereads": [
+          {
+            "count": 3,
+            "path": "<REPO>/parser/kiwiw/selection.py"
+          },
+          {
+            "count": 7,
+            "path": "<REPO>/parser/osm_to_parcel_geometry.py"
+          }
+        ],
+        "delta_since_prior": {
+          "tool_histogram_delta": {
+            "Edit": 4,
+            "Bash": 5,
+            "Read": 6
+          },
+          "new_read_paths": [
+            "<REPO>/parser/refdata/selection.json",
+            "<TMP_REPO>/670245db-d72a-4875-86cf-4f4b98803720/scratchpad/way_tag_counts.json"
+          ]
+        },
+        "cumulative": {
+          "assistant_text_chars": 3151,
+          "compaction_event_count": 2,
+          "distinct_read_paths": 12,
+          "reread_paths": [
+            {
+              "count": 3,
+              "path": "<REPO>/parser/kiwiw/selection.py"
+            },
+            {
+              "count": 7,
+              "path": "<REPO>/parser/osm_to_parcel_geometry.py"
+            }
+          ],
+          "tool_histogram": {
+            "ToolSearch": 1,
+            "Write": 3,
+            "Edit": 12,
+            "Read": 21,
+            "Bash": 85
+          },
+          "prefix_bytes": 1483549,
+          "peak_ctx_tokens": 162349,
+          "api_turns": 120
+        },
+        "api_turns_note": "api_turns = 120",
+        "brief_anchor": "Repo: <REPO> (branch: master, currently clean at commit 74e7393).\n\nYour task is fully specified in this brief file \u2014 read it first, in full, before doing anything else:\ndocs/plans/01-eval-harness-and-map-layer/briefs/14-per-level-selection.md\n\nFollow it exactly: read its \"Required reading, in order\" list (including the Amendment section) before writing any code, implement only within its stated owned paths, run its stated done evidence, and commit + push to master",
+        "prior_checkpoint_turn": 105,
+        "snapshot_params": {
+          "excerpt": 400,
+          "N": 8
+        },
+        "snapshot_mode": "hybrid_v0",
+        "schedule": {
+          "interval": 15,
+          "first_at": 75
+        },
+        "checkpoint_turn": 120,
+        "worker_id": "7b00225cb824"
+      },
+      {
+        "pack_chars": 2805,
+        "pack_meta": {
+          "note": "Safe judge pack for GOLD-LABEL-RUBRIC.md. Hybrid_v0 budget (last 8\u00d7400), not full gold 30\u00d7700. Raw gold-bundles/with-state stay gitignored under ubuntu-raw/.",
+          "redaction": "hybrid_v0 N=8 excerpt=400; secrets; home/workspace/mount/tmp-claude paths \u2192 tokens; username scrubbed",
+          "sources": [
+            "7b00225cb824-dry-run-checkpoints-20261001-204508.with-state.jsonl (delta_since_prior)",
+            "7b00225cb824-dry-run-thrash-table-20261001-204508.json (top rereads)",
+            "7b00225cb824-gold-bundles-20261001-204508.jsonl (tail+brief+cumulative)"
+          ],
+          "source_run": "20261001-204508"
+        },
+        "shrink_steps": [],
+        "gold_bundle_status": "ok",
+        "tail": [
+          {
+            "tool_names": [
+              "Bash"
+            ],
+            "excerpt": "",
+            "turn": 105
+          },
+          {
+            "tool_names": [
+              "Bash"
+            ],
+            "excerpt": "",
+            "turn": 104
+          },
+          {
+            "tool_names": [
+              "Bash"
+            ],
+            "excerpt": "",
+            "turn": 103
+          },
+          {
+            "tool_names": [
+              "Bash"
+            ],
+            "excerpt": "Now rerun the dry-run scan with the fix.",
+            "turn": 102
+          },
+          {
+            "tool_names": [
+              "Edit"
+            ],
+            "excerpt": "Similarly optimize the way() path to skip dict-building for ways that aren't roads and don't have any candidate background/other tags \u2014 though way count is much smaller (11.5M) so it's less critical, but let's apply the same cheap pre-check pattern.",
+            "turn": 101
+          },
+          {
+            "tool_names": [
+              "Edit"
+            ],
+            "excerpt": "Now fix the node() hot path to avoid materializing the full tag dict for the ~134M nodes that don't have `place`.",
+            "turn": 100
+          },
+          {
+            "tool_names": [
+              "Bash"
+            ],
+            "excerpt": "",
+            "turn": 99
+          },
+          {
+            "tool_names": [
+              "Read"
+            ],
+            "excerpt": "",
+            "turn": 98
+          }
+        ],
+        "thrash_top_rereads": [
+          {
+            "count": 6,
+            "path": "<REPO>/parser/osm_to_parcel_geometry.py"
+          }
+        ],
+        "delta_since_prior": {
+          "tool_histogram_delta": {
+            "Read": 2,
+            "Edit": 2,
+            "Bash": 11
+          },
+          "new_read_paths": [
+            "<REPO>/parser/kiwiw/selection.py",
+            "<REPO>/docs/provenance.md"
+          ]
+        },
+        "cumulative": {
+          "assistant_text_chars": 2985,
+          "compaction_event_count": 2,
+          "distinct_read_paths": 10,
+          "reread_paths": [
+            {
+              "count": 6,
+              "path": "<REPO>/parser/osm_to_parcel_geometry.py"
+            }
+          ],
+          "tool_histogram": {
+            "ToolSearch": 1,
+            "Write": 3,
+            "Edit": 8,
+            "Read": 15,
+            "Bash": 80
+          },
+          "prefix_bytes": 1293711,
+          "peak_ctx_tokens": 162349,
+          "api_turns": 105
+        },
+        "api_turns_note": "api_turns = 105",
+        "brief_anchor": "Repo: <REPO> (branch: master, currently clean at commit 74e7393).\n\nYour task is fully specified in this brief file \u2014 read it first, in full, before doing anything else:\ndocs/plans/01-eval-harness-and-map-layer/briefs/14-per-level-selection.md\n\nFollow it exactly: read its \"Required reading, in order\" list (including the Amendment section) before writing any code, implement only within its stated owned paths, run its stated done evidence, and commit + push to master",
+        "prior_checkpoint_turn": 90,
+        "snapshot_params": {
+          "excerpt": 400,
+          "N": 8
+        },
+        "snapshot_mode": "hybrid_v0",
+        "schedule": {
+          "interval": 15,
+          "first_at": 75
+        },
+        "checkpoint_turn": 105,
+        "worker_id": "7b00225cb824"
+      },
+      {
+        "pack_chars": 2555,
+        "pack_meta": {
+          "note": "Safe judge pack for GOLD-LABEL-RUBRIC.md. Hybrid_v0 budget (last 8\u00d7400), not full gold 30\u00d7700. Raw gold-bundles/with-state stay gitignored under ubuntu-raw/.",
+          "redaction": "hybrid_v0 N=8 excerpt=400; secrets; home/workspace/mount/tmp-claude paths \u2192 tokens; username scrubbed",
+          "sources": [
+            "7b00225cb824-dry-run-checkpoints-20261001-204508.with-state.jsonl (delta_since_prior)",
+            "7b00225cb824-dry-run-thrash-table-20261001-204508.json (top rereads)",
+            "7b00225cb824-gold-bundles-20261001-204508.jsonl (tail+brief+cumulative)"
+          ],
+          "source_run": "20261001-204508"
+        },
+        "shrink_steps": [],
+        "gold_bundle_status": "ok",
+        "tail": [
+          {
+            "tool_names": [
+              "Bash"
+            ],
+            "excerpt": "",
+            "turn": 90
+          },
+          {
+            "tool_names": [
+              "Bash"
+            ],
+            "excerpt": "",
+            "turn": 89
+          },
+          {
+            "tool_names": [
+              "Bash"
+            ],
+            "excerpt": "I'll wait for the notification.",
+            "turn": 88
+          },
+          {
+            "tool_names": [
+              "Bash"
+            ],
+            "excerpt": "It's running. Let me wait for it (should take under a minute given prior benchmarks, but node scan added ~255s before, so let's allow generous time).",
+            "turn": 87
+          },
+          {
+            "tool_names": [
+              "Bash"
+            ],
+            "excerpt": "",
+            "turn": 86
+          },
+          {
+            "tool_names": [
+              "Bash"
+            ],
+            "excerpt": "",
+            "turn": 85
+          },
+          {
+            "tool_names": [
+              "Bash"
+            ],
+            "excerpt": "",
+            "turn": 84
+          },
+          {
+            "tool_names": [
+              "Bash"
+            ],
+            "excerpt": "",
+            "turn": 83
+          }
+        ],
+        "thrash_top_rereads": [
+          {
+            "count": 6,
+            "path": "<REPO>/parser/osm_to_parcel_geometry.py"
+          }
+        ],
+        "delta_since_prior": {
+          "tool_histogram_delta": {
+            "Read": 1,
+            "Edit": 1,
+            "Bash": 13
+          },
+          "new_read_paths": [
+            "<REPO>/parser/tests/test_extractor_scale.py"
+          ]
+        },
+        "cumulative": {
+          "assistant_text_chars": 2099,
+          "compaction_event_count": 2,
+          "distinct_read_paths": 8,
+          "reread_paths": [
+            {
+              "count": 6,
+              "path": "<REPO>/parser/osm_to_parcel_geometry.py"
+            }
+          ],
+          "tool_histogram": {
+            "ToolSearch": 1,
+            "Write": 3,
+            "Edit": 6,
+            "Read": 13,
+            "Bash": 69
+          },
+          "prefix_bytes": 1203599,
+          "peak_ctx_tokens": 162349,
+          "api_turns": 90
+        },
+        "api_turns_note": "api_turns = 90",
+        "brief_anchor": "Repo: <REPO> (branch: master, currently clean at commit 74e7393).\n\nYour task is fully specified in this brief file \u2014 read it first, in full, before doing anything else:\ndocs/plans/01-eval-harness-and-map-layer/briefs/14-per-level-selection.md\n\nFollow it exactly: read its \"Required reading, in order\" list (including the Amendment section) before writing any code, implement only within its stated owned paths, run its stated done evidence, and commit + push to master",
+        "prior_checkpoint_turn": 75,
+        "snapshot_params": {
+          "excerpt": 400,
+          "N": 8
+        },
+        "snapshot_mode": "hybrid_v0",
+        "schedule": {
+          "interval": 15,
+          "first_at": 75
+        },
+        "checkpoint_turn": 90,
+        "worker_id": "7b00225cb824"
+      },
+      {
+        "pack_chars": 2384,
+        "pack_meta": {
+          "note": "Safe judge pack for GOLD-LABEL-RUBRIC.md. Hybrid_v0 budget (last 8\u00d7400), not full gold 30\u00d7700. Raw gold-bundles/with-state stay gitignored under ubuntu-raw/.",
+          "redaction": "hybrid_v0 N=8 excerpt=400; secrets; home/workspace/mount/tmp-claude paths \u2192 tokens; username scrubbed",
+          "sources": [
+            "7b00225cb824-dry-run-checkpoints-20261001-204508.with-state.jsonl (delta_since_prior)",
+            "7b00225cb824-dry-run-thrash-table-20261001-204508.json (top rereads)",
+            "7b00225cb824-gold-bundles-20261001-204508.jsonl (tail+brief+cumulative)"
+          ],
+          "source_run": "20261001-204508"
+        },
+        "shrink_steps": [],
+        "gold_bundle_status": "ok",
+        "tail": [
+          {
+            "tool_names": [
+              "Bash"
+            ],
+            "excerpt": "",
+            "turn": 75
+          },
+          {
+            "tool_names": [
+              "Bash"
+            ],
+            "excerpt": "",
+            "turn": 74
+          },
+          {
+            "tool_names": [
+              "Bash"
+            ],
+            "excerpt": "I'll wait for that notification before proceeding.",
+            "turn": 73
+          },
+          {
+            "tool_names": [
+              "Bash"
+            ],
+            "excerpt": "",
+            "turn": 72
+          },
+          {
+            "tool_names": [
+              "Bash"
+            ],
+            "excerpt": "",
+            "turn": 71
+          },
+          {
+            "tool_names": [
+              "Bash"
+            ],
+            "excerpt": "I'll just wait for the pytest background task notification rather than poll.",
+            "turn": 70
+          },
+          {
+            "tool_names": [
+              "ToolSearch"
+            ],
+            "excerpt": "",
+            "turn": 69
+          },
+          {
+            "tool_names": [
+              "Bash"
+            ],
+            "excerpt": "",
+            "turn": 68
+          }
+        ],
+        "thrash_top_rereads": [
+          {
+            "count": 6,
+            "path": "<REPO>/parser/osm_to_parcel_geometry.py"
+          }
+        ],
+        "delta_since_prior": {},
+        "cumulative": {
+          "assistant_text_chars": 1748,
+          "compaction_event_count": 2,
+          "distinct_read_paths": 7,
+          "reread_paths": [
+            {
+              "count": 6,
+              "path": "<REPO>/parser/osm_to_parcel_geometry.py"
+            }
+          ],
+          "tool_histogram": {
+            "ToolSearch": 1,
+            "Write": 3,
+            "Edit": 5,
+            "Read": 12,
+            "Bash": 56
+          },
+          "prefix_bytes": 1096347,
+          "peak_ctx_tokens": 162349,
+          "api_turns": 75
+        },
+        "api_turns_note": "api_turns = 75",
+        "brief_anchor": "Repo: <REPO> (branch: master, currently clean at commit 74e7393).\n\nYour task is fully specified in this brief file \u2014 read it first, in full, before doing anything else:\ndocs/plans/01-eval-harness-and-map-layer/briefs/14-per-level-selection.md\n\nFollow it exactly: read its \"Required reading, in order\" list (including the Amendment section) before writing any code, implement only within its stated owned paths, run its stated done evidence, and commit + push to master",
+        "prior_checkpoint_turn": null,
+        "snapshot_params": {
+          "excerpt": 400,
+          "N": 8
+        },
+        "snapshot_mode": "hybrid_v0",
+        "schedule": {
+          "interval": 15,
+          "first_at": 75
+        },
+        "checkpoint_turn": 75,
+        "worker_id": "7b00225cb824"
+      }
+    ],
+    "checkpoint_turn": 135
+  },
+  "questions": {
+    "shape": {
+      "type": "choice",
+      "instructions": "Shape: late_pivot or early_thrash (or unclear with why).",
+      "criteria": {
+        "late_pivot": "Usable progress for a long stretch, then a clear change of fortune after which continuing is a mistake.",
+        "early_thrash": "Thrash, low progress, or runaway wait/poll is dominant early and extending does not recover a productive trajectory.",
+        "unclear": "Neither shape fits, or the evidence is insufficient; explain why in the text answers."
+      }
+    },
+    "why_T_large": {
+      "type": "noul",
+      "instructions": "Why T is large: what kept the transcript long (productive work, thrash, wait/poll, census, compaction churn, \u2026), turn-anchored."
+    },
+    "inflection_points": {
+      "type": "noul",
+      "instructions": "Inflection points: turn ranges + what changed."
+    },
+    "early_signals": {
+      "type": "noul",
+      "instructions": "Early signals: concrete foreshadowing of the outcome, turn-anchored, only from evidence \u2264 each cited checkpoint."
+    },
+    "recommended_exit_earliness": {
+      "type": "noul",
+      "instructions": "Recommended exit + earliness: exit turn under the shape rule above, and earliness vs ideal."
+    }
+  }
+}
