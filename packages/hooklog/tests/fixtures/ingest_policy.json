@@ -635,12 +635,12 @@
    "type": "hook_event",
    "conversation_id": "fx-conv-opencode",
    "harness": "opencode",
-   "event": "message.updated",
+   "event": "todo.updated",
    "ts": 1791100036.0,
    "payload": {
     "cwd": "/work/fixture",
     "session_id": "fx-conv-opencode",
-    "hook_event_name": "message.updated",
+    "hook_event_name": "todo.updated",
     "source": "bus"
    }
   },

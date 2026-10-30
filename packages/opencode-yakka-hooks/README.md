@@ -19,14 +19,14 @@ OpenCode plugin that captures **18 named Hooks callbacks + all 28 catalog bus ty
 
 **Advisory only** — never blocks tools or changes exit codes. Does not call `assert_phase --deterministic` or enforce Flash review guidance.
 
-Every hook and bus event except nine is written as one file in the queue (`YAKKA_QUEUE`), named and wrapped
+Every hook and bus event except ten is written as one file in the queue (`YAKKA_QUEUE`), named and wrapped
 as `packages/hooklog/spool.sh --harness opencode` does; an event with no session ID is dropped. After a
 write the plugin kicks `python3 plugins/yakka/client/yakka.py drain` (detached, at most once per 10 s)
 when `YAKKA_BIN` is unset. Capture never waits on the drain or the network, and
 failures never reach OpenCode.
 
 Not forwarded: `experimental.chat.system.transform`, `chat.params`, `chat.headers`, `shell.env`,
-`message.part.delta`, `message.part.updated`, `session.status`, `session.updated` and
+`message.part.delta`, `message.part.updated`, `message.updated`, `session.status`, `session.updated` and
 `session.diff` (by event name, so hook and bus forms alike). The first carries redundant prompt
 bodies; the next three carry secrets (API keys, auth headers, environment); the rest repeat state
 that other events already record (finished text is `experimental.text.complete`, tool calls are

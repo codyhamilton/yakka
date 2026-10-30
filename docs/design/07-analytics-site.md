@@ -200,8 +200,8 @@ Phase 2 leaves existing `/query` fields unchanged; `/schema`, `/summary`, `/seri
 `/baselines` are likewise unchanged.
 
 **Count semantics.** `hook_events` counts stored hook events. Events on the ingest policy's `remove`
-list are never stored, so they are not counted: that includes OpenCode's `message.part.delta` and
-`message.part.updated`, so a streamed message part no longer adds a hook event. A model call is counted once (a Claude
+list are never stored, so they are not counted: that includes OpenCode's `message.part.delta`,
+`message.part.updated` and `message.updated`, so a streamed message part no longer adds a hook event. A model call is counted once (a Claude
 message ID repeated across transcript lines counts once).
 
 **Cost.** `cost_usd` is computed at read time: a call's reported cost when the harness gave one,

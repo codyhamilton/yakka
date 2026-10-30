@@ -83,13 +83,15 @@ type SyncRow struct {
 	RowHash        string
 	Type           string
 	ConversationID string
+	Harness        string
+	Event          string
 	ContentHash    string
 	Raw            []byte
 }
 
 // FactsAfter returns up to limit fact rows with rowid greater than after, in rowid order.
 func (r *ReadOnly) FactsAfter(ctx context.Context, after int64, limit int) ([]SyncRow, error) {
-	rows, err := r.db.QueryContext(ctx, `SELECT rowid, row_hash, type, conversation_id, content_hash, raw
+	rows, err := r.db.QueryContext(ctx, `SELECT rowid, row_hash, type, conversation_id, harness, event, content_hash, raw
 		FROM facts WHERE rowid > ? ORDER BY rowid LIMIT ?`, after, limit)
 	if err != nil {
 		return nil, err
@@ -98,7 +100,7 @@ func (r *ReadOnly) FactsAfter(ctx context.Context, after int64, limit int) ([]Sy
 	var out []SyncRow
 	for rows.Next() {
 		var x SyncRow
-		if err := rows.Scan(&x.Rowid, &x.RowHash, &x.Type, &x.ConversationID, &x.ContentHash, &x.Raw); err != nil {
+		if err := rows.Scan(&x.Rowid, &x.RowHash, &x.Type, &x.ConversationID, &x.Harness, &x.Event, &x.ContentHash, &x.Raw); err != nil {
 			return nil, err
 		}
 		out = append(out, x)
