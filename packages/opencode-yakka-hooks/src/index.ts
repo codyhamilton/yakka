@@ -84,13 +84,31 @@ function snapshotOf(payload: Record<string, unknown>): string {
 const REMOVE_EVENTS = ["experimental.chat.system.transform", "chat.params", "chat.headers", "shell.env", "message.part.delta"] as const
 // remove-list:end
 
+// Events whose payload carries dead weight: OpenCode repeats the session's cumulative patches in
+// info.summary.diffs on every update, and artifact versions and commits already cover them. The
+// path is trimmed before spooling and again by the server. Mirrored by the Go policy; a test asserts equality.
+// trim-list:begin
+const TRIM_EVENTS = ["message.updated"] as const
+// trim-list:end
+
+// trimmed returns payload without event.properties.info.summary.diffs for a TRIM_EVENTS event. It
+// copies the objects on that path rather than mutating the live event.
+function trimmed(payload: Record<string, unknown>): Record<string, unknown> {
+  if (!(TRIM_EVENTS as readonly string[]).includes(String(payload.hook_event_name || ""))) return payload
+  const ev = payload.event as { properties?: { info?: { summary?: Record<string, unknown> } } } | undefined
+  const summary = ev?.properties?.info?.summary
+  if (!summary || typeof summary !== "object" || !("diffs" in summary)) return payload
+  const { diffs: _diffs, ...rest } = summary
+  return { ...payload, event: { ...ev, properties: { ...ev!.properties, info: { ...ev!.properties!.info, summary: rest } } } }
+}
+
 async function recordHooklog(payload: Record<string, unknown>): Promise<void> {
   if (/^(0|off|false)$/i.test(process.env.YAKKA_HOOKLOG || "")) return
   if ((REMOVE_EVENTS as readonly string[]).includes(String(payload.hook_event_name || ""))) return
   try {
     const sid = typeof payload.session_id === "string" ? payload.session_id.replace(/[^A-Za-z0-9._-]/g, "_") : ""
     if (!sid) return
-    const snapshot = snapshotOf(payload)
+    const snapshot = snapshotOf(trimmed(payload))
     // ts is when the hook fired and must stay strictly increasing: the drain orders and turn-counts by it.
     lastSpoolTs = Math.max(Date.now() / 1000, lastSpoolTs + 1e-6)
     const ts = lastSpoolTs.toFixed(6)
