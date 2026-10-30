@@ -1,0 +1,3076 @@
+{
+  "case_id": "PR-SIGNAL-CLOSENESS",
+  "protocol_sha256": "5f54251e6168ad35e67a0c192bacd1a03b1d05814bc56565373453fbc9206d52",
+  "protocol_sha256_verified": true,
+  "panel_sha256": "e36fcebc51da2e9b6be21de49457a1da0a82c60eceaa8991ae644c39b4adec67",
+  "panel_sha256_verified": true,
+  "driver": "TypeSafe",
+  "model": "jev-1.13.0",
+  "maps_only": true,
+  "behaviour_ship": false,
+  "no_call_jev": true,
+  "no_8080": true,
+  "replicates": 2,
+  "preferred_checkpoint": 75,
+  "planned_post_count": 18,
+  "scored_workers": [
+    "92a48e004519",
+    "ca977b9ca0dd",
+    "87a380bc64ff",
+    "bb6165018de0",
+    "15f24c7ba18c",
+    "0677f597286e",
+    "074c8cf22927",
+    "0aab88c525de",
+    "036ff3ed4a89"
+  ],
+  "holdouts_scored": false,
+  "signals": [
+    "thrash",
+    "poll",
+    "productive_edit",
+    "validation_inflection"
+  ],
+  "zero_call": {
+    "checkpoint_turn": 75,
+    "replicates": 2,
+    "profiles": {
+      "92a48e004519": {
+        "edit_count": 0,
+        "write_count": 0,
+        "edit_write_count": 0,
+        "monitor_count": 0,
+        "wait_term_count": 0,
+        "reread_total": 29,
+        "compaction_event_count": 12,
+        "tool_histogram": {
+          "Bash": 55,
+          "Read": 31
+        }
+      },
+      "ca977b9ca0dd": {
+        "edit_count": 0,
+        "write_count": 0,
+        "edit_write_count": 0,
+        "monitor_count": 0,
+        "wait_term_count": 0,
+        "reread_total": 33,
+        "compaction_event_count": 10,
+        "tool_histogram": {
+          "Read": 45,
+          "Bash": 42
+        }
+      },
+      "87a380bc64ff": {
+        "edit_count": 0,
+        "write_count": 0,
+        "edit_write_count": 0,
+        "monitor_count": 6,
+        "wait_term_count": 4,
+        "reread_total": 7,
+        "compaction_event_count": 0,
+        "tool_histogram": {
+          "Bash": 56,
+          "Read": 9,
+          "Monitor": 6,
+          "ToolSearch": 1
+        }
+      },
+      "bb6165018de0": {
+        "edit_count": 0,
+        "write_count": 1,
+        "edit_write_count": 1,
+        "monitor_count": 2,
+        "wait_term_count": 4,
+        "reread_total": 3,
+        "compaction_event_count": 0,
+        "tool_histogram": {
+          "Bash": 66,
+          "Read": 8,
+          "Monitor": 2,
+          "ToolSearch": 1,
+          "Write": 1
+        }
+      },
+      "15f24c7ba18c": {
+        "edit_count": 6,
+        "write_count": 0,
+        "edit_write_count": 6,
+        "monitor_count": 28,
+        "wait_term_count": 1,
+        "reread_total": 0,
+        "compaction_event_count": 0,
+        "tool_histogram": {
+          "Monitor": 28,
+          "Bash": 25,
+          "Read": 8,
+          "Agent": 6,
+          "Edit": 6,
+          "Skill": 1,
+          "ToolSearch": 1
+        }
+      },
+      "0677f597286e": {
+        "edit_count": 7,
+        "write_count": 5,
+        "edit_write_count": 12,
+        "monitor_count": 0,
+        "wait_term_count": 2,
+        "reread_total": 9,
+        "compaction_event_count": 2,
+        "tool_histogram": {
+          "Bash": 46,
+          "Read": 20,
+          "Edit": 7,
+          "Write": 5,
+          "ToolSearch": 1
+        }
+      },
+      "074c8cf22927": {
+        "edit_count": 4,
+        "write_count": 2,
+        "edit_write_count": 6,
+        "monitor_count": 0,
+        "wait_term_count": 1,
+        "reread_total": 0,
+        "compaction_event_count": 0,
+        "tool_histogram": {
+          "Bash": 58,
+          "Read": 12,
+          "Edit": 4,
+          "Write": 2,
+          "ToolSearch": 1
+        }
+      },
+      "0aab88c525de": {
+        "edit_count": 3,
+        "write_count": 0,
+        "edit_write_count": 3,
+        "monitor_count": 0,
+        "wait_term_count": 0,
+        "reread_total": 16,
+        "compaction_event_count": 4,
+        "tool_histogram": {
+          "Bash": 47,
+          "Read": 36,
+          "Edit": 3
+        }
+      },
+      "036ff3ed4a89": {
+        "edit_count": 0,
+        "write_count": 0,
+        "edit_write_count": 0,
+        "monitor_count": 2,
+        "wait_term_count": 2,
+        "reread_total": 0,
+        "compaction_event_count": 0,
+        "tool_histogram": {
+          "Bash": 70,
+          "Read": 6,
+          "Monitor": 2,
+          "ToolSearch": 1
+        }
+      }
+    },
+    "signals": {
+      "thrash": {
+        "metric": "reread_total_plus_compaction",
+        "high_workers": [
+          "92a48e004519",
+          "ca977b9ca0dd"
+        ],
+        "low_workers": [
+          "0677f597286e",
+          "074c8cf22927"
+        ],
+        "high_mean": 42.0,
+        "low_mean": 5.5,
+        "high_greater_than_low": true,
+        "evidence": "cumulative reread_paths plus compaction_event_count",
+        "zero_call_separation": true,
+        "model_skipped": true
+      },
+      "poll": {
+        "metric": "monitor_plus_wait_terms",
+        "high_workers": [
+          "15f24c7ba18c",
+          "87a380bc64ff",
+          "bb6165018de0"
+        ],
+        "low_workers": [
+          "0677f597286e",
+          "074c8cf22927"
+        ],
+        "high_mean": 15.0,
+        "low_mean": 1.5,
+        "high_greater_than_low": true,
+        "evidence": "cumulative Monitor count plus wait/monitor/poll terms in last-n excerpts",
+        "write_count_caution_worker": "bb6165018de0",
+        "write_count_caution": 1,
+        "zero_call_separation": true,
+        "model_skipped": true
+      },
+      "productive_edit": {
+        "metric": "edit_plus_write",
+        "high_workers": [
+          "0677f597286e",
+          "074c8cf22927"
+        ],
+        "low_workers": [
+          "92a48e004519",
+          "ca977b9ca0dd"
+        ],
+        "high_mean": 9.0,
+        "low_mean": 0.0,
+        "high_greater_than_low": true,
+        "evidence": "cumulative Edit plus Write counts",
+        "zero_call_separation": true,
+        "model_skipped": true
+      },
+      "validation_inflection": {
+        "zero_call_separation": false,
+        "model_skipped": false,
+        "skip_profile": true,
+        "skip_profile_reason": "protocol requires prompt_plus_last_n for this signal; profile skipped by design"
+      }
+    }
+  },
+  "cells": [
+    {
+      "cell_id": "26a32082c4344511",
+      "worker_id": "92a48e004519",
+      "stratum": "thrash",
+      "checkpoint_turn": 75,
+      "replicate": 1,
+      "driver": "TypeSafe",
+      "model": "jev-1.13.0",
+      "protocol_sha256": "5f54251e6168ad35e67a0c192bacd1a03b1d05814bc56565373453fbc9206d52",
+      "panel_sha256": "e36fcebc51da2e9b6be21de49457a1da0a82c60eceaa8991ae644c39b4adec67",
+      "maps_only": true,
+      "behaviour_ship": false,
+      "no_call_jev": true,
+      "no_8080": true,
+      "subset": "prompt_plus_last_n",
+      "pack_path": "/home/codyh/workspace/corpus-ops/registry/validation-phase/packs/92a48e004519-judge-packs-20261002-earlycps.jsonl",
+      "request": {
+        "model": "jev-1.13.0",
+        "state": {
+          "evidence_class": "hybrid_v0",
+          "framing": "PR-SIGNAL-CLOSENESS",
+          "subset": "prompt_plus_last_n",
+          "worker_id": "92a48e004519",
+          "checkpoint_turn": 75,
+          "snapshot": {
+            "worker_id": "92a48e004519",
+            "checkpoint_turn": 75,
+            "schedule": {
+              "first_at": 50,
+              "interval": 10,
+              "checkpoints": [
+                50,
+                60,
+                75
+              ],
+              "mode": "early_prefix_exact"
+            },
+            "snapshot_mode": "hybrid_v0",
+            "snapshot_params": {
+              "N": 8,
+              "excerpt": 400
+            },
+            "prior_checkpoint_turn": 60,
+            "brief_anchor": "Execute the brief `docs/plans/03-map-layer-parity-remediation/briefs/3C-09-division-into-e2.md` in repo <REPO>, branch master. Its dependency 3C-08 is committed (965dcfc). Read the outcome records for 3C-06, 3C-07 and 3C-08 in `docs/plans/03-map-layer-parity-remediation/IMPLEMENTATION.md`, and the amendments at the end of the 3C-06, 3C-07 and 3C-08 briefs. Follow the brief exactly, including its step gates and committed stop point (full-disc sha 87a01b14\u2026 at -j 12",
+            "api_turns_note": "api_turns = 75",
+            "cumulative": {
+              "api_turns": 75,
+              "peak_ctx_tokens": 129961,
+              "prefix_bytes": 4202317,
+              "tool_histogram": {
+                "Bash": 55,
+                "Read": 31
+              },
+              "reread_paths": [
+                {
+                  "path": "<REPO>/parser/kiwiw/_cenc.c",
+                  "count": 10
+                },
+                {
+                  "path": "<REPO>/parser/kiwiw/divide.py",
+                  "count": 7
+                },
+                {
+                  "path": "<REPO>/parser/kiwiw/_e2.c",
+                  "count": 6
+                },
+                {
+                  "path": "<REPO>/parser/build_alldata.py",
+                  "count": 3
+                },
+                {
+                  "path": "<REPO>/parser/osm_to_parcel_geometry.py",
+                  "count": 3
+                }
+              ],
+              "distinct_read_paths": 7,
+              "compaction_event_count": 12,
+              "assistant_text_chars": 36
+            },
+            "delta_since_prior": {
+              "new_read_paths": [
+                "<REPO>/parser/kiwiw/cenc.py"
+              ],
+              "tool_histogram_delta": {
+                "Read": 10,
+                "Bash": 9
+              }
+            },
+            "thrash_top_rereads": [
+              {
+                "path": "<REPO>/parser/kiwiw/_cenc.c",
+                "count": 10
+              },
+              {
+                "path": "<REPO>/parser/kiwiw/divide.py",
+                "count": 7
+              },
+              {
+                "path": "<REPO>/parser/kiwiw/_e2.c",
+                "count": 6
+              },
+              {
+                "path": "<REPO>/parser/build_alldata.py",
+                "count": 3
+              },
+              {
+                "path": "<REPO>/parser/osm_to_parcel_geometry.py",
+                "count": 3
+              }
+            ],
+            "tail": [
+              {
+                "turn": 68,
+                "excerpt": "",
+                "tool_names": [
+                  "Bash"
+                ]
+              },
+              {
+                "turn": 69,
+                "excerpt": "",
+                "tool_names": [
+                  "Bash"
+                ]
+              },
+              {
+                "turn": 70,
+                "excerpt": "",
+                "tool_names": [
+                  "Read"
+                ]
+              },
+              {
+                "turn": 71,
+                "excerpt": "",
+                "tool_names": [
+                  "Read",
+                  "Bash"
+                ]
+              },
+              {
+                "turn": 72,
+                "excerpt": "",
+                "tool_names": [
+                  "Read"
+                ]
+              },
+              {
+                "turn": 73,
+                "excerpt": "",
+                "tool_names": [
+                  "Bash"
+                ]
+              },
+              {
+                "turn": 74,
+                "excerpt": "",
+                "tool_names": [
+                  "Read",
+                  "Read",
+                  "Read"
+                ]
+              },
+              {
+                "turn": 75,
+                "excerpt": "",
+                "tool_names": [
+                  "Read"
+                ]
+              }
+            ]
+          }
+        },
+        "questions": {
+          "validation_inflection": {
+            "type": "score",
+            "instructions": "Return one independent float in [0,1] for the closeness of this snapshot to the signal validation_inflection: a shift from forward delivery into reactive read/fix/test mode. Judge the prompt plus the shown last-n turns only. This is a closeness measurement, not a phase class; do not emit a union, winner, fire decision, or any other signal score.",
+            "criteria": [
+              "0.0 = no evidence of a forward-to-reactive mode shift",
+              "0.5 = ambiguous or partial mode-shift evidence",
+              "1.0 = strong evidence of a forward-to-reactive mode shift"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "cell_id": "b4623b8c298c5761",
+      "worker_id": "92a48e004519",
+      "stratum": "thrash",
+      "checkpoint_turn": 75,
+      "replicate": 2,
+      "driver": "TypeSafe",
+      "model": "jev-1.13.0",
+      "protocol_sha256": "5f54251e6168ad35e67a0c192bacd1a03b1d05814bc56565373453fbc9206d52",
+      "panel_sha256": "e36fcebc51da2e9b6be21de49457a1da0a82c60eceaa8991ae644c39b4adec67",
+      "maps_only": true,
+      "behaviour_ship": false,
+      "no_call_jev": true,
+      "no_8080": true,
+      "subset": "prompt_plus_last_n",
+      "pack_path": "/home/codyh/workspace/corpus-ops/registry/validation-phase/packs/92a48e004519-judge-packs-20261002-earlycps.jsonl",
+      "request": {
+        "model": "jev-1.13.0",
+        "state": {
+          "evidence_class": "hybrid_v0",
+          "framing": "PR-SIGNAL-CLOSENESS",
+          "subset": "prompt_plus_last_n",
+          "worker_id": "92a48e004519",
+          "checkpoint_turn": 75,
+          "snapshot": {
+            "worker_id": "92a48e004519",
+            "checkpoint_turn": 75,
+            "schedule": {
+              "first_at": 50,
+              "interval": 10,
+              "checkpoints": [
+                50,
+                60,
+                75
+              ],
+              "mode": "early_prefix_exact"
+            },
+            "snapshot_mode": "hybrid_v0",
+            "snapshot_params": {
+              "N": 8,
+              "excerpt": 400
+            },
+            "prior_checkpoint_turn": 60,
+            "brief_anchor": "Execute the brief `docs/plans/03-map-layer-parity-remediation/briefs/3C-09-division-into-e2.md` in repo <REPO>, branch master. Its dependency 3C-08 is committed (965dcfc). Read the outcome records for 3C-06, 3C-07 and 3C-08 in `docs/plans/03-map-layer-parity-remediation/IMPLEMENTATION.md`, and the amendments at the end of the 3C-06, 3C-07 and 3C-08 briefs. Follow the brief exactly, including its step gates and committed stop point (full-disc sha 87a01b14\u2026 at -j 12",
+            "api_turns_note": "api_turns = 75",
+            "cumulative": {
+              "api_turns": 75,
+              "peak_ctx_tokens": 129961,
+              "prefix_bytes": 4202317,
+              "tool_histogram": {
+                "Bash": 55,
+                "Read": 31
+              },
+              "reread_paths": [
+                {
+                  "path": "<REPO>/parser/kiwiw/_cenc.c",
+                  "count": 10
+                },
+                {
+                  "path": "<REPO>/parser/kiwiw/divide.py",
+                  "count": 7
+                },
+                {
+                  "path": "<REPO>/parser/kiwiw/_e2.c",
+                  "count": 6
+                },
+                {
+                  "path": "<REPO>/parser/build_alldata.py",
+                  "count": 3
+                },
+                {
+                  "path": "<REPO>/parser/osm_to_parcel_geometry.py",
+                  "count": 3
+                }
+              ],
+              "distinct_read_paths": 7,
+              "compaction_event_count": 12,
+              "assistant_text_chars": 36
+            },
+            "delta_since_prior": {
+              "new_read_paths": [
+                "<REPO>/parser/kiwiw/cenc.py"
+              ],
+              "tool_histogram_delta": {
+                "Read": 10,
+                "Bash": 9
+              }
+            },
+            "thrash_top_rereads": [
+              {
+                "path": "<REPO>/parser/kiwiw/_cenc.c",
+                "count": 10
+              },
+              {
+                "path": "<REPO>/parser/kiwiw/divide.py",
+                "count": 7
+              },
+              {
+                "path": "<REPO>/parser/kiwiw/_e2.c",
+                "count": 6
+              },
+              {
+                "path": "<REPO>/parser/build_alldata.py",
+                "count": 3
+              },
+              {
+                "path": "<REPO>/parser/osm_to_parcel_geometry.py",
+                "count": 3
+              }
+            ],
+            "tail": [
+              {
+                "turn": 68,
+                "excerpt": "",
+                "tool_names": [
+                  "Bash"
+                ]
+              },
+              {
+                "turn": 69,
+                "excerpt": "",
+                "tool_names": [
+                  "Bash"
+                ]
+              },
+              {
+                "turn": 70,
+                "excerpt": "",
+                "tool_names": [
+                  "Read"
+                ]
+              },
+              {
+                "turn": 71,
+                "excerpt": "",
+                "tool_names": [
+                  "Read",
+                  "Bash"
+                ]
+              },
+              {
+                "turn": 72,
+                "excerpt": "",
+                "tool_names": [
+                  "Read"
+                ]
+              },
+              {
+                "turn": 73,
+                "excerpt": "",
+                "tool_names": [
+                  "Bash"
+                ]
+              },
+              {
+                "turn": 74,
+                "excerpt": "",
+                "tool_names": [
+                  "Read",
+                  "Read",
+                  "Read"
+                ]
+              },
+              {
+                "turn": 75,
+                "excerpt": "",
+                "tool_names": [
+                  "Read"
+                ]
+              }
+            ]
+          }
+        },
+        "questions": {
+          "validation_inflection": {
+            "type": "score",
+            "instructions": "Return one independent float in [0,1] for the closeness of this snapshot to the signal validation_inflection: a shift from forward delivery into reactive read/fix/test mode. Judge the prompt plus the shown last-n turns only. This is a closeness measurement, not a phase class; do not emit a union, winner, fire decision, or any other signal score.",
+            "criteria": [
+              "0.0 = no evidence of a forward-to-reactive mode shift",
+              "0.5 = ambiguous or partial mode-shift evidence",
+              "1.0 = strong evidence of a forward-to-reactive mode shift"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "cell_id": "8c62a9300a497738",
+      "worker_id": "ca977b9ca0dd",
+      "stratum": "thrash",
+      "checkpoint_turn": 75,
+      "replicate": 1,
+      "driver": "TypeSafe",
+      "model": "jev-1.13.0",
+      "protocol_sha256": "5f54251e6168ad35e67a0c192bacd1a03b1d05814bc56565373453fbc9206d52",
+      "panel_sha256": "e36fcebc51da2e9b6be21de49457a1da0a82c60eceaa8991ae644c39b4adec67",
+      "maps_only": true,
+      "behaviour_ship": false,
+      "no_call_jev": true,
+      "no_8080": true,
+      "subset": "prompt_plus_last_n",
+      "pack_path": "/home/codyh/workspace/corpus-ops/registry/validation-phase/packs/ca977b9ca0dd-judge-packs-20261002-earlycps.jsonl",
+      "request": {
+        "model": "jev-1.13.0",
+        "state": {
+          "evidence_class": "hybrid_v0",
+          "framing": "PR-SIGNAL-CLOSENESS",
+          "subset": "prompt_plus_last_n",
+          "worker_id": "ca977b9ca0dd",
+          "checkpoint_turn": 75,
+          "snapshot": {
+            "worker_id": "ca977b9ca0dd",
+            "checkpoint_turn": 75,
+            "schedule": {
+              "first_at": 50,
+              "interval": 10,
+              "checkpoints": [
+                50,
+                60,
+                75
+              ],
+              "mode": "early_prefix_exact"
+            },
+            "snapshot_mode": "hybrid_v0",
+            "snapshot_params": {
+              "N": 8,
+              "excerpt": 400
+            },
+            "prior_checkpoint_turn": 60,
+            "brief_anchor": "Execute the brief `docs/plans/03-map-layer-parity-remediation/briefs/3C-09-division-into-e2.md` in repo <REPO>, branch master. Its dependency 3C-08 is committed (965dcfc). Read the outcome records for 3C-06, 3C-07 and 3C-08 in `docs/plans/03-map-layer-parity-remediation/IMPLEMENTATION.md`, and the amendments at the end of the 3C-06, 3C-07 and 3C-08 briefs. Follow the brief exactly, including its step gates and committed stop point (full-disc sha 87a01b14\u2026 at -j 12",
+            "api_turns_note": "api_turns = 75",
+            "cumulative": {
+              "api_turns": 75,
+              "peak_ctx_tokens": 126470,
+              "prefix_bytes": 3522749,
+              "tool_histogram": {
+                "Read": 45,
+                "Bash": 42
+              },
+              "reread_paths": [
+                {
+                  "path": "<REPO>/parser/kiwiw/_cenc.c",
+                  "count": 10
+                },
+                {
+                  "path": "<REPO>/parser/kiwiw/divide.py",
+                  "count": 9
+                },
+                {
+                  "path": "<REPO>/parser/kiwiw/_e2.c",
+                  "count": 6
+                },
+                {
+                  "path": "<REPO>/parser/build_alldata.py",
+                  "count": 5
+                },
+                {
+                  "path": "<REPO>/parser/kiwiw/cenc.py",
+                  "count": 3
+                }
+              ],
+              "distinct_read_paths": 14,
+              "compaction_event_count": 10,
+              "assistant_text_chars": 167
+            },
+            "delta_since_prior": {
+              "new_read_paths": [],
+              "tool_histogram_delta": {
+                "Bash": 12,
+                "Read": 5
+              }
+            },
+            "thrash_top_rereads": [
+              {
+                "path": "<REPO>/parser/kiwiw/_cenc.c",
+                "count": 10
+              },
+              {
+                "path": "<REPO>/parser/kiwiw/divide.py",
+                "count": 9
+              },
+              {
+                "path": "<REPO>/parser/kiwiw/_e2.c",
+                "count": 6
+              },
+              {
+                "path": "<REPO>/parser/build_alldata.py",
+                "count": 5
+              },
+              {
+                "path": "<REPO>/parser/kiwiw/cenc.py",
+                "count": 3
+              }
+            ],
+            "tail": [
+              {
+                "turn": 68,
+                "excerpt": "",
+                "tool_names": [
+                  "Bash"
+                ]
+              },
+              {
+                "turn": 69,
+                "excerpt": "",
+                "tool_names": [
+                  "Bash"
+                ]
+              },
+              {
+                "turn": 70,
+                "excerpt": "",
+                "tool_names": [
+                  "Bash"
+                ]
+              },
+              {
+                "turn": 71,
+                "excerpt": "",
+                "tool_names": [
+                  "Bash"
+                ]
+              },
+              {
+                "turn": 72,
+                "excerpt": "",
+                "tool_names": [
+                  "Read",
+                  "Read"
+                ]
+              },
+              {
+                "turn": 73,
+                "excerpt": "",
+                "tool_names": [
+                  "Bash"
+                ]
+              },
+              {
+                "turn": 74,
+                "excerpt": "",
+                "tool_names": [
+                  "Bash"
+                ]
+              },
+              {
+                "turn": 75,
+                "excerpt": "",
+                "tool_names": [
+                  "Bash"
+                ]
+              }
+            ]
+          }
+        },
+        "questions": {
+          "validation_inflection": {
+            "type": "score",
+            "instructions": "Return one independent float in [0,1] for the closeness of this snapshot to the signal validation_inflection: a shift from forward delivery into reactive read/fix/test mode. Judge the prompt plus the shown last-n turns only. This is a closeness measurement, not a phase class; do not emit a union, winner, fire decision, or any other signal score.",
+            "criteria": [
+              "0.0 = no evidence of a forward-to-reactive mode shift",
+              "0.5 = ambiguous or partial mode-shift evidence",
+              "1.0 = strong evidence of a forward-to-reactive mode shift"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "cell_id": "0cc1d1ad9f0bc182",
+      "worker_id": "ca977b9ca0dd",
+      "stratum": "thrash",
+      "checkpoint_turn": 75,
+      "replicate": 2,
+      "driver": "TypeSafe",
+      "model": "jev-1.13.0",
+      "protocol_sha256": "5f54251e6168ad35e67a0c192bacd1a03b1d05814bc56565373453fbc9206d52",
+      "panel_sha256": "e36fcebc51da2e9b6be21de49457a1da0a82c60eceaa8991ae644c39b4adec67",
+      "maps_only": true,
+      "behaviour_ship": false,
+      "no_call_jev": true,
+      "no_8080": true,
+      "subset": "prompt_plus_last_n",
+      "pack_path": "/home/codyh/workspace/corpus-ops/registry/validation-phase/packs/ca977b9ca0dd-judge-packs-20261002-earlycps.jsonl",
+      "request": {
+        "model": "jev-1.13.0",
+        "state": {
+          "evidence_class": "hybrid_v0",
+          "framing": "PR-SIGNAL-CLOSENESS",
+          "subset": "prompt_plus_last_n",
+          "worker_id": "ca977b9ca0dd",
+          "checkpoint_turn": 75,
+          "snapshot": {
+            "worker_id": "ca977b9ca0dd",
+            "checkpoint_turn": 75,
+            "schedule": {
+              "first_at": 50,
+              "interval": 10,
+              "checkpoints": [
+                50,
+                60,
+                75
+              ],
+              "mode": "early_prefix_exact"
+            },
+            "snapshot_mode": "hybrid_v0",
+            "snapshot_params": {
+              "N": 8,
+              "excerpt": 400
+            },
+            "prior_checkpoint_turn": 60,
+            "brief_anchor": "Execute the brief `docs/plans/03-map-layer-parity-remediation/briefs/3C-09-division-into-e2.md` in repo <REPO>, branch master. Its dependency 3C-08 is committed (965dcfc). Read the outcome records for 3C-06, 3C-07 and 3C-08 in `docs/plans/03-map-layer-parity-remediation/IMPLEMENTATION.md`, and the amendments at the end of the 3C-06, 3C-07 and 3C-08 briefs. Follow the brief exactly, including its step gates and committed stop point (full-disc sha 87a01b14\u2026 at -j 12",
+            "api_turns_note": "api_turns = 75",
+            "cumulative": {
+              "api_turns": 75,
+              "peak_ctx_tokens": 126470,
+              "prefix_bytes": 3522749,
+              "tool_histogram": {
+                "Read": 45,
+                "Bash": 42
+              },
+              "reread_paths": [
+                {
+                  "path": "<REPO>/parser/kiwiw/_cenc.c",
+                  "count": 10
+                },
+                {
+                  "path": "<REPO>/parser/kiwiw/divide.py",
+                  "count": 9
+                },
+                {
+                  "path": "<REPO>/parser/kiwiw/_e2.c",
+                  "count": 6
+                },
+                {
+                  "path": "<REPO>/parser/build_alldata.py",
+                  "count": 5
+                },
+                {
+                  "path": "<REPO>/parser/kiwiw/cenc.py",
+                  "count": 3
+                }
+              ],
+              "distinct_read_paths": 14,
+              "compaction_event_count": 10,
+              "assistant_text_chars": 167
+            },
+            "delta_since_prior": {
+              "new_read_paths": [],
+              "tool_histogram_delta": {
+                "Bash": 12,
+                "Read": 5
+              }
+            },
+            "thrash_top_rereads": [
+              {
+                "path": "<REPO>/parser/kiwiw/_cenc.c",
+                "count": 10
+              },
+              {
+                "path": "<REPO>/parser/kiwiw/divide.py",
+                "count": 9
+              },
+              {
+                "path": "<REPO>/parser/kiwiw/_e2.c",
+                "count": 6
+              },
+              {
+                "path": "<REPO>/parser/build_alldata.py",
+                "count": 5
+              },
+              {
+                "path": "<REPO>/parser/kiwiw/cenc.py",
+                "count": 3
+              }
+            ],
+            "tail": [
+              {
+                "turn": 68,
+                "excerpt": "",
+                "tool_names": [
+                  "Bash"
+                ]
+              },
+              {
+                "turn": 69,
+                "excerpt": "",
+                "tool_names": [
+                  "Bash"
+                ]
+              },
+              {
+                "turn": 70,
+                "excerpt": "",
+                "tool_names": [
+                  "Bash"
+                ]
+              },
+              {
+                "turn": 71,
+                "excerpt": "",
+                "tool_names": [
+                  "Bash"
+                ]
+              },
+              {
+                "turn": 72,
+                "excerpt": "",
+                "tool_names": [
+                  "Read",
+                  "Read"
+                ]
+              },
+              {
+                "turn": 73,
+                "excerpt": "",
+                "tool_names": [
+                  "Bash"
+                ]
+              },
+              {
+                "turn": 74,
+                "excerpt": "",
+                "tool_names": [
+                  "Bash"
+                ]
+              },
+              {
+                "turn": 75,
+                "excerpt": "",
+                "tool_names": [
+                  "Bash"
+                ]
+              }
+            ]
+          }
+        },
+        "questions": {
+          "validation_inflection": {
+            "type": "score",
+            "instructions": "Return one independent float in [0,1] for the closeness of this snapshot to the signal validation_inflection: a shift from forward delivery into reactive read/fix/test mode. Judge the prompt plus the shown last-n turns only. This is a closeness measurement, not a phase class; do not emit a union, winner, fire decision, or any other signal score.",
+            "criteria": [
+              "0.0 = no evidence of a forward-to-reactive mode shift",
+              "0.5 = ambiguous or partial mode-shift evidence",
+              "1.0 = strong evidence of a forward-to-reactive mode shift"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "cell_id": "c816f3e034e48595",
+      "worker_id": "87a380bc64ff",
+      "stratum": "poll",
+      "checkpoint_turn": 75,
+      "replicate": 1,
+      "driver": "TypeSafe",
+      "model": "jev-1.13.0",
+      "protocol_sha256": "5f54251e6168ad35e67a0c192bacd1a03b1d05814bc56565373453fbc9206d52",
+      "panel_sha256": "e36fcebc51da2e9b6be21de49457a1da0a82c60eceaa8991ae644c39b4adec67",
+      "maps_only": true,
+      "behaviour_ship": false,
+      "no_call_jev": true,
+      "no_8080": true,
+      "subset": "prompt_plus_last_n",
+      "pack_path": "/home/codyh/workspace/corpus-ops/registry/validation-phase/packs/87a380bc64ff-judge-packs-20261002-earlycps.jsonl",
+      "request": {
+        "model": "jev-1.13.0",
+        "state": {
+          "evidence_class": "hybrid_v0",
+          "framing": "PR-SIGNAL-CLOSENESS",
+          "subset": "prompt_plus_last_n",
+          "worker_id": "87a380bc64ff",
+          "checkpoint_turn": 75,
+          "snapshot": {
+            "worker_id": "87a380bc64ff",
+            "checkpoint_turn": 75,
+            "schedule": {
+              "first_at": 50,
+              "interval": 10,
+              "checkpoints": [
+                50,
+                60,
+                75
+              ],
+              "mode": "early_prefix_exact"
+            },
+            "snapshot_mode": "hybrid_v0",
+            "snapshot_params": {
+              "N": 8,
+              "excerpt": 400
+            },
+            "prior_checkpoint_turn": 60,
+            "brief_anchor": "Repo: <REPO>, branch `master` (work directly on it, no new branch). You are a build worker for one unit of a larger plan-driven project (open-pajero-maps, reverse-engineering a proprietary map disc format).\n\nYour brief is the complete, self-sufficient spec for this unit: read it in full before doing anything else.\n\n  docs/plans/03-map-layer-parity-remediation/briefs/3-12-overlap-duplication-remeasure.md\n\nFollow it exactly \u2014 owned paths, contract, done evidence, ev",
+            "api_turns_note": "api_turns = 75",
+            "cumulative": {
+              "api_turns": 75,
+              "peak_ctx_tokens": 105811,
+              "prefix_bytes": 801534,
+              "tool_histogram": {
+                "Bash": 56,
+                "Read": 9,
+                "Monitor": 6,
+                "ToolSearch": 1
+              },
+              "reread_paths": [
+                {
+                  "path": "<REPO>/parser/build_alldata.py",
+                  "count": 4
+                },
+                {
+                  "path": "<REPO>/parser/kiwiw/overlap.py",
+                  "count": 3
+                }
+              ],
+              "distinct_read_paths": 4,
+              "compaction_event_count": 0,
+              "assistant_text_chars": 2284
+            },
+            "delta_since_prior": {
+              "new_read_paths": [],
+              "tool_histogram_delta": {
+                "Bash": 11,
+                "Monitor": 2
+              }
+            },
+            "thrash_top_rereads": [
+              {
+                "path": "<REPO>/parser/build_alldata.py",
+                "count": 4
+              },
+              {
+                "path": "<REPO>/parser/kiwiw/overlap.py",
+                "count": 3
+              }
+            ],
+            "tail": [
+              {
+                "turn": 68,
+                "excerpt": "Waiting for compare_disc and quantisation_roundtrip to finish.",
+                "tool_names": [
+                  "Bash"
+                ]
+              },
+              {
+                "turn": 69,
+                "excerpt": "Waiting for the compare_disc and quantisation_roundtrip background jobs to complete.",
+                "tool_names": [
+                  "Bash"
+                ]
+              },
+              {
+                "turn": 70,
+                "excerpt": "",
+                "tool_names": [
+                  "Bash"
+                ]
+              },
+              {
+                "turn": 71,
+                "excerpt": "",
+                "tool_names": [
+                  "Monitor"
+                ]
+              },
+              {
+                "turn": 72,
+                "excerpt": "",
+                "tool_names": [
+                  "Monitor"
+                ]
+              },
+              {
+                "turn": 73,
+                "excerpt": "Now waiting for both monitors to report back.",
+                "tool_names": [
+                  "Bash"
+                ]
+              },
+              {
+                "turn": 74,
+                "excerpt": "Waiting on the compare_disc and roundtrip monitors.",
+                "tool_names": []
+              },
+              {
+                "turn": 75,
+                "excerpt": "",
+                "tool_names": [
+                  "Bash"
+                ]
+              }
+            ]
+          }
+        },
+        "questions": {
+          "validation_inflection": {
+            "type": "score",
+            "instructions": "Return one independent float in [0,1] for the closeness of this snapshot to the signal validation_inflection: a shift from forward delivery into reactive read/fix/test mode. Judge the prompt plus the shown last-n turns only. This is a closeness measurement, not a phase class; do not emit a union, winner, fire decision, or any other signal score.",
+            "criteria": [
+              "0.0 = no evidence of a forward-to-reactive mode shift",
+              "0.5 = ambiguous or partial mode-shift evidence",
+              "1.0 = strong evidence of a forward-to-reactive mode shift"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "cell_id": "b8338a1a47f1fc00",
+      "worker_id": "87a380bc64ff",
+      "stratum": "poll",
+      "checkpoint_turn": 75,
+      "replicate": 2,
+      "driver": "TypeSafe",
+      "model": "jev-1.13.0",
+      "protocol_sha256": "5f54251e6168ad35e67a0c192bacd1a03b1d05814bc56565373453fbc9206d52",
+      "panel_sha256": "e36fcebc51da2e9b6be21de49457a1da0a82c60eceaa8991ae644c39b4adec67",
+      "maps_only": true,
+      "behaviour_ship": false,
+      "no_call_jev": true,
+      "no_8080": true,
+      "subset": "prompt_plus_last_n",
+      "pack_path": "/home/codyh/workspace/corpus-ops/registry/validation-phase/packs/87a380bc64ff-judge-packs-20261002-earlycps.jsonl",
+      "request": {
+        "model": "jev-1.13.0",
+        "state": {
+          "evidence_class": "hybrid_v0",
+          "framing": "PR-SIGNAL-CLOSENESS",
+          "subset": "prompt_plus_last_n",
+          "worker_id": "87a380bc64ff",
+          "checkpoint_turn": 75,
+          "snapshot": {
+            "worker_id": "87a380bc64ff",
+            "checkpoint_turn": 75,
+            "schedule": {
+              "first_at": 50,
+              "interval": 10,
+              "checkpoints": [
+                50,
+                60,
+                75
+              ],
+              "mode": "early_prefix_exact"
+            },
+            "snapshot_mode": "hybrid_v0",
+            "snapshot_params": {
+              "N": 8,
+              "excerpt": 400
+            },
+            "prior_checkpoint_turn": 60,
+            "brief_anchor": "Repo: <REPO>, branch `master` (work directly on it, no new branch). You are a build worker for one unit of a larger plan-driven project (open-pajero-maps, reverse-engineering a proprietary map disc format).\n\nYour brief is the complete, self-sufficient spec for this unit: read it in full before doing anything else.\n\n  docs/plans/03-map-layer-parity-remediation/briefs/3-12-overlap-duplication-remeasure.md\n\nFollow it exactly \u2014 owned paths, contract, done evidence, ev",
+            "api_turns_note": "api_turns = 75",
+            "cumulative": {
+              "api_turns": 75,
+              "peak_ctx_tokens": 105811,
+              "prefix_bytes": 801534,
+              "tool_histogram": {
+                "Bash": 56,
+                "Read": 9,
+                "Monitor": 6,
+                "ToolSearch": 1
+              },
+              "reread_paths": [
+                {
+                  "path": "<REPO>/parser/build_alldata.py",
+                  "count": 4
+                },
+                {
+                  "path": "<REPO>/parser/kiwiw/overlap.py",
+                  "count": 3
+                }
+              ],
+              "distinct_read_paths": 4,
+              "compaction_event_count": 0,
+              "assistant_text_chars": 2284
+            },
+            "delta_since_prior": {
+              "new_read_paths": [],
+              "tool_histogram_delta": {
+                "Bash": 11,
+                "Monitor": 2
+              }
+            },
+            "thrash_top_rereads": [
+              {
+                "path": "<REPO>/parser/build_alldata.py",
+                "count": 4
+              },
+              {
+                "path": "<REPO>/parser/kiwiw/overlap.py",
+                "count": 3
+              }
+            ],
+            "tail": [
+              {
+                "turn": 68,
+                "excerpt": "Waiting for compare_disc and quantisation_roundtrip to finish.",
+                "tool_names": [
+                  "Bash"
+                ]
+              },
+              {
+                "turn": 69,
+                "excerpt": "Waiting for the compare_disc and quantisation_roundtrip background jobs to complete.",
+                "tool_names": [
+                  "Bash"
+                ]
+              },
+              {
+                "turn": 70,
+                "excerpt": "",
+                "tool_names": [
+                  "Bash"
+                ]
+              },
+              {
+                "turn": 71,
+                "excerpt": "",
+                "tool_names": [
+                  "Monitor"
+                ]
+              },
+              {
+                "turn": 72,
+                "excerpt": "",
+                "tool_names": [
+                  "Monitor"
+                ]
+              },
+              {
+                "turn": 73,
+                "excerpt": "Now waiting for both monitors to report back.",
+                "tool_names": [
+                  "Bash"
+                ]
+              },
+              {
+                "turn": 74,
+                "excerpt": "Waiting on the compare_disc and roundtrip monitors.",
+                "tool_names": []
+              },
+              {
+                "turn": 75,
+                "excerpt": "",
+                "tool_names": [
+                  "Bash"
+                ]
+              }
+            ]
+          }
+        },
+        "questions": {
+          "validation_inflection": {
+            "type": "score",
+            "instructions": "Return one independent float in [0,1] for the closeness of this snapshot to the signal validation_inflection: a shift from forward delivery into reactive read/fix/test mode. Judge the prompt plus the shown last-n turns only. This is a closeness measurement, not a phase class; do not emit a union, winner, fire decision, or any other signal score.",
+            "criteria": [
+              "0.0 = no evidence of a forward-to-reactive mode shift",
+              "0.5 = ambiguous or partial mode-shift evidence",
+              "1.0 = strong evidence of a forward-to-reactive mode shift"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "cell_id": "57f2efe4358d40ad",
+      "worker_id": "bb6165018de0",
+      "stratum": "poll",
+      "checkpoint_turn": 75,
+      "replicate": 1,
+      "driver": "TypeSafe",
+      "model": "jev-1.13.0",
+      "protocol_sha256": "5f54251e6168ad35e67a0c192bacd1a03b1d05814bc56565373453fbc9206d52",
+      "panel_sha256": "e36fcebc51da2e9b6be21de49457a1da0a82c60eceaa8991ae644c39b4adec67",
+      "maps_only": true,
+      "behaviour_ship": false,
+      "no_call_jev": true,
+      "no_8080": true,
+      "subset": "prompt_plus_last_n",
+      "pack_path": "/home/codyh/workspace/corpus-ops/registry/validation-phase/packs/bb6165018de0-judge-packs-20261002-earlycps.jsonl",
+      "request": {
+        "model": "jev-1.13.0",
+        "state": {
+          "evidence_class": "hybrid_v0",
+          "framing": "PR-SIGNAL-CLOSENESS",
+          "subset": "prompt_plus_last_n",
+          "worker_id": "bb6165018de0",
+          "checkpoint_turn": 75,
+          "snapshot": {
+            "worker_id": "bb6165018de0",
+            "checkpoint_turn": 75,
+            "schedule": {
+              "first_at": 50,
+              "interval": 10,
+              "checkpoints": [
+                50,
+                60,
+                75
+              ],
+              "mode": "early_prefix_exact"
+            },
+            "snapshot_mode": "hybrid_v0",
+            "snapshot_params": {
+              "N": 8,
+              "excerpt": 400
+            },
+            "prior_checkpoint_turn": 60,
+            "brief_anchor": "READ-ONLY RESEARCH. Repo <REPO> (branch master). You must NOT edit, create or commit any file in the repo. Throwaway census scripts go in your scratchpad only; run with `<REPO>/.venv-rp/bin/python`. Reference disc R mounted read-only at <MOUNT>/\u2026 Spec PDFs at spec/format_english/pdf/ (index spec/INDEX.md; ch.7.2 = 0702122e.pdf is the Road Data Frame, ch.7.1 = 0701122e.pdf). Read PDFs with the Read tool's `pages` ",
+            "api_turns_note": "api_turns = 75",
+            "cumulative": {
+              "api_turns": 75,
+              "peak_ctx_tokens": 127123,
+              "prefix_bytes": 2912944,
+              "tool_histogram": {
+                "Bash": 66,
+                "Read": 8,
+                "Monitor": 2,
+                "ToolSearch": 1,
+                "Write": 1
+              },
+              "reread_paths": [
+                {
+                  "path": "<REPO>/spec/format_english/pdf/0702122e.pdf",
+                  "count": 3
+                }
+              ],
+              "distinct_read_paths": 6,
+              "compaction_event_count": 0,
+              "assistant_text_chars": 2174
+            },
+            "delta_since_prior": {
+              "new_read_paths": [],
+              "tool_histogram_delta": {
+                "Bash": 15
+              }
+            },
+            "thrash_top_rereads": [
+              {
+                "path": "<REPO>/spec/format_english/pdf/0702122e.pdf",
+                "count": 3
+              }
+            ],
+            "tail": [
+              {
+                "turn": 68,
+                "excerpt": "Standing by.",
+                "tool_names": [
+                  "Bash"
+                ]
+              },
+              {
+                "turn": 69,
+                "excerpt": "Waiting for the census job \u2014 will resume analysis once it finishes.",
+                "tool_names": [
+                  "Bash"
+                ]
+              },
+              {
+                "turn": 70,
+                "excerpt": "",
+                "tool_names": [
+                  "Bash"
+                ]
+              },
+              {
+                "turn": 71,
+                "excerpt": "I'll wait for the next monitor event.",
+                "tool_names": [
+                  "Bash"
+                ]
+              },
+              {
+                "turn": 72,
+                "excerpt": "",
+                "tool_names": [
+                  "Bash"
+                ]
+              },
+              {
+                "turn": 73,
+                "excerpt": "",
+                "tool_names": [
+                  "Bash"
+                ]
+              },
+              {
+                "turn": 74,
+                "excerpt": "",
+                "tool_names": [
+                  "Bash"
+                ]
+              },
+              {
+                "turn": 75,
+                "excerpt": "",
+                "tool_names": [
+                  "Bash"
+                ]
+              }
+            ]
+          }
+        },
+        "questions": {
+          "validation_inflection": {
+            "type": "score",
+            "instructions": "Return one independent float in [0,1] for the closeness of this snapshot to the signal validation_inflection: a shift from forward delivery into reactive read/fix/test mode. Judge the prompt plus the shown last-n turns only. This is a closeness measurement, not a phase class; do not emit a union, winner, fire decision, or any other signal score.",
+            "criteria": [
+              "0.0 = no evidence of a forward-to-reactive mode shift",
+              "0.5 = ambiguous or partial mode-shift evidence",
+              "1.0 = strong evidence of a forward-to-reactive mode shift"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "cell_id": "dc350173ede5c0c2",
+      "worker_id": "bb6165018de0",
+      "stratum": "poll",
+      "checkpoint_turn": 75,
+      "replicate": 2,
+      "driver": "TypeSafe",
+      "model": "jev-1.13.0",
+      "protocol_sha256": "5f54251e6168ad35e67a0c192bacd1a03b1d05814bc56565373453fbc9206d52",
+      "panel_sha256": "e36fcebc51da2e9b6be21de49457a1da0a82c60eceaa8991ae644c39b4adec67",
+      "maps_only": true,
+      "behaviour_ship": false,
+      "no_call_jev": true,
+      "no_8080": true,
+      "subset": "prompt_plus_last_n",
+      "pack_path": "/home/codyh/workspace/corpus-ops/registry/validation-phase/packs/bb6165018de0-judge-packs-20261002-earlycps.jsonl",
+      "request": {
+        "model": "jev-1.13.0",
+        "state": {
+          "evidence_class": "hybrid_v0",
+          "framing": "PR-SIGNAL-CLOSENESS",
+          "subset": "prompt_plus_last_n",
+          "worker_id": "bb6165018de0",
+          "checkpoint_turn": 75,
+          "snapshot": {
+            "worker_id": "bb6165018de0",
+            "checkpoint_turn": 75,
+            "schedule": {
+              "first_at": 50,
+              "interval": 10,
+              "checkpoints": [
+                50,
+                60,
+                75
+              ],
+              "mode": "early_prefix_exact"
+            },
+            "snapshot_mode": "hybrid_v0",
+            "snapshot_params": {
+              "N": 8,
+              "excerpt": 400
+            },
+            "prior_checkpoint_turn": 60,
+            "brief_anchor": "READ-ONLY RESEARCH. Repo <REPO> (branch master). You must NOT edit, create or commit any file in the repo. Throwaway census scripts go in your scratchpad only; run with `<REPO>/.venv-rp/bin/python`. Reference disc R mounted read-only at <MOUNT>/\u2026 Spec PDFs at spec/format_english/pdf/ (index spec/INDEX.md; ch.7.2 = 0702122e.pdf is the Road Data Frame, ch.7.1 = 0701122e.pdf). Read PDFs with the Read tool's `pages` ",
+            "api_turns_note": "api_turns = 75",
+            "cumulative": {
+              "api_turns": 75,
+              "peak_ctx_tokens": 127123,
+              "prefix_bytes": 2912944,
+              "tool_histogram": {
+                "Bash": 66,
+                "Read": 8,
+                "Monitor": 2,
+                "ToolSearch": 1,
+                "Write": 1
+              },
+              "reread_paths": [
+                {
+                  "path": "<REPO>/spec/format_english/pdf/0702122e.pdf",
+                  "count": 3
+                }
+              ],
+              "distinct_read_paths": 6,
+              "compaction_event_count": 0,
+              "assistant_text_chars": 2174
+            },
+            "delta_since_prior": {
+              "new_read_paths": [],
+              "tool_histogram_delta": {
+                "Bash": 15
+              }
+            },
+            "thrash_top_rereads": [
+              {
+                "path": "<REPO>/spec/format_english/pdf/0702122e.pdf",
+                "count": 3
+              }
+            ],
+            "tail": [
+              {
+                "turn": 68,
+                "excerpt": "Standing by.",
+                "tool_names": [
+                  "Bash"
+                ]
+              },
+              {
+                "turn": 69,
+                "excerpt": "Waiting for the census job \u2014 will resume analysis once it finishes.",
+                "tool_names": [
+                  "Bash"
+                ]
+              },
+              {
+                "turn": 70,
+                "excerpt": "",
+                "tool_names": [
+                  "Bash"
+                ]
+              },
+              {
+                "turn": 71,
+                "excerpt": "I'll wait for the next monitor event.",
+                "tool_names": [
+                  "Bash"
+                ]
+              },
+              {
+                "turn": 72,
+                "excerpt": "",
+                "tool_names": [
+                  "Bash"
+                ]
+              },
+              {
+                "turn": 73,
+                "excerpt": "",
+                "tool_names": [
+                  "Bash"
+                ]
+              },
+              {
+                "turn": 74,
+                "excerpt": "",
+                "tool_names": [
+                  "Bash"
+                ]
+              },
+              {
+                "turn": 75,
+                "excerpt": "",
+                "tool_names": [
+                  "Bash"
+                ]
+              }
+            ]
+          }
+        },
+        "questions": {
+          "validation_inflection": {
+            "type": "score",
+            "instructions": "Return one independent float in [0,1] for the closeness of this snapshot to the signal validation_inflection: a shift from forward delivery into reactive read/fix/test mode. Judge the prompt plus the shown last-n turns only. This is a closeness measurement, not a phase class; do not emit a union, winner, fire decision, or any other signal score.",
+            "criteria": [
+              "0.0 = no evidence of a forward-to-reactive mode shift",
+              "0.5 = ambiguous or partial mode-shift evidence",
+              "1.0 = strong evidence of a forward-to-reactive mode shift"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "cell_id": "4b8384bc88cb6da2",
+      "worker_id": "15f24c7ba18c",
+      "stratum": "poll",
+      "checkpoint_turn": 75,
+      "replicate": 1,
+      "driver": "TypeSafe",
+      "model": "jev-1.13.0",
+      "protocol_sha256": "5f54251e6168ad35e67a0c192bacd1a03b1d05814bc56565373453fbc9206d52",
+      "panel_sha256": "e36fcebc51da2e9b6be21de49457a1da0a82c60eceaa8991ae644c39b4adec67",
+      "maps_only": true,
+      "behaviour_ship": false,
+      "no_call_jev": true,
+      "no_8080": true,
+      "subset": "prompt_plus_last_n",
+      "pack_path": "/home/codyh/workspace/corpus-ops/registry/validation-phase/packs/15f24c7ba18c-judge-packs-20261002-earlycps.jsonl",
+      "request": {
+        "model": "jev-1.13.0",
+        "state": {
+          "evidence_class": "hybrid_v0",
+          "framing": "PR-SIGNAL-CLOSENESS",
+          "subset": "prompt_plus_last_n",
+          "worker_id": "15f24c7ba18c",
+          "checkpoint_turn": 75,
+          "snapshot": {
+            "worker_id": "15f24c7ba18c",
+            "checkpoint_turn": 75,
+            "schedule": {
+              "first_at": 50,
+              "interval": 10,
+              "checkpoints": [
+                50,
+                60,
+                75
+              ],
+              "mode": "early_prefix_exact"
+            },
+            "snapshot_mode": "hybrid_v0",
+            "snapshot_params": {
+              "N": 8,
+              "excerpt": 400
+            },
+            "prior_checkpoint_turn": 60,
+            "brief_anchor": "Invoke the Skill `workflow:execute` and run exactly ONE phase \u2014 Phase 2 of docs/plans/03-map-layer-parity-remediation/DESIGN.md (repo <REPO>, branch master). This is a RESTART: a first attempt did not close (see IMPLEMENTATION.md Phase 2 sections, EVIDENCE-2-03.json, WORD7-ANALYSIS.md). Follow the skill's rules; append to IMPLEMENTATION.md, commit and push (project CLAUDE.md; no large binaries; update docs/provenance.md for new untracked material). Close with a co",
+            "api_turns_note": "api_turns = 75",
+            "cumulative": {
+              "api_turns": 75,
+              "peak_ctx_tokens": 138468,
+              "prefix_bytes": 985261,
+              "tool_histogram": {
+                "Monitor": 28,
+                "Bash": 25,
+                "Read": 8,
+                "Agent": 6,
+                "Edit": 6,
+                "Skill": 1,
+                "ToolSearch": 1
+              },
+              "reread_paths": [],
+              "distinct_read_paths": 8,
+              "compaction_event_count": 0,
+              "assistant_text_chars": 1289
+            },
+            "delta_since_prior": {
+              "new_read_paths": [],
+              "tool_histogram_delta": {
+                "Bash": 8,
+                "Edit": 4,
+                "Agent": 3
+              }
+            },
+            "thrash_top_rereads": [],
+            "tail": [
+              {
+                "turn": 68,
+                "excerpt": "",
+                "tool_names": [
+                  "Edit"
+                ]
+              },
+              {
+                "turn": 69,
+                "excerpt": "",
+                "tool_names": [
+                  "Bash"
+                ]
+              },
+              {
+                "turn": 70,
+                "excerpt": "2-05 and 2-07 recorded. Waiting on 2-06.",
+                "tool_names": [
+                  "Bash"
+                ]
+              },
+              {
+                "turn": 71,
+                "excerpt": "",
+                "tool_names": [
+                  "Bash"
+                ]
+              },
+              {
+                "turn": 72,
+                "excerpt": "",
+                "tool_names": [
+                  "Edit"
+                ]
+              },
+              {
+                "turn": 73,
+                "excerpt": "Dispatching 2-08 (overlay re-run) and a small fixer for the bug 2-05 deferred.",
+                "tool_names": [
+                  "Agent"
+                ]
+              },
+              {
+                "turn": 74,
+                "excerpt": "",
+                "tool_names": [
+                  "Agent"
+                ]
+              },
+              {
+                "turn": 75,
+                "excerpt": "",
+                "tool_names": [
+                  "Bash"
+                ]
+              }
+            ]
+          }
+        },
+        "questions": {
+          "validation_inflection": {
+            "type": "score",
+            "instructions": "Return one independent float in [0,1] for the closeness of this snapshot to the signal validation_inflection: a shift from forward delivery into reactive read/fix/test mode. Judge the prompt plus the shown last-n turns only. This is a closeness measurement, not a phase class; do not emit a union, winner, fire decision, or any other signal score.",
+            "criteria": [
+              "0.0 = no evidence of a forward-to-reactive mode shift",
+              "0.5 = ambiguous or partial mode-shift evidence",
+              "1.0 = strong evidence of a forward-to-reactive mode shift"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "cell_id": "92b7a898c20dc727",
+      "worker_id": "15f24c7ba18c",
+      "stratum": "poll",
+      "checkpoint_turn": 75,
+      "replicate": 2,
+      "driver": "TypeSafe",
+      "model": "jev-1.13.0",
+      "protocol_sha256": "5f54251e6168ad35e67a0c192bacd1a03b1d05814bc56565373453fbc9206d52",
+      "panel_sha256": "e36fcebc51da2e9b6be21de49457a1da0a82c60eceaa8991ae644c39b4adec67",
+      "maps_only": true,
+      "behaviour_ship": false,
+      "no_call_jev": true,
+      "no_8080": true,
+      "subset": "prompt_plus_last_n",
+      "pack_path": "/home/codyh/workspace/corpus-ops/registry/validation-phase/packs/15f24c7ba18c-judge-packs-20261002-earlycps.jsonl",
+      "request": {
+        "model": "jev-1.13.0",
+        "state": {
+          "evidence_class": "hybrid_v0",
+          "framing": "PR-SIGNAL-CLOSENESS",
+          "subset": "prompt_plus_last_n",
+          "worker_id": "15f24c7ba18c",
+          "checkpoint_turn": 75,
+          "snapshot": {
+            "worker_id": "15f24c7ba18c",
+            "checkpoint_turn": 75,
+            "schedule": {
+              "first_at": 50,
+              "interval": 10,
+              "checkpoints": [
+                50,
+                60,
+                75
+              ],
+              "mode": "early_prefix_exact"
+            },
+            "snapshot_mode": "hybrid_v0",
+            "snapshot_params": {
+              "N": 8,
+              "excerpt": 400
+            },
+            "prior_checkpoint_turn": 60,
+            "brief_anchor": "Invoke the Skill `workflow:execute` and run exactly ONE phase \u2014 Phase 2 of docs/plans/03-map-layer-parity-remediation/DESIGN.md (repo <REPO>, branch master). This is a RESTART: a first attempt did not close (see IMPLEMENTATION.md Phase 2 sections, EVIDENCE-2-03.json, WORD7-ANALYSIS.md). Follow the skill's rules; append to IMPLEMENTATION.md, commit and push (project CLAUDE.md; no large binaries; update docs/provenance.md for new untracked material). Close with a co",
+            "api_turns_note": "api_turns = 75",
+            "cumulative": {
+              "api_turns": 75,
+              "peak_ctx_tokens": 138468,
+              "prefix_bytes": 985261,
+              "tool_histogram": {
+                "Monitor": 28,
+                "Bash": 25,
+                "Read": 8,
+                "Agent": 6,
+                "Edit": 6,
+                "Skill": 1,
+                "ToolSearch": 1
+              },
+              "reread_paths": [],
+              "distinct_read_paths": 8,
+              "compaction_event_count": 0,
+              "assistant_text_chars": 1289
+            },
+            "delta_since_prior": {
+              "new_read_paths": [],
+              "tool_histogram_delta": {
+                "Bash": 8,
+                "Edit": 4,
+                "Agent": 3
+              }
+            },
+            "thrash_top_rereads": [],
+            "tail": [
+              {
+                "turn": 68,
+                "excerpt": "",
+                "tool_names": [
+                  "Edit"
+                ]
+              },
+              {
+                "turn": 69,
+                "excerpt": "",
+                "tool_names": [
+                  "Bash"
+                ]
+              },
+              {
+                "turn": 70,
+                "excerpt": "2-05 and 2-07 recorded. Waiting on 2-06.",
+                "tool_names": [
+                  "Bash"
+                ]
+              },
+              {
+                "turn": 71,
+                "excerpt": "",
+                "tool_names": [
+                  "Bash"
+                ]
+              },
+              {
+                "turn": 72,
+                "excerpt": "",
+                "tool_names": [
+                  "Edit"
+                ]
+              },
+              {
+                "turn": 73,
+                "excerpt": "Dispatching 2-08 (overlay re-run) and a small fixer for the bug 2-05 deferred.",
+                "tool_names": [
+                  "Agent"
+                ]
+              },
+              {
+                "turn": 74,
+                "excerpt": "",
+                "tool_names": [
+                  "Agent"
+                ]
+              },
+              {
+                "turn": 75,
+                "excerpt": "",
+                "tool_names": [
+                  "Bash"
+                ]
+              }
+            ]
+          }
+        },
+        "questions": {
+          "validation_inflection": {
+            "type": "score",
+            "instructions": "Return one independent float in [0,1] for the closeness of this snapshot to the signal validation_inflection: a shift from forward delivery into reactive read/fix/test mode. Judge the prompt plus the shown last-n turns only. This is a closeness measurement, not a phase class; do not emit a union, winner, fire decision, or any other signal score.",
+            "criteria": [
+              "0.0 = no evidence of a forward-to-reactive mode shift",
+              "0.5 = ambiguous or partial mode-shift evidence",
+              "1.0 = strong evidence of a forward-to-reactive mode shift"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "cell_id": "79cfe237f0bca7cf",
+      "worker_id": "0677f597286e",
+      "stratum": "productive_edit",
+      "checkpoint_turn": 75,
+      "replicate": 1,
+      "driver": "TypeSafe",
+      "model": "jev-1.13.0",
+      "protocol_sha256": "5f54251e6168ad35e67a0c192bacd1a03b1d05814bc56565373453fbc9206d52",
+      "panel_sha256": "e36fcebc51da2e9b6be21de49457a1da0a82c60eceaa8991ae644c39b4adec67",
+      "maps_only": true,
+      "behaviour_ship": false,
+      "no_call_jev": true,
+      "no_8080": true,
+      "subset": "prompt_plus_last_n",
+      "pack_path": "/home/codyh/workspace/corpus-ops/registry/validation-phase/packs/0677f597286e-judge-packs-20261002-earlycps.jsonl",
+      "request": {
+        "model": "jev-1.13.0",
+        "state": {
+          "evidence_class": "hybrid_v0",
+          "framing": "PR-SIGNAL-CLOSENESS",
+          "subset": "prompt_plus_last_n",
+          "worker_id": "0677f597286e",
+          "checkpoint_turn": 75,
+          "snapshot": {
+            "worker_id": "0677f597286e",
+            "checkpoint_turn": 75,
+            "schedule": {
+              "first_at": 50,
+              "interval": 10,
+              "checkpoints": [
+                50,
+                60,
+                75
+              ],
+              "mode": "early_prefix_exact"
+            },
+            "snapshot_mode": "hybrid_v0",
+            "snapshot_params": {
+              "N": 8,
+              "excerpt": 400
+            },
+            "prior_checkpoint_turn": 60,
+            "brief_anchor": "You are the worker for unit 3C-02 of plan `docs/plans/03-map-layer-parity-remediation/`. Repo: <REPO>, branch master. Your brief is `docs/plans/03-map-layer-parity-remediation/briefs/3C-02-c-test-scaffolding.md`. Read it first and follow it exactly: owned paths, done evidence, boundary rule, waiting rules, machine facts, report format.\n\nOther units run alongside you right now (3C-03 golden capture, 3C-04 round-trip redesign), and they have their own uncommitted ed",
+            "api_turns_note": "api_turns = 75",
+            "cumulative": {
+              "api_turns": 75,
+              "peak_ctx_tokens": 126023,
+              "prefix_bytes": 1306824,
+              "tool_histogram": {
+                "Bash": 46,
+                "Read": 20,
+                "Edit": 7,
+                "Write": 5,
+                "ToolSearch": 1
+              },
+              "reread_paths": [
+                {
+                  "path": "<REPO>/docs/provenance.md",
+                  "count": 5
+                },
+                {
+                  "path": "<REPO>/parser/kiwiw/_cenc.c",
+                  "count": 4
+                }
+              ],
+              "distinct_read_paths": 9,
+              "compaction_event_count": 2,
+              "assistant_text_chars": 3263
+            },
+            "delta_since_prior": {
+              "new_read_paths": [
+                "<REPO>/.gitignore"
+              ],
+              "tool_histogram_delta": {
+                "Bash": 5,
+                "Read": 5,
+                "Edit": 3,
+                "ToolSearch": 1
+              }
+            },
+            "thrash_top_rereads": [
+              {
+                "path": "<REPO>/docs/provenance.md",
+                "count": 5
+              },
+              {
+                "path": "<REPO>/parser/kiwiw/_cenc.c",
+                "count": 4
+              }
+            ],
+            "tail": [
+              {
+                "turn": 68,
+                "excerpt": "",
+                "tool_names": [
+                  "Read"
+                ]
+              },
+              {
+                "turn": 69,
+                "excerpt": "I'll correct the now-inaccurate \"rebuilt when the source is newer\" line (it describes the exact mechanism I changed) and append my own new entry for the Contract T build products.",
+                "tool_names": [
+                  "Edit"
+                ]
+              },
+              {
+                "turn": 70,
+                "excerpt": "Now append my own new entry at the end of the file (after 3C-01's or others' latest entries, appending only \u2014 not touching 3C-03's concurrent additions).",
+                "tool_names": [
+                  "Read"
+                ]
+              },
+              {
+                "turn": 71,
+                "excerpt": "That's the end of the file (231 lines original + my 3 added lines = 234). I'll append my new entry there.",
+                "tool_names": [
+                  "Edit"
+                ]
+              },
+              {
+                "turn": 72,
+                "excerpt": "Now let's check on the full pytest run.",
+                "tool_names": [
+                  "Bash"
+                ]
+              },
+              {
+                "turn": 73,
+                "excerpt": "",
+                "tool_names": [
+                  "Bash"
+                ]
+              },
+              {
+                "turn": 74,
+                "excerpt": "I'll wait for this notification. Meanwhile, let's prepare the commit message and double-check nothing else needs attention while it's still running \u2014 no further action possible until it completes, so I'll pause here.",
+                "tool_names": [
+                  "Bash"
+                ]
+              },
+              {
+                "turn": 75,
+                "excerpt": "The full pytest suite is running in the background under a bounded wait (`timeout 3300`, polling every 10s for `ALLDONE`/`ABORT`/`FAIL`/`Traceback`). I'll continue once that notification arrives.",
+                "tool_names": []
+              }
+            ]
+          }
+        },
+        "questions": {
+          "validation_inflection": {
+            "type": "score",
+            "instructions": "Return one independent float in [0,1] for the closeness of this snapshot to the signal validation_inflection: a shift from forward delivery into reactive read/fix/test mode. Judge the prompt plus the shown last-n turns only. This is a closeness measurement, not a phase class; do not emit a union, winner, fire decision, or any other signal score.",
+            "criteria": [
+              "0.0 = no evidence of a forward-to-reactive mode shift",
+              "0.5 = ambiguous or partial mode-shift evidence",
+              "1.0 = strong evidence of a forward-to-reactive mode shift"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "cell_id": "d22bf246fa788f75",
+      "worker_id": "0677f597286e",
+      "stratum": "productive_edit",
+      "checkpoint_turn": 75,
+      "replicate": 2,
+      "driver": "TypeSafe",
+      "model": "jev-1.13.0",
+      "protocol_sha256": "5f54251e6168ad35e67a0c192bacd1a03b1d05814bc56565373453fbc9206d52",
+      "panel_sha256": "e36fcebc51da2e9b6be21de49457a1da0a82c60eceaa8991ae644c39b4adec67",
+      "maps_only": true,
+      "behaviour_ship": false,
+      "no_call_jev": true,
+      "no_8080": true,
+      "subset": "prompt_plus_last_n",
+      "pack_path": "/home/codyh/workspace/corpus-ops/registry/validation-phase/packs/0677f597286e-judge-packs-20261002-earlycps.jsonl",
+      "request": {
+        "model": "jev-1.13.0",
+        "state": {
+          "evidence_class": "hybrid_v0",
+          "framing": "PR-SIGNAL-CLOSENESS",
+          "subset": "prompt_plus_last_n",
+          "worker_id": "0677f597286e",
+          "checkpoint_turn": 75,
+          "snapshot": {
+            "worker_id": "0677f597286e",
+            "checkpoint_turn": 75,
+            "schedule": {
+              "first_at": 50,
+              "interval": 10,
+              "checkpoints": [
+                50,
+                60,
+                75
+              ],
+              "mode": "early_prefix_exact"
+            },
+            "snapshot_mode": "hybrid_v0",
+            "snapshot_params": {
+              "N": 8,
+              "excerpt": 400
+            },
+            "prior_checkpoint_turn": 60,
+            "brief_anchor": "You are the worker for unit 3C-02 of plan `docs/plans/03-map-layer-parity-remediation/`. Repo: <REPO>, branch master. Your brief is `docs/plans/03-map-layer-parity-remediation/briefs/3C-02-c-test-scaffolding.md`. Read it first and follow it exactly: owned paths, done evidence, boundary rule, waiting rules, machine facts, report format.\n\nOther units run alongside you right now (3C-03 golden capture, 3C-04 round-trip redesign), and they have their own uncommitted ed",
+            "api_turns_note": "api_turns = 75",
+            "cumulative": {
+              "api_turns": 75,
+              "peak_ctx_tokens": 126023,
+              "prefix_bytes": 1306824,
+              "tool_histogram": {
+                "Bash": 46,
+                "Read": 20,
+                "Edit": 7,
+                "Write": 5,
+                "ToolSearch": 1
+              },
+              "reread_paths": [
+                {
+                  "path": "<REPO>/docs/provenance.md",
+                  "count": 5
+                },
+                {
+                  "path": "<REPO>/parser/kiwiw/_cenc.c",
+                  "count": 4
+                }
+              ],
+              "distinct_read_paths": 9,
+              "compaction_event_count": 2,
+              "assistant_text_chars": 3263
+            },
+            "delta_since_prior": {
+              "new_read_paths": [
+                "<REPO>/.gitignore"
+              ],
+              "tool_histogram_delta": {
+                "Bash": 5,
+                "Read": 5,
+                "Edit": 3,
+                "ToolSearch": 1
+              }
+            },
+            "thrash_top_rereads": [
+              {
+                "path": "<REPO>/docs/provenance.md",
+                "count": 5
+              },
+              {
+                "path": "<REPO>/parser/kiwiw/_cenc.c",
+                "count": 4
+              }
+            ],
+            "tail": [
+              {
+                "turn": 68,
+                "excerpt": "",
+                "tool_names": [
+                  "Read"
+                ]
+              },
+              {
+                "turn": 69,
+                "excerpt": "I'll correct the now-inaccurate \"rebuilt when the source is newer\" line (it describes the exact mechanism I changed) and append my own new entry for the Contract T build products.",
+                "tool_names": [
+                  "Edit"
+                ]
+              },
+              {
+                "turn": 70,
+                "excerpt": "Now append my own new entry at the end of the file (after 3C-01's or others' latest entries, appending only \u2014 not touching 3C-03's concurrent additions).",
+                "tool_names": [
+                  "Read"
+                ]
+              },
+              {
+                "turn": 71,
+                "excerpt": "That's the end of the file (231 lines original + my 3 added lines = 234). I'll append my new entry there.",
+                "tool_names": [
+                  "Edit"
+                ]
+              },
+              {
+                "turn": 72,
+                "excerpt": "Now let's check on the full pytest run.",
+                "tool_names": [
+                  "Bash"
+                ]
+              },
+              {
+                "turn": 73,
+                "excerpt": "",
+                "tool_names": [
+                  "Bash"
+                ]
+              },
+              {
+                "turn": 74,
+                "excerpt": "I'll wait for this notification. Meanwhile, let's prepare the commit message and double-check nothing else needs attention while it's still running \u2014 no further action possible until it completes, so I'll pause here.",
+                "tool_names": [
+                  "Bash"
+                ]
+              },
+              {
+                "turn": 75,
+                "excerpt": "The full pytest suite is running in the background under a bounded wait (`timeout 3300`, polling every 10s for `ALLDONE`/`ABORT`/`FAIL`/`Traceback`). I'll continue once that notification arrives.",
+                "tool_names": []
+              }
+            ]
+          }
+        },
+        "questions": {
+          "validation_inflection": {
+            "type": "score",
+            "instructions": "Return one independent float in [0,1] for the closeness of this snapshot to the signal validation_inflection: a shift from forward delivery into reactive read/fix/test mode. Judge the prompt plus the shown last-n turns only. This is a closeness measurement, not a phase class; do not emit a union, winner, fire decision, or any other signal score.",
+            "criteria": [
+              "0.0 = no evidence of a forward-to-reactive mode shift",
+              "0.5 = ambiguous or partial mode-shift evidence",
+              "1.0 = strong evidence of a forward-to-reactive mode shift"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "cell_id": "d74e4ed2c32089ef",
+      "worker_id": "074c8cf22927",
+      "stratum": "productive_edit",
+      "checkpoint_turn": 75,
+      "replicate": 1,
+      "driver": "TypeSafe",
+      "model": "jev-1.13.0",
+      "protocol_sha256": "5f54251e6168ad35e67a0c192bacd1a03b1d05814bc56565373453fbc9206d52",
+      "panel_sha256": "e36fcebc51da2e9b6be21de49457a1da0a82c60eceaa8991ae644c39b4adec67",
+      "maps_only": true,
+      "behaviour_ship": false,
+      "no_call_jev": true,
+      "no_8080": true,
+      "subset": "prompt_plus_last_n",
+      "pack_path": "/home/codyh/workspace/corpus-ops/registry/validation-phase/packs/074c8cf22927-judge-packs-20261002-earlycps.jsonl",
+      "request": {
+        "model": "jev-1.13.0",
+        "state": {
+          "evidence_class": "hybrid_v0",
+          "framing": "PR-SIGNAL-CLOSENESS",
+          "subset": "prompt_plus_last_n",
+          "worker_id": "074c8cf22927",
+          "checkpoint_turn": 75,
+          "snapshot": {
+            "worker_id": "074c8cf22927",
+            "checkpoint_turn": 75,
+            "schedule": {
+              "first_at": 50,
+              "interval": 10,
+              "checkpoints": [
+                50,
+                60,
+                75
+              ],
+              "mode": "early_prefix_exact"
+            },
+            "snapshot_mode": "hybrid_v0",
+            "snapshot_params": {
+              "N": 8,
+              "excerpt": 400
+            },
+            "prior_checkpoint_turn": 60,
+            "brief_anchor": "You are an implementation worker on the open-pajero-maps repo. Read and implement, in order:\n\n1. docs/plans/01-eval-harness-and-map-layer/briefs/24-dune-drop-and-selection-vocab-consistency.md (primary fix)\n2. docs/plans/01-eval-harness-and-map-layer/briefs/19-container-pdmdh-blob-tail.md (documents the downstream symptom this same fix resolves \u2014 confirm it actually does resolve, don't assume)\n\nFollow each brief's own \"Required reading\", \"Goal\", \"Contract\", \"Changes\", and \"Done evidence\" section",
+            "api_turns_note": "api_turns = 75",
+            "cumulative": {
+              "api_turns": 75,
+              "peak_ctx_tokens": 152501,
+              "prefix_bytes": 1097434,
+              "tool_histogram": {
+                "Bash": 58,
+                "Read": 12,
+                "Edit": 4,
+                "Write": 2,
+                "ToolSearch": 1
+              },
+              "reread_paths": [],
+              "distinct_read_paths": 11,
+              "compaction_event_count": 0,
+              "assistant_text_chars": 2586
+            },
+            "delta_since_prior": {
+              "new_read_paths": [
+                "<TMP_REPO>/f06c7365-e8be-4dbf-b6c3-730a03ecdc0d/tasks/bte46fhjd.output"
+              ],
+              "tool_histogram_delta": {
+                "Bash": 14,
+                "Read": 1
+              }
+            },
+            "thrash_top_rereads": [],
+            "tail": [
+              {
+                "turn": 68,
+                "excerpt": "",
+                "tool_names": [
+                  "Bash"
+                ]
+              },
+              {
+                "turn": 69,
+                "excerpt": "",
+                "tool_names": [
+                  "Bash"
+                ]
+              },
+              {
+                "turn": 70,
+                "excerpt": "That note was just confirming my own append landed as expected. Now amend brief 19 similarly.",
+                "tool_names": [
+                  "Bash"
+                ]
+              },
+              {
+                "turn": 71,
+                "excerpt": "Good, the amendment landed. Now let's clean up scratch build artifacts and run the full test suite once more to confirm everything is green after all edits.",
+                "tool_names": [
+                  "Bash"
+                ]
+              },
+              {
+                "turn": 72,
+                "excerpt": "I'll wait for tests to finish.",
+                "tool_names": [
+                  "Bash"
+                ]
+              },
+              {
+                "turn": 73,
+                "excerpt": "",
+                "tool_names": [
+                  "Read"
+                ]
+              },
+              {
+                "turn": 74,
+                "excerpt": "All 229 tests pass. Now let's commit. Scratch build artifacts were all written outside the worktree (in the scratchpad tmp dir), so nothing extra to clean up in the repo itself.",
+                "tool_names": [
+                  "Bash"
+                ]
+              },
+              {
+                "turn": 75,
+                "excerpt": "",
+                "tool_names": [
+                  "Bash"
+                ]
+              }
+            ]
+          }
+        },
+        "questions": {
+          "validation_inflection": {
+            "type": "score",
+            "instructions": "Return one independent float in [0,1] for the closeness of this snapshot to the signal validation_inflection: a shift from forward delivery into reactive read/fix/test mode. Judge the prompt plus the shown last-n turns only. This is a closeness measurement, not a phase class; do not emit a union, winner, fire decision, or any other signal score.",
+            "criteria": [
+              "0.0 = no evidence of a forward-to-reactive mode shift",
+              "0.5 = ambiguous or partial mode-shift evidence",
+              "1.0 = strong evidence of a forward-to-reactive mode shift"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "cell_id": "35f03fb2e567bd55",
+      "worker_id": "074c8cf22927",
+      "stratum": "productive_edit",
+      "checkpoint_turn": 75,
+      "replicate": 2,
+      "driver": "TypeSafe",
+      "model": "jev-1.13.0",
+      "protocol_sha256": "5f54251e6168ad35e67a0c192bacd1a03b1d05814bc56565373453fbc9206d52",
+      "panel_sha256": "e36fcebc51da2e9b6be21de49457a1da0a82c60eceaa8991ae644c39b4adec67",
+      "maps_only": true,
+      "behaviour_ship": false,
+      "no_call_jev": true,
+      "no_8080": true,
+      "subset": "prompt_plus_last_n",
+      "pack_path": "/home/codyh/workspace/corpus-ops/registry/validation-phase/packs/074c8cf22927-judge-packs-20261002-earlycps.jsonl",
+      "request": {
+        "model": "jev-1.13.0",
+        "state": {
+          "evidence_class": "hybrid_v0",
+          "framing": "PR-SIGNAL-CLOSENESS",
+          "subset": "prompt_plus_last_n",
+          "worker_id": "074c8cf22927",
+          "checkpoint_turn": 75,
+          "snapshot": {
+            "worker_id": "074c8cf22927",
+            "checkpoint_turn": 75,
+            "schedule": {
+              "first_at": 50,
+              "interval": 10,
+              "checkpoints": [
+                50,
+                60,
+                75
+              ],
+              "mode": "early_prefix_exact"
+            },
+            "snapshot_mode": "hybrid_v0",
+            "snapshot_params": {
+              "N": 8,
+              "excerpt": 400
+            },
+            "prior_checkpoint_turn": 60,
+            "brief_anchor": "You are an implementation worker on the open-pajero-maps repo. Read and implement, in order:\n\n1. docs/plans/01-eval-harness-and-map-layer/briefs/24-dune-drop-and-selection-vocab-consistency.md (primary fix)\n2. docs/plans/01-eval-harness-and-map-layer/briefs/19-container-pdmdh-blob-tail.md (documents the downstream symptom this same fix resolves \u2014 confirm it actually does resolve, don't assume)\n\nFollow each brief's own \"Required reading\", \"Goal\", \"Contract\", \"Changes\", and \"Done evidence\" section",
+            "api_turns_note": "api_turns = 75",
+            "cumulative": {
+              "api_turns": 75,
+              "peak_ctx_tokens": 152501,
+              "prefix_bytes": 1097434,
+              "tool_histogram": {
+                "Bash": 58,
+                "Read": 12,
+                "Edit": 4,
+                "Write": 2,
+                "ToolSearch": 1
+              },
+              "reread_paths": [],
+              "distinct_read_paths": 11,
+              "compaction_event_count": 0,
+              "assistant_text_chars": 2586
+            },
+            "delta_since_prior": {
+              "new_read_paths": [
+                "<TMP_REPO>/f06c7365-e8be-4dbf-b6c3-730a03ecdc0d/tasks/bte46fhjd.output"
+              ],
+              "tool_histogram_delta": {
+                "Bash": 14,
+                "Read": 1
+              }
+            },
+            "thrash_top_rereads": [],
+            "tail": [
+              {
+                "turn": 68,
+                "excerpt": "",
+                "tool_names": [
+                  "Bash"
+                ]
+              },
+              {
+                "turn": 69,
+                "excerpt": "",
+                "tool_names": [
+                  "Bash"
+                ]
+              },
+              {
+                "turn": 70,
+                "excerpt": "That note was just confirming my own append landed as expected. Now amend brief 19 similarly.",
+                "tool_names": [
+                  "Bash"
+                ]
+              },
+              {
+                "turn": 71,
+                "excerpt": "Good, the amendment landed. Now let's clean up scratch build artifacts and run the full test suite once more to confirm everything is green after all edits.",
+                "tool_names": [
+                  "Bash"
+                ]
+              },
+              {
+                "turn": 72,
+                "excerpt": "I'll wait for tests to finish.",
+                "tool_names": [
+                  "Bash"
+                ]
+              },
+              {
+                "turn": 73,
+                "excerpt": "",
+                "tool_names": [
+                  "Read"
+                ]
+              },
+              {
+                "turn": 74,
+                "excerpt": "All 229 tests pass. Now let's commit. Scratch build artifacts were all written outside the worktree (in the scratchpad tmp dir), so nothing extra to clean up in the repo itself.",
+                "tool_names": [
+                  "Bash"
+                ]
+              },
+              {
+                "turn": 75,
+                "excerpt": "",
+                "tool_names": [
+                  "Bash"
+                ]
+              }
+            ]
+          }
+        },
+        "questions": {
+          "validation_inflection": {
+            "type": "score",
+            "instructions": "Return one independent float in [0,1] for the closeness of this snapshot to the signal validation_inflection: a shift from forward delivery into reactive read/fix/test mode. Judge the prompt plus the shown last-n turns only. This is a closeness measurement, not a phase class; do not emit a union, winner, fire decision, or any other signal score.",
+            "criteria": [
+              "0.0 = no evidence of a forward-to-reactive mode shift",
+              "0.5 = ambiguous or partial mode-shift evidence",
+              "1.0 = strong evidence of a forward-to-reactive mode shift"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "cell_id": "8c79d48cac6ec8b9",
+      "worker_id": "0aab88c525de",
+      "stratum": "validation_inflection",
+      "checkpoint_turn": 75,
+      "replicate": 1,
+      "driver": "TypeSafe",
+      "model": "jev-1.13.0",
+      "protocol_sha256": "5f54251e6168ad35e67a0c192bacd1a03b1d05814bc56565373453fbc9206d52",
+      "panel_sha256": "e36fcebc51da2e9b6be21de49457a1da0a82c60eceaa8991ae644c39b4adec67",
+      "maps_only": true,
+      "behaviour_ship": false,
+      "no_call_jev": true,
+      "no_8080": true,
+      "subset": "prompt_plus_last_n",
+      "pack_path": "/home/codyh/workspace/workflow-plugin/docs/lab/RESEARCH/2026-10-01-progressive-jev-session-gates/proofs/validated/gold/packs/0aab88c525de-judge-packs-20261001-202909.jsonl",
+      "request": {
+        "model": "jev-1.13.0",
+        "state": {
+          "evidence_class": "hybrid_v0",
+          "framing": "PR-SIGNAL-CLOSENESS",
+          "subset": "prompt_plus_last_n",
+          "worker_id": "0aab88c525de",
+          "checkpoint_turn": 75,
+          "snapshot": {
+            "worker_id": "0aab88c525de",
+            "checkpoint_turn": 75,
+            "schedule": {
+              "first_at": 75,
+              "interval": 15
+            },
+            "snapshot_mode": "hybrid_v0",
+            "snapshot_params": {
+              "N": 8,
+              "excerpt": 400
+            },
+            "prior_checkpoint_turn": null,
+            "brief_anchor": "Repo: <REPO> (git, branch master). Read and follow exactly:\n\ndocs/plans/01-eval-harness-and-map-layer/briefs/12-assembler-all-levels.md\n\nThis brief has an \"Amendment (post-11, orchestrator)\" note near the top \u2014 it was added after unit 11 landed with a legacy name-frame signature; read it carefully and apply it (pass `level=` explicitly to `build_name_frame_bytes` when this unit calls it).\n\nFollow the brief's required reading, contract, changes, done evidence, and ",
+            "api_turns_note": "api_turns = 75",
+            "cumulative": {
+              "api_turns": 75,
+              "peak_ctx_tokens": 166836,
+              "prefix_bytes": 1703052,
+              "tool_histogram": {
+                "Bash": 47,
+                "Read": 36,
+                "Edit": 3
+              },
+              "reread_paths": [
+                {
+                  "path": "<REPO>/parser/kiwiw/alldata_writer.py",
+                  "count": 7
+                },
+                {
+                  "path": "<REPO>/parser/kiwiw/grid.py",
+                  "count": 3
+                },
+                {
+                  "path": "<REPO>/parser/kiwiw/model.py",
+                  "count": 3
+                },
+                {
+                  "path": "<REPO>/parser/kiwiw/volume.py",
+                  "count": 3
+                }
+              ],
+              "distinct_read_paths": 20,
+              "compaction_event_count": 4,
+              "assistant_text_chars": 1038
+            },
+            "delta_since_prior": {},
+            "thrash_top_rereads": [
+              {
+                "path": "<REPO>/parser/kiwiw/alldata_writer.py",
+                "count": 7
+              },
+              {
+                "path": "<REPO>/parser/kiwiw/grid.py",
+                "count": 3
+              },
+              {
+                "path": "<REPO>/parser/kiwiw/model.py",
+                "count": 3
+              },
+              {
+                "path": "<REPO>/parser/kiwiw/volume.py",
+                "count": 3
+              }
+            ],
+            "tail": [
+              {
+                "turn": 68,
+                "excerpt": "",
+                "tool_names": [
+                  "Edit"
+                ]
+              },
+              {
+                "turn": 69,
+                "excerpt": "",
+                "tool_names": [
+                  "Read"
+                ]
+              },
+              {
+                "turn": 70,
+                "excerpt": "",
+                "tool_names": [
+                  "Bash"
+                ]
+              },
+              {
+                "turn": 71,
+                "excerpt": "",
+                "tool_names": [
+                  "Bash"
+                ]
+              },
+              {
+                "turn": 72,
+                "excerpt": "",
+                "tool_names": [
+                  "Bash"
+                ]
+              },
+              {
+                "turn": 73,
+                "excerpt": "",
+                "tool_names": [
+                  "Bash"
+                ]
+              },
+              {
+                "turn": 74,
+                "excerpt": "Not frozen \u2014 I can mutate directly with `dataclasses.replace` or in-place. Let me fix the bsmr_offset computation in `build_alldata_kwi`.",
+                "tool_names": [
+                  "Read"
+                ]
+              },
+              {
+                "turn": 75,
+                "excerpt": "",
+                "tool_names": [
+                  "Read"
+                ]
+              }
+            ]
+          }
+        },
+        "questions": {
+          "validation_inflection": {
+            "type": "score",
+            "instructions": "Return one independent float in [0,1] for the closeness of this snapshot to the signal validation_inflection: a shift from forward delivery into reactive read/fix/test mode. Judge the prompt plus the shown last-n turns only. This is a closeness measurement, not a phase class; do not emit a union, winner, fire decision, or any other signal score.",
+            "criteria": [
+              "0.0 = no evidence of a forward-to-reactive mode shift",
+              "0.5 = ambiguous or partial mode-shift evidence",
+              "1.0 = strong evidence of a forward-to-reactive mode shift"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "cell_id": "2596bd2ba1b821a7",
+      "worker_id": "0aab88c525de",
+      "stratum": "validation_inflection",
+      "checkpoint_turn": 75,
+      "replicate": 2,
+      "driver": "TypeSafe",
+      "model": "jev-1.13.0",
+      "protocol_sha256": "5f54251e6168ad35e67a0c192bacd1a03b1d05814bc56565373453fbc9206d52",
+      "panel_sha256": "e36fcebc51da2e9b6be21de49457a1da0a82c60eceaa8991ae644c39b4adec67",
+      "maps_only": true,
+      "behaviour_ship": false,
+      "no_call_jev": true,
+      "no_8080": true,
+      "subset": "prompt_plus_last_n",
+      "pack_path": "/home/codyh/workspace/workflow-plugin/docs/lab/RESEARCH/2026-10-01-progressive-jev-session-gates/proofs/validated/gold/packs/0aab88c525de-judge-packs-20261001-202909.jsonl",
+      "request": {
+        "model": "jev-1.13.0",
+        "state": {
+          "evidence_class": "hybrid_v0",
+          "framing": "PR-SIGNAL-CLOSENESS",
+          "subset": "prompt_plus_last_n",
+          "worker_id": "0aab88c525de",
+          "checkpoint_turn": 75,
+          "snapshot": {
+            "worker_id": "0aab88c525de",
+            "checkpoint_turn": 75,
+            "schedule": {
+              "first_at": 75,
+              "interval": 15
+            },
+            "snapshot_mode": "hybrid_v0",
+            "snapshot_params": {
+              "N": 8,
+              "excerpt": 400
+            },
+            "prior_checkpoint_turn": null,
+            "brief_anchor": "Repo: <REPO> (git, branch master). Read and follow exactly:\n\ndocs/plans/01-eval-harness-and-map-layer/briefs/12-assembler-all-levels.md\n\nThis brief has an \"Amendment (post-11, orchestrator)\" note near the top \u2014 it was added after unit 11 landed with a legacy name-frame signature; read it carefully and apply it (pass `level=` explicitly to `build_name_frame_bytes` when this unit calls it).\n\nFollow the brief's required reading, contract, changes, done evidence, and ",
+            "api_turns_note": "api_turns = 75",
+            "cumulative": {
+              "api_turns": 75,
+              "peak_ctx_tokens": 166836,
+              "prefix_bytes": 1703052,
+              "tool_histogram": {
+                "Bash": 47,
+                "Read": 36,
+                "Edit": 3
+              },
+              "reread_paths": [
+                {
+                  "path": "<REPO>/parser/kiwiw/alldata_writer.py",
+                  "count": 7
+                },
+                {
+                  "path": "<REPO>/parser/kiwiw/grid.py",
+                  "count": 3
+                },
+                {
+                  "path": "<REPO>/parser/kiwiw/model.py",
+                  "count": 3
+                },
+                {
+                  "path": "<REPO>/parser/kiwiw/volume.py",
+                  "count": 3
+                }
+              ],
+              "distinct_read_paths": 20,
+              "compaction_event_count": 4,
+              "assistant_text_chars": 1038
+            },
+            "delta_since_prior": {},
+            "thrash_top_rereads": [
+              {
+                "path": "<REPO>/parser/kiwiw/alldata_writer.py",
+                "count": 7
+              },
+              {
+                "path": "<REPO>/parser/kiwiw/grid.py",
+                "count": 3
+              },
+              {
+                "path": "<REPO>/parser/kiwiw/model.py",
+                "count": 3
+              },
+              {
+                "path": "<REPO>/parser/kiwiw/volume.py",
+                "count": 3
+              }
+            ],
+            "tail": [
+              {
+                "turn": 68,
+                "excerpt": "",
+                "tool_names": [
+                  "Edit"
+                ]
+              },
+              {
+                "turn": 69,
+                "excerpt": "",
+                "tool_names": [
+                  "Read"
+                ]
+              },
+              {
+                "turn": 70,
+                "excerpt": "",
+                "tool_names": [
+                  "Bash"
+                ]
+              },
+              {
+                "turn": 71,
+                "excerpt": "",
+                "tool_names": [
+                  "Bash"
+                ]
+              },
+              {
+                "turn": 72,
+                "excerpt": "",
+                "tool_names": [
+                  "Bash"
+                ]
+              },
+              {
+                "turn": 73,
+                "excerpt": "",
+                "tool_names": [
+                  "Bash"
+                ]
+              },
+              {
+                "turn": 74,
+                "excerpt": "Not frozen \u2014 I can mutate directly with `dataclasses.replace` or in-place. Let me fix the bsmr_offset computation in `build_alldata_kwi`.",
+                "tool_names": [
+                  "Read"
+                ]
+              },
+              {
+                "turn": 75,
+                "excerpt": "",
+                "tool_names": [
+                  "Read"
+                ]
+              }
+            ]
+          }
+        },
+        "questions": {
+          "validation_inflection": {
+            "type": "score",
+            "instructions": "Return one independent float in [0,1] for the closeness of this snapshot to the signal validation_inflection: a shift from forward delivery into reactive read/fix/test mode. Judge the prompt plus the shown last-n turns only. This is a closeness measurement, not a phase class; do not emit a union, winner, fire decision, or any other signal score.",
+            "criteria": [
+              "0.0 = no evidence of a forward-to-reactive mode shift",
+              "0.5 = ambiguous or partial mode-shift evidence",
+              "1.0 = strong evidence of a forward-to-reactive mode shift"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "cell_id": "70b4f607175a15b7",
+      "worker_id": "036ff3ed4a89",
+      "stratum": "validation_inflection",
+      "checkpoint_turn": 75,
+      "replicate": 1,
+      "driver": "TypeSafe",
+      "model": "jev-1.13.0",
+      "protocol_sha256": "5f54251e6168ad35e67a0c192bacd1a03b1d05814bc56565373453fbc9206d52",
+      "panel_sha256": "e36fcebc51da2e9b6be21de49457a1da0a82c60eceaa8991ae644c39b4adec67",
+      "maps_only": true,
+      "behaviour_ship": false,
+      "no_call_jev": true,
+      "no_8080": true,
+      "subset": "prompt_plus_last_n",
+      "pack_path": "/home/codyh/workspace/workflow-plugin/docs/lab/RESEARCH/2026-10-01-progressive-jev-session-gates/proofs/validated/gold/packs/036ff3ed4a89-judge-packs-20261001-202909.jsonl",
+      "request": {
+        "model": "jev-1.13.0",
+        "state": {
+          "evidence_class": "hybrid_v0",
+          "framing": "PR-SIGNAL-CLOSENESS",
+          "subset": "prompt_plus_last_n",
+          "worker_id": "036ff3ed4a89",
+          "checkpoint_turn": 75,
+          "snapshot": {
+            "worker_id": "036ff3ed4a89",
+            "checkpoint_turn": 75,
+            "schedule": {
+              "first_at": 75,
+              "interval": 15
+            },
+            "snapshot_mode": "hybrid_v0",
+            "snapshot_params": {
+              "N": 8,
+              "excerpt": 400
+            },
+            "prior_checkpoint_turn": null,
+            "brief_anchor": "Repo: <REPO> (branch: master, clean at commit 2112510).\n\nYour task is fully specified in this brief file \u2014 read it first, in full, before doing anything else:\ndocs/plans/01-eval-harness-and-map-layer/briefs/15b-full-build-verify-and-record.md\n\nContext you need that isn't in the brief: a prior unit-15b agent attempt was abandoned (it stalled itself waiting rather than blocking on the wait; per the plan's Long-Running Work rule it was not resumed). The orchestrator ",
+            "api_turns_note": "api_turns = 75",
+            "cumulative": {
+              "api_turns": 75,
+              "peak_ctx_tokens": 97368,
+              "prefix_bytes": 588016,
+              "tool_histogram": {
+                "Bash": 70,
+                "Read": 6,
+                "Monitor": 2,
+                "ToolSearch": 1
+              },
+              "reread_paths": [],
+              "distinct_read_paths": 6,
+              "compaction_event_count": 0,
+              "assistant_text_chars": 3114
+            },
+            "delta_since_prior": {},
+            "thrash_top_rereads": [],
+            "tail": [
+              {
+                "turn": 68,
+                "excerpt": "",
+                "tool_names": [
+                  "Bash"
+                ]
+              },
+              {
+                "turn": 69,
+                "excerpt": "",
+                "tool_names": [
+                  "Bash"
+                ]
+              },
+              {
+                "turn": 70,
+                "excerpt": "",
+                "tool_names": [
+                  "Bash"
+                ]
+              },
+              {
+                "turn": 71,
+                "excerpt": "I've started the necessary background waits (compare_disc.py run, and monitors watching for its completion). I will not poll further \u2014 stopping tool calls now and waiting for the notification to arrive before resuming verification.",
+                "tool_names": [
+                  "Bash"
+                ]
+              },
+              {
+                "turn": 72,
+                "excerpt": "",
+                "tool_names": [
+                  "Bash"
+                ]
+              },
+              {
+                "turn": 73,
+                "excerpt": "",
+                "tool_names": [
+                  "Bash"
+                ]
+              },
+              {
+                "turn": 74,
+                "excerpt": "",
+                "tool_names": [
+                  "Bash"
+                ]
+              },
+              {
+                "turn": 75,
+                "excerpt": "",
+                "tool_names": [
+                  "Bash"
+                ]
+              }
+            ]
+          }
+        },
+        "questions": {
+          "validation_inflection": {
+            "type": "score",
+            "instructions": "Return one independent float in [0,1] for the closeness of this snapshot to the signal validation_inflection: a shift from forward delivery into reactive read/fix/test mode. Judge the prompt plus the shown last-n turns only. This is a closeness measurement, not a phase class; do not emit a union, winner, fire decision, or any other signal score.",
+            "criteria": [
+              "0.0 = no evidence of a forward-to-reactive mode shift",
+              "0.5 = ambiguous or partial mode-shift evidence",
+              "1.0 = strong evidence of a forward-to-reactive mode shift"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "cell_id": "be532e8042afdcaa",
+      "worker_id": "036ff3ed4a89",
+      "stratum": "validation_inflection",
+      "checkpoint_turn": 75,
+      "replicate": 2,
+      "driver": "TypeSafe",
+      "model": "jev-1.13.0",
+      "protocol_sha256": "5f54251e6168ad35e67a0c192bacd1a03b1d05814bc56565373453fbc9206d52",
+      "panel_sha256": "e36fcebc51da2e9b6be21de49457a1da0a82c60eceaa8991ae644c39b4adec67",
+      "maps_only": true,
+      "behaviour_ship": false,
+      "no_call_jev": true,
+      "no_8080": true,
+      "subset": "prompt_plus_last_n",
+      "pack_path": "/home/codyh/workspace/workflow-plugin/docs/lab/RESEARCH/2026-10-01-progressive-jev-session-gates/proofs/validated/gold/packs/036ff3ed4a89-judge-packs-20261001-202909.jsonl",
+      "request": {
+        "model": "jev-1.13.0",
+        "state": {
+          "evidence_class": "hybrid_v0",
+          "framing": "PR-SIGNAL-CLOSENESS",
+          "subset": "prompt_plus_last_n",
+          "worker_id": "036ff3ed4a89",
+          "checkpoint_turn": 75,
+          "snapshot": {
+            "worker_id": "036ff3ed4a89",
+            "checkpoint_turn": 75,
+            "schedule": {
+              "first_at": 75,
+              "interval": 15
+            },
+            "snapshot_mode": "hybrid_v0",
+            "snapshot_params": {
+              "N": 8,
+              "excerpt": 400
+            },
+            "prior_checkpoint_turn": null,
+            "brief_anchor": "Repo: <REPO> (branch: master, clean at commit 2112510).\n\nYour task is fully specified in this brief file \u2014 read it first, in full, before doing anything else:\ndocs/plans/01-eval-harness-and-map-layer/briefs/15b-full-build-verify-and-record.md\n\nContext you need that isn't in the brief: a prior unit-15b agent attempt was abandoned (it stalled itself waiting rather than blocking on the wait; per the plan's Long-Running Work rule it was not resumed). The orchestrator ",
+            "api_turns_note": "api_turns = 75",
+            "cumulative": {
+              "api_turns": 75,
+              "peak_ctx_tokens": 97368,
+              "prefix_bytes": 588016,
+              "tool_histogram": {
+                "Bash": 70,
+                "Read": 6,
+                "Monitor": 2,
+                "ToolSearch": 1
+              },
+              "reread_paths": [],
+              "distinct_read_paths": 6,
+              "compaction_event_count": 0,
+              "assistant_text_chars": 3114
+            },
+            "delta_since_prior": {},
+            "thrash_top_rereads": [],
+            "tail": [
+              {
+                "turn": 68,
+                "excerpt": "",
+                "tool_names": [
+                  "Bash"
+                ]
+              },
+              {
+                "turn": 69,
+                "excerpt": "",
+                "tool_names": [
+                  "Bash"
+                ]
+              },
+              {
+                "turn": 70,
+                "excerpt": "",
+                "tool_names": [
+                  "Bash"
+                ]
+              },
+              {
+                "turn": 71,
+                "excerpt": "I've started the necessary background waits (compare_disc.py run, and monitors watching for its completion). I will not poll further \u2014 stopping tool calls now and waiting for the notification to arrive before resuming verification.",
+                "tool_names": [
+                  "Bash"
+                ]
+              },
+              {
+                "turn": 72,
+                "excerpt": "",
+                "tool_names": [
+                  "Bash"
+                ]
+              },
+              {
+                "turn": 73,
+                "excerpt": "",
+                "tool_names": [
+                  "Bash"
+                ]
+              },
+              {
+                "turn": 74,
+                "excerpt": "",
+                "tool_names": [
+                  "Bash"
+                ]
+              },
+              {
+                "turn": 75,
+                "excerpt": "",
+                "tool_names": [
+                  "Bash"
+                ]
+              }
+            ]
+          }
+        },
+        "questions": {
+          "validation_inflection": {
+            "type": "score",
+            "instructions": "Return one independent float in [0,1] for the closeness of this snapshot to the signal validation_inflection: a shift from forward delivery into reactive read/fix/test mode. Judge the prompt plus the shown last-n turns only. This is a closeness measurement, not a phase class; do not emit a union, winner, fire decision, or any other signal score.",
+            "criteria": [
+              "0.0 = no evidence of a forward-to-reactive mode shift",
+              "0.5 = ambiguous or partial mode-shift evidence",
+              "1.0 = strong evidence of a forward-to-reactive mode shift"
+            ]
+          }
+        }
+      }
+    }
+  ]
+}

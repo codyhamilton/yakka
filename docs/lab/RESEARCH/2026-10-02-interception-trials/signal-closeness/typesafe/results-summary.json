@@ -1,0 +1,260 @@
+{
+  "case_id": "PR-SIGNAL-CLOSENESS",
+  "driver": "TypeSafe",
+  "model": "jev-1.13.0",
+  "protocol_sha256": "5f54251e6168ad35e67a0c192bacd1a03b1d05814bc56565373453fbc9206d52",
+  "panel_sha256": "e36fcebc51da2e9b6be21de49457a1da0a82c60eceaa8991ae644c39b4adec67",
+  "protocol_sha256_verified": true,
+  "panel_sha256_verified": true,
+  "maps_only": true,
+  "behaviour_ship": false,
+  "no_call_jev": true,
+  "no_8080": true,
+  "replicates": 2,
+  "planned_cells": 18,
+  "result_rows": 18,
+  "successful_rows": 18,
+  "error_rows": 0,
+  "valid_float_rows": 18,
+  "http_counts": {
+    "200": 18
+  },
+  "zero_call": {
+    "checkpoint_turn": 75,
+    "replicates": 2,
+    "profiles": {
+      "92a48e004519": {
+        "edit_count": 0,
+        "write_count": 0,
+        "edit_write_count": 0,
+        "monitor_count": 0,
+        "wait_term_count": 0,
+        "reread_total": 29,
+        "compaction_event_count": 12,
+        "tool_histogram": {
+          "Bash": 55,
+          "Read": 31
+        }
+      },
+      "ca977b9ca0dd": {
+        "edit_count": 0,
+        "write_count": 0,
+        "edit_write_count": 0,
+        "monitor_count": 0,
+        "wait_term_count": 0,
+        "reread_total": 33,
+        "compaction_event_count": 10,
+        "tool_histogram": {
+          "Read": 45,
+          "Bash": 42
+        }
+      },
+      "87a380bc64ff": {
+        "edit_count": 0,
+        "write_count": 0,
+        "edit_write_count": 0,
+        "monitor_count": 6,
+        "wait_term_count": 4,
+        "reread_total": 7,
+        "compaction_event_count": 0,
+        "tool_histogram": {
+          "Bash": 56,
+          "Read": 9,
+          "Monitor": 6,
+          "ToolSearch": 1
+        }
+      },
+      "bb6165018de0": {
+        "edit_count": 0,
+        "write_count": 1,
+        "edit_write_count": 1,
+        "monitor_count": 2,
+        "wait_term_count": 4,
+        "reread_total": 3,
+        "compaction_event_count": 0,
+        "tool_histogram": {
+          "Bash": 66,
+          "Read": 8,
+          "Monitor": 2,
+          "ToolSearch": 1,
+          "Write": 1
+        }
+      },
+      "15f24c7ba18c": {
+        "edit_count": 6,
+        "write_count": 0,
+        "edit_write_count": 6,
+        "monitor_count": 28,
+        "wait_term_count": 1,
+        "reread_total": 0,
+        "compaction_event_count": 0,
+        "tool_histogram": {
+          "Monitor": 28,
+          "Bash": 25,
+          "Read": 8,
+          "Agent": 6,
+          "Edit": 6,
+          "Skill": 1,
+          "ToolSearch": 1
+        }
+      },
+      "0677f597286e": {
+        "edit_count": 7,
+        "write_count": 5,
+        "edit_write_count": 12,
+        "monitor_count": 0,
+        "wait_term_count": 2,
+        "reread_total": 9,
+        "compaction_event_count": 2,
+        "tool_histogram": {
+          "Bash": 46,
+          "Read": 20,
+          "Edit": 7,
+          "Write": 5,
+          "ToolSearch": 1
+        }
+      },
+      "074c8cf22927": {
+        "edit_count": 4,
+        "write_count": 2,
+        "edit_write_count": 6,
+        "monitor_count": 0,
+        "wait_term_count": 1,
+        "reread_total": 0,
+        "compaction_event_count": 0,
+        "tool_histogram": {
+          "Bash": 58,
+          "Read": 12,
+          "Edit": 4,
+          "Write": 2,
+          "ToolSearch": 1
+        }
+      },
+      "0aab88c525de": {
+        "edit_count": 3,
+        "write_count": 0,
+        "edit_write_count": 3,
+        "monitor_count": 0,
+        "wait_term_count": 0,
+        "reread_total": 16,
+        "compaction_event_count": 4,
+        "tool_histogram": {
+          "Bash": 47,
+          "Read": 36,
+          "Edit": 3
+        }
+      },
+      "036ff3ed4a89": {
+        "edit_count": 0,
+        "write_count": 0,
+        "edit_write_count": 0,
+        "monitor_count": 2,
+        "wait_term_count": 2,
+        "reread_total": 0,
+        "compaction_event_count": 0,
+        "tool_histogram": {
+          "Bash": 70,
+          "Read": 6,
+          "Monitor": 2,
+          "ToolSearch": 1
+        }
+      }
+    },
+    "signals": {
+      "thrash": {
+        "metric": "reread_total_plus_compaction",
+        "high_workers": [
+          "92a48e004519",
+          "ca977b9ca0dd"
+        ],
+        "low_workers": [
+          "0677f597286e",
+          "074c8cf22927"
+        ],
+        "high_mean": 42.0,
+        "low_mean": 5.5,
+        "high_greater_than_low": true,
+        "evidence": "cumulative reread_paths plus compaction_event_count",
+        "zero_call_separation": true,
+        "model_skipped": true
+      },
+      "poll": {
+        "metric": "monitor_plus_wait_terms",
+        "high_workers": [
+          "15f24c7ba18c",
+          "87a380bc64ff",
+          "bb6165018de0"
+        ],
+        "low_workers": [
+          "0677f597286e",
+          "074c8cf22927"
+        ],
+        "high_mean": 15.0,
+        "low_mean": 1.5,
+        "high_greater_than_low": true,
+        "evidence": "cumulative Monitor count plus wait/monitor/poll terms in last-n excerpts",
+        "write_count_caution_worker": "bb6165018de0",
+        "write_count_caution": 1,
+        "zero_call_separation": true,
+        "model_skipped": true
+      },
+      "productive_edit": {
+        "metric": "edit_plus_write",
+        "high_workers": [
+          "0677f597286e",
+          "074c8cf22927"
+        ],
+        "low_workers": [
+          "92a48e004519",
+          "ca977b9ca0dd"
+        ],
+        "high_mean": 9.0,
+        "low_mean": 0.0,
+        "high_greater_than_low": true,
+        "evidence": "cumulative Edit plus Write counts",
+        "zero_call_separation": true,
+        "model_skipped": true
+      },
+      "validation_inflection": {
+        "zero_call_separation": false,
+        "model_skipped": false,
+        "skip_profile": true,
+        "skip_profile_reason": "protocol requires prompt_plus_last_n for this signal; profile skipped by design"
+      }
+    }
+  },
+  "validation_inflection": {
+    "high_workers": [
+      "036ff3ed4a89",
+      "0aab88c525de"
+    ],
+    "low_workers": [
+      "0677f597286e",
+      "074c8cf22927",
+      "92a48e004519",
+      "ca977b9ca0dd"
+    ],
+    "high_scores": [
+      0.915,
+      0.925,
+      0.56,
+      0.55
+    ],
+    "low_scores": [
+      0.875,
+      0.875,
+      0.87,
+      0.875,
+      0.82,
+      0.84,
+      0.485,
+      0.485
+    ],
+    "high_mean": 0.7375,
+    "low_mean": 0.765625,
+    "outcome": "KILL \u2014 flat or reversed contrast"
+  },
+  "freeform_wire": "not used; score-only request",
+  "holdouts_scored": false,
+  "generated_at": "2026-10-02T19:29:00+10:00"
+}
