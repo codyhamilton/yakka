@@ -1,0 +1,28 @@
+{
+  "experiment": "shape-qual-full-maps-v1",
+  "worker_id": "0677f597286e",
+  "model": "Composer",
+  "narrative_shape": "3C-02: substantive Edits/Writes by cp75, full pytest in background with wait excerpts, owned-path commit by cp90.",
+  "shape_label": "unclear",
+  "phases": [
+    {
+      "range": "75-90",
+      "name": "test_wait_commit",
+      "note": "Edits on provenance/_cenc; pytest bg; commit excerpt."
+    }
+  ],
+  "early_signals": [
+    {
+      "turn": 75,
+      "signal": "Edit=7, Write=5 at cp75 with commit-prep wait excerpt."
+    },
+    {
+      "turn": 90,
+      "signal": "Owned-paths-only staged commit excerpt."
+    }
+  ],
+  "early_signal_window_respected": true,
+  "recommended_exit": null,
+  "earliness": null,
+  "rationale": "Pytest wait is bounded gate behavior after real edits, not thrash."
+}

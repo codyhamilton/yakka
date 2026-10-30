@@ -1,0 +1,24 @@
+{
+  "experiment": "shape-qual-full-maps-v1",
+  "worker_id": "074c8cf22927",
+  "model": "Composer",
+  "narrative_shape": "Harness implementation worker: Edit/Write/Read through cp75 with all tests passing and commit excerpt\u2014run essentially complete at T~76.",
+  "shape_label": "unclear",
+  "phases": [
+    {
+      "range": "75",
+      "name": "finish_and_commit",
+      "note": "229 tests pass; commit excerpt."
+    }
+  ],
+  "early_signals": [
+    {
+      "turn": 75,
+      "signal": "Edit=4, Write=2 with all-tests-pass excerpt."
+    }
+  ],
+  "early_signal_window_respected": true,
+  "recommended_exit": null,
+  "earliness": null,
+  "rationale": "Ultra-short successful run; shape labels for thrash/pivot do not apply."
+}

@@ -1,0 +1,36 @@
+{
+  "experiment": "shape-qual-full-maps-v1",
+  "worker_id": "daf933273c8f",
+  "model": "Composer",
+  "narrative_shape": "3C-04 roundtrip brief: Bash intervals dominate with minimal assistant narration frozen ~251 chars; Read on quantisation_roundtrip/spool but little Edit progress through cp120.",
+  "shape_label": "early_thrash",
+  "phases": [
+    {
+      "range": "75-120",
+      "name": "bash_heavy_stall",
+      "note": "Rising Bash deltas; compactions 6\u21928; Edit stuck at 1."
+    }
+  ],
+  "early_signals": [
+    {
+      "turn": 75,
+      "signal": "assistant_text_chars=196 with only Edit=1 despite roundtrip redesign brief."
+    },
+    {
+      "turn": 90,
+      "signal": "Delta +13 Bash; narration barely grows (251 chars)."
+    },
+    {
+      "turn": 105,
+      "signal": "Delta +16 Bash; zero new_read_paths."
+    },
+    {
+      "turn": 120,
+      "signal": "Monitor appears but Edit still 1; quantisation_roundtrip 3\u00d7 re-read only."
+    }
+  ],
+  "early_signal_window_respected": true,
+  "recommended_exit": 105,
+  "earliness": "on_time vs first clear bash-only mistake interval at 105.",
+  "rationale": "Thrash-screen (d) pattern: escalating bash without narrowing edits or growing narration within the early window."
+}

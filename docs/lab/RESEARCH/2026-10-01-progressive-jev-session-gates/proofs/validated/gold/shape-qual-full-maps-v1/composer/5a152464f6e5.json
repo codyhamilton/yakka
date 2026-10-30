@@ -1,0 +1,37 @@
+{
+  "experiment": "shape-qual-full-maps-v1",
+  "worker_id": "5a152464f6e5",
+  "model": "Composer",
+  "narrative_shape": "Brief 11 name-type: steady Edit/Read/Bash through cp105, vocab test path added, PBF rebuild and vocab check with Monitor by end of run (T~119).",
+  "shape_label": "unclear",
+  "phases": [
+    {
+      "range": "75-105",
+      "name": "encoder_work",
+      "note": "12 Edits at cp75; synth/osm reads; test_name_encoder added."
+    },
+    {
+      "range": "105",
+      "name": "rebuild_gate",
+      "note": "Monitor+Write; rebuild-with-defaults excerpt."
+    }
+  ],
+  "early_signals": [
+    {
+      "turn": 75,
+      "signal": "Edit=12 at first cp with decode_parcel investigation excerpt."
+    },
+    {
+      "turn": 90,
+      "signal": "New test_name_encoder path; +4 Read delta."
+    },
+    {
+      "turn": 105,
+      "signal": "PBF present; rebuild and vocab check excerpt."
+    }
+  ],
+  "early_signal_window_respected": true,
+  "recommended_exit": null,
+  "earliness": null,
+  "rationale": "Productive name-encoder implementation; no late recovery or zero-edit thrash in packs."
+}

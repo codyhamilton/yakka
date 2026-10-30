@@ -1,0 +1,28 @@
+{
+  "experiment": "shape-qual-full-maps-v1",
+  "worker_id": "e28a2428b192",
+  "model": "Composer",
+  "narrative_shape": "Unit 3-07 at medium effort: Bash-only histogram with Write=2 and near-zero reads/assistant text through cp90\u2014no visible implementation narrowing.",
+  "shape_label": "early_thrash",
+  "phases": [
+    {
+      "range": "75-90",
+      "name": "bash_only_grind",
+      "note": "No Read/Edit in hist; assistant_chars 0\u2192101."
+    }
+  ],
+  "early_signals": [
+    {
+      "turn": 75,
+      "signal": "Bash=75, distinct_read_paths=0, assistant_text_chars=0 at cp75."
+    },
+    {
+      "turn": 90,
+      "signal": "Delta +15 Bash only; still zero reads in cumulative hist."
+    }
+  ],
+  "early_signal_window_respected": true,
+  "recommended_exit": 90,
+  "earliness": "on_time vs bash-only mistake by cp90.",
+  "rationale": "Absent read/edit motion on a code brief within early window is strong thrash foreshadowing."
+}

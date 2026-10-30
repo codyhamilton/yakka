@@ -1,0 +1,28 @@
+{
+  "experiment": "shape-qual-full-maps-v1",
+  "worker_id": "16a958631580",
+  "model": "Composer",
+  "narrative_shape": "Cenc/clip unit: Read/Edit on _cenc.c and tests, bg task output path by cp90\u2014productive kernel fix arc T~94.",
+  "shape_label": "unclear",
+  "phases": [
+    {
+      "range": "75-90",
+      "name": "cenc_fix",
+      "note": "13 Edits; step computation replace excerpt."
+    }
+  ],
+  "early_signals": [
+    {
+      "turn": 75,
+      "signal": "Edit=13 with _cenc.c and test_cenc re-reads."
+    },
+    {
+      "turn": 90,
+      "signal": "Bg task output scratch path; +11 Bash delta with continued cenc focus."
+    }
+  ],
+  "early_signal_window_respected": true,
+  "recommended_exit": null,
+  "earliness": null,
+  "rationale": "Normal build worker with edits dominating early histogram."
+}

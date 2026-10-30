@@ -1,0 +1,28 @@
+{
+  "experiment": "shape-qual-full-maps-v1",
+  "worker_id": "9b156dbab5d9",
+  "model": "Composer",
+  "narrative_shape": "Execute phase build worker: parallel overlay runs with Monitor waits, commit owned paths by cp90 (T~93).",
+  "shape_label": "unclear",
+  "phases": [
+    {
+      "range": "75-90",
+      "name": "parallel_runs_then_commit",
+      "note": "Monitor waits; commit excerpt at cp90."
+    }
+  ],
+  "early_signals": [
+    {
+      "turn": 75,
+      "signal": "Edit=6, Write=1 with waiting-on-three-runs excerpt."
+    },
+    {
+      "turn": 90,
+      "signal": "SendMessage appears; commit owned paths excerpt."
+    }
+  ],
+  "early_signal_window_respected": true,
+  "recommended_exit": null,
+  "earliness": null,
+  "rationale": "On-brief parallel gate waits with edits present from cp75."
+}

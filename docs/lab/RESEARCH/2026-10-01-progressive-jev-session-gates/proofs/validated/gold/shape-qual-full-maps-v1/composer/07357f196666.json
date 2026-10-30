@@ -1,0 +1,24 @@
+{
+  "experiment": "shape-qual-full-maps-v1",
+  "worker_id": "07357f196666",
+  "model": "Composer",
+  "narrative_shape": "Medium-effort unit worker: Bash=75, Write=2 only at cp75, assistant_text_chars=62, zero reads\u2014minimal visible narrowing (T~83).",
+  "shape_label": "early_thrash",
+  "phases": [
+    {
+      "range": "75",
+      "name": "bash_only_snapshot",
+      "note": "Sole cp; no Read/Edit in hist."
+    }
+  ],
+  "early_signals": [
+    {
+      "turn": 75,
+      "signal": "Bash-only hist with 62-char assistant text and zero reads."
+    }
+  ],
+  "early_signal_window_respected": true,
+  "recommended_exit": 75,
+  "earliness": "on_time \u2014 only checkpoint available.",
+  "rationale": "Same bash-only early signal class as de5b76/e28a2428b192 within available prefix."
+}

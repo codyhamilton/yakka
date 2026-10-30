@@ -1,0 +1,28 @@
+{
+  "experiment": "shape-qual-full-maps-v1",
+  "worker_id": "582c23b3c6e4",
+  "model": "Composer",
+  "narrative_shape": "Unit 3-02 at cp75: Bash-only with long assistant narration reporting needs_context / uncommitted sha mismatch\u2014stalled gate state at end of available prefix (T~77).",
+  "shape_label": "unclear",
+  "phases": [
+    {
+      "range": "75",
+      "name": "blocked_needs_context",
+      "note": "Status needs context excerpt; no reads in hist."
+    }
+  ],
+  "early_signals": [
+    {
+      "turn": 75,
+      "signal": "Tail excerpt: needs context; full-disc sha moved; no commit."
+    },
+    {
+      "turn": 75,
+      "signal": "Bash=77 but assistant_text_chars=7456\u2014high narration vs tool thrash."
+    }
+  ],
+  "early_signal_window_respected": true,
+  "recommended_exit": null,
+  "earliness": null,
+  "rationale": "Stall is brief/context dependency, not classic re-read thrash; single cp limits shape confidence \u2192 unclear."
+}

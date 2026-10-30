@@ -1,0 +1,28 @@
+{
+  "experiment": "shape-qual-full-maps-v1",
+  "worker_id": "91a9aa8050fb",
+  "model": "Composer",
+  "narrative_shape": "Multi-step verification brief at cp75: balanced Edit/Write/Read/Monitor with rich assistant text and parallel done-evidence work while jobs complete (T~86).",
+  "shape_label": "unclear",
+  "phases": [
+    {
+      "range": "75",
+      "name": "parallel_verification",
+      "note": "Single cp; multi-tool productive hist."
+    }
+  ],
+  "early_signals": [
+    {
+      "turn": 75,
+      "signal": "Edit=3, Write=4, Monitor=5, assistant_text_chars=4668\u2014high narration bandwidth."
+    },
+    {
+      "turn": 75,
+      "signal": "Continue verification while job completes excerpt."
+    }
+  ],
+  "early_signal_window_respected": true,
+  "recommended_exit": null,
+  "earliness": null,
+  "rationale": "One checkpoint shows healthy multi-tool progress, not thrash or pivot."
+}

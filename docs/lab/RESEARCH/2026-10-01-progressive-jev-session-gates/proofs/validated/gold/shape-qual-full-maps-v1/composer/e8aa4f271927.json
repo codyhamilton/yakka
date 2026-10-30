@@ -1,0 +1,28 @@
+{
+  "experiment": "shape-qual-full-maps-v1",
+  "worker_id": "e8aa4f271927",
+  "model": "Composer",
+  "narrative_shape": "3C-08 wire e1/e2: Read/build_alldata focus, Write=3, low assistant chars at cp75\u2014short wiring task T~76.",
+  "shape_label": "unclear",
+  "phases": [
+    {
+      "range": "75",
+      "name": "wire_and_stage",
+      "note": "build_alldata 5\u00d7 re-read; staged deletions excerpt."
+    }
+  ],
+  "early_signals": [
+    {
+      "turn": 75,
+      "signal": "Write=3 with build_alldata/cenc reads\u2014owned wiring paths."
+    },
+    {
+      "turn": 75,
+      "signal": "Staged deletions pathspec excerpt\u2014commit hygiene visible early."
+    }
+  ],
+  "early_signal_window_respected": true,
+  "recommended_exit": null,
+  "earliness": null,
+  "rationale": "Thrashing-expand prior wave not visible at sole cp; brief wire task completes immediately."
+}

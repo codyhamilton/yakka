@@ -1,0 +1,33 @@
+{
+  "experiment": "shape-qual-full-maps-v1",
+  "worker_id": "5163c22a6a3e",
+  "model": "Composer",
+  "narrative_shape": "08-vocab-mapping: strong Edit/Write by cp75, then Monitor/Bash pause for Perth-fixture background extractor through cp90 (T=90).",
+  "shape_label": "late_pivot",
+  "phases": [
+    {
+      "range": "68-75",
+      "name": "implementation",
+      "note": "8 Edit, 7 Write; osm_to_parcel_geometry focus."
+    },
+    {
+      "range": "75-90",
+      "name": "extractor_wait",
+      "note": "+13 Bash, +1 Monitor; pause for bg extractor."
+    }
+  ],
+  "early_signals": [
+    {
+      "turn": 75,
+      "signal": "8 Edit/7 Write rules out zero-edit thrash at first cp."
+    },
+    {
+      "turn": 90,
+      "signal": "Monitor delta; explicit pause for background extractor excerpt."
+    }
+  ],
+  "early_signal_window_respected": true,
+  "recommended_exit": null,
+  "earliness": "n/a \u2014 short T; wait is validation gate after implementation.",
+  "rationale": "Classic implement-then-wait pivot within a single brief; foreshadowed by monitor language at cp90 only, with healthy edits earlier."
+}

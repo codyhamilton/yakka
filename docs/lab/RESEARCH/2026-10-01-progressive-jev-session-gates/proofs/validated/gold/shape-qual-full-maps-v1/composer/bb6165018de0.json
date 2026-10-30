@@ -1,0 +1,41 @@
+{
+  "experiment": "shape-qual-full-maps-v1",
+  "worker_id": "bb6165018de0",
+  "model": "Composer",
+  "narrative_shape": "READ-ONLY census research: long Monitor/Bash standby while level-0 census runs, parallel report skeleton prep, then analysis once census output lands (~150T).",
+  "shape_label": "late_pivot",
+  "phases": [
+    {
+      "range": "75-120",
+      "name": "census_wait",
+      "note": "Bash/Monitor waiting; skeleton prep during run."
+    },
+    {
+      "range": "135-150",
+      "name": "post_census_analysis",
+      "note": "Scratch analysis read; census-finished excerpt."
+    }
+  ],
+  "early_signals": [
+    {
+      "turn": 75,
+      "signal": "READ-ONLY anchor; Monitor present; Write=1 with substantive assistant text\u2014not bash-only thrash."
+    },
+    {
+      "turn": 90,
+      "signal": "Monitor-armed wait excerpts; parallel Write delta."
+    },
+    {
+      "turn": 105,
+      "signal": "Report skeleton prep while census still running."
+    },
+    {
+      "turn": 120,
+      "signal": "Standing-by-for-monitor language; still no analysis pivot in hist."
+    }
+  ],
+  "early_signal_window_respected": true,
+  "recommended_exit": null,
+  "earliness": "n/a \u2014 on-brief external census dominates T.",
+  "rationale": "Pivot from passive wait to analysis is real but driven by external job completion; early window correctly shows wait-plus-prep, not kernel thrash."
+}

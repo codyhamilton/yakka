@@ -1,0 +1,28 @@
+{
+  "experiment": "shape-qual-full-maps-v1",
+  "worker_id": "8e36f8e80baa",
+  "model": "Composer",
+  "narrative_shape": "workflow:execute Phase 2: dispatches sub-agents, Monitor-heavy coordination, reads GATE-2.md by cp90 while waiting on grounded gate worker.",
+  "shape_label": "unclear",
+  "phases": [
+    {
+      "range": "75-90",
+      "name": "phase_orchestration",
+      "note": "Agent/SendMessage/Monitor; unit 2-15 dispatched."
+    }
+  ],
+  "early_signals": [
+    {
+      "turn": 75,
+      "signal": "Skill+Agent+Monitor already at cp75 with dispatch excerpt."
+    },
+    {
+      "turn": 90,
+      "signal": "New GATE-2.md read; still-waiting-on-monitor excerpt."
+    }
+  ],
+  "early_signal_window_respected": true,
+  "recommended_exit": null,
+  "earliness": null,
+  "rationale": "Parent execute worker shape is coordination-heavy by design; not late_pivot or early_thrash on a single brief."
+}

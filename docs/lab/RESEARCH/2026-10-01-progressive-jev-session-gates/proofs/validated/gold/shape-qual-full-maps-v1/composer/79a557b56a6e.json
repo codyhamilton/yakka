@@ -1,0 +1,28 @@
+{
+  "experiment": "shape-qual-full-maps-v1",
+  "worker_id": "79a557b56a6e",
+  "model": "Composer",
+  "narrative_shape": "Brief 23 vocab leak fix in worktree: Edit-heavy on osm_to_parcel_geometry, brief amendment read by cp90, compact T~95.",
+  "shape_label": "unclear",
+  "phases": [
+    {
+      "range": "75-90",
+      "name": "fix_and_amend",
+      "note": "12 Edits; worktree paths; amend brief excerpt."
+    }
+  ],
+  "early_signals": [
+    {
+      "turn": 75,
+      "signal": "Edit=12 at cp75 on owned extractor file (8\u00d7 re-read focus)."
+    },
+    {
+      "turn": 90,
+      "signal": "Write+Read delta; amend brief file excerpt."
+    }
+  ],
+  "early_signal_window_respected": true,
+  "recommended_exit": null,
+  "earliness": null,
+  "rationale": "Straightforward owned-path fix with edits from the first checkpoint."
+}

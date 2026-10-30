@@ -1,0 +1,33 @@
+{
+  "experiment": "shape-qual-full-maps-v1",
+  "worker_id": "a3cc4da7e21c",
+  "model": "Composer",
+  "narrative_shape": "3C-01 baseline: launches long baseline script cp75, waits through cp90, then owned-path commit when builds complete.",
+  "shape_label": "late_pivot",
+  "phases": [
+    {
+      "range": "75-90",
+      "name": "baseline_wait",
+      "note": "Bash-heavy wait on multi-build script."
+    },
+    {
+      "range": "90",
+      "name": "commit",
+      "note": "Owned paths staged and commit excerpt."
+    }
+  ],
+  "early_signals": [
+    {
+      "turn": 75,
+      "signal": "Edit=5, Write=2 but tail is baseline script wait\u2014not thrash."
+    },
+    {
+      "turn": 90,
+      "signal": "Commit excerpt after wait; read build_alldata once."
+    }
+  ],
+  "early_signal_window_respected": true,
+  "recommended_exit": null,
+  "earliness": "n/a \u2014 external baseline runtime.",
+  "rationale": "Pivot is build completion \u2192 commit; early window foreshadows wait-heavy baseline, not read thrash."
+}

@@ -1,0 +1,37 @@
+{
+  "experiment": "shape-qual-full-maps-v1",
+  "worker_id": "d34bb8ba01ba",
+  "model": "Composer",
+  "narrative_shape": "Unit 3-01 harness tools: heavy Edit/Read from cp75, new harness tests, background pytest wait at cp105\u2014completes inside T~116.",
+  "shape_label": "unclear",
+  "phases": [
+    {
+      "range": "75-90",
+      "name": "tooling_edits",
+      "note": "Many edits on walk/overlay/census tools."
+    },
+    {
+      "range": "90-105",
+      "name": "tests_and_pytest_wait",
+      "note": "New test paths; Monitor on bg pytest."
+    }
+  ],
+  "early_signals": [
+    {
+      "turn": 75,
+      "signal": "Edit=18 at cp75 with walk.py/overlay completion excerpts."
+    },
+    {
+      "turn": 90,
+      "signal": "New test_harness_walk path; continued edit deltas."
+    },
+    {
+      "turn": 105,
+      "signal": "Waiting for pytest background task excerpt."
+    }
+  ],
+  "early_signal_window_respected": true,
+  "recommended_exit": null,
+  "earliness": null,
+  "rationale": "High edit bandwidth from the first checkpoint; pytest wait is normal gate behavior."
+}

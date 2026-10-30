@@ -1,0 +1,46 @@
+{
+  "experiment": "shape-qual-full-maps-v1",
+  "worker_id": "036ff3ed4a89",
+  "model": "Composer",
+  "narrative_shape": "Target-disc / compare_disc brief is Bash-dominant through ~120T with blocking waits on long runs, then shifts to harness reads and Edits on design docs by ~150T.",
+  "shape_label": "late_pivot",
+  "phases": [
+    {
+      "range": "75-120",
+      "name": "compare_and_wait",
+      "note": "Bash-heavy; compare_disc finished; repeated blocking-wait language."
+    },
+    {
+      "range": "105-120",
+      "name": "offender_investigation",
+      "note": "New paths into report.json and harness checks while still waiting."
+    },
+    {
+      "range": "135-150",
+      "name": "doc_edits",
+      "note": "Edit appears; target-disc updates in tail excerpts."
+    }
+  ],
+  "early_signals": [
+    {
+      "turn": 75,
+      "signal": "Bash=70, Read=6 only\u2014no Edit/Write at first checkpoint."
+    },
+    {
+      "turn": 90,
+      "signal": "compare_disc exit 0 but delta +15 Bash only."
+    },
+    {
+      "turn": 105,
+      "signal": "New_read_paths into envelope/container checks while bash intervals continue."
+    },
+    {
+      "turn": 120,
+      "signal": "Still blocking-wait excerpts; zero Edit/Write in histogram at cp120."
+    }
+  ],
+  "early_signal_window_respected": true,
+  "recommended_exit": 120,
+  "earliness": "too_late vs ideal before long wait grind; on_time vs pivot into edits at 150.",
+  "rationale": "Foreshadowing is the bash-only compare/wait spine visible by cp90; pivot to durable doc edits is not evident until after the early window."
+}
