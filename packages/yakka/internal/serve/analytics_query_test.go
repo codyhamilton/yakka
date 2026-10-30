@@ -80,7 +80,7 @@ func TestAnalyticsSchema(t *testing.T) {
 		name, unit string
 		dims       []string
 	}{
-		{"hook_events", "count", []string{"harness", "repo_id", "norm_event", "event", "tool", "conversation_id"}},
+		{"hook_events", "count", []string{"harness", "repo_id", "norm_event", "event", "tool", "tool_kind", "conversation_id"}},
 		{"conversations", "count", []string{"harness", "repo_id", "model"}},
 		{"artifact_versions", "count", []string{"harness", "repo_id", "kind", "plan", "source", "conversation_id"}},
 		{"distinct_content", "count", []string{"harness", "repo_id", "kind", "plan", "source", "conversation_id"}},
