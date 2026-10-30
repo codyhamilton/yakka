@@ -1,0 +1,57 @@
+{
+  "generated_at": "2026-10-02T06:32:19.419+00:00",
+  "case_id": "tournament-binary-foreshadow",
+  "driver": "typesafe",
+  "model": "jev-1.13.0",
+  "stratum": "maps-5h",
+  "maps_only": true,
+  "measurement_only": true,
+  "behaviour_ship": false,
+  "localhost_8080": false,
+  "post_90_prune": true,
+  "framing_id": "esv0-binary-foreshadow#d0f736b5ecc043ce",
+  "n_cells_planned": 8,
+  "n_cells_recorded": 8,
+  "n_successful": 8,
+  "n_errors": 0,
+  "fire_count": 1,
+  "defer_count": 7,
+  "parse_miss_count": 0,
+  "response_label_counts": {
+    "fire_now": 1,
+    "defer_recheck": 0,
+    "defer_closing": 0,
+    "defer_productive": 1,
+    "defer_insufficient": 6
+  },
+  "frame_answer_counts": {
+    "reread_cluster": {
+      "no": 8,
+      "yes": 0
+    },
+    "thrash_bundle": {
+      "no": 8,
+      "yes": 0
+    },
+    "poll_monitor": {
+      "no": 4,
+      "yes": 4
+    }
+  },
+  "response_class_equals_response_label": true,
+  "by_checkpoint": {
+    "75": {
+      "n": 4,
+      "fire": 0,
+      "defer": 4
+    },
+    "90": {
+      "n": 4,
+      "fire": 1,
+      "defer": 3
+    }
+  },
+  "error_cell_ids": [],
+  "monitor_called_out_included": false,
+  "outcome_scoring": "unidentified; no outcome labels supplied"
+}

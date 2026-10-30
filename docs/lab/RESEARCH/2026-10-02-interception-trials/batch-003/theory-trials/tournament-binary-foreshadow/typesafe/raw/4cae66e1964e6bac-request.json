@@ -1,0 +1,128 @@
+{
+  "model": "jev-1.13.0",
+  "state": {
+    "question_id": "session-checkout",
+    "jev_model": "jev-1.13.0",
+    "worker_id": "bb6165018de0",
+    "checkpoint_turn": 75,
+    "prior_checkpoint_turn": null,
+    "schedule": {
+      "first_at": 75,
+      "interval": 15
+    },
+    "brief_anchor": "[REDACTED]:4841",
+    "cumulative": {
+      "api_turns": 75,
+      "peak_ctx_tokens": 127123,
+      "prefix_bytes": 160393,
+      "tool_histogram": {
+        "Bash": 66,
+        "Read": 8,
+        "Monitor": 2,
+        "ToolSearch": 1,
+        "Write": 1
+      },
+      "reread_paths": [],
+      "distinct_read_paths": 0,
+      "compaction_event_count": 0,
+      "assistant_text_chars": 346
+    },
+    "delta_since_prior": {},
+    "tail": [
+      {
+        "turn": 68,
+        "excerpt": "[REDACTED]:12",
+        "tool_names": [
+          "Bash"
+        ]
+      },
+      {
+        "turn": 69,
+        "excerpt": "[REDACTED]:67",
+        "tool_names": [
+          "Bash"
+        ]
+      },
+      {
+        "turn": 70,
+        "excerpt": "",
+        "tool_names": [
+          "Bash"
+        ]
+      },
+      {
+        "turn": 71,
+        "excerpt": "[REDACTED]:37",
+        "tool_names": [
+          "Bash"
+        ]
+      },
+      {
+        "turn": 72,
+        "excerpt": "",
+        "tool_names": [
+          "Bash"
+        ]
+      },
+      {
+        "turn": 73,
+        "excerpt": "",
+        "tool_names": [
+          "Bash"
+        ]
+      },
+      {
+        "turn": 74,
+        "excerpt": "",
+        "tool_names": [
+          "Bash"
+        ]
+      },
+      {
+        "turn": 75,
+        "excerpt": "",
+        "tool_names": [
+          "Bash"
+        ]
+      }
+    ],
+    "evidence_class": "trial-prefix-v1"
+  },
+  "questions": {
+    "response": {
+      "type": "choice",
+      "instructions": "From the supplied prefix only, choose exactly one response label. Fire only for likely avoidable low-value continuation; otherwise choose the most specific defer label.",
+      "criteria": {
+        "fire_now": "Fire now: likely avoidable low-value continuation.",
+        "defer_recheck": "Defer and re-check: concern is not persistent or evidence is insufficient.",
+        "defer_closing": "Defer: concrete completion, validation, or delivery value remains.",
+        "defer_productive": "Defer: checkable productive progress remains.",
+        "defer_insufficient": "Defer: evidence is too weak to justify firing."
+      }
+    },
+    "reread_cluster": {
+      "type": "choice",
+      "instructions": "Does any single read path appear at least three times in cumulative.reread_paths?",
+      "criteria": {
+        "yes": "Yes",
+        "no": "No"
+      }
+    },
+    "thrash_bundle": {
+      "type": "choice",
+      "instructions": "Binary: does compaction slope plus high reread counts match a frozen-narration thrash bundle?",
+      "criteria": {
+        "yes": "Yes",
+        "no": "No"
+      }
+    },
+    "poll_monitor": {
+      "type": "choice",
+      "instructions": "Binary: does Monitor tool presence dominate over compaction churn?",
+      "criteria": {
+        "yes": "Yes",
+        "no": "No"
+      }
+    }
+  }
+}

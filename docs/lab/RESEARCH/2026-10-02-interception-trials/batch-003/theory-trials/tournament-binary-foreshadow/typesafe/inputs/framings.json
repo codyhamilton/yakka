@@ -1,0 +1,221 @@
+{
+  "schema_id": "early-signal-v0",
+  "model_pin": "jev-1.13.0",
+  "approach_id": "stats-jev-tournament",
+  "case_id": "PR-STATS-JEV-TOURNAMENT",
+  "state_mode": "stats_card",
+  "stratum": "maps-5h",
+  "freeze_date": "2026-10-02",
+  "freeze_note": "TYPESAFE_LEGAL_v2 (WSM Option A 2026-10-02): Drop all type:report fields (compaction_event_count) from foreshadow / monitor-present / counts-only. Counts stay on stats_card only (zero-call rank); do not rewrite as echo score/choice. counts-only: instruction_scope replaced with yes/no choice ack (Corpus Ops draft) — not free-text/report. Likert unchanged. Reject Option B (report→score) and likert-only live. questions_sha256 = SHA256(canonical_questions_json) json.dumps(..., ensure_ascii=False, sort_keys=True). framing_id = registry_id#questions_sha256[:16]. Old Pilot hashes void for live. Trial Runner re-dry must be 32/32 preflight before live ≤32.",
+  "source_paths": [
+    "workflow-plugin/docs/lab/RESEARCH/2026-10-01-session-analysis-open-field/proofs/lib/framing_pool.py",
+    "workflow-plugin/docs/lab/RESEARCH/2026-10-01-session-analysis-open-field/proofs/framing/registry.json",
+    "workflow-plugin/docs/lab/RESEARCH/2026-10-01-cheap-analysis-typesafe-opencode/proofs/lib/schemas.py"
+  ],
+  "likert_theme_collapse_rule": {
+    "applies_to": "esv0-likert-collapse",
+    "field": "compaction_pressure",
+    "rule_text": "Likert→theme-collapse: map compaction_pressure to binary theme flag thrash_pressure_collapsed = yes iff answer is \"high\"; else no. (Pilot instructions: \"collapse yes if ≥ high\".) reread_cluster remains independent yes/no. Theme score uses the collapsed flag + reread_cluster; do not invent additional Likert bands.",
+    "collapse_threshold": "high",
+    "collapsed_yes_values": [
+      "high"
+    ],
+    "collapsed_no_values": [
+      "low",
+      "mid"
+    ]
+  },
+  "framings": [
+    {
+      "registry_id": "esv0-binary-foreshadow",
+      "pilot_slug": "tournament-binary-foreshadow",
+      "pilot_framing_id": "tournament-binary-foreshadow#a44e2b63c864be8b",
+      "framing_id": "esv0-binary-foreshadow#d0f736b5ecc043ce",
+      "schema_id": "early-signal-v0",
+      "model_pin": "jev-1.13.0",
+      "description": "Binary foreshadow ids (thrash_bundle + poll_monitor) on early-signal-v0 stats fields.",
+      "freeze_status": "TYPESAFE_LEGAL_v2",
+      "questions_sha256": "d0f736b5ecc043ce235cff655a3d3b72bc9b09fc8e231fe3b696e625893981f6",
+      "canonical_questions_json": "{\"poll_monitor\": {\"criteria\": {\"no\": \"No\", \"yes\": \"Yes\"}, \"instructions\": \"Binary: does Monitor tool presence dominate over compaction churn?\", \"type\": \"choice\"}, \"reread_cluster\": {\"criteria\": {\"no\": \"No\", \"yes\": \"Yes\"}, \"instructions\": \"Does any single read path appear at least three times in cumulative.reread_paths?\", \"type\": \"choice\"}, \"thrash_bundle\": {\"criteria\": {\"no\": \"No\", \"yes\": \"Yes\"}, \"instructions\": \"Binary: does compaction slope plus high reread counts match a frozen-narration thrash bundle?\", \"type\": \"choice\"}}",
+      "questions": {
+        "reread_cluster": {
+          "type": "choice",
+          "instructions": "Does any single read path appear at least three times in cumulative.reread_paths?",
+          "criteria": {
+            "yes": "Yes",
+            "no": "No"
+          }
+        },
+        "thrash_bundle": {
+          "type": "choice",
+          "instructions": "Binary: does compaction slope plus high reread counts match a frozen-narration thrash bundle?",
+          "criteria": {
+            "yes": "Yes",
+            "no": "No"
+          }
+        },
+        "poll_monitor": {
+          "type": "choice",
+          "instructions": "Binary: does Monitor tool presence dominate over compaction churn?",
+          "criteria": {
+            "yes": "Yes",
+            "no": "No"
+          }
+        }
+      },
+      "NEEDS_PILOT_TEXT": false,
+      "pilot_framing_id_superseded": "tournament-binary-foreshadow#a44e2b63c864be8b"
+    },
+    {
+      "registry_id": "esv0-likert-collapse",
+      "pilot_slug": "tournament-likert-collapsed",
+      "pilot_framing_id": "tournament-likert-collapsed#4ddae065dda2245f",
+      "framing_id": "esv0-likert-collapse#4ddae065dda2245f",
+      "schema_id": "early-signal-v0",
+      "model_pin": "jev-1.13.0",
+      "description": "Likert compaction_pressure with theme-collapse rule; plus reread_cluster.",
+      "freeze_status": "TYPESAFE_LEGAL_v2",
+      "questions_sha256": "4ddae065dda2245fbe46a9de7dbc61e56fd66c1d7938ccb7c45e5aff6fe35031",
+      "canonical_questions_json": "{\"compaction_pressure\": {\"criteria\": {\"high\": \"high\", \"low\": \"low\", \"mid\": \"mid\"}, \"instructions\": \"Likert compaction pressure (collapse yes if ≥ high).\", \"type\": \"choice\"}, \"reread_cluster\": {\"criteria\": {\"no\": \"No\", \"yes\": \"Yes\"}, \"instructions\": \"Does any single read path appear at least three times in cumulative.reread_paths?\", \"type\": \"choice\"}}",
+      "questions": {
+        "compaction_pressure": {
+          "type": "choice",
+          "instructions": "Likert compaction pressure (collapse yes if ≥ high).",
+          "criteria": {
+            "low": "low",
+            "mid": "mid",
+            "high": "high"
+          }
+        },
+        "reread_cluster": {
+          "type": "choice",
+          "instructions": "Does any single read path appear at least three times in cumulative.reread_paths?",
+          "criteria": {
+            "yes": "Yes",
+            "no": "No"
+          }
+        }
+      },
+      "NEEDS_PILOT_TEXT": false,
+      "pilot_framing_id_superseded": "tournament-likert-collapsed#4ddae065dda2245f"
+    },
+    {
+      "registry_id": "esv0-binary-monitor-present",
+      "pilot_slug": "tournament-monitor-called-out",
+      "pilot_framing_id": "tournament-monitor-called-out#95fd5fc062f1b94f",
+      "framing_id": "esv0-binary-monitor-present#77ace2e03f04a9da",
+      "schema_id": "early-signal-v0",
+      "model_pin": "jev-1.13.0",
+      "description": "Binary + explicit monitor_present choice.",
+      "freeze_status": "TYPESAFE_LEGAL_v2",
+      "questions_sha256": "77ace2e03f04a9daf622faa0e49da54a620af1c0cf7b94be89e45fd9720e7db6",
+      "canonical_questions_json": "{\"monitor_present\": {\"criteria\": {\"no\": \"No\", \"yes\": \"Yes\"}, \"instructions\": \"Is Monitor count ≥ 1 in cumulative.tool_histogram at this checkpoint?\", \"type\": \"choice\"}, \"reread_cluster\": {\"criteria\": {\"no\": \"No\", \"yes\": \"Yes\"}, \"instructions\": \"Does any single read path appear at least three times in cumulative.reread_paths?\", \"type\": \"choice\"}, \"thrash_bundle\": {\"criteria\": {\"no\": \"No\", \"yes\": \"Yes\"}, \"instructions\": \"Compaction rising with flat assistant_text_chars and no Edit/Write?\", \"type\": \"choice\"}}",
+      "questions": {
+        "reread_cluster": {
+          "type": "choice",
+          "instructions": "Does any single read path appear at least three times in cumulative.reread_paths?",
+          "criteria": {
+            "yes": "Yes",
+            "no": "No"
+          }
+        },
+        "monitor_present": {
+          "type": "choice",
+          "instructions": "Is Monitor count ≥ 1 in cumulative.tool_histogram at this checkpoint?",
+          "criteria": {
+            "yes": "Yes",
+            "no": "No"
+          }
+        },
+        "thrash_bundle": {
+          "type": "choice",
+          "instructions": "Compaction rising with flat assistant_text_chars and no Edit/Write?",
+          "criteria": {
+            "yes": "Yes",
+            "no": "No"
+          }
+        }
+      },
+      "NEEDS_PILOT_TEXT": false,
+      "pilot_framing_id_superseded": "tournament-monitor-called-out#95fd5fc062f1b94f"
+    },
+    {
+      "registry_id": "esv0-binary-counts-only",
+      "pilot_slug": "tournament-no-story-beyond-counts",
+      "pilot_framing_id": "tournament-no-story-beyond-counts#7a26c8fca8ac76a4",
+      "framing_id": "esv0-binary-counts-only#10485a6cd618781e",
+      "schema_id": "early-signal-v0",
+      "model_pin": "jev-1.13.0",
+      "description": "Counts-only judgment axes + instruction_scope yes/no choice ack (no type:report; do not infer beyond printed cumulative counts).",
+      "freeze_status": "TYPESAFE_LEGAL_v2",
+      "questions_sha256": "10485a6cd618781e93260513dd01dcc7fb058bdc6ebcf5be8b1f383d445983cd",
+      "canonical_questions_json": "{\"instruction_scope\": {\"criteria\": {\"no\": \"No\", \"yes\": \"Yes\"}, \"instructions\": \"Ack: answer only from printed cumulative counts — do not infer a story beyond the counts?\", \"type\": \"choice\"}, \"reread_cluster\": {\"criteria\": {\"no\": \"No\", \"yes\": \"Yes\"}, \"instructions\": \"Does any single read path appear at least three times in cumulative.reread_paths?\", \"type\": \"choice\"}}",
+      "questions": {
+        "reread_cluster": {
+          "type": "choice",
+          "instructions": "Does any single read path appear at least three times in cumulative.reread_paths?",
+          "criteria": {
+            "yes": "Yes",
+            "no": "No"
+          }
+        },
+        "instruction_scope": {
+          "type": "choice",
+          "instructions": "Ack: answer only from printed cumulative counts — do not infer a story beyond the counts?",
+          "criteria": {
+            "yes": "Yes",
+            "no": "No"
+          }
+        }
+      },
+      "NEEDS_PILOT_TEXT": false,
+      "pilot_framing_id_superseded": "tournament-no-story-beyond-counts#7a26c8fca8ac76a4"
+    }
+  ],
+  "protocol": {
+    "state_mode": "stats_card",
+    "stratified_n": 8,
+    "hold_out_n": 26,
+    "hold_out_rule": "do not score winner on hold-out",
+    "dry_run": "8×4",
+    "live_max": 32,
+    "model_pin": "jev-1.13.0",
+    "stratum": "maps-5h",
+    "sha256_each_frozen_question_json": true
+  },
+  "stratified_8": {
+    "thrash": [
+      "92a48e004519",
+      "ca977b9ca0dd"
+    ],
+    "poll": [
+      "87a380bc64ff",
+      "bb6165018de0",
+      "15f24c7ba18c"
+    ],
+    "steady_residual": {
+      "workers": [
+        "0677f597286e",
+        "074c8cf22927"
+      ],
+      "sonnet_shape_detail": "steady_build_to_commit",
+      "source": "workflow-plugin/.../shape-qual-full-maps-v1/AGREEMENT-SUMMARY.md; open-field cycles/REGISTRATION-pilot-field-proof.md",
+      "status": "RESOLVED"
+    },
+    "weak": [
+      "daf933273c8f"
+    ],
+    "ordered": [
+      "92a48e004519",
+      "ca977b9ca0dd",
+      "87a380bc64ff",
+      "bb6165018de0",
+      "15f24c7ba18c",
+      "0677f597286e",
+      "074c8cf22927",
+      "daf933273c8f"
+    ]
+  },
+  "freeze_version": "TYPESAFE_LEGAL_v2",
+  "wsm_signoff": "Option A GO — TYPESAFE_LEGAL_v2; re-dry 32/32 before live"
+}

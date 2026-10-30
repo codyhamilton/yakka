@@ -1,0 +1,38 @@
+{
+  "registry_source": "/home/codyh/workspace/corpus-ops/registry/stats-jev-tournament/framings.json",
+  "registry_sha256": "9e3d81f5fb39fc0f0f9afd5a91baf1cd00758277780da5d9d1ed31b71b98678a",
+  "schema_id": "early-signal-v0",
+  "model_pin": "jev-1.13.0",
+  "registry_id": "esv0-binary-foreshadow",
+  "pilot_slug": "tournament-binary-foreshadow",
+  "framing_id": "esv0-binary-foreshadow#d0f736b5ecc043ce",
+  "questions_sha256": "d0f736b5ecc043ce235cff655a3d3b72bc9b09fc8e231fe3b696e625893981f6",
+  "freeze_status": "TYPESAFE_LEGAL_v2",
+  "questions": {
+    "reread_cluster": {
+      "type": "choice",
+      "instructions": "Does any single read path appear at least three times in cumulative.reread_paths?",
+      "criteria": {
+        "yes": "Yes",
+        "no": "No"
+      }
+    },
+    "thrash_bundle": {
+      "type": "choice",
+      "instructions": "Binary: does compaction slope plus high reread counts match a frozen-narration thrash bundle?",
+      "criteria": {
+        "yes": "Yes",
+        "no": "No"
+      }
+    },
+    "poll_monitor": {
+      "type": "choice",
+      "instructions": "Binary: does Monitor tool presence dominate over compaction churn?",
+      "criteria": {
+        "yes": "Yes",
+        "no": "No"
+      }
+    }
+  },
+  "killed_framing": "tournament-monitor-called-out"
+}
