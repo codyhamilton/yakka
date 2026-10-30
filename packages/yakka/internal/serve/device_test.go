@@ -32,7 +32,10 @@ func newDeviceEnv(t *testing.T) *deviceEnv {
 	h := s.Handler()
 	origin := "https://collector.example"
 	sess := loginRemote(t, h, origin)
-	remoteCreateTenant(t, h, origin, sess, "devt")
+	// Register the tenant under a fixed ID so the request literals below stay readable.
+	s.registry.mu.Lock()
+	s.registry.owners["devt"], s.registry.names["devt"] = "30", "Dev tenant"
+	s.registry.mu.Unlock()
 	e := &deviceEnv{t: t, s: s, h: h, origin: origin, sess: sess, dir: dir, clock: time.Now()}
 	s.grants.now = func() time.Time { return e.clock }
 	return e
@@ -360,8 +363,9 @@ func TestValidateGrant(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !r.CreateTenant("acme", 7) {
-		t.Fatal("claim")
+	id, ok, err := r.CreateTenant("acme", 7)
+	if err != nil || !ok {
+		t.Fatal("claim", err)
 	}
 	now := time.Now()
 	future := now.Add(time.Hour)
@@ -370,10 +374,10 @@ func TestValidateGrant(t *testing.T) {
 		exp           time.Time
 		gh            int64
 	}{
-		{"acme", "read", future, 7},
-		{"acme", "bogus", future, 7},
-		{"acme", "read", now, 7},
-		{"acme", "read", future, 8},
+		{id, "read", future, 7},
+		{id, "bogus", future, 7},
+		{id, "read", now, 7},
+		{id, "read", future, 8},
 		{"nope", "read_write", future, 7},
 	}
 	for _, c := range cases {
@@ -383,7 +387,7 @@ func TestValidateGrant(t *testing.T) {
 			t.Fatalf("%+v: ValidateGrant=%v CreateToken=%v", c, verr, cerr)
 		}
 	}
-	if err := r.ValidateGrant("acme", "bogus", future, 7, now); err == nil || err.Error() != "invalid scope" {
+	if err := r.ValidateGrant(id, "bogus", future, 7, now); err == nil || err.Error() != "invalid scope" {
 		t.Fatalf("scope: %v", err)
 	}
 }

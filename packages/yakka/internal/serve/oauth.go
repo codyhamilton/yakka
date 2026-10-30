@@ -114,13 +114,21 @@ func (s *Server) oauthCallback(w http.ResponseWriter, r *http.Request) {
 		fail(http.StatusForbidden, "denied")
 		return
 	}
+	// A user always has somewhere to put data; this also backfills users who signed up before defaults existed.
+	if _, err := s.registry.EnsureDefaultTenant(user.ID); err != nil {
+		fail(http.StatusInternalServerError, "tenant setup failed")
+		return
+	}
 	sid, err := newSessionID()
 	if err != nil {
 		fail(http.StatusUnauthorized, "unauthorized")
 		return
 	}
 	s.registry.PutSession(sid, rec)
-	_ = s.registry.Persist()
+	if err := s.registry.Persist(); err != nil {
+		fail(http.StatusInternalServerError, "persist failed")
+		return
+	}
 	s.setSessionCookie(w, sid, rec.ExpiresAt)
 	dest := "/"
 	if ret, err := r.Cookie(oauthReturnCookie); err == nil {

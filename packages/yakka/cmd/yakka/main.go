@@ -26,7 +26,7 @@ var (
 	commit  = "unknown"
 )
 
-const usage = "usage: yakka serve | drain | ledger compact --tenant-dir <dir> | ledger purge-deltas --tenant-dir <dir> | mcp | status | version\n"
+const usage = "usage: yakka serve | drain | ledger compact --tenant-dir <dir> | ledger purge-deltas --tenant-dir <dir> | sync --to <tenant-id> | mcp | status | version\n"
 
 func main() { os.Exit(run(os.Args[1:])) }
 
@@ -48,6 +48,8 @@ func run(args []string) int {
 		return runLogin(args[1:])
 	case "ledger":
 		return runLedger(args[1:])
+	case "sync":
+		return runSync(args[1:])
 	case "mcp":
 		return runMCP(args[1:])
 	case "--version", "version":

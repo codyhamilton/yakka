@@ -128,7 +128,7 @@ Envelope types accepted by the remote: `hook_event`, `artifact_version`, `commit
 
 ### Hook-event policy
 
-One table in `internal/ingest` maps `(harness, event)` to `keep` or `remove`; a pair not listed is
+One table in `internal/ingest` maps `(harness, event)` to `keep`, `remove` or `trim`; a pair not listed is
 `keep`.
 
 - **`remove`** applies to OpenCode `experimental.chat.system.transform`, `chat.params`,
@@ -140,6 +140,15 @@ One table in `internal/ingest` maps `(harness, event)` to `keep` or `remove`; a 
   the plugin's remove list equals the table's.
 - **`keep`** stores the event as an envelope plus extracted fields. Row-hash identity is the
   full received envelope's, as above.
+- **`trim`** applies to OpenCode `message.updated`. OpenCode repeats the session's cumulative
+  patches in `payload.event.properties.info.summary.diffs` on every update (about 1.5 of 4.9 GB
+  uncompressed in the first measurement); artifact versions and commits already cover them.
+  `ingest.Trim(obj)` deletes that one key from the decoded fact, then the event is stored as `keep`
+  does. The row hash and the archive line are computed from the re-encoded, trimmed object, never
+  the received bytes, so an event hashes the same however it arrived. The plugin trims before
+  spooling, and a test asserts its trim list equals the table's. Compaction treats `trim` as
+  `keep`, so rows stored before the rule keep their hashes. An event delivered both before and
+  after the rule leaves one duplicate local row.
 - **Stored form.** A hook fact's stored `raw` is its envelope (`type`, `harness`, `event`,
   `conversation_id`, `ts`, `repo_id`) with no `payload`. The body goes verbatim, after secret
   redaction, to the per-conversation archive ([design 3](03-remote-service.md#event-archive)), so

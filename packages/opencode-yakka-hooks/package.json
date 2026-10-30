@@ -1,6 +1,6 @@
 {
   "name": "@codyhamilton/opencode-yakka-hooks",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "OpenCode plugin: full-surface advisory hooklog capture and PostToolBatch soft signals",
   "type": "module",
   "license": "MIT",

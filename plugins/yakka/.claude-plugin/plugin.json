@@ -2,7 +2,7 @@
   "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
   "name": "yakka",
   "description": "Cloud-safe core workflow skills for Claude Code: design, refine, execute, comprehensive-review, close-out, post-build. Also login (interactive).",
-  "version": "3.1.1",
+  "version": "3.2.0",
   "author": {
     "name": "William Hamilton",
     "email": "codyh@ctzns.net"

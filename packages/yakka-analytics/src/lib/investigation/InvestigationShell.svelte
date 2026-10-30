@@ -17,7 +17,7 @@
 	import { isCollectorMode } from '$lib/api';
 	import { PRESETS } from '$lib/presets';
 	import { savedAnalysisOwner } from '$lib/saved-analysis';
-	import { tenantNameFromMe } from '$lib/session-gate';
+	import { tenantIdFromMe } from '$lib/session-gate';
 	import { sessionGate } from '$lib/session-gate.svelte';
 	import { Superseded } from '$lib/query';
 	import { clearError, setError } from '$lib/state.svelte';
@@ -45,7 +45,7 @@
 	import UsageTool from './tools/UsageTool.svelte';
 
 	const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
-	const sessionTenant = $derived(isCollectorMode() ? tenantNameFromMe(sessionGate.me) : null);
+	const sessionTenant = $derived(isCollectorMode() ? tenantIdFromMe(sessionGate.me, sessionGate.tenant) : null);
 	const savedOwner = $derived(
 		sessionGate.me?.kind === 'ok' ? savedAnalysisOwner(sessionGate.me.body.github_id) : ''
 	);

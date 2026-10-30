@@ -15,6 +15,7 @@
 	} from '$lib/api';
 	import { setError } from '$lib/state.svelte';
 	import { IdentityPanel } from '$lib/analysis';
+	import { initialTenantChoice, readRememberedTenant, showsTenantChoice } from '$lib/session-gate';
 
 	let me = $state<MeResponse | null>(null);
 	let tokens = $state<TokenListItem[]>([]);
@@ -43,7 +44,7 @@
 		try {
 			const m = await fetchMe();
 			me = m;
-			if (!tokenTenant && m.tenants[0]) tokenTenant = m.tenants[0].name;
+			tokenTenant = initialTenantChoice(m.tenants, tokenTenant, readRememberedTenant());
 			tokens = await listTokens();
 			adminTokens = m.admin ? await listAdminTokens() : [];
 		} catch (e) {
@@ -65,11 +66,11 @@
 		e.preventDefault();
 		tenantStatus = '';
 		try {
-			const { name } = await createTenant(tenantName.trim());
+			const { id, name } = await createTenant(tenantName.trim());
 			tenantStatus = `Created tenant ${name}.`;
 			tenantName = '';
 			await reload();
-			tokenTenant = name;
+			tokenTenant = id;
 		} catch (err) {
 			tenantStatus = err instanceof ApiError ? err.message : 'Could not create tenant.';
 		}
@@ -139,15 +140,17 @@
 	<section>
 		<h2>Create token</h2>
 		<form onsubmit={submitToken}>
-			<label>
-				Tenant
-				<select data-testid="profile-token-tenant" bind:value={tokenTenant} required>
-					<option value="" disabled>Select tenant</option>
-					{#each me.tenants as t (t.name)}
-						<option value={t.name}>{t.name}</option>
-					{/each}
-				</select>
-			</label>
+			{#if showsTenantChoice(me.tenants)}
+				<label>
+					Tenant
+					<select data-testid="profile-token-tenant" bind:value={tokenTenant} required>
+						<option value="" disabled>Select tenant</option>
+						{#each me.tenants as t (t.id)}
+							<option value={t.id}>{t.name}</option>
+						{/each}
+					</select>
+				</label>
+			{/if}
 			<label>
 				Scope
 				<select data-testid="profile-token-scope" bind:value={tokenScope}>
@@ -194,7 +197,7 @@
 				<tbody>
 					{#each tokens as row (row.id)}
 						<tr>
-							<td>{row.tenant}</td>
+							<td>{row.tenant_name}</td>
 							<td>{row.scope}</td>
 							<td>{row.expires_at}</td>
 							<td>{row.revoked ? 'yes' : 'no'}</td>
@@ -230,7 +233,7 @@
 					{#each adminTokens as row (row.id)}
 						<tr>
 							<td>{row.github_id}</td>
-							<td>{row.tenant}</td>
+							<td>{row.tenant_name}</td>
 							<td>{row.scope}</td>
 							<td>{row.expires_at}</td>
 							<td>{row.revoked ? 'yes' : 'no'}</td>

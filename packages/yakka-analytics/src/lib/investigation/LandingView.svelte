@@ -3,7 +3,7 @@
 	import { aggregate } from '$lib/aggregate';
 	import { TrendChart, type TrendFrameData } from '$lib/analysis/chart-frame';
 	import { isCollectorMode } from '$lib/api';
-	import { tenantNameFromMe } from '$lib/session-gate';
+	import { tenantIdFromMe } from '$lib/session-gate';
 	import { sessionGate } from '$lib/session-gate.svelte';
 	import { Superseded } from '$lib/query';
 	import { clearError, setError } from '$lib/state.svelte';
@@ -12,7 +12,7 @@
 
 	const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
-	const sessionTenant = $derived(isCollectorMode() ? tenantNameFromMe(sessionGate.me) : null);
+	const sessionTenant = $derived(isCollectorMode() ? tenantIdFromMe(sessionGate.me, sessionGate.tenant) : null);
 	const sessionReady = $derived(sessionGate.ready);
 
 	let hookEvents = $state<TrendFrameData | null>(null);

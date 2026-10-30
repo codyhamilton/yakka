@@ -484,6 +484,7 @@ func (s *Server) Close() error {
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/v1/health", s.method(http.MethodGet, s.health))
+	mux.HandleFunc("/v1/whoami", s.method(http.MethodGet, s.whoami))
 	mux.HandleFunc("/v1/ingest", s.method(http.MethodPost, s.auth(s.ingest)))
 	mux.HandleFunc("/v1/artifacts", s.method(http.MethodGet, s.auth(s.artifacts)))
 	mux.HandleFunc("/v1/checks", s.method(http.MethodGet, s.auth(s.checks)))
@@ -648,6 +649,38 @@ func (s *Server) auth(h tenantHandler) http.HandlerFunc {
 		}
 		h(w, r, name, ts)
 	}
+}
+
+// whoami answers which tenant and scope a bearer token is bound to, so `yakka sync` can confirm its
+// target before sending anything. It uses only the bearer branch of authorizeRequest: no cookie
+// session, and it never opens the tenant, so a locked tenant cannot turn it into a 503. Local
+// mode needs no token and always answers the local tenant; a keyed-mode key and local mode answer
+// read_write with expires_at 0.
+func (s *Server) whoami(w http.ResponseWriter, r *http.Request) {
+	if s.cfg.Local() {
+		writeJSON(w, 200, map[string]any{"tenant": LocalTenant, "scope": TokenScopeReadWrite, "expires_at": 0})
+		return
+	}
+	tok, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
+	if !ok {
+		writeJSON(w, 401, map[string]string{"error": "unauthorized"})
+		return
+	}
+	var tenant, scope string
+	var expires int64
+	if s.cfg.Remote() {
+		var exp time.Time
+		tenant, scope, exp, ok = s.registry.resolveBearerExpiry(tok, time.Now())
+		expires = exp.Unix()
+	} else {
+		tenant, ok = s.tenantForKey(tok)
+		scope = TokenScopeReadWrite
+	}
+	if !ok {
+		writeJSON(w, 401, map[string]string{"error": "unauthorized"})
+		return
+	}
+	writeJSON(w, 200, map[string]any{"tenant": tenant, "scope": scope, "expires_at": expires})
 }
 
 func (s *Server) health(w http.ResponseWriter, r *http.Request) {

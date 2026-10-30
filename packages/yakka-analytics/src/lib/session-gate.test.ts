@@ -1,8 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
 	decideAfterMeFetch,
+	currentTenantFromMe,
+	initialTenantChoice,
 	routeAllowsChildren,
 	shouldNavigateToProfile,
+	showsTenantChoice,
+	tenantIdFromMe,
 	type MeFetchResult
 } from './session-gate';
 
@@ -13,7 +17,7 @@ const me200Empty: MeFetchResult = {
 };
 const me200Acme: MeFetchResult = {
 	kind: 'ok',
-	body: { github_id: 1, github_login: 'u', admin: false, tenants: [{ name: 'acme' }] }
+	body: { github_id: 1, github_login: 'u', admin: false, tenants: [{ id: 't-1', name: 'acme' }] }
 };
 
 function decide(
@@ -142,5 +146,47 @@ describe('shouldNavigateToProfile', () => {
 				fetchErrorMessage: 'no such tenant'
 			})
 		).toBe(false);
+	});
+});
+
+const two = [
+	{ id: 't-a', name: 'default' },
+	{ id: 't-b', name: 'default' }
+];
+const meTwo: MeFetchResult = {
+	kind: 'ok',
+	body: { github_id: 1, github_login: 'u', admin: false, tenants: two }
+};
+
+describe('current tenant', () => {
+	it('is the first tenant until one is chosen, and names need not be unique', () => {
+		expect(tenantIdFromMe(meTwo, '')).toBe('t-a');
+		expect(tenantIdFromMe(meTwo, 't-b')).toBe('t-b');
+	});
+
+	it('ignores a remembered tenant the user no longer owns', () => {
+		expect(currentTenantFromMe(meTwo, 't-gone')).toEqual(two[0]);
+	});
+
+	it('is null without a session or tenants', () => {
+		expect(tenantIdFromMe(null, '')).toBeNull();
+		expect(tenantIdFromMe(me401, '')).toBeNull();
+		expect(tenantIdFromMe(me200Empty, '')).toBeNull();
+	});
+});
+
+describe('tenant choice UI', () => {
+	it('shows a picker only when there is more than one tenant', () => {
+		expect(showsTenantChoice([])).toBe(false);
+		expect(showsTenantChoice(two.slice(0, 1))).toBe(false);
+		expect(showsTenantChoice(two)).toBe(true);
+	});
+
+	it('preselects the only tenant, else the remembered one, else nothing', () => {
+		expect(initialTenantChoice(two.slice(0, 1), '', '')).toBe('t-a');
+		expect(initialTenantChoice(two, '', 't-b')).toBe('t-b');
+		expect(initialTenantChoice(two, 't-a', 't-b')).toBe('t-a');
+		expect(initialTenantChoice(two, '', '')).toBe('');
+		expect(initialTenantChoice(two, 'gone', 'gone')).toBe('');
 	});
 });

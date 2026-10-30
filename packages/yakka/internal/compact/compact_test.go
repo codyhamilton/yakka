@@ -283,6 +283,32 @@ func TestOutcome(t *testing.T) {
 	}
 }
 
+// Compaction treats the trim policy as keep: a legacy message.updated row stored with its diffs
+// keeps its row hash and its archive line is untrimmed, so a later sync does not see it as new.
+func TestCompactKeepsTrimmedEventHash(t *testing.T) {
+	fact := json.RawMessage(`{"id":"q#0","type":"hook_event","conversation_id":"c-trim","harness":"opencode","event":"message.updated","ts":7,
+	  "payload":{"event":{"properties":{"info":{"summary":{"diffs":[{"patch":"x"}]}}}}}}`)
+	tn := openExclusive(t)
+	insertLegacy(t, tn, fact)
+	want, err := keys.RowHash(fact)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Run(context.Background(), tn, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	var got string
+	if err := tn.Raw().QueryRow(`SELECT row_hash FROM facts WHERE conversation_id='c-trim'`).Scan(&got); err != nil {
+		t.Fatal(err)
+	}
+	if got != want {
+		t.Fatalf("row hash changed: %s -> %s", want, got)
+	}
+	if !archiveHashes(t, tn.Dir(), []string{"c-trim"})[want] {
+		t.Fatal("archive line for the original hash is missing")
+	}
+}
+
 func TestResume(t *testing.T) {
 	facts := fixtureFacts(t)
 	ctx := context.Background()

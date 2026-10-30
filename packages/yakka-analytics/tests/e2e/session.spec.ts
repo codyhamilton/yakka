@@ -8,10 +8,10 @@ test('login surfaces denied admission', async ({ page }) => {
 });
 
 test('collector overview sends tenant from /v1/me on summary', async ({ page }) => {
-	const tenant = 'acme';
+	const tenant = 't-acme';
 	await page.route('**/v1/me', (route) =>
 		route.fulfill({
-			json: { github_id: 1, github_login: 'u', admin: false, tenants: [{ name: tenant }] }
+			json: { github_id: 1, github_login: 'u', admin: false, tenants: [{ id: tenant, name: 'acme' }] }
 		})
 	);
 	const query = trackRequests(page, /analytics\/query/);
@@ -38,10 +38,64 @@ test('collector overview sends tenant from /v1/me on summary', async ({ page }) 
 	}
 });
 
+test('one tenant: no tenant switcher in the header', async ({ page }) => {
+	await page.route('**/v1/me', (route) =>
+		route.fulfill({
+			json: { github_id: 1, github_login: 'u', admin: false, tenants: [{ id: 't-1', name: 'default' }] }
+		})
+	);
+	await page.route('**/v1/analytics/facets*', (route) =>
+		route.fulfill({
+			json: { repos: [], harnesses: [], kinds: [], plans: [], events: [], models: [], norm_events: [], tools: [] }
+		})
+	);
+	await page.route('**/v1/analytics/query*', (route) =>
+		route.fulfill({ json: { rows: [], partial: false, ignored_filters: [] } })
+	);
+	await page.goto('/');
+	await expect(page.getByTestId('landing-trend-hook_events')).toBeVisible();
+	await expect(page.getByTestId('tenant-switcher')).toHaveCount(0);
+});
+
+test('several tenants: the switcher sets which tenant views query, and is remembered', async ({ page }) => {
+	await page.route('**/v1/me', (route) =>
+		route.fulfill({
+			json: {
+				github_id: 1,
+				github_login: 'u',
+				admin: false,
+				tenants: [
+					{ id: 't-a', name: 'default' },
+					{ id: 't-b', name: 'work' }
+				]
+			}
+		})
+	);
+	const query = trackRequests(page, /analytics\/query/);
+	await page.route('**/v1/analytics/facets*', (route) =>
+		route.fulfill({
+			json: { repos: [], harnesses: [], kinds: [], plans: [], events: [], models: [], norm_events: [], tools: [] }
+		})
+	);
+	await page.route('**/v1/analytics/query*', (route) =>
+		route.fulfill({ json: { rows: [], partial: false, ignored_filters: [] } })
+	);
+	await page.goto('/');
+	const switcher = page.getByTestId('tenant-switcher');
+	await expect(switcher).toHaveValue('t-a');
+	await expect(page.getByTestId('landing-trend-hook_events')).toBeVisible();
+	await switcher.selectOption('t-b');
+	await expect
+		.poll(() => query.urls().some((u) => new URL(u).searchParams.get('tenant') === 't-b'))
+		.toBe(true);
+	await page.reload();
+	await expect(page.getByTestId('tenant-switcher')).toHaveValue('t-b');
+});
+
 test('session summary mock loads overview tiles', async ({ page }) => {
 	await page.route('**/v1/me', (route) =>
 		route.fulfill({
-			json: { github_id: 1, github_login: 'u', admin: false, tenants: [{ name: 't1' }] }
+			json: { github_id: 1, github_login: 'u', admin: false, tenants: [{ id: 't-1', name: 't1' }] }
 		})
 	);
 	await page.route('**/v1/analytics/facets*', (route) =>
@@ -160,7 +214,7 @@ test('tenant present: summary 403 no such tenant does not send to /profile', asy
 	const analytics = trackRequests(page, '/v1/analytics/');
 	await page.route('**/v1/me', (route) =>
 		route.fulfill({
-			json: { github_id: 1, github_login: 'u', admin: false, tenants: [{ name: 'acme' }] }
+			json: { github_id: 1, github_login: 'u', admin: false, tenants: [{ id: 't-acme', name: 'acme' }] }
 		})
 	);
 	await page.route('**/v1/analytics/**', (route) =>

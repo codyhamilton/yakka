@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 	"time"
+	"unicode"
 )
 
 func (s *Server) handleCreateTenant(w http.ResponseWriter, r *http.Request, sess *Session) {
@@ -15,19 +16,38 @@ func (s *Server) handleCreateTenant(w http.ResponseWriter, r *http.Request, sess
 		writeJSON(w, 400, map[string]string{"error": "invalid body"})
 		return
 	}
-	if !tenantRE.MatchString(body.Name) {
+	name := strings.TrimSpace(body.Name)
+	if !validTenantName(name) {
 		writeJSON(w, 400, map[string]string{"error": "invalid tenant name"})
 		return
 	}
-	if !s.registry.CreateTenant(body.Name, sess.GitHubID) {
-		writeJSON(w, 409, map[string]string{"error": "tenant name taken"})
+	id, ok, err := s.registry.CreateTenant(name, sess.GitHubID)
+	if err != nil {
+		writeJSON(w, 500, map[string]string{"error": "create failed"})
+		return
+	}
+	if !ok {
+		writeJSON(w, 409, map[string]string{"error": "you already have a tenant with that name"})
 		return
 	}
 	if err := s.registry.Persist(); err != nil {
 		writeJSON(w, 500, map[string]string{"error": "persist failed"})
 		return
 	}
-	writeJSON(w, 201, map[string]string{"name": body.Name})
+	writeJSON(w, 201, TenantInfo{ID: id, Name: name})
+}
+
+// validTenantName accepts a display name: 1 to 64 characters, no control characters.
+func validTenantName(name string) bool {
+	if name == "" || len([]rune(name)) > 64 {
+		return false
+	}
+	for _, c := range name {
+		if unicode.IsControl(c) {
+			return false
+		}
+	}
+	return true
 }
 
 func (s *Server) handleCreateToken(w http.ResponseWriter, r *http.Request, sess *Session) {
@@ -73,14 +93,15 @@ func (s *Server) handleCreateToken(w http.ResponseWriter, r *http.Request, sess 
 	})
 }
 
-func tokenListItem(rec TokenHashRecord) map[string]any {
+func (s *Server) tokenListItem(rec TokenHashRecord) map[string]any {
 	return map[string]any{
-		"id":         rec.ID,
-		"tenant":     rec.Tenant,
-		"scope":      rec.Scope,
-		"expires_at": rec.ExpiresAt.Format(time.RFC3339),
-		"revoked":    rec.Revoked,
-		"created_at": rec.CreatedAt.Format(time.RFC3339),
+		"id":          rec.ID,
+		"tenant":      rec.Tenant,
+		"tenant_name": s.registry.TenantName(rec.Tenant),
+		"scope":       rec.Scope,
+		"expires_at":  rec.ExpiresAt.Format(time.RFC3339),
+		"revoked":     rec.Revoked,
+		"created_at":  rec.CreatedAt.Format(time.RFC3339),
 	}
 }
 
@@ -88,7 +109,7 @@ func (s *Server) handleListTokens(w http.ResponseWriter, r *http.Request, sess *
 	recs := s.registry.ListTokensForOwner(sess.GitHubID)
 	out := make([]map[string]any, len(recs))
 	for i, rec := range recs {
-		out[i] = tokenListItem(rec)
+		out[i] = s.tokenListItem(rec)
 	}
 	writeJSON(w, 200, out)
 }
@@ -101,7 +122,7 @@ func (s *Server) handleAdminListTokens(w http.ResponseWriter, r *http.Request, s
 	recs := s.registry.ListAllTokens()
 	out := make([]map[string]any, len(recs))
 	for i, rec := range recs {
-		item := tokenListItem(rec)
+		item := s.tokenListItem(rec)
 		item["github_id"] = rec.GitHubID
 		out[i] = item
 	}

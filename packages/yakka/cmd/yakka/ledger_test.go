@@ -408,3 +408,16 @@ func TestLedgerCompactRerunComplete(t *testing.T) {
 		t.Fatalf("no after counts on rerun:\n%s", out)
 	}
 }
+
+func TestSyncCommandRefusals(t *testing.T) {
+	t.Setenv("YAKKA_SYNC_ENDPOINT", "")
+	t.Setenv("YAKKA_SYNC_KEY", "")
+	t.Setenv("YAKKA_SYNC_CONFIG", filepath.Join(t.TempDir(), "none.toml"))
+	if code, out := captureRun(t, "sync"); code != 2 || !strings.Contains(out, "usage") {
+		t.Fatalf("no --to: %d %s", code, out)
+	}
+	code, out := captureRun(t, "sync", "--to", "t-abc", "--tenant-dir", t.TempDir())
+	if code != 1 || !strings.Contains(out, "no sync credential") {
+		t.Fatalf("no credential: %d %s", code, out)
+	}
+}

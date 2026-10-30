@@ -18,9 +18,17 @@
 		readConfiguredBase,
 		routeAllowsChildren,
 		shouldNavigateToProfile,
+		showsTenantChoice,
+		tenantIdFromMe,
+		tenantsFromMe,
 		type MeFetchResult
 	} from '$lib/session-gate';
-	import { beginSessionGate, finishSessionGate, sessionGate } from '$lib/session-gate.svelte';
+	import {
+		beginSessionGate,
+		chooseTenant,
+		finishSessionGate,
+		sessionGate
+	} from '$lib/session-gate.svelte';
 	import { isInvestigationQuery } from '$lib/investigation/request-url';
 	import { clearError, fetchError, pruneNotices, setNoticeView } from '$lib/state.svelte';
 
@@ -41,6 +49,8 @@
 	);
 
 	const collector = $derived(isCollectorMode());
+	const tenants = $derived(tenantsFromMe(sessionGate.me));
+	const currentTenant = $derived(tenantIdFromMe(sessionGate.me, sessionGate.tenant) ?? '');
 	const noTenant = $derived(collector && fetchError.status === 403 && fetchError.message === 'no such tenant');
 
 	function navHref(path: string): string {
@@ -182,6 +192,20 @@
 				onclick={() => chooseTheme('dark')}>Dark</button
 			>
 		</div>
+		{#if collector && showsTenantChoice(tenants)}
+			<label class="tenant">
+				Tenant
+				<select
+					data-testid="tenant-switcher"
+					value={currentTenant}
+					onchange={(e) => chooseTenant(e.currentTarget.value)}
+				>
+					{#each tenants as t (t.id)}
+						<option value={t.id}>{t.name}</option>
+					{/each}
+				</select>
+			</label>
+		{/if}
 		<nav>
 			{#each nav as [href, text] (href)}
 				<a href={navHref(href)} aria-current={navCurrent(href)}>{text}</a>
@@ -245,6 +269,18 @@
 		display: flex;
 		flex-wrap: wrap;
 		gap: var(--space-2);
+	}
+	.tenant {
+		display: flex;
+		gap: var(--space-2);
+		align-items: baseline;
+	}
+	.tenant select {
+		font: inherit;
+		color: var(--text);
+		background: var(--bg);
+		border: 1px solid var(--border);
+		padding: var(--space-1) var(--space-2);
 	}
 	.theme button {
 		font: inherit;
