@@ -1,0 +1,101 @@
+{
+  "generated_at": "2026-10-02T06:15:57.437+00:00",
+  "stratum": "maps-5h",
+  "approach_id": "H3-progress-velocity",
+  "model": "jev-1.13.0",
+  "driver": "TypeSafe System One",
+  "n_cells": 8,
+  "n_sessions": 4,
+  "checkpoints": [
+    75,
+    90
+  ],
+  "recheck_interval_turns": 15,
+  "http_successes": 8,
+  "errors": 0,
+  "parse_miss_cells": 0,
+  "fire_count": 1,
+  "defer_count": 7,
+  "fire_by_checkpoint": {
+    "75": {
+      "n": 4,
+      "fire": 0,
+      "defer": 4
+    },
+    "90": {
+      "n": 4,
+      "fire": 1,
+      "defer": 3
+    }
+  },
+  "fire_cell_ids": [
+    "6a57e92f3fc98925"
+  ],
+  "response_label_counts": {
+    "fire_now": 1,
+    "defer_recovery": 0,
+    "defer_progress": 0,
+    "defer_activity_not_value": 3,
+    "defer_insufficient": 4
+  },
+  "h2_null_baselines": {
+    "never_fire": {
+      "definition": "Never fire at any checkpoint; no model needed.",
+      "fire_count": 0,
+      "defer_count": 8,
+      "by_checkpoint": {
+        "75": {
+          "n": 4,
+          "fire": 0,
+          "defer": 4
+        },
+        "90": {
+          "n": 4,
+          "fire": 0,
+          "defer": 4
+        }
+      }
+    },
+    "constant_turn_75": {
+      "definition": "Fire at every checkpoint at or after turn 75; no model needed.",
+      "fire_count": 8,
+      "defer_count": 0,
+      "by_checkpoint": {
+        "75": {
+          "n": 4,
+          "fire": 4,
+          "defer": 0
+        },
+        "90": {
+          "n": 4,
+          "fire": 4,
+          "defer": 0
+        }
+      }
+    },
+    "constant_turn_90": {
+      "definition": "Fire at every checkpoint at or after turn 90; no model needed.",
+      "fire_count": 4,
+      "defer_count": 4,
+      "by_checkpoint": {
+        "75": {
+          "n": 4,
+          "fire": 0,
+          "defer": 4
+        },
+        "90": {
+          "n": 4,
+          "fire": 4,
+          "defer": 0
+        }
+      }
+    }
+  },
+  "ideal_steer_status": "unidentified",
+  "near_done_fp": "unknown",
+  "runaway_miss": "unknown",
+  "scoreboard_note": "No evidence-based outcome-label sidecar; final length was not sent to the judge. H2 nulls are deterministic grid baselines only.",
+  "soft_standard_hold": true,
+  "product_wiring": false,
+  "hooks_unlock": false
+}

@@ -1,0 +1,28 @@
+{
+  "generated_at": "2026-10-02T06:08:13.645+00:00",
+  "stratum": "maps-5h",
+  "approach_id": "H1-defer-recheck",
+  "model": "jev-1.13.0",
+  "driver": "TypeSafe System One",
+  "n_cells": 8,
+  "n_sessions": 4,
+  "checkpoints": [75, 90],
+  "recheck_interval_turns": 15,
+  "http_successes": 8,
+  "errors": 0,
+  "parse_miss_cells": 0,
+  "fire_count": 1,
+  "defer_count": 7,
+  "fire_by_checkpoint": {
+    "75": {"n": 4, "fire": 0, "defer": 4},
+    "90": {"n": 4, "fire": 1, "defer": 3}
+  },
+  "fire_cell_ids": ["330f878d73bbfe36"],
+  "ideal_steer_status": "unidentified",
+  "near_done_fp": "unknown",
+  "runaway_miss": "unknown",
+  "scoreboard_note": "No evidence-based outcome-label sidecar; final length was not sent to the judge.",
+  "soft_standard_hold": true,
+  "product_wiring": false,
+  "hooks_unlock": false
+}
