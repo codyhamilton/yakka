@@ -1,0 +1,61 @@
+{
+  "registration_id": "stats-jev-tournament-live-v2-1",
+  "mode": "live",
+  "model_pin": "jev-1.13.0",
+  "cells_planned": 32,
+  "cells_recorded": 32,
+  "preflight_passes": 32,
+  "network_calls": 0,
+  "jev_posts": 0,
+  "replay_posts": 0,
+  "flash_calls": 0,
+  "live_seats_run": 0,
+  "hold_out_scored": 0,
+  "transcript_excerpts_in_state": 0,
+  "missing_fixtures": 0,
+  "kill_fired": true,
+  "kill_reason": "zero_call_already_separates",
+  "api_errors": [],
+  "framing_summary": [
+    {
+      "registry_id": "esv0-binary-foreshadow",
+      "framing_id": "esv0-binary-foreshadow#d0f736b5ecc043ce",
+      "planned_cells": 8,
+      "recorded_cells": 8,
+      "live_posts": 0,
+      "not_run_cells": 8,
+      "outcome_counts": {},
+      "pass": true
+    },
+    {
+      "registry_id": "esv0-likert-collapse",
+      "framing_id": "esv0-likert-collapse#4ddae065dda2245f",
+      "planned_cells": 8,
+      "recorded_cells": 8,
+      "live_posts": 0,
+      "not_run_cells": 8,
+      "outcome_counts": {},
+      "pass": true
+    },
+    {
+      "registry_id": "esv0-binary-monitor-present",
+      "framing_id": "esv0-binary-monitor-present#77ace2e03f04a9da",
+      "planned_cells": 8,
+      "recorded_cells": 8,
+      "live_posts": 0,
+      "not_run_cells": 8,
+      "outcome_counts": {},
+      "pass": true
+    },
+    {
+      "registry_id": "esv0-binary-counts-only",
+      "framing_id": "esv0-binary-counts-only#10485a6cd618781e",
+      "planned_cells": 8,
+      "recorded_cells": 8,
+      "live_posts": 0,
+      "not_run_cells": 8,
+      "outcome_counts": {},
+      "pass": true
+    }
+  ]
+}
