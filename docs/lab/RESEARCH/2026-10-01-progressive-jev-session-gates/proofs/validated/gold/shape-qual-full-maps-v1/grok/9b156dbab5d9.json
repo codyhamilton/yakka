@@ -1,0 +1,41 @@
+{
+  "experiment": "shape-qual-full-maps-v1",
+  "worker_id": "9b156dbab5d9",
+  "model": "Grok",
+  "narrative_shape": "Census reruns that finish and get committed. Turn 70 waits on a background reference run. Turn 72 starts the remaining continuity and mirror runs. Turn 74 waits on those three. Turn 83 they have finished; sha256 matches across pairs; the worker inspects JSON and builds the evidence file; turn 90 commits owned paths. Edits stay at 6. No reread table. The waits are the measurement plan, and they resolve.",
+  "shape_label": "unclear",
+  "phases": [
+    {
+      "range": "68-75",
+      "name": "staggered census waits",
+      "note": "One run finishes quickly; three more are launched; Monitor 4. Explicit pauses."
+    },
+    {
+      "range": "83-90",
+      "name": "identity check and commit",
+      "note": "Sha256 matches, JSON inspected against the brief, evidence file, commit of owned paths."
+    }
+  ],
+  "early_signals": [
+    {
+      "turn": 70,
+      "signal": "Pauses for the background reference run."
+    },
+    {
+      "turn": 72,
+      "signal": "First run succeeded; starts the continuity and mirror reruns."
+    },
+    {
+      "turn": 74,
+      "signal": "Waiting on the remaining three runs."
+    },
+    {
+      "turn": 83,
+      "signal": "Those runs finished; next act is sha256 identity and the evidence JSON."
+    }
+  ],
+  "early_signal_window_respected": true,
+  "recommended_exit": null,
+  "earliness": null,
+  "rationale": "The early window is the multi-run wait and, inside the same window, the successful identity check and commit. The waits are the measurement, not a stuck poll after the work was done."
+}

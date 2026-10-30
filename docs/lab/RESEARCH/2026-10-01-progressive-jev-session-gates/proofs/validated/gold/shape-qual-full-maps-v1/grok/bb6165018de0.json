@@ -1,0 +1,50 @@
+{
+  "experiment": "shape-qual-full-maps-v1",
+  "worker_id": "bb6165018de0",
+  "model": "Grok",
+  "narrative_shape": "Read-only census whose shape is standby. From turn 68 the tail is \"standing by\" and \"waiting for the census.\" Bash climbs 66→137 while Read stays near 8 and the only repeated path is one spec PDF three times. A report skeleton is drafted during the wait. Block counts advance (1200/1836, then 1600). The census finishes at turn 149 and analysis starts. The long run is the monitor, not a code loop.",
+  "shape_label": "poll_monitor",
+  "phases": [
+    {
+      "range": "68-120",
+      "name": "census standby",
+      "note": "Standing by, waiting on level-0 block lines, arming monitors. Write count sticks at 2 (report skeleton). Monitor 2→3."
+    },
+    {
+      "range": "128-148",
+      "name": "still waiting, blocks advance",
+      "note": "Silent bash tails, then prose at 143 and 147 with block 1200 and 1600 of 1836. Compactions appear (2) without a new read set."
+    },
+    {
+      "range": "149-150",
+      "name": "census done, analysis starts",
+      "note": "\"The census finished. Now running the analysis.\" One new scratchpad path. This is the end of the wait, not a second shape."
+    }
+  ],
+  "early_signals": [
+    {
+      "turn": 68,
+      "signal": "\"Standing by.\""
+    },
+    {
+      "turn": 69,
+      "signal": "\"Waiting for the census job — will resume analysis once it finishes.\""
+    },
+    {
+      "turn": 75,
+      "signal": "Bash 66 vs Read 8, Monitor 2, one PDF reread — command wait, not an edit/reread loop."
+    },
+    {
+      "turn": 99,
+      "signal": "Still waiting on level 0, about 1836 blocks."
+    },
+    {
+      "turn": 103,
+      "signal": "Drafts the report skeleton while the census runs — the wait is the assigned work."
+    }
+  ],
+  "early_signal_window_respected": true,
+  "recommended_exit": null,
+  "earliness": null,
+  "rationale": "By turn 75 the session is census standby, and turns through 120 stay there. That is a poll/monitor shape, distinct from the reread loops. The finish at 149 is outcome, so it is not an early signal, and it is not a reason to call the wait thrash."
+}

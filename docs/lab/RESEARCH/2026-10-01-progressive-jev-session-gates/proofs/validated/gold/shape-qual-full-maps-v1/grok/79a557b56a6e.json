@@ -1,0 +1,37 @@
+{
+  "experiment": "shape-qual-full-maps-v1",
+  "worker_id": "79a557b56a6e",
+  "model": "Grok",
+  "narrative_shape": "A single-file fix that closes by amending the brief. osm_to_parcel_geometry.py is read 8 times by turn 75, with 12 edits already done. Turn 70 waits for a notification instead of polling. The edit count does not grow after that. Turn 90 reads the brief and amends it to record the resolution. Compactions 0. The reread is concentration on the file being fixed, and the prefix ends in the write-up.",
+  "shape_label": "unclear",
+  "phases": [
+    {
+      "range": "68-75",
+      "name": "edits done, short wait",
+      "note": "Edit 12, one Monitor. Turn 70 stops polling. Extractor reread count is 8."
+    },
+    {
+      "range": "83-90",
+      "name": "resolution write-up",
+      "note": "Bash, one new brief read, turn 90 amends the brief. Edit count stays 12."
+    }
+  ],
+  "early_signals": [
+    {
+      "turn": 70,
+      "signal": "Waits for a notification instead of polling, after the edit burst."
+    },
+    {
+      "turn": 75,
+      "signal": "One extractor path already at 8 reads, with 12 edits — tight focus, not a widening loop."
+    },
+    {
+      "turn": 90,
+      "signal": "Amends the brief to record the resolution."
+    }
+  ],
+  "early_signal_window_respected": true,
+  "recommended_exit": null,
+  "earliness": null,
+  "rationale": "The reread count is high, but the same ≤120 window ends in a brief amendment rather than a stuck loop. The short wait resolves. Not early thrash."
+}

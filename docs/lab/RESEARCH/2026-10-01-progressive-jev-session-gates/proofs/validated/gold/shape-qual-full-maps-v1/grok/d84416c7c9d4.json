@@ -1,0 +1,32 @@
+{
+  "experiment": "shape-qual-full-maps-v1",
+  "worker_id": "d84416c7c9d4",
+  "model": "Grok",
+  "narrative_shape": "Read-only measurement that is still producing results. Turn 68 starts a name-matching baseline. Turn 73 calls an L2 result strong and real and starts an L0 rerun. Turn 75 arms a monitor for that rerun. Bash 70, Read 5, Monitor 4, one Edit and one Write, no path at ≥3 reads, compactions 0. Single checkpoint. The shape is a measurement loop, not standby-as-the-whole-session and not a code thrash.",
+  "shape_label": "unclear",
+  "phases": [
+    {
+      "range": "68-75",
+      "name": "baseline, then L0 rerun",
+      "note": "Name-matching script, a stated L2 result, L0 rerun launched, monitor armed."
+    }
+  ],
+  "early_signals": [
+    {
+      "turn": 68,
+      "signal": "Starts the name-matching baseline for part 4."
+    },
+    {
+      "turn": 73,
+      "signal": "Treats the L2 match as a real result and reruns scoped to level 0."
+    },
+    {
+      "turn": 75,
+      "signal": "Monitor armed on that L0 rerun — a measurement wait, after a result, not the whole histogram."
+    }
+  ],
+  "early_signal_window_respected": true,
+  "recommended_exit": null,
+  "earliness": null,
+  "rationale": "Inside the only checkpoint the worker reports a result and widens the measurement. That is the trajectory. There is no reread table and no collapsed wait."
+}

@@ -1,0 +1,37 @@
+{
+  "experiment": "shape-qual-full-maps-v1",
+  "worker_id": "e28a2428b192",
+  "model": "Grok",
+  "narrative_shape": "Bash-only prefix. Both checkpoints are Bash plus two Writes. Distinct reads stay 0. Assistant text is 0 at turn 75 and 101 at turn 90. The only sentence, turn 85, launches compare_disc coord_scale and a round-trip rerun. No Edit, no Read, no reread table. Compactions 2→4. Prefix bytes grow (~1.6MB to ~1.9MB).",
+  "shape_label": "unclear",
+  "phases": [
+    {
+      "range": "68-75",
+      "name": "silent bash",
+      "note": "Histogram Bash 75, Write 2. Empty tail. No reads."
+    },
+    {
+      "range": "83-90",
+      "name": "still bash, one check line",
+      "note": "Bash +15. Turn 85 starts compare_disc coord_scale and the round-trip rerun. Still 0 distinct reads."
+    }
+  ],
+  "early_signals": [
+    {
+      "turn": 75,
+      "signal": "Tool histogram is Bash 75 and Write 2; 0 reads; 0 assistant characters; empty tail."
+    },
+    {
+      "turn": 85,
+      "signal": "The only prose launches disc checks rather than a read/edit trajectory."
+    },
+    {
+      "turn": 90,
+      "signal": "Still 0 distinct reads and text of 101 after another 15 bash calls."
+    }
+  ],
+  "early_signal_window_respected": true,
+  "recommended_exit": null,
+  "earliness": null,
+  "rationale": "The prefix never shows a read/edit trajectory, but it also never shows a reread loop or an explicit stuck-wait sentence. A bash-only disc check is compatible with the brief, so thrash is not established."
+}

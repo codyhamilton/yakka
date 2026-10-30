@@ -1,0 +1,42 @@
+{
+  "experiment": "shape-qual-full-maps-v1",
+  "worker_id": "ca977b9ca0dd",
+  "model": "Grok",
+  "narrative_shape": "Reread-and-compaction loop with no implementation tools. At turn 75 Read 45 and Bash 42, zero edits, assistant text 167. _cenc.c is already at 10 reads, divide.py 9, _e2.c 6, build_alldata.py 5, cenc.py 3, and compactions are 10. Text stays 167 through turn 105 while those counts climb (_cenc.c 14, _e2.c 9, compactions 16). Every tail excerpt is empty.",
+  "shape_label": "early_thrash",
+  "phases": [
+    {
+      "range": "75",
+      "name": "loop already set",
+      "note": "Five paths reread at least three times, 10 compactions, text 167, silent tail, no Edit or Write."
+    },
+    {
+      "range": "90",
+      "name": "same files, more reads",
+      "note": "Bash +10, Read +6. One new tool-result path. Text unchanged. cenc.py reread rises to 5."
+    },
+    {
+      "range": "105",
+      "name": "counts still climbing",
+      "note": "_cenc.c 14, divide.py 10, _e2.c 9, build_alldata.py 7, compactions 16. Still no implementation tool in the histogram."
+    }
+  ],
+  "early_signals": [
+    {
+      "turn": 75,
+      "signal": "Reread cluster and 10 compactions with frozen-low text and a silent tail; histogram is only Read and Bash."
+    },
+    {
+      "turn": 90,
+      "signal": "No Edit/Write, text still 167, rereads still rising on the same parser files."
+    },
+    {
+      "turn": 105,
+      "signal": "Compactions 16 and higher reread counts; distinct reads only 15; tail still empty."
+    }
+  ],
+  "early_signal_window_respected": true,
+  "recommended_exit": 75,
+  "earliness": "on time — the first checkpoint is already the loop",
+  "rationale": "Turn 75 is a reread and compaction loop with no edits and no prose. Turns 90 and 105 only deepen it. There is no recovery inside this prefix."
+}

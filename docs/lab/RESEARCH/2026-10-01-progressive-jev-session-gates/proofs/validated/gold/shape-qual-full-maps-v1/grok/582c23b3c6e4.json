@@ -1,0 +1,29 @@
+{
+  "experiment": "shape-qual-full-maps-v1",
+  "worker_id": "582c23b3c6e4",
+  "model": "Grok",
+  "narrative_shape": "The tail is silent bash until a hard stop. Turns 68–74 have no prose. Turn 75 is a status: needs context; the full-disc sha moved; the worker has not committed or pushed because done evidence does not pass; owned-path changes are uncommitted; the cause given is a y-down versus y-up stored-pixel change the brief requires. Histogram is Bash 77 only, 0 reads, 0 edits, compactions 2, but assistant text is 7456 characters, almost all of it this stop note. T=77, so the declaration is the end.",
+  "shape_label": "late_pivot",
+  "phases": [
+    {
+      "range": "68-74",
+      "name": "silent bash",
+      "note": "Empty excerpts. No Read or Edit in the cumulative histogram."
+    },
+    {
+      "range": "75",
+      "name": "failed-gate stop",
+      "note": "Explicit non-commit. Sha moved because stored road-node pixels are y-down against the later y-up frame. Status is needs context."
+    }
+  ],
+  "early_signals": [
+    {
+      "turn": 75,
+      "signal": "Declares needs context: full-disc sha moved, done evidence fails, changes left uncommitted, cause named as the stored-pixel y-down/y-up mismatch."
+    }
+  ],
+  "early_signal_window_respected": true,
+  "recommended_exit": 75,
+  "earliness": "on time — the failed-gate declaration is the last visible turn",
+  "rationale": "The pack does not show a long edit narrative, but turn 75 is a clear change to a failed evidence gate and a refusal to commit. That is the pivot. There is no post-120 material in this prefix."
+}

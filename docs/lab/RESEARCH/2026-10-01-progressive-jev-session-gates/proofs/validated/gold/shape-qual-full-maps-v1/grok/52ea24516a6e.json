@@ -1,0 +1,46 @@
+{
+  "experiment": "shape-qual-full-maps-v1",
+  "worker_id": "52ea24516a6e",
+  "model": "Grok",
+  "narrative_shape": "Extraction wait, then results, then a second wait, then a commit. Turn 75 is parked on a full-Australia run after the module was already rewritten (Edit 10, the extractor reread 6 times). Turn 90 says the run results are in and done-evidence has started. Turns 100–102 wait on a pytest monitor. Turn 105 stages owned files and commits. Both waits resolve inside the prefix.",
+  "shape_label": "unclear",
+  "phases": [
+    {
+      "range": "68-75",
+      "name": "wait on full extraction",
+      "note": "Reviews the module while a monitor watches the Australia run. Explicitly stops polling."
+    },
+    {
+      "range": "83-90",
+      "name": "results arrive",
+      "note": "Monitor re-armed during index finalization (spool ~19GB). Turn 90: full results, done-evidence, commit prep."
+    },
+    {
+      "range": "98-105",
+      "name": "suite wait, then commit",
+      "note": "Monitor on pytest plus grep/git checks. Turn 105: owned files staged, committing."
+    }
+  ],
+  "early_signals": [
+    {
+      "turn": 72,
+      "signal": "Names the full-Australia extraction and defers the final time numbers until the monitor fires."
+    },
+    {
+      "turn": 74,
+      "signal": "Switches to the Monitor notification instead of polling."
+    },
+    {
+      "turn": 90,
+      "signal": "Results are in; done-evidence and commit prep start — the extraction wait resolved."
+    },
+    {
+      "turn": 100,
+      "signal": "Second wait, on the suite monitor, rather than polling further."
+    }
+  ],
+  "early_signal_window_respected": true,
+  "recommended_exit": null,
+  "earliness": null,
+  "rationale": "The ≤120 window already contains both waits and the commit. The waits are on-brief evidence steps that finish. That is not early thrash and not a pivot that fails to return."
+}

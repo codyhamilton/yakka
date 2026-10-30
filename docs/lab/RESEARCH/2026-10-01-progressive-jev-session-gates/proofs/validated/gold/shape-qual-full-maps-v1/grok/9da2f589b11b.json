@@ -1,0 +1,28 @@
+{
+  "experiment": "shape-qual-full-maps-v1",
+  "worker_id": "9da2f589b11b",
+  "model": "Grok",
+  "narrative_shape": "An edit burst that closes into a handoff. Histogram is Edit 23, Bash 49, Read 5, Write 2. Assistant text is only 246 characters. No path reaches three reads. Turn 74 appends the 2-03 handoff. Compactions 2. The tail is mostly empty bash around that handoff. Single checkpoint, T=76. Heavy editing with very little prose, and the visible end is the handoff rather than a loop.",
+  "shape_label": "unclear",
+  "phases": [
+    {
+      "range": "68-75",
+      "name": "edits and handoff",
+      "note": "Edit count 23 against only 5 reads. Turn 74 appends the handoff. No reread table."
+    }
+  ],
+  "early_signals": [
+    {
+      "turn": 74,
+      "signal": "Appends the 2-03 handoff — the visible close of an edit-heavy prefix."
+    },
+    {
+      "turn": 75,
+      "signal": "Edit 23, Read 5, assistant text 246, no path reread ≥3 — many edits, not a widening read loop."
+    }
+  ],
+  "early_signal_window_respected": true,
+  "recommended_exit": null,
+  "earliness": null,
+  "rationale": "The checkpoint shows a large edit count and a handoff, not rereads or a wait park. Low prose makes the edit contents invisible, but the shape is still an implementation close."
+}

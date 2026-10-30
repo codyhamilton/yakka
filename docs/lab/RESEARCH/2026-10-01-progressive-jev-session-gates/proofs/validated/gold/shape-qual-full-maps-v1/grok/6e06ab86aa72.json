@@ -1,0 +1,46 @@
+{
+  "experiment": "shape-qual-full-maps-v1",
+  "worker_id": "6e06ab86aa72",
+  "model": "Grok",
+  "narrative_shape": "Done-evidence waits, then a commit. Early turns check Perth parity and start compare_disc. From turn 83 through 116 the tail is hold-for-notification on roundtrip and full-disc coord_scale. Distinct reads stay at 2 and there is no reread table. Turn 117 the coord_scale check PASSes (0 of 1,461,347 exceeding) and turns 118–120 clean scratch and commit. The length is the wait; the wait resolves.",
+  "shape_label": "unclear",
+  "phases": [
+    {
+      "range": "68-75",
+      "name": "parity and compare_disc",
+      "note": "Perth identical at two job counts; compare_disc started; one Write."
+    },
+    {
+      "range": "83-116",
+      "name": "blocking waits",
+      "note": "Repeated \"I'll wait\" / \"pause here\" on roundtrip and coord_scale. Bash 84→112, Read stuck at 2."
+    },
+    {
+      "range": "117-120",
+      "name": "pass and commit",
+      "note": "coord_scale PASS, owned files only, commit."
+    }
+  ],
+  "early_signals": [
+    {
+      "turn": 83,
+      "signal": "\"Let's wait for it to complete\" on the long check."
+    },
+    {
+      "turn": 102,
+      "signal": "Switches from further polling to a completion notification."
+    },
+    {
+      "turn": 105,
+      "signal": "Still on the full-disc coord_scale check, scaled like a ~350s roundtrip."
+    },
+    {
+      "turn": 113,
+      "signal": "Holding for the coord_scale check or a 30s monitor tick."
+    }
+  ],
+  "early_signal_window_respected": true,
+  "recommended_exit": null,
+  "earliness": null,
+  "rationale": "Turns ≤120 are the evidence wait, which is why the transcript is long, and the same window already contains the PASS and the commit. That is not a failed pivot and not a reread thrash."
+}

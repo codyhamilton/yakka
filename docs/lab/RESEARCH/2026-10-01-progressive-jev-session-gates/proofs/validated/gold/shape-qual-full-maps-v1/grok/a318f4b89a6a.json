@@ -1,0 +1,33 @@
+{
+  "experiment": "shape-qual-full-maps-v1",
+  "worker_id": "a318f4b89a6a",
+  "model": "Grok",
+  "narrative_shape": "Active debugging of a heavy disc check, still editing at the end. Turn 75: pytest 7/7 and a clean import grep, then the heavy-lock check is relaunched with a multiprocessing fix. Turn 86 diagnoses a copy-on-write memory blow-up in ShapeIndex.buckets and turns 87–89 edit again. Rereads of the roundtrip tool, walk.py, and spool.py are real, and compactions are already 8 at turn 75, but the tail is a new diagnosis plus edits, not a frozen loop.",
+  "shape_label": "unclear",
+  "phases": [
+    {
+      "range": "68-75",
+      "name": "fix, tests, relaunch",
+      "note": "Edits 8, then a passing pytest and a relaunch of the heavy-lock check."
+    },
+    {
+      "range": "83-90",
+      "name": "memory diagnosis and more edits",
+      "note": "Roundtrip tool reread rises to 5. Turn 86 names the COW/GC problem. Three further edits. Compactions stay 8."
+    }
+  ],
+  "early_signals": [
+    {
+      "turn": 75,
+      "signal": "Pytest passed and the heavy-lock check is relaunched, while compactions are already 8 and three paths are reread ≥3 — a live debug loop, not a quiet commit."
+    },
+    {
+      "turn": 86,
+      "signal": "The runaway process is diagnosed as copy-on-write duplication of ShapeIndex.buckets, and edits follow."
+    }
+  ],
+  "early_signal_window_respected": true,
+  "recommended_exit": null,
+  "earliness": null,
+  "rationale": "Elevated compactions and rereads at turn 75 foreshadow the debug loop, and turn 86 shows that loop is a live memory investigation. It has not frozen into thrash by turn 90."
+}

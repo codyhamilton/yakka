@@ -1,0 +1,37 @@
+{
+  "experiment": "shape-qual-full-maps-v1",
+  "worker_id": "7af2854bba92",
+  "model": "Grok",
+  "narrative_shape": "Design revision that writes an amendment, waits on an adversarial review agent, then edits again. Turn 72: amendment committed, holding the push. Turn 74: still waiting on that agent. Checkpoint 90 has no prose, but Edit rises from 1 to 5 (four edit calls in the tail). DESIGN.md is reread three times. Seven Agent calls are already in the histogram at turn 75. The wait does not eat the rest of the run.",
+  "shape_label": "unclear",
+  "phases": [
+    {
+      "range": "68-75",
+      "name": "amendment, then agent wait",
+      "note": "Skill plus Agent traffic. Turn 72 amendment committed. Turn 74 still waiting on the adversarial pass."
+    },
+    {
+      "range": "83-90",
+      "name": "edits resume",
+      "note": "Bash, then four Edits with empty excerpts. Edit count 1→5. No new read paths."
+    }
+  ],
+  "early_signals": [
+    {
+      "turn": 72,
+      "signal": "Amendment is committed and the push is held for the adversarial pass."
+    },
+    {
+      "turn": 74,
+      "signal": "Still waiting on the adversarial review agent."
+    },
+    {
+      "turn": 75,
+      "signal": "Histogram already has Agent 7 and only one Edit — the wait is a real phase, not the whole run."
+    }
+  ],
+  "early_signal_window_respected": true,
+  "recommended_exit": null,
+  "earliness": null,
+  "rationale": "The ≤120 window shows an agent wait and then further edits, so the wait is a phase of a design revision rather than runaway poll or a failed pivot. Checkpoint 90's edits have no prose, so what they change is not visible."
+}

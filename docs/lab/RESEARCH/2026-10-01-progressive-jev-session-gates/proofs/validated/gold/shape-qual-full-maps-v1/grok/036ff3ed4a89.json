@@ -1,0 +1,42 @@
+{
+  "experiment": "shape-qual-full-maps-v1",
+  "worker_id": "036ff3ed4a89",
+  "model": "Grok",
+  "narrative_shape": "Verify-and-record, structured as blocking waits that do end. Turn 71 stops tool calls to wait on compare_disc. The job finishes, a vocab/container finding is inspected, another blocking wait starts, and turns 143–150 confirm a deterministic failing report and write the PLAN.md build record plus target-disc deviations. Compactions stay 0. Edits appear only at the documentation close. Not a reread loop, and not a collapse: the last phase is the brief's record.",
+  "shape_label": "unclear",
+  "phases": [
+    {
+      "range": "71-90",
+      "name": "wait, then open the report",
+      "note": "Explicit stop-and-wait on compare_disc and its monitors. Turn 90: exit 0, look at the report. Bash 70→85, Read stuck at 6."
+    },
+    {
+      "range": "104-135",
+      "name": "investigate, then block again",
+      "note": "Turn 104 looks at vocab offender 578 and DESIGN.md while a job runs. Turn 120 is another real blocking wait. Checkpoint 135 tail is silent Bash."
+    },
+    {
+      "range": "143-150",
+      "name": "document the record",
+      "note": "Second compare_disc report checked, artifacts cleaned, PLAN.md and target-disc.md edited. PLAN.md reaches a reread count of 3 only here."
+    }
+  ],
+  "early_signals": [
+    {
+      "turn": 71,
+      "signal": "Stops further tool calls to wait on compare_disc and its monitors before resuming verification."
+    },
+    {
+      "turn": 90,
+      "signal": "compare_disc finished exit 0 and the next act is the report — the waits are finite."
+    },
+    {
+      "turn": 104,
+      "signal": "Investigates a vocab finding and DESIGN.md for record-keeping while another job runs."
+    }
+  ],
+  "early_signal_window_respected": true,
+  "recommended_exit": null,
+  "earliness": null,
+  "rationale": "The early window is wait-between-checks, and that is how the run is long. Those waits resolve into the documentation close, so this is not early thrash and not a late failed pivot. The doc edits after 120 are outcome."
+}

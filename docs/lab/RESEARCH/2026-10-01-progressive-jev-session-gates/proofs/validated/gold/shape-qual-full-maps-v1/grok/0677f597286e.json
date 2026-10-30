@@ -1,0 +1,37 @@
+{
+  "experiment": "shape-qual-full-maps-v1",
+  "worker_id": "0677f597286e",
+  "model": "Grok",
+  "narrative_shape": "Scaffolding unit that waits out pytest and then commits. Turns 69–71 correct provenance and append a Contract T entry. Turn 75 is an explicit bounded wait on the full suite. Turns 85–90 confirm the Perth sha matches da13a775…, check gitignore, stage owned paths only, and commit. Edit and Write counts are flat after turn 75 because the writing already happened. Rereads are provenance.md ×5 and _cenc.c ×4.",
+  "shape_label": "unclear",
+  "phases": [
+    {
+      "range": "68-75",
+      "name": "docs written, suite running",
+      "note": "Provenance edits and a new entry. Turn 75 describes a bounded wait (timeout 3300, poll for ALLDONE/ABORT/FAIL)."
+    },
+    {
+      "range": "83-90",
+      "name": "sha match and commit",
+      "note": "Output-invariant sha confirmed, scratch cleaned, owned paths staged, commit. No new edits."
+    }
+  ],
+  "early_signals": [
+    {
+      "turn": 69,
+      "signal": "Correcting provenance and appending the Contract T build-product entry."
+    },
+    {
+      "turn": 75,
+      "signal": "Full pytest is in a bounded background wait; the worker plans to continue when it notifies."
+    },
+    {
+      "turn": 85,
+      "signal": "Sha matches the perth_j1 reference; next step is cleanup and commit."
+    }
+  ],
+  "early_signal_window_respected": true,
+  "recommended_exit": null,
+  "earliness": null,
+  "rationale": "The wait and the successful sha-then-commit are both inside ≤120. The session does the brief and closes. The rereads are the docs and C file being updated, not a widening loop."
+}

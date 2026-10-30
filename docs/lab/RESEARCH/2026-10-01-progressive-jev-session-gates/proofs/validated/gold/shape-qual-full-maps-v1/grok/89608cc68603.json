@@ -1,0 +1,46 @@
+{
+  "experiment": "shape-qual-full-maps-v1",
+  "worker_id": "89608cc68603",
+  "model": "Grok",
+  "narrative_shape": "A calibration fix that lands inside the observed window. The Perth place-name record appears (type_code 308, cell 206/216), an e2e place=city test is added, the suite reaches 238 passes, and briefs 20 and 22 are amended. Last checkpoint is 120 on a 125-turn run. Rereads are a handful of test files. Compactions 0. No post-fix stall.",
+  "shape_label": "unclear",
+  "phases": [
+    {
+      "range": "75-90",
+      "name": "Perth fix confirmed",
+      "note": "Re-extract; names +17; Perth place record checked. Some silent bash around the reads."
+    },
+    {
+      "range": "98-105",
+      "name": "e2e test, then wait",
+      "note": "Synthetic PBF test added. Turn 105 waits on the pytest notification."
+    },
+    {
+      "range": "113-120",
+      "name": "green suite and brief amendments",
+      "note": "New test passes, full suite 238, briefs 22 and 20 amended."
+    }
+  ],
+  "early_signals": [
+    {
+      "turn": 87,
+      "signal": "Names count rose by 17; next check is the Perth cell."
+    },
+    {
+      "turn": 88,
+      "signal": "Perth place record confirmed at type_code 308 in cell (206, 216)."
+    },
+    {
+      "turn": 98,
+      "signal": "Adds an e2e test that drives _handle_node for place=city."
+    },
+    {
+      "turn": 105,
+      "signal": "Short wait on pytest before continuing — evidence wait, not a loop."
+    }
+  ],
+  "early_signal_window_respected": true,
+  "recommended_exit": null,
+  "earliness": null,
+  "rationale": "The Perth confirmation and the new test inside ≤120 are already the path that ends in a green suite and brief amendments. There is no later shape change to explain."
+}
