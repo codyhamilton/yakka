@@ -83,8 +83,11 @@ is the API origin. A person signs in with GitHub; the Pages site (or the embedde
 or release binary) uses the session for the dashboard and profile ([design
 7](07-analytics-site.md#shape)). On the profile they create tenants and issue API tokens.
 Each issued token is plaintext `wk_` plus an unguessable body, belongs to one tenant, has scope
-`read` or `read_write` chosen at creation, and expires at an `expires_at` the issuer set with no
-server default. Clients and agents configure that plaintext as `Authorization: Bearer`. The
+`read` or `read_write` chosen at creation, a name that says which host or use it is for, and a
+lifetime the issuer picks from `1d`, `1w`, `1m`, `3m` (the default), `6m` or `1y`. The server
+computes `expires_at` from the lifetime (months are 30 days); a client never sends a date, and
+`expires_at` in a request is a 400. The name is 1 to 64 characters with no control characters and
+defaults to `token`. Clients and agents configure that plaintext as `Authorization: Bearer`. The
 registry stores SHA-256 only; comparison is constant time and neither plaintext nor hash is logged.
 The session cookie is not a bearer token and is not used for ingest.
 
@@ -108,9 +111,10 @@ endpoints. Unknown fields in a fact are kept in its raw payload, never rejected.
 | `GET /v1/whoami` | bearer only (local: none) | the tenant, scope and `expires_at` (Unix seconds, 0 for none) a bearer token resolves to; no cookie, never opens the tenant. `yakka sync` calls it before sending to check the target tenant and `read_write` scope. A 404 means a collector too old to be a sync target |
 | `GET /v1/me` | session | signed-in GitHub identity and owned tenants (collector dashboard) |
 | `POST /v1/tenants`, `POST /v1/tokens`, `GET /v1/tokens`, `POST /v1/tokens/<id>/revoke` | session (tenant owner) | create tenant; issue, list, or revoke tokens; plaintext `token` only in the `POST /v1/tokens` response |
-| `POST /v1/device/code` | none (rate limited per IP) | start a device grant; returns `device_code`, `user_code`, `verification_uri_complete`, `interval`, `expires_in` |
-| `POST /v1/device/authorize` | session (tenant owner), same-origin | approve or deny a `user_code` with tenant, scope and expiry; no token is minted here |
-| `POST /v1/device/token` | none (the `device_code` is the credential) | the client polls; `authorization_pending`, `slow_down`, `access_denied`, `expired_token`, or 200 with `token`, `tenant`, `endpoint`; the token is minted on the one successful poll |
+| `POST /v1/device/code` | none (rate limited per IP) | start a device grant; the optional body `{"host": "<machine name>"}` becomes the default token name (control characters dropped, at most 64 characters); returns `device_code`, `user_code`, `verification_uri_complete`, `interval`, `expires_in` |
+| `GET /v1/device/grant?user_code=` | session | the `host` a pending code reported, so the approval page can prefill the token name; read-only, counted against the same per-session unknown-code limit as authorize |
+| `POST /v1/device/authorize` | session (tenant owner), same-origin | approve or deny a `user_code` with tenant, scope, `lifetime` and optional `name` (default: the reported host, then `token`); no token is minted here |
+| `POST /v1/device/token` | none (the `device_code` is the credential) | the client polls; `authorization_pending`, `slow_down`, `access_denied`, `expired_token`, or 200 with `token`, `name`, `tenant`, `endpoint`, `expires_at`; the token is minted on the one successful poll |
 | `GET /v1/admin/tokens` | session (admin) | list every token without plaintext |
 
 Outside `/v1`, a binary with the site embedded serves it at `/`. The production Fly image does not

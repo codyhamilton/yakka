@@ -1,6 +1,7 @@
 import io
 import json
 import os
+import socket
 import stat
 import subprocess
 import sys
@@ -134,7 +135,7 @@ class TestStart(LoginEnv):
         self.assertEqual(p["endpoint"], self.fake.url)
         self.assertEqual(p["interval"], 5)
         self.assertEqual([r[0] for r in self.fake.requests], ["/v1/device/code"])
-        self.assertEqual(self.fake.requests[0][1], {})
+        self.assertEqual(self.fake.requests[0][1], {"host": socket.gethostname()})
         self.assertFalse(os.path.exists(self._cfg))
 
     def test_404_and_replacement(self) -> None:

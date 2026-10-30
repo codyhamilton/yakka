@@ -25,10 +25,12 @@ const (
 // deviceGrant is one pending device authorization. It lives in memory only and never holds a token.
 type deviceGrant struct {
 	userCode  string // normalised
+	host      string // host name the device reported, the default token name; may be empty
 	status    grantStatus
 	tenant    string
 	scope     string
-	expiresAt time.Time // chosen token expiry, set on approval
+	name      string    // token name chosen on approval
+	expiresAt time.Time // token expiry, set on approval from the chosen lifetime
 	githubID  int64
 	expiry    time.Time // grant expiry
 	clientIP  string
@@ -96,7 +98,7 @@ func (g *deviceGrants) dropLocked(hash string, gr *deviceGrant) {
 }
 
 // create adds a pending grant for deviceCode and returns its formatted user code.
-func (g *deviceGrants) create(deviceCode, clientIP string) (string, error) {
+func (g *deviceGrants) create(deviceCode, clientIP, host string) (string, error) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	now := g.now()
@@ -115,7 +117,7 @@ func (g *deviceGrants) create(deviceCode, clientIP string) (string, error) {
 			break
 		}
 	}
-	gr := &deviceGrant{userCode: norm, clientIP: clientIP, expiry: now.Add(deviceGrantTTL), interval: deviceBaseInterval}
+	gr := &deviceGrant{userCode: norm, host: host, clientIP: clientIP, expiry: now.Add(deviceGrantTTL), interval: deviceBaseInterval}
 	g.byHash[hashDeviceCode(deviceCode)] = gr
 	g.byUser[norm] = gr
 	return formatUserCode(norm), nil

@@ -35,12 +35,11 @@ func TestWhoamiRemote(t *testing.T) {
 	origin := "https://collector.example"
 	sess := loginRemote(t, h, origin)
 	tid := remoteCreateTenant(t, h, origin, sess, "who")
-	exp := time.Now().Add(24 * time.Hour).Truncate(time.Second)
-	_, rw := remoteIssueToken(t, h, origin, sess, tid, TokenScopeReadWrite, exp)
-	_, ro := remoteIssueToken(t, h, origin, sess, tid, TokenScopeRead, exp)
+	_, rw := remoteIssueToken(t, h, origin, sess, tid, TokenScopeReadWrite, "1d")
+	_, ro := remoteIssueToken(t, h, origin, sess, tid, TokenScopeRead, "1d")
 
 	code, body := do(t, h, "GET", "/v1/whoami", rw, "")
-	if r := getWhoami(t, code, body, 200); r.Tenant != tid || r.Scope != TokenScopeReadWrite || r.ExpiresAt != exp.Unix() {
+	if r := getWhoami(t, code, body, 200); r.Tenant != tid || r.Scope != TokenScopeReadWrite || r.ExpiresAt < time.Now().Add(23*time.Hour).Unix() || r.ExpiresAt > time.Now().Add(25*time.Hour).Unix() {
 		t.Fatalf("read_write whoami: %s", body)
 	}
 	code, body = do(t, h, "GET", "/v1/whoami", ro, "")

@@ -50,6 +50,7 @@ const (
 // TokenHashRecord is one issued API token (SHA-256 of plaintext stored; plaintext never persisted).
 type TokenHashRecord struct {
 	ID        string    `json:"id"`
+	Name      string    `json:"name,omitempty"`
 	Tenant    string    `json:"tenant"`
 	Scope     string    `json:"scope"`
 	Hash      string    `json:"hash"`
@@ -375,7 +376,7 @@ func (r *Registry) ValidateGrant(tenant, scope string, expiresAt time.Time, gith
 }
 
 // CreateToken issues a token for tenant owned by githubID. Returns nil on validation or ownership failure.
-func (r *Registry) CreateToken(tenant, scope string, expiresAt time.Time, githubID int64, now time.Time) (*CreatedToken, error) {
+func (r *Registry) CreateToken(tenant, scope, name string, expiresAt time.Time, githubID int64, now time.Time) (*CreatedToken, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if err := r.validateGrantLocked(tenant, scope, expiresAt, githubID, now); err != nil {
@@ -391,6 +392,7 @@ func (r *Registry) CreateToken(tenant, scope string, expiresAt time.Time, github
 	}
 	rec := TokenHashRecord{
 		ID:        id,
+		Name:      name,
 		Tenant:    tenant,
 		Scope:     scope,
 		Hash:      hashTokenPlaintext(plain),

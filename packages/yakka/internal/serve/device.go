@@ -32,25 +32,30 @@ func (s *Server) handleDeviceCodeRoute(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.grants.sweep()
-	// Body is empty or {}; anything else that is not JSON is rejected.
+	// Body is empty or a JSON object; anything else is rejected. host, when a string, is the
+	// device's name for itself and becomes the default token name.
+	var host string
 	if raw, _ := io.ReadAll(io.LimitReader(r.Body, 1<<10)); len(strings.TrimSpace(string(raw))) > 0 {
 		var v map[string]any
 		if json.Unmarshal(raw, &v) != nil {
 			writeJSON(w, 400, map[string]string{"error": "invalid body"})
 			return
 		}
+		if h, ok := v["host"].(string); ok {
+			host = cleanHost(h)
+		}
 	}
-	s.handleDeviceCode(w, r)
+	s.handleDeviceCode(w, r, host)
 }
 
 // handleDeviceCode issues a grant, subject to the limits in device_limits.go.
-func (s *Server) handleDeviceCode(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleDeviceCode(w http.ResponseWriter, r *http.Request, host string) {
 	deviceCode, err := generateDeviceCode()
 	if err != nil {
 		writeJSON(w, 500, map[string]string{"error": "internal error"})
 		return
 	}
-	userCode, err := s.grants.create(deviceCode, deviceClientIP(r))
+	userCode, err := s.grants.create(deviceCode, deviceClientIP(r), host)
 	if errors.Is(err, errDeviceRateLimited) {
 		writeJSON(w, 429, map[string]string{"error": "rate_limited"})
 		return
@@ -81,7 +86,9 @@ type deviceAuthorizeFields struct {
 	Action      string
 	Tenant      string
 	Scope       string
-	ExpiresAt   string
+	Lifetime    string
+	Name        string
+	ExpiresAt   string // refused: a token's expiry is chosen by lifetime, never by date
 }
 
 func readDeviceAuthorizeFields(r *http.Request) (deviceAuthorizeFields, error) {
@@ -98,6 +105,8 @@ func readDeviceAuthorizeFields(r *http.Request) (deviceAuthorizeFields, error) {
 			Action:      r.FormValue("action"),
 			Tenant:      r.FormValue("tenant"),
 			Scope:       r.FormValue("scope"),
+			Lifetime:    r.FormValue("lifetime"),
+			Name:        r.FormValue("name"),
 			ExpiresAt:   r.FormValue("expires_at"),
 		}, nil
 	}
@@ -108,6 +117,8 @@ func readDeviceAuthorizeFields(r *http.Request) (deviceAuthorizeFields, error) {
 		Action      string `json:"action"`
 		Tenant      string `json:"tenant"`
 		Scope       string `json:"scope"`
+		Lifetime    string `json:"lifetime"`
+		Name        string `json:"name"`
 		ExpiresAt   string `json:"expires_at"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
@@ -115,7 +126,7 @@ func readDeviceAuthorizeFields(r *http.Request) (deviceAuthorizeFields, error) {
 	}
 	return deviceAuthorizeFields{
 		RedirectURI: body.RedirectURI, State: body.State, UserCode: body.UserCode, Action: body.Action,
-		Tenant: body.Tenant, Scope: body.Scope, ExpiresAt: body.ExpiresAt,
+		Tenant: body.Tenant, Scope: body.Scope, Lifetime: body.Lifetime, Name: body.Name, ExpiresAt: body.ExpiresAt,
 	}, nil
 }
 
@@ -129,20 +140,30 @@ func (s *Server) handleDeviceAuthorize(w http.ResponseWriter, r *http.Request, s
 		writeJSON(w, 400, map[string]string{"error": "redirect_uri and state are not accepted"})
 		return
 	}
+	if body.ExpiresAt != "" {
+		writeJSON(w, 400, map[string]string{"error": "expires_at is not accepted; send lifetime"})
+		return
+	}
 	if body.Action != "" && body.Action != "deny" {
 		writeJSON(w, 400, map[string]string{"error": "invalid body"})
 		return
 	}
 	deny := body.Action == "deny"
 	var exp time.Time
+	var name string
 	if !deny {
-		if body.Tenant == "" || body.Scope == "" || body.ExpiresAt == "" {
+		if body.Tenant == "" || body.Scope == "" {
 			writeJSON(w, 400, map[string]string{"error": "invalid body"})
 			return
 		}
-		exp, err = time.Parse(time.RFC3339, body.ExpiresAt)
-		if err != nil {
-			writeJSON(w, 400, map[string]string{"error": "invalid expires_at"})
+		var ok bool
+		if exp, ok = tokenExpiry(body.Lifetime, s.grants.now()); !ok {
+			writeJSON(w, 400, map[string]string{"error": "invalid lifetime"})
+			return
+		}
+		name = strings.TrimSpace(body.Name)
+		if name != "" && !validTokenName(name) {
+			writeJSON(w, 400, map[string]string{"error": "invalid token name"})
 			return
 		}
 	}
@@ -155,7 +176,13 @@ func (s *Server) handleDeviceAuthorize(w http.ResponseWriter, r *http.Request, s
 		if verr = s.registry.ValidateGrant(body.Tenant, body.Scope, exp, sess.GitHubID, s.grants.now()); verr != nil {
 			return verr
 		}
-		gr.status, gr.tenant, gr.scope, gr.expiresAt, gr.githubID = grantApproved, body.Tenant, body.Scope, exp.UTC(), sess.GitHubID
+		if name == "" {
+			name = gr.host
+		}
+		if name == "" {
+			name = defaultTokenName
+		}
+		gr.status, gr.tenant, gr.scope, gr.name, gr.expiresAt, gr.githubID = grantApproved, body.Tenant, body.Scope, name, exp.UTC(), sess.GitHubID
 		return nil
 	})
 	if blocked {
@@ -211,7 +238,7 @@ func (s *Server) handleDeviceTokenRoute(w http.ResponseWriter, r *http.Request) 
 // concurrent second poll sees expired_token. A persist failure therefore loses the grant and the
 // token; the user runs login again.
 func (s *Server) redeemDeviceGrant(w http.ResponseWriter, gr deviceGrant) {
-	created, err := s.registry.CreateToken(gr.tenant, gr.scope, gr.expiresAt, gr.githubID, s.grants.now())
+	created, err := s.registry.CreateToken(gr.tenant, gr.scope, gr.name, gr.expiresAt, gr.githubID, s.grants.now())
 	if err != nil {
 		writeJSON(w, 400, map[string]string{"error": "access_denied"})
 		return
@@ -222,6 +249,7 @@ func (s *Server) redeemDeviceGrant(w http.ResponseWriter, gr deviceGrant) {
 	}
 	writeJSON(w, 200, map[string]string{
 		"token":      created.Plaintext,
+		"name":       created.Record.Name,
 		"endpoint":   s.publicOrigin(),
 		"tenant":     created.Record.Tenant,
 		"scope":      created.Record.Scope,
@@ -239,4 +267,29 @@ func (s *Server) handleDeviceAuthorizeRoute(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	s.originGuardJSONOrForm(s.sessionOnly(s.handleDeviceAuthorize))(w, r)
+}
+
+// handleDeviceGrant tells the signed-in user which host asked for a code, so the approval page can
+// show it and prefill the token name. It counts an unknown code against the same per-session limit
+// as authorize, and changes nothing.
+func (s *Server) handleDeviceGrant(w http.ResponseWriter, r *http.Request, sess *Session) {
+	code := r.URL.Query().Get("user_code")
+	if code == "" {
+		writeJSON(w, 400, map[string]string{"error": "invalid body"})
+		return
+	}
+	var host string
+	found, blocked, _ := s.grants.decide(sess.ID, code, func(gr *deviceGrant) error {
+		host = gr.host
+		return nil
+	})
+	if blocked {
+		writeJSON(w, 429, map[string]string{"error": "rate_limited"})
+		return
+	}
+	if !found {
+		writeJSON(w, 404, map[string]string{"error": "unknown_code"})
+		return
+	}
+	writeJSON(w, 200, map[string]string{"host": host})
 }

@@ -5,12 +5,16 @@
 		ApiError,
 		approveDevice,
 		createTenant,
+		DEFAULT_TOKEN_LIFETIME,
 		denyDevice,
+		fetchDeviceGrant,
 		fetchMe,
 		isCollectorMode,
 		oauthLoginPath,
 		safeReturnPath,
-		type MeResponse
+		TOKEN_LIFETIMES,
+		type MeResponse,
+		type TokenLifetime
 	} from '$lib/api';
 	import { initialTenantChoice, readRememberedTenant, showsTenantChoice } from '$lib/session-gate';
 	import { IdentityPanel } from '$lib/analysis';
@@ -26,7 +30,9 @@
 	let tenantName = $state('');
 	let selectedTenant = $state('');
 	let grantScope = $state<'' | 'read' | 'read_write'>('');
-	let expiresLocal = $state('');
+	let lifetime = $state<TokenLifetime>(DEFAULT_TOKEN_LIFETIME);
+	let tokenName = $state('');
+	let nameLoadedFor = '';
 
 	let tenantStatus = $state('');
 	let entryCode = $state('');
@@ -35,23 +41,11 @@
 	let busy = $state(false);
 	const decided = $derived(result === 'Approved — return to your terminal' || result === 'Denied');
 
-	function parseFutureExpiry(local: string): string | null {
-		if (!local.trim()) return null;
-		const d = new Date(local);
-		if (Number.isNaN(d.getTime())) return null;
-		const iso = d.toISOString();
-		if (d.getTime() <= Date.now()) return null;
-		return iso;
-	}
-
-	const expiresAt = $derived(parseFutureExpiry(expiresLocal));
-
 	const canApprove = $derived(
 		userCode !== '' &&
 			me !== null &&
 			selectedTenant !== '' &&
 			grantScope !== '' &&
-			expiresAt !== null &&
 			!busy &&
 			!decided
 	);
@@ -72,6 +66,19 @@
 			loading = false;
 		}
 	}
+
+	// Prefill the token name with the host the device reported, once per code and only while signed in.
+	$effect(() => {
+		if (!me || userCode === '' || nameLoadedFor === userCode) return;
+		const code = userCode;
+		nameLoadedFor = code;
+		tokenName = '';
+		fetchDeviceGrant(code)
+			.then((g) => {
+				if (nameLoadedFor === code && tokenName === '') tokenName = g.host;
+			})
+			.catch(() => {});
+	});
 
 	$effect(() => {
 		if (!isCollectorMode()) {
@@ -106,14 +113,15 @@
 	}
 
 	function approve() {
-		if (!canApprove || expiresAt === null) return;
+		if (!canApprove) return;
 		void decide(
 			() =>
 				approveDevice({
 					user_code: userCode,
 					tenant: selectedTenant,
 					scope: grantScope,
-					expires_at: expiresAt
+					lifetime,
+					name: tokenName.trim() || undefined
 				}),
 			'Approved — return to your terminal'
 		);
@@ -224,8 +232,23 @@
 					</label>
 
 					<label>
-						Expires (UTC)
-						<input data-testid="device-expires" type="datetime-local" bind:value={expiresLocal} required />
+						Expires in
+						<select data-testid="device-lifetime" bind:value={lifetime} required>
+							{#each TOKEN_LIFETIMES as l (l.value)}
+								<option value={l.value}>{l.label}</option>
+							{/each}
+						</select>
+					</label>
+
+					<label>
+						Token name
+						<input
+							data-testid="device-token-name"
+							bind:value={tokenName}
+							maxlength="64"
+							autocomplete="off"
+							placeholder="e.g. work laptop"
+						/>
 					</label>
 
 					<div class="actions">

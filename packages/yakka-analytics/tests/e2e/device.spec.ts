@@ -28,38 +28,64 @@ async function mockAuthorize(page: Page, status = 200, json: unknown = { approve
 	return cap;
 }
 
-async function fillChoices(page: Page, scope = 'read_write') {
-	await page.getByTestId('device-grant').selectOption(scope);
-	await page.getByTestId('device-expires').fill('2099-06-15T12:00');
+async function mockGrant(page: Page, host = 'work-laptop') {
+	await page.route('**/v1/device/grant*', (route) => route.fulfill({ json: { host } }));
 }
 
-test('shows the code and keeps Approve disabled until scope and expiry are set', async ({ page }) => {
+async function fillChoices(page: Page, scope = 'read_write') {
+	await page.getByTestId('device-grant').selectOption(scope);
+}
+
+test('shows the code and keeps Approve disabled until a grant is chosen', async ({ page }) => {
 	await mockMe(page);
 	await page.goto('/device?user_code=WDJB-MJHT');
 	await expect(page.getByTestId('device-user-code')).toHaveText('WDJB-MJHT');
 	await expect(page.locator('body')).toContainText('Check this matches the code in your terminal');
-	await expect(page.getByTestId('device-expires')).toHaveValue('');
 	await expect(page.getByTestId('device-submit')).toBeDisabled();
 	await page.getByTestId('device-grant').selectOption('read');
-	await expect(page.getByTestId('device-submit')).toBeDisabled();
-	await page.getByTestId('device-expires').fill('2099-06-15T12:00');
 	await expect(page.getByTestId('device-submit')).toBeEnabled();
 });
 
-test('Approve sends one credentialed fetch with the four fields and shows Approved', async ({ page, baseURL }) => {
+test('lifetime is a dropdown of six choices defaulting to 3 months, with no date input', async ({ page }) => {
 	await mockMe(page);
+	await page.goto('/device?user_code=WDJB-MJHT');
+	const sel = page.getByTestId('device-lifetime');
+	await expect(sel.locator('option')).toHaveText(['1 day', '1 week', '1 month', '3 months', '6 months', '1 year']);
+	await expect(sel).toHaveValue('3m');
+	await expect(page.locator('input[type="datetime-local"], input[type="date"]')).toHaveCount(0);
+});
+
+test('token name is prefilled from the device host and can be edited', async ({ page }) => {
+	await mockMe(page);
+	await mockGrant(page, 'work-laptop');
+	await page.goto('/device?user_code=WDJB-MJHT');
+	await expect(page.getByTestId('device-token-name')).toHaveValue('work-laptop');
+	await page.getByTestId('device-token-name').fill('ci box');
+	await expect(page.getByTestId('device-token-name')).toHaveValue('ci box');
+});
+
+test('Approve sends one credentialed fetch with the grant fields and shows Approved', async ({ page, baseURL }) => {
+	await mockMe(page);
+	await mockGrant(page);
 	const cap = await mockAuthorize(page);
 	await page.context().addCookies([{ name: 'yakka_session', value: '1', url: baseURL! }]);
 	await page.goto('/device?user_code=WDJB-MJHT');
 	await page.evaluate(() => ((window as unknown as { __stay: number }).__stay = 1));
 	await fillChoices(page);
+	await page.getByTestId('device-lifetime').selectOption('1y');
+	await expect(page.getByTestId('device-token-name')).toHaveValue('work-laptop');
 	await page.getByTestId('device-submit').click();
 	await expect(page.getByTestId('device-result')).toContainText('Approved');
 	expect(cap.calls).toHaveLength(1);
 	expect(cap.calls[0].creds).toBe(true);
-	expect(Object.keys(cap.calls[0].body).sort()).toEqual(['expires_at', 'scope', 'tenant', 'user_code']);
-	expect(cap.calls[0].body).toMatchObject({ user_code: 'WDJB-MJHT', tenant: 't-acme', scope: 'read_write' });
-	expect(String(cap.calls[0].body.expires_at)).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+	expect(Object.keys(cap.calls[0].body).sort()).toEqual(['lifetime', 'name', 'scope', 'tenant', 'user_code']);
+	expect(cap.calls[0].body).toMatchObject({
+		user_code: 'WDJB-MJHT',
+		tenant: 't-acme',
+		scope: 'read_write',
+		lifetime: '1y',
+		name: 'work-laptop'
+	});
 	expect(await page.evaluate(() => (window as unknown as { __stay?: number }).__stay)).toBe(1);
 	expect(new URL(page.url()).pathname).toBe('/device');
 	await expect(page.getByTestId('device-submit')).toBeDisabled();
@@ -99,7 +125,6 @@ test('several tenants: picker lists them by name, and Approve sends the chosen I
 	await page.goto('/device?user_code=WDJB-MJHT');
 	await expect(page.getByTestId('device-tenant').locator('option')).toHaveText(['Select tenant', 'default', 'default']);
 	await page.getByTestId('device-grant').selectOption('read');
-	await page.getByTestId('device-expires').fill('2099-06-15T12:00');
 	await expect(page.getByTestId('device-submit')).toBeDisabled();
 	await page.getByTestId('device-tenant').selectOption('t-two');
 	await page.getByTestId('device-submit').click();
