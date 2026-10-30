@@ -1140,8 +1140,24 @@ class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
         )
 
 
+def _plugin_version_text() -> str:
+    path = os.path.join(os.path.dirname(__file__), "..", "bin", "VERSION")
+    with open(path, encoding="utf-8") as f:
+        return f.read().strip()
+
+
+def _user_agent() -> str:
+    # Cloudflare in front of api.yakka.build rejects urllib's default Python-urllib agent (error 1010).
+    try:
+        return "yakka-client/" + _plugin_version_text()
+    except OSError:
+        return "yakka-client"
+
+
 _OPENER = urllib.request.build_opener(_BearerRedirectHandler)
 _NO_REDIRECT = urllib.request.build_opener(_NoRedirectHandler)
+_OPENER.addheaders = [("User-Agent", _user_agent())]
+_NO_REDIRECT.addheaders = [("User-Agent", _user_agent())]
 
 
 def _urlopen(req: urllib.request.Request, timeout: float = 30.0):
@@ -1882,12 +1898,6 @@ def _mcp_start_drain() -> Optional[BaseException]:
         return err
     threading.Thread(target=proc.wait, daemon=True).start()
     return None
-
-
-def _plugin_version_text() -> str:
-    path = os.path.join(os.path.dirname(__file__), "..", "bin", "VERSION")
-    with open(path, encoding="utf-8") as f:
-        return f.read().strip()
 
 
 class _McpServer:

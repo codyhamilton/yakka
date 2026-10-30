@@ -5,6 +5,10 @@
 - `yakka login --sync` (and `start --sync`) runs the device flow but writes the token to `sync.toml` (`$YAKKA_SYNC_CONFIG`, else `~/.config/yakka/sync.toml`, mode 0600). `client.toml` and the running drain are left alone, so a migration can authenticate without redirecting the backlog. A sync login never reads `client.toml` for its endpoint; pass `--endpoint` for a non-default host.
 - The `/yakka:login` skill documents the sync variant.
 
+## 3.1.1 — 2026-10-30 — client User-Agent
+
+- The client now sends `User-Agent: yakka-client/<version>` on every request. Cloudflare in front of `api.yakka.build` blocks urllib's default `Python-urllib` agent with a 403 (error 1010), which broke `yakka login` and the drain against the hosted service. **3.0.1 and 3.1.0 clients get that 403 until updated to 3.1.1 or later.**
+
 ## 3.1.0 — 2026-10-21 — device-code login
 
 - Login is now a device-code flow. `yakka login start` prints a URL and code and exits; `yakka login wait` polls until you approve on the `/device` page and then writes `client.toml`. Bare `yakka login` runs both. The default endpoint is `https://api.yakka.build`.
