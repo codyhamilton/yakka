@@ -30,7 +30,11 @@ func baseHookAgg(t *testing.T, tn *Tenant, from, to int64, dim string) map[strin
 	t.Helper()
 	sel := "''"
 	if dim != "" {
-		sel = dim
+		if dim == "tool_kind" {
+			sel = toolKindExpr
+		} else {
+			sel = dim
+		}
 	}
 	q := "SELECT " + sel + " AS k, count(*) FROM facts WHERE type='hook_event' AND ts>=? AND ts<=? GROUP BY k"
 	rows, err := tn.rdb.Query(q, float64(from), float64(to))
@@ -95,7 +99,7 @@ func TestRollupEqualsBaseRows(t *testing.T) {
 		{"one second in", base + 1, base + 3600 - 1},
 		{"all", 0, base + 10*3600},
 	}
-	dims := []string{"", "harness", "repo_id", "norm_event", "event", "tool", "conversation_id"}
+	dims := []string{"", "harness", "repo_id", "norm_event", "event", "tool", "tool_kind", "conversation_id"}
 	for _, w := range windows {
 		for _, d := range dims {
 			want := baseHookAgg(t, tn, w.from, w.to, d)
