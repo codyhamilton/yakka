@@ -1,0 +1,166 @@
+{
+  "model": "jev-1.13.0",
+  "state": {
+    "evidence_class": "hybrid_v0",
+    "framing": "PR-VALIDATION-TOOLGROUNDED",
+    "seat": "seat-2",
+    "worker_id": "074c8cf22927",
+    "stratum": "productive_edit",
+    "checkpoint_turn": 75,
+    "tool_evidence": {
+      "edit_count": 4,
+      "write_count": 2,
+      "bash_count": 58,
+      "last_tools": [
+        "Bash",
+        "Bash",
+        "Bash",
+        "Bash",
+        "Bash",
+        "Read",
+        "Bash",
+        "Bash"
+      ],
+      "tool_evidence_block": "edit_count=4; write_count=2; bash_count=58; last_tools=[Bash, Bash, Bash, Bash, Bash, Read, Bash, Bash]"
+    },
+    "snapshot": {
+      "worker_id": "074c8cf22927",
+      "stratum": "productive_edit",
+      "checkpoint_turn": 75,
+      "snapshot_mode": "hybrid_v0",
+      "cumulative": {
+        "api_turns": 75,
+        "peak_ctx_tokens": 152501,
+        "prefix_bytes": 1097434,
+        "tool_histogram": {
+          "Bash": 58,
+          "Read": 12,
+          "Edit": 4,
+          "Write": 2,
+          "ToolSearch": 1
+        },
+        "reread_paths": [],
+        "distinct_read_paths": 11,
+        "compaction_event_count": 0,
+        "assistant_text_chars": 2586
+      },
+      "delta_since_prior": {
+        "new_read_paths": [
+          "<TMP_REPO>/f06c7365-e8be-4dbf-b6c3-730a03ecdc0d/tasks/bte46fhjd.output"
+        ],
+        "tool_histogram_delta": {
+          "Bash": 14,
+          "Read": 1
+        }
+      },
+      "tail": [
+        {
+          "turn": 68,
+          "excerpt": "",
+          "tool_names": [
+            "Bash"
+          ]
+        },
+        {
+          "turn": 69,
+          "excerpt": "",
+          "tool_names": [
+            "Bash"
+          ]
+        },
+        {
+          "turn": 70,
+          "excerpt": "That note was just confirming my own append landed as expected. Now amend brief 19 similarly.",
+          "tool_names": [
+            "Bash"
+          ]
+        },
+        {
+          "turn": 71,
+          "excerpt": "Good, the amendment landed. Now let's clean up scratch build artifacts and run the full test suite once more to confirm everything is green after all edits.",
+          "tool_names": [
+            "Bash"
+          ]
+        },
+        {
+          "turn": 72,
+          "excerpt": "I'll wait for tests to finish.",
+          "tool_names": [
+            "Bash"
+          ]
+        },
+        {
+          "turn": 73,
+          "excerpt": "",
+          "tool_names": [
+            "Read"
+          ]
+        },
+        {
+          "turn": 74,
+          "excerpt": "All 229 tests pass. Now let's commit. Scratch build artifacts were all written outside the worktree (in the scratchpad tmp dir), so nothing extra to clean up in the repo itself.",
+          "tool_names": [
+            "Bash"
+          ]
+        },
+        {
+          "turn": 75,
+          "excerpt": "",
+          "tool_names": [
+            "Bash"
+          ]
+        }
+      ],
+      "tool_evidence": {
+        "edit_count": 4,
+        "write_count": 2,
+        "bash_count": 58,
+        "last_tools": [
+          "Bash",
+          "Bash",
+          "Bash",
+          "Bash",
+          "Bash",
+          "Read",
+          "Bash",
+          "Bash"
+        ],
+        "tool_evidence_block": "edit_count=4; write_count=2; bash_count=58; last_tools=[Bash, Bash, Bash, Bash, Bash, Read, Bash, Bash]"
+      }
+    }
+  },
+  "questions": {
+    "choice": {
+      "type": "choice",
+      "instructions": "Is this worker already in validation (reactive read/fix/test loop) vs forward build? Answer building ONLY if Edit or Write appears in the shown window tool evidence; otherwise prefer in_validation or inconclusive.",
+      "labels": [
+        "in_validation",
+        "building",
+        "inconclusive"
+      ],
+      "criteria": {
+        "in_validation": "Reactive read/fix/test loop is supported; do not call building without Edit or Write evidence.",
+        "building": "Forward build is supported AND Edit or Write appears in the shown tool evidence.",
+        "inconclusive": "The shown evidence does not distinguish validation from forward build."
+      }
+    },
+    "pattern_note": {
+      "type": "choice",
+      "instructions": "Choose exactly one pattern note from the shown tool evidence: test_fix_loop, forward_edit, or mixed_or_unclear.",
+      "labels": [
+        "test_fix_loop",
+        "forward_edit",
+        "mixed_or_unclear"
+      ],
+      "criteria": {
+        "test_fix_loop": "Reactive read/fix/test loop dominates.",
+        "forward_edit": "Forward editing/building dominates.",
+        "mixed_or_unclear": "Evidence is mixed or unclear."
+      }
+    },
+    "freeform_note": {
+      "type": "noul",
+      "instructions": "One concise free-form note about the tool evidence; do not introduce a new label."
+    }
+  }
+}

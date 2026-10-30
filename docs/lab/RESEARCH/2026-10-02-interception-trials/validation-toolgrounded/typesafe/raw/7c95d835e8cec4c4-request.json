@@ -1,0 +1,160 @@
+{
+  "model": "jev-1.13.0",
+  "state": {
+    "evidence_class": "hybrid_v0",
+    "framing": "PR-VALIDATION-TOOLGROUNDED",
+    "seat": "seat-2",
+    "worker_id": "15f24c7ba18c",
+    "stratum": "poll",
+    "checkpoint_turn": 50,
+    "tool_evidence": {
+      "edit_count": 2,
+      "write_count": 0,
+      "bash_count": 11,
+      "last_tools": [
+        "Bash",
+        "Monitor",
+        "Monitor",
+        "Monitor",
+        "Monitor",
+        "Monitor",
+        "Monitor",
+        "Monitor"
+      ],
+      "tool_evidence_block": "edit_count=2; write_count=0; bash_count=11; last_tools=[Bash, Monitor, Monitor, Monitor, Monitor, Monitor, Monitor, Monitor]"
+    },
+    "snapshot": {
+      "worker_id": "15f24c7ba18c",
+      "stratum": "poll",
+      "checkpoint_turn": 50,
+      "snapshot_mode": "hybrid_v0",
+      "cumulative": {
+        "api_turns": 50,
+        "peak_ctx_tokens": 93883,
+        "prefix_bytes": 585117,
+        "tool_histogram": {
+          "Monitor": 26,
+          "Bash": 11,
+          "Read": 8,
+          "Edit": 2,
+          "Agent": 1,
+          "Skill": 1,
+          "ToolSearch": 1
+        },
+        "reread_paths": [],
+        "distinct_read_paths": 8,
+        "compaction_event_count": 0,
+        "assistant_text_chars": 737
+      },
+      "delta_since_prior": {},
+      "tail": [
+        {
+          "turn": 43,
+          "excerpt": "",
+          "tool_names": [
+            "Bash"
+          ]
+        },
+        {
+          "turn": 44,
+          "excerpt": "`refine` is still running (no briefs committed yet). Continuing to wait.",
+          "tool_names": [
+            "Monitor"
+          ]
+        },
+        {
+          "turn": 45,
+          "excerpt": "",
+          "tool_names": [
+            "Monitor"
+          ]
+        },
+        {
+          "turn": 46,
+          "excerpt": "",
+          "tool_names": [
+            "Monitor"
+          ]
+        },
+        {
+          "turn": 47,
+          "excerpt": "",
+          "tool_names": [
+            "Monitor"
+          ]
+        },
+        {
+          "turn": 48,
+          "excerpt": "",
+          "tool_names": [
+            "Monitor"
+          ]
+        },
+        {
+          "turn": 49,
+          "excerpt": "",
+          "tool_names": [
+            "Monitor"
+          ]
+        },
+        {
+          "turn": 50,
+          "excerpt": "",
+          "tool_names": [
+            "Monitor"
+          ]
+        }
+      ],
+      "tool_evidence": {
+        "edit_count": 2,
+        "write_count": 0,
+        "bash_count": 11,
+        "last_tools": [
+          "Bash",
+          "Monitor",
+          "Monitor",
+          "Monitor",
+          "Monitor",
+          "Monitor",
+          "Monitor",
+          "Monitor"
+        ],
+        "tool_evidence_block": "edit_count=2; write_count=0; bash_count=11; last_tools=[Bash, Monitor, Monitor, Monitor, Monitor, Monitor, Monitor, Monitor]"
+      }
+    }
+  },
+  "questions": {
+    "choice": {
+      "type": "choice",
+      "instructions": "Is this worker already in validation (reactive read/fix/test loop) vs forward build? Answer building ONLY if Edit or Write appears in the shown window tool evidence; otherwise prefer in_validation or inconclusive.",
+      "labels": [
+        "in_validation",
+        "building",
+        "inconclusive"
+      ],
+      "criteria": {
+        "in_validation": "Reactive read/fix/test loop is supported; do not call building without Edit or Write evidence.",
+        "building": "Forward build is supported AND Edit or Write appears in the shown tool evidence.",
+        "inconclusive": "The shown evidence does not distinguish validation from forward build."
+      }
+    },
+    "pattern_note": {
+      "type": "choice",
+      "instructions": "Choose exactly one pattern note from the shown tool evidence: test_fix_loop, forward_edit, or mixed_or_unclear.",
+      "labels": [
+        "test_fix_loop",
+        "forward_edit",
+        "mixed_or_unclear"
+      ],
+      "criteria": {
+        "test_fix_loop": "Reactive read/fix/test loop dominates.",
+        "forward_edit": "Forward editing/building dominates.",
+        "mixed_or_unclear": "Evidence is mixed or unclear."
+      }
+    },
+    "freeform_note": {
+      "type": "noul",
+      "instructions": "One concise free-form note about the tool evidence; do not introduce a new label."
+    }
+  }
+}

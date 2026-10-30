@@ -1,0 +1,46 @@
+{
+  "case_id": "PR-VALIDATION-TOOLGROUNDED",
+  "driver": "TypeSafe",
+  "model": "jev-1.13.0",
+  "protocol_sha256": "f15e130fb807421a1f0ff0fe5feaf16b17897f586c7e1671da2f404a2b26ac06",
+  "protocol_sha256_verified": true,
+  "maps_only": true,
+  "behaviour_ship": false,
+  "no_call_jev": true,
+  "no_8080": true,
+  "seat_count": 3,
+  "worker_count": 7,
+  "checkpoint_count": 3,
+  "planned_cells": 63,
+  "result_rows": 63,
+  "successful_rows": 63,
+  "error_rows": 0,
+  "choice_counts": {
+    "inconclusive": 27,
+    "building": 25,
+    "in_validation": 11
+  },
+  "choice_counts_by_stratum": {
+    "poll": {
+      "inconclusive": 9,
+      "building": 13,
+      "in_validation": 5
+    },
+    "productive_edit": {
+      "in_validation": 6,
+      "building": 12
+    },
+    "thrash": {
+      "inconclusive": 18
+    }
+  },
+  "building_rule": "building ONLY when Edit or Write appears in shown tool evidence",
+  "building_evidence_violations": [],
+  "response_class_equals_response_label": true,
+  "pattern_notes": [
+    "test_fix_loop",
+    "forward_edit",
+    "mixed_or_unclear"
+  ],
+  "freeform_wire": "noul"
+}

@@ -1,0 +1,172 @@
+{
+  "model": "jev-1.13.0",
+  "state": {
+    "evidence_class": "hybrid_v0",
+    "framing": "PR-VALIDATION-TOOLGROUNDED",
+    "seat": "seat-1",
+    "worker_id": "87a380bc64ff",
+    "stratum": "poll",
+    "checkpoint_turn": 60,
+    "tool_evidence": {
+      "edit_count": 0,
+      "write_count": 0,
+      "bash_count": 45,
+      "last_tools": [
+        "Bash",
+        "Monitor",
+        "Bash",
+        "Bash",
+        "Bash",
+        "Bash",
+        "Bash",
+        "Bash"
+      ],
+      "tool_evidence_block": "edit_count=0; write_count=0; bash_count=45; last_tools=[Bash, Monitor, Bash, Bash, Bash, Bash, Bash, Bash]"
+    },
+    "snapshot": {
+      "worker_id": "87a380bc64ff",
+      "stratum": "poll",
+      "checkpoint_turn": 60,
+      "snapshot_mode": "hybrid_v0",
+      "cumulative": {
+        "api_turns": 60,
+        "peak_ctx_tokens": 99541,
+        "prefix_bytes": 718453,
+        "tool_histogram": {
+          "Bash": 45,
+          "Read": 9,
+          "Monitor": 4,
+          "ToolSearch": 1
+        },
+        "reread_paths": [
+          {
+            "path": "<REPO>/parser/build_alldata.py",
+            "count": 4
+          },
+          {
+            "path": "<REPO>/parser/kiwiw/overlap.py",
+            "count": 3
+          }
+        ],
+        "distinct_read_paths": 4,
+        "compaction_event_count": 0,
+        "assistant_text_chars": 1761
+      },
+      "delta_since_prior": {
+        "new_read_paths": [],
+        "tool_histogram_delta": {
+          "Bash": 9,
+          "Monitor": 1
+        }
+      },
+      "tail": [
+        {
+          "turn": 53,
+          "excerpt": "",
+          "tool_names": [
+            "Bash"
+          ]
+        },
+        {
+          "turn": 54,
+          "excerpt": "",
+          "tool_names": [
+            "Monitor"
+          ]
+        },
+        {
+          "turn": 55,
+          "excerpt": "While waiting, let's set up the mirror-probe script copy and run compare_disc/roundtrip against the already-completed full disc.",
+          "tool_names": [
+            "Bash"
+          ]
+        },
+        {
+          "turn": 56,
+          "excerpt": "",
+          "tool_names": [
+            "Bash"
+          ]
+        },
+        {
+          "turn": 57,
+          "excerpt": "",
+          "tool_names": [
+            "Bash"
+          ]
+        },
+        {
+          "turn": 58,
+          "excerpt": "",
+          "tool_names": [
+            "Bash"
+          ]
+        },
+        {
+          "turn": 59,
+          "excerpt": "I'll wait for compare_disc, roundtrip, and probe to complete.",
+          "tool_names": [
+            "Bash"
+          ]
+        },
+        {
+          "turn": 60,
+          "excerpt": "I'll wait for these three background tasks (compare_disc, roundtrip, mirror probe) to finish via their completion notifications.",
+          "tool_names": [
+            "Bash"
+          ]
+        }
+      ],
+      "tool_evidence": {
+        "edit_count": 0,
+        "write_count": 0,
+        "bash_count": 45,
+        "last_tools": [
+          "Bash",
+          "Monitor",
+          "Bash",
+          "Bash",
+          "Bash",
+          "Bash",
+          "Bash",
+          "Bash"
+        ],
+        "tool_evidence_block": "edit_count=0; write_count=0; bash_count=45; last_tools=[Bash, Monitor, Bash, Bash, Bash, Bash, Bash, Bash]"
+      }
+    }
+  },
+  "questions": {
+    "choice": {
+      "type": "choice",
+      "instructions": "Is this worker already in validation (reactive read/fix/test loop) vs forward build? Answer building ONLY if Edit or Write appears in the shown window tool evidence; otherwise prefer in_validation or inconclusive.",
+      "labels": [
+        "in_validation",
+        "building",
+        "inconclusive"
+      ],
+      "criteria": {
+        "in_validation": "Reactive read/fix/test loop is supported; do not call building without Edit or Write evidence.",
+        "building": "Forward build is supported AND Edit or Write appears in the shown tool evidence.",
+        "inconclusive": "The shown evidence does not distinguish validation from forward build."
+      }
+    },
+    "pattern_note": {
+      "type": "choice",
+      "instructions": "Choose exactly one pattern note from the shown tool evidence: test_fix_loop, forward_edit, or mixed_or_unclear.",
+      "labels": [
+        "test_fix_loop",
+        "forward_edit",
+        "mixed_or_unclear"
+      ],
+      "criteria": {
+        "test_fix_loop": "Reactive read/fix/test loop dominates.",
+        "forward_edit": "Forward editing/building dominates.",
+        "mixed_or_unclear": "Evidence is mixed or unclear."
+      }
+    },
+    "freeform_note": {
+      "type": "noul",
+      "instructions": "One concise free-form note about the tool evidence; do not introduce a new label."
+    }
+  }
+}
