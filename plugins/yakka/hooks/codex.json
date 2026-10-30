@@ -44,17 +44,6 @@
         ]
       }
     ],
-    "PreToolUse": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash \"${PLUGIN_ROOT}/script/spool.sh\" --harness codex",
-            "timeout": 3
-          }
-        ]
-      }
-    ],
     "PermissionRequest": [
       {
         "hooks": [

@@ -126,8 +126,8 @@ shell environment and experimental transforms/compaction/model selection. `event
 all 28 catalog bus names, plus future types. Older runtimes may not invoke newer callbacks.
 
 Rows preserve native hook names and `source: hook|bus|derived`. Bus tool/shell events are
-observations; dedicated tool callbacks provide completed tool calls. Derived PostToolBatch and
-Stop rows retain existing turn markers. Nested session/message/part envelopes resolve to the
+observations; dedicated tool callbacks provide completed tool calls. Derived Stop rows retain
+the turn marker; PostToolBatch is no longer captured, so turns fall back to the tool-gap heuristic. Nested session/message/part envelopes resolve to the
 owning session; callbacks with no session are dropped.
 
 `YAKKA_OPENCODE_SIGNALS=0` disables soft signals independently of hooklog. Writes are ordered
@@ -144,10 +144,10 @@ every source, so each event would be captured twice. Plugin hooks need the host'
 `/hooks` before they run, and again whenever the file changes. See
 [official OpenAI documentation](https://developers.openai.com/codex/hooks).
 
-All 12 names use `spool.sh --harness codex`: SessionStart, SessionEnd, SubagentStart,
-SubagentStop, PreToolUse, PermissionRequest, PostToolUse, PreCompact, PostCompact,
+All 11 names use `spool.sh --harness codex`: SessionStart, SessionEnd, SubagentStart,
+SubagentStop, PermissionRequest, PostToolUse, PreCompact, PostCompact,
 UserPromptSubmit, Stop, Interrupt. Codex is **not N/A**. Every Codex timeout is at most 3 s.
-Hosted tools such as WebSearch skip PreToolUse/PostToolUse, so their absence is a host gap.
+Hosted tools such as WebSearch skip PostToolUse, so their absence is a host gap.
 Codex capture hooks emit no stdout or control decision.
 
 ## Rows and turns
@@ -161,8 +161,8 @@ no name or malformed JSON are ignored. Subagent IDs are preserved as `agent_id`.
 `events.load_hooklog` counts one model response per turn:
 
 - Cursor: afterAgentThought (`step`) marks each response; following tools belong to it.
-- Claude: PostToolBatch (`batch_end`) closes a tool turn; Stop closes the final reply.
-- OpenCode: step-finish bus parts derive PostToolBatch; session.idle derives Stop.
+- Claude: logs captured before 3.3.0 carry PostToolBatch (`batch_end`), which closes a tool turn; Stop closes the final reply.
+- OpenCode: session.idle derives Stop; step-finish no longer derives PostToolBatch.
 - Codex and logs without step/batch markers use the existing 1.5 s tool-gap heuristic.
 
 Lifecycle/pre-tool/bus observations do not advance turns. SessionEnd is a lifecycle observation,

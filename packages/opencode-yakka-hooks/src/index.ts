@@ -12,6 +12,7 @@ import { fileURLToPath } from "node:url"
 import path from "node:path"
 
 type PendingCall = { tool: string; callID: string; title: string; output: string }
+type InflightCall = { sessionID: string; tool: string; callID: string; args: unknown; startedAt: number }
 
 function packageRoot(): string {
   return path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
@@ -81,7 +82,7 @@ function snapshotOf(payload: Record<string, unknown>): string {
 
 // Secret-bearing or redundant events are never forwarded. Mirrored by the Go policy; a test asserts equality.
 // remove-list:begin
-const REMOVE_EVENTS = ["experimental.chat.system.transform", "chat.params", "chat.headers", "shell.env", "message.part.delta", "message.part.updated", "message.updated", "session.status", "session.updated", "session.diff"] as const
+const REMOVE_EVENTS = ["experimental.chat.system.transform", "chat.params", "chat.headers", "shell.env", "message.part.delta", "message.part.updated", "message.updated", "session.status", "session.updated", "session.diff", "tool.execute.before", "PostToolBatch"] as const
 // remove-list:end
 
 async function recordHooklog(payload: Record<string, unknown>): Promise<void> {
@@ -172,7 +173,10 @@ export const YakkaSignalsPlugin: Plugin = async (ctx) => {
   const enabled = process.env.YAKKA_OPENCODE_SIGNALS !== "0"
   const ctxDir = ctx.directory
   const pendingBySession = new Map<string, PendingCall[]>()
-  const callsThisStep = new Map<string, string[]>()
+  // Calls between tool.execute.before and after, keyed by session and call ID: the after row carries the start
+  // time, and a call still here at session.idle is written as incomplete.
+  const inflight = new Map<string, InflightCall>()
+  const inflightKey = (sessionID: string, callID: string) => `${sessionID}\u0000${callID}`
   // Serial writes retain callback/marker order even when the bus dispatches concurrently.
   let writes = Promise.resolve()
   const record = (...payloads: Record<string, unknown>[]) => {
@@ -191,7 +195,7 @@ export const YakkaSignalsPlugin: Plugin = async (ctx) => {
     dispose: async () => {
       await observe("dispose")()
       pendingBySession.clear()
-      callsThisStep.clear()
+      inflight.clear()
     },
     "chat.params": observe("chat.params"),
     "chat.headers": observe("chat.headers"),
@@ -217,18 +221,20 @@ export const YakkaSignalsPlugin: Plugin = async (ctx) => {
                      source: "hook", prompt: text, input, output })
     },
     "tool.execute.before": async (input, output) => {
-      await record({ hook_event_name: "tool.execute.before", session_id: input.sessionID,
-                     source: "hook", tool_name: input.tool, tool_use_id: input.callID,
-                     tool_input: output.args, input, output })
+      inflight.set(inflightKey(input.sessionID, input.callID),
+                   { sessionID: input.sessionID, tool: input.tool, callID: input.callID, args: output.args, startedAt: Date.now() / 1000 })
     },
     "tool.execute.after": async (input, output) => {
+      const key = inflightKey(input.sessionID, input.callID)
+      const started = inflight.get(key)
+      inflight.delete(key)
       const payload = {
         hook_event_name: "tool.execute.after", session_id: input.sessionID, source: "hook",
         tool_name: input.tool, tool_use_id: input.callID, tool_input: input.args ?? {},
         tool_response: output.output ?? output.title ?? "", input, output,
+        ...(started ? { started_at: started.startedAt } : {}),
       }
       await record(payload)
-      callsThisStep.set(input.sessionID, [...(callsThisStep.get(input.sessionID) || []), input.callID])
       if (!enabled) return
       const list = pendingBySession.get(input.sessionID) || []
       list.push({ tool: input.tool, callID: input.callID, title: output.title ?? "", output: output.output ?? "" })
@@ -238,12 +244,14 @@ export const YakkaSignalsPlugin: Plugin = async (ctx) => {
       // Catch all 28 catalog bus types, plus future/undocumented types without a whitelist.
       const sid = sessionId(event)
       const rows: Record<string, unknown>[] = [{ hook_event_name: event.type, session_id: sid, source: "bus", event }]
-      const e = event as { type: string; properties?: { part?: { type?: string } } }
-      if (sid && e.type === "message.part.updated" && e.properties?.part?.type === "step-finish") {
-        rows.push({ hook_event_name: "PostToolBatch", session_id: sid, source: "derived",
-                       tool_calls: (callsThisStep.get(sid) || []).map((id) => ({ tool_use_id: id })) })
-        callsThisStep.set(sid, [])
-      } else if (sid && e.type === "session.idle") {
+      if (sid && event.type === "session.idle") {
+        for (const [key, call] of inflight) {
+          if (call.sessionID !== sid) continue
+          inflight.delete(key)
+          rows.push({ hook_event_name: "tool.execute.incomplete", session_id: sid, source: "derived",
+                      tool_name: call.tool, tool_use_id: call.callID, tool_input: call.args ?? {},
+                      started_at: call.startedAt, incomplete: true })
+        }
         rows.push({ hook_event_name: "Stop", session_id: sid, source: "derived" })
       }
       await record(...rows)  // queue derived markers before teardown can drain the queue

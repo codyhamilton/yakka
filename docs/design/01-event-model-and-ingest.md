@@ -144,10 +144,19 @@ One table in `internal/ingest` maps `(harness, event)` to `keep` or `remove`; a 
   about 1.04M of 1.44M hook events in the first measured ledger. The OpenCode plugin does not forward them ([design
   2](02-edge-capture.md)); ingest answers any that arrive (older plugins, other clients)
   `accepted` and stores nothing: no fact and no archive line. A test asserts the plugin's remove
-  list equals the table's. The plugin still reads `message.part.updated` to derive the
-  `PostToolBatch` marker at a `step-finish` part; only the stored row is dropped. Compaction and
-  `yakka sync` apply the same table, so rows stored before a rule are deleted at the next
-  compaction and skipped when syncing.
+  list equals the table's. Compaction and `yakka sync` apply the same table, so rows stored
+  before a rule are deleted at the next compaction and skipped when syncing.
+
+  The table also removes the tool-start and batch markers, because the end event already holds
+  everything they do: OpenCode `tool.execute.before` and `PostToolBatch`, Claude `PreToolUse`
+  and `PostToolBatch`, and Codex `PreToolUse`. `PostToolUse` and `tool.execute.after` carry the
+  tool name, call ID, input and response, and artifact and commit extraction reads only them.
+  A batch row held call IDs and nothing else. Before this change those events were about 167k of
+  the 402k hook events left after the rules above. The Claude and Codex plugins no longer
+  register the hooks; the entries cover older plugins. The OpenCode plugin keeps each call's
+  start time and puts it on the `after` row as `started_at`. A call still open at `session.idle`
+  is written as `tool.execute.incomplete` with `incomplete: true`, which normalises to
+  `tool_fail`. Cursor's `preToolUse` is not on the table.
 - **`keep`** stores the event as an envelope plus extracted fields. Row-hash identity is the
   full received envelope's, as above.
 - **Stored form.** A hook fact's stored `raw` is its envelope (`type`, `harness`, `event`,

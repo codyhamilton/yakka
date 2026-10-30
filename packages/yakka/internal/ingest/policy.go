@@ -22,7 +22,8 @@ type policyKey struct{ harness, event string }
 
 // policyTable maps (harness, event) to an action. Any pair not listed is Keep. The OpenCode Remove
 // entries must equal the plugin's remove-list in
-// packages/opencode-yakka-hooks/src/index.ts (asserted by TestRemoveListMatchesPlugin).
+// packages/opencode-yakka-hooks/src/index.ts (asserted by TestRemoveListMatchesPlugin). The Claude
+// and Codex entries cover older plugins that still register those hooks.
 var policyTable = map[policyKey]Action{
 	{"opencode", "experimental.chat.system.transform"}: Remove,
 	{"opencode", "chat.params"}:                        Remove,
@@ -34,6 +35,11 @@ var policyTable = map[policyKey]Action{
 	{"opencode", "session.updated"}:                    Remove,
 	{"opencode", "session.diff"}:                       Remove,
 	{"opencode", "message.updated"}:                    Remove,
+	{"opencode", "tool.execute.before"}:                Remove,
+	{"opencode", "PostToolBatch"}:                      Remove,
+	{"claude", "PreToolUse"}:                           Remove,
+	{"claude", "PostToolBatch"}:                        Remove,
+	{"codex", "PreToolUse"}:                            Remove,
 }
 
 // Policy returns the action for a hook_event fact. The payload is accepted for callers that key a

@@ -10,7 +10,7 @@ import plugin from '../src/index.ts'
 
 const named = 'event config dispose chat.message chat.params chat.headers permission.ask command.execute.before tool.execute.before tool.execute.after tool.definition shell.env experimental.chat.messages.transform experimental.chat.system.transform experimental.session.compacting experimental.compaction.autocontinue experimental.text.complete experimental.provider.small_model'.split(' ')
 const bus = 'command.executed file.edited file.watcher.updated installation.updated lsp.client.diagnostics lsp.updated message.part.removed message.part.updated message.removed message.updated permission.asked permission.replied server.connected session.created session.compacted session.deleted session.diff session.error session.idle session.status session.updated todo.updated shell.env tool.execute.before tool.execute.after tui.prompt.append tui.command.execute tui.toast.show'.split(' ')
-const removed = ['experimental.chat.system.transform', 'chat.params', 'chat.headers', 'shell.env', 'message.part.delta', 'message.part.updated', 'message.updated', 'session.status', 'session.updated', 'session.diff']
+const removed = ['experimental.chat.system.transform', 'chat.params', 'chat.headers', 'shell.env', 'message.part.delta', 'message.part.updated', 'message.updated', 'session.status', 'session.updated', 'session.diff', 'tool.execute.before', 'PostToolBatch']
 const spoolSh = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'packages', 'hooklog', 'spool.sh')
 const sleep = (ms) => new Promise(r => setTimeout(r, ms))
 
@@ -54,7 +54,6 @@ test('18 callbacks and 28 bus types queue payloads, sessions and boundaries', as
       assert.equal(JSON.stringify({ input, output }), before, name)
     }
     for (const type of bus) await hooks.event({ event: { type, properties: { info: { id: 's', directory: '/tmp/project' } } } })
-    await hooks.event({ event: { type: 'message.part.updated', properties: { part: { id: 'part', sessionID: 's', type: 'step-finish' } } } })
     const cyclic = { sessionID: 's' }
     cyclic.properties = cyclic
     await hooks['chat.params'](cyclic, output)
@@ -69,7 +68,7 @@ test('18 callbacks and 28 bus types queue payloads, sessions and boundaries', as
     assert.deepEqual(hookEvents, new Set(hookNames.filter(n => !removed.includes(n))))
     const busEvents = new Set(rows.filter(([, p]) => p.source === 'bus').map(([env]) => env.event))
     assert.deepEqual(busEvents, new Set(bus.filter(n => !removed.includes(n))))
-    assert(rows.some(([env]) => env.event === 'PostToolBatch'))
+    assert(rows.every(([env]) => env.event !== 'PostToolBatch'))
     assert(rows.some(([env]) => env.event === 'Stop'))
     const ts = rows.map(([env]) => env.ts)
     assert(ts.every(t => typeof t === 'number'))
@@ -109,6 +108,34 @@ test('tool.execute.after writes one queue file named like spool.sh with the open
     assert.match(ref[0], /^ses_odd_id-\d+\.\d+-\d+-\d+\.evt$/)
     const [refEnv] = await read(q2, ref[0]).catch(async () => [JSON.parse((await readFile(path.join(q2, ref[0]), 'utf8')).split('\n')[0])])
     assert.deepEqual(Object.keys(refEnv), Object.keys(env))
+  } finally { await sb.done() }
+})
+
+test('tool.execute.after carries started_at; a call still open at session.idle is written as incomplete', async () => {
+  const sb = await sandbox()
+  try {
+    const hooks = await plugin({ directory: '/tmp/project' })
+    const t0 = Date.now() / 1000
+    await hooks['tool.execute.before']({ sessionID: 's', tool: 'bash', callID: 'done' }, { args: { command: 'ls' } })
+    await hooks['tool.execute.before']({ sessionID: 's', tool: 'bash', callID: 'open' }, { args: { command: 'sleep 9' } })
+    await hooks['tool.execute.before']({ sessionID: 'other', tool: 'read', callID: 'o1' }, { args: { path: 'a' } })
+    assert.equal((await evts(sb.queue)).length, 0)
+    await hooks['tool.execute.after']({ sessionID: 's', tool: 'bash', callID: 'done', args: { command: 'ls' } }, { output: 'x', title: 't' })
+    await hooks.event({ event: { type: 'session.idle', properties: { sessionID: 's' } } })
+    await hooks.event({ event: { type: 'session.idle', properties: { sessionID: 's' } } })
+    const rows = []
+    for (const n of await evts(sb.queue)) rows.push((await read(sb.queue, n))[1])
+    const by = (e) => rows.filter(p => p.hook_event_name === e)
+    const [after] = by('tool.execute.after')
+    assert(after.started_at >= t0 && after.started_at <= Date.now() / 1000)
+    const inc = by('tool.execute.incomplete')
+    assert.equal(inc.length, 1)
+    assert.equal(inc[0].tool_use_id, 'open')
+    assert.equal(inc[0].tool_name, 'bash')
+    assert.equal(inc[0].tool_input.command, 'sleep 9')
+    assert.equal(inc[0].incomplete, true)
+    assert(inc[0].started_at >= t0)
+    assert.equal(by('Stop').length, 2)
   } finally { await sb.done() }
 })
 

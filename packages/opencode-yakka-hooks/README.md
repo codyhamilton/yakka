@@ -19,20 +19,21 @@ OpenCode plugin that captures **18 named Hooks callbacks + all 28 catalog bus ty
 
 **Advisory only** — never blocks tools or changes exit codes. Does not call `assert_phase --deterministic` or enforce Flash review guidance.
 
-Every hook and bus event except ten is written as one file in the queue (`YAKKA_QUEUE`), named and wrapped
+Every hook and bus event except twelve is written as one file in the queue (`YAKKA_QUEUE`), named and wrapped
 as `packages/hooklog/spool.sh --harness opencode` does; an event with no session ID is dropped. After a
 write the plugin kicks `python3 plugins/yakka/client/yakka.py drain` (detached, at most once per 10 s)
 when `YAKKA_BIN` is unset. Capture never waits on the drain or the network, and
 failures never reach OpenCode.
 
 Not forwarded: `experimental.chat.system.transform`, `chat.params`, `chat.headers`, `shell.env`,
-`message.part.delta`, `message.part.updated`, `message.updated`, `session.status`, `session.updated` and
-`session.diff` (by event name, so hook and bus forms alike). The first carries redundant prompt
+`message.part.delta`, `message.part.updated`, `message.updated`, `session.status`, `session.updated`,
+`session.diff`, `tool.execute.before` and `PostToolBatch` (by event name, so hook and bus forms alike). The first carries redundant prompt
 bodies; the next three carry secrets (API keys, auth headers, environment); the rest repeat state
 that other events already record (finished text is `experimental.text.complete`, tool calls are
-`tool.execute.*`, patches are artifact versions and commits). The plugin still reads
-`message.part.updated` to emit the derived `PostToolBatch` marker. Their hooks stay registered and
-write nothing. The list is declared once in `src/index.ts`
+`tool.execute.after`, patches are artifact versions and commits). Their hooks stay registered and
+write nothing. `tool.execute.before` only records the call's start: `tool.execute.after` carries it
+as `started_at`, and a call still open at `session.idle` is written as `tool.execute.incomplete`
+(`incomplete: true`). The list is declared once in `src/index.ts`
 between `remove-list` markers, and a test asserts the Go ingest policy carries an equal list.
 
 Threshold constants for documentation: `yakka-signals.json` (source of truth remains `gate_thresholds.py` in the yakka lab).
@@ -123,6 +124,6 @@ Hooklog keeps native names and `source: hook|bus|derived`; the catch-all `event`
 also captures future bus types. Session IDs are resolved from nested message/part/session envelopes;
 load/teardown and other events without a session use `unknown.jsonl`. Bus tool events remain
 observations so they do not duplicate dedicated tool callbacks in turn counting. Existing
-PostToolBatch/Stop markers remain derived rows. Config, prompts, headers, permissions, args,
+The Stop marker remains a derived row; `PostToolBatch` is no longer emitted. Config, prompts, headers, permissions, args,
 environment, tool definitions and experimental outputs are observed without mutation.
 `dispose` and `experimental.provider.small_model` may be absent in older plugin runtimes.
