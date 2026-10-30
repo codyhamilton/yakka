@@ -1,0 +1,54 @@
+{
+  "experiment": "shape-qual-full-maps-v1",
+  "worker_id": "d84416c7c9d4",
+  "model": "Sonnet",
+  "narrative_shape": "Read-only research run: Bash 70, Read 5, Monitor 4, one edit and one write (scratchpad). It writes name-matching baseline scripts (T68 part 4), gets 'a strong, real result at L2' (T73) and re-runs scoped to level 0. Narration 2.4k chars, no compactions, ctx 145k. T76-81 unseen.",
+  "shape_label": "unclear",
+  "shape_detail": "research_measurement",
+  "phases": [
+    {
+      "range": "1-67",
+      "name": "spec reading + scripted census",
+      "note": "Bash 70, Read 5, Monitor 4"
+    },
+    {
+      "range": "68-75",
+      "name": "name-matching baseline (part 4)",
+      "note": "T68 script; T69, T75 Monitor; T73 L2 result, L0 rerun"
+    },
+    {
+      "range": "76-81",
+      "name": "unseen",
+      "note": ""
+    }
+  ],
+  "early_signals": [
+    {
+      "turn": 68,
+      "signal": "Runs name-matching baseline for part 4"
+    },
+    {
+      "turn": 73,
+      "signal": "Real L2 result obtained; scopes follow-up to L0"
+    },
+    {
+      "turn": 75,
+      "signal": "Monitor 4: monitored scripts, with no compaction"
+    },
+    {
+      "turn": 75,
+      "signal": "Only 5 reads and no real edits: read-only brief respected"
+    }
+  ],
+  "early_signal_window_respected": true,
+  "recommended_exit": null,
+  "earliness": null,
+  "rationale": "Productive measurement run with bounded monitors and an informative interim result.",
+  "pack_coverage": {
+    "T": 81,
+    "checkpoints_seen": [
+      75
+    ],
+    "unseen_tail_turns": 6
+  }
+}

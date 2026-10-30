@@ -1,0 +1,54 @@
+{
+  "experiment": "shape-qual-full-maps-v1",
+  "worker_id": "87a380bc64ff",
+  "model": "Sonnet",
+  "narrative_shape": "Re-measurement unit that is pure run-and-wait: by T75 there are no Edit or Write calls at all (Bash 56, Read 9, Monitor 6, ToolSearch 1). T68-69 it waits for compare_disc and the quantisation round-trip, two Monitor calls follow back-to-back (T71-72), and T73-74 it again says it is waiting on both monitors. Context 105k and no compactions. Distinct poll/monitor shape: no authoring, one-turn-per-poll, but not a stall. T76-89 unseen.",
+  "shape_label": "unclear",
+  "shape_detail": "poll_monitor_wait",
+  "phases": [
+    {
+      "range": "1-67",
+      "name": "read + run setup",
+      "note": "Bash ~50, Read 9; no edits or writes"
+    },
+    {
+      "range": "68-75",
+      "name": "launch two jobs and park on two monitors",
+      "note": "T68-69 waiting; T71-72 two Monitor calls; T73-74 waiting on both"
+    },
+    {
+      "range": "75-89",
+      "name": "unseen",
+      "note": ""
+    }
+  ],
+  "early_signals": [
+    {
+      "turn": 68,
+      "signal": "'Waiting for compare_disc and quantisation_roundtrip to finish'"
+    },
+    {
+      "turn": 72,
+      "signal": "Two Monitor calls in consecutive turns"
+    },
+    {
+      "turn": 74,
+      "signal": "'Waiting on the compare_disc and roundtrip monitors' (fourth wait statement in 7 turns)"
+    },
+    {
+      "turn": 75,
+      "signal": "Zero Edit/Write in 75 turns; 6 Monitor calls; build_alldata.py 4x and overlap.py 3x re-reads"
+    }
+  ],
+  "early_signal_window_respected": true,
+  "recommended_exit": null,
+  "earliness": null,
+  "rationale": "Measurement unit whose visible turns are parked on monitors, with no authoring at all. Not thrash (inputs are bounded, context 105k, no compactions), but a distinct poll/monitor wait shape.",
+  "pack_coverage": {
+    "T": 89,
+    "checkpoints_seen": [
+      75
+    ],
+    "unseen_tail_turns": 14
+  }
+}

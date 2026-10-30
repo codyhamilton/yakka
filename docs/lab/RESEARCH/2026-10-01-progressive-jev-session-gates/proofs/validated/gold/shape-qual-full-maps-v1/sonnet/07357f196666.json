@@ -1,0 +1,49 @@
+{
+  "experiment": "shape-qual-full-maps-v1",
+  "worker_id": "07357f196666",
+  "model": "Sonnet",
+  "narrative_shape": "Bash 75 and Write 2 by T75, zero Read or Edit, 62 chars of narration, 2 compactions at 138k. Tail T68-75 is eight consecutive Bash turns with no text. The pack is opaque about progress. T76-83 unseen.",
+  "shape_label": "unclear",
+  "shape_detail": "bash_only_silent",
+  "phases": [
+    {
+      "range": "1-75",
+      "name": "bash-only",
+      "note": "Bash 75, Write 2; 2 compactions"
+    },
+    {
+      "range": "76-83",
+      "name": "unseen",
+      "note": ""
+    }
+  ],
+  "early_signals": [
+    {
+      "turn": 75,
+      "signal": "Bash 75, Write 2, zero Read/Edit"
+    },
+    {
+      "turn": 75,
+      "signal": "62 chars of narration across the whole prefix"
+    },
+    {
+      "turn": 75,
+      "signal": "Eight consecutive single-Bash turns T68-75 without text"
+    },
+    {
+      "turn": 75,
+      "signal": "2 compactions at 138k context"
+    }
+  ],
+  "early_signal_window_respected": true,
+  "recommended_exit": null,
+  "earliness": null,
+  "rationale": "Silent single-tool stream with only one checkpoint; no distinguishing evidence for productive vs loop.",
+  "pack_coverage": {
+    "T": 83,
+    "checkpoints_seen": [
+      75
+    ],
+    "unseen_tail_turns": 8
+  }
+}

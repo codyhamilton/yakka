@@ -1,0 +1,60 @@
+{
+  "experiment": "shape-qual-full-maps-v1",
+  "worker_id": "ca977b9ca0dd",
+  "model": "Sonnet",
+  "narrative_shape": "Read-and-bash churn with no authoring visible. By T75 it has 45 reads and 42 bash, 10 compactions, and only 167 characters of narration; no Edit or Write ever appears. Compactions keep coming (12 at T90, 16 at T105) while the re-read set stays fixed on _cenc.c (14x), divide.py (10x), _e2.c (9x), build_alldata.py (7x) and cenc.py (5x). Late checkpoints alternate Read and Bash single calls. The run ends at T109 with the loop intact.",
+  "shape_label": "early_thrash",
+  "shape_detail": "churn_compaction_loop",
+  "phases": [
+    {
+      "range": "1-75",
+      "name": "read-heavy churn",
+      "note": "Read 45, Bash 42, 10 compactions, 14 distinct paths, text 167 chars"
+    },
+    {
+      "range": "75-105",
+      "name": "alternating read/bash",
+      "note": "reads +6 and +7 per checkpoint; compactions 12->16; re-read counts climbing"
+    },
+    {
+      "range": "105-109",
+      "name": "end of run",
+      "note": "unseen after T105"
+    }
+  ],
+  "early_signals": [
+    {
+      "turn": 75,
+      "signal": "10 compactions by T75 at 126k context; 45 reads vs 42 bash with zero edits or writes"
+    },
+    {
+      "turn": 75,
+      "signal": "Only 167 characters of assistant text in 75 turns"
+    },
+    {
+      "turn": 90,
+      "signal": "Compactions 12; reads +6 and a new tool-results file; no authoring"
+    },
+    {
+      "turn": 105,
+      "signal": "_cenc.c 14x, divide.py 10x, _e2.c 9x, build_alldata.py 7x; compactions 16 (accelerating)"
+    },
+    {
+      "turn": 103,
+      "signal": "T99-104 alternating Read/Bash single calls (no narration)"
+    }
+  ],
+  "early_signal_window_respected": true,
+  "recommended_exit": null,
+  "earliness": null,
+  "rationale": "Strong early churn signature: read-heavy, no edits, compaction accelerating, narration near zero, fixed re-read set. Dominant pattern is established by the first checkpoint and does not change through the visible prefix.",
+  "pack_coverage": {
+    "T": 109,
+    "checkpoints_seen": [
+      75,
+      90,
+      105
+    ],
+    "unseen_tail_turns": 4
+  }
+}

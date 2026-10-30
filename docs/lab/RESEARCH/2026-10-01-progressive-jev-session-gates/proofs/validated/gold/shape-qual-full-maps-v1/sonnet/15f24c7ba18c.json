@@ -1,0 +1,60 @@
+{
+  "experiment": "shape-qual-full-maps-v1",
+  "worker_id": "15f24c7ba18c",
+  "model": "Sonnet",
+  "narrative_shape": "Restart of a phase: 28 Monitor calls by T75 (37% of turns) with Bash 25, Read 8, Agent 6, Edit 6. It records units 2-05 and 2-07 and waits on 2-06 (T70), dispatches 2-08 and a fixer (T73), then monitor use stops: 28 at T90 as well. After T75 Bash/Edit/Agent resume. No compaction until T90.",
+  "shape_label": "unclear",
+  "shape_detail": "orchestrator_monitor_burst",
+  "phases": [
+    {
+      "range": "1-70",
+      "name": "dispatch + monitor loop",
+      "note": "Monitor 28, Bash 25, Agent 6; T70 waiting on 2-06"
+    },
+    {
+      "range": "70-75",
+      "name": "record + dispatch next",
+      "note": "T73 2-08 overlay re-run and a fixer"
+    },
+    {
+      "range": "75-90",
+      "name": "bash/edit verification",
+      "note": "Bash +11, Edit +2, Agent +1"
+    },
+    {
+      "range": "90-93",
+      "name": "unseen",
+      "note": ""
+    }
+  ],
+  "early_signals": [
+    {
+      "turn": 70,
+      "signal": "'2-05 and 2-07 recorded, waiting on 2-06'"
+    },
+    {
+      "turn": 73,
+      "signal": "Dispatches 2-08 and a fixer for a deferred bug"
+    },
+    {
+      "turn": 75,
+      "signal": "28 Monitor calls in 75 turns: a monitor-poll burst"
+    },
+    {
+      "turn": 90,
+      "signal": "Monitor count unchanged after T75: the burst ended"
+    }
+  ],
+  "early_signal_window_respected": true,
+  "recommended_exit": null,
+  "earliness": null,
+  "rationale": "Orchestrator shape with a monitor-poll burst in the first 75 turns that ends on its own; subsequent work is ordinary. Distinct from a runaway because it resolves before T90.",
+  "pack_coverage": {
+    "T": 93,
+    "checkpoints_seen": [
+      75,
+      90
+    ],
+    "unseen_tail_turns": 3
+  }
+}

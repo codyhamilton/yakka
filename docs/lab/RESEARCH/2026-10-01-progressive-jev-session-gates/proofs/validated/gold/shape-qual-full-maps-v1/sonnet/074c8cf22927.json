@@ -1,0 +1,54 @@
+{
+  "experiment": "shape-qual-full-maps-v1",
+  "worker_id": "074c8cf22927",
+  "model": "Sonnet",
+  "narrative_shape": "Compact implementation: Bash 58, Read 12, Edit 4, Write 2. T70-71 amends brief 19 to confirm the downstream symptom is resolved by the same fix, cleans scratch artifacts and runs the full suite; T72 waits for tests; T74 229 pass; commit. Scratch artifacts were written outside the worktree.",
+  "shape_label": "unclear",
+  "shape_detail": "steady_build_to_commit",
+  "phases": [
+    {
+      "range": "1-67",
+      "name": "implement dune-drop/selection fix",
+      "note": "Bash 58, Read 12, Edit 4, Write 2"
+    },
+    {
+      "range": "68-71",
+      "name": "amend brief 19",
+      "note": "T70-71 confirms resolution; clean scratch"
+    },
+    {
+      "range": "72-76",
+      "name": "tests + commit",
+      "note": "T72 wait; T74 229 pass; commit"
+    }
+  ],
+  "early_signals": [
+    {
+      "turn": 70,
+      "signal": "Amends brief 19 only after confirming it actually resolved"
+    },
+    {
+      "turn": 71,
+      "signal": "Cleans artifacts and reruns the full suite"
+    },
+    {
+      "turn": 74,
+      "signal": "229 tests pass; moves to commit"
+    },
+    {
+      "turn": 75,
+      "signal": "No compactions; no re-reads of note"
+    }
+  ],
+  "early_signal_window_respected": true,
+  "recommended_exit": null,
+  "earliness": null,
+  "rationale": "Short, clean build-verify-commit run.",
+  "pack_coverage": {
+    "T": 76,
+    "checkpoints_seen": [
+      75
+    ],
+    "unseen_tail_turns": 1
+  }
+}

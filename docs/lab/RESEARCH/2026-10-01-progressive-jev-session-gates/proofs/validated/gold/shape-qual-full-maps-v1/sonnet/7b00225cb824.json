@@ -1,0 +1,68 @@
+{
+  "experiment": "shape-qual-full-maps-v1",
+  "worker_id": "7b00225cb824",
+  "model": "Sonnet",
+  "narrative_shape": "Implementation run with one performance detour. Early turns include waits for pytest background notifications (T70-73, T87-88). Around T100-102 a slow dry-run scan over ~134M nodes prompts a hot-path optimisation of node() and way(); then background_all is implemented (T114-120) and the suite passes (227, T131), followed by scope check and commit/push (T134). Edit count rises 5->16 across the prefix.",
+  "shape_label": "unclear",
+  "shape_detail": "steady_build_with_perf_debug",
+  "phases": [
+    {
+      "range": "1-75",
+      "name": "implement + pytest",
+      "note": "Bash 56, Read 12, Edit 5, Write 3; T70/T73 wait for pytest notification"
+    },
+    {
+      "range": "75-105",
+      "name": "selection.py + provenance + slow scan",
+      "note": "T87-88 dry-run expected to take long; new reads provenance.md, selection.py"
+    },
+    {
+      "range": "100-105",
+      "name": "perf fix",
+      "note": "T100-102 avoid tag-dict materialisation for ~134M nodes; rerun scan"
+    },
+    {
+      "range": "105-135",
+      "name": "background_all + refdata",
+      "note": "T114-120 add background_all; T131 227 pass"
+    },
+    {
+      "range": "134-137",
+      "name": "scope check, commit/push",
+      "note": "T134"
+    }
+  ],
+  "early_signals": [
+    {
+      "turn": 70,
+      "signal": "Waits on pytest background notification rather than polling (T70, T73)"
+    },
+    {
+      "turn": 88,
+      "signal": "Dry-run scan is slow (extra ~255s from node scan); waits again"
+    },
+    {
+      "turn": 102,
+      "signal": "Diagnoses the hot path (134M nodes without place tag) and applies a targeted optimisation, reruns"
+    },
+    {
+      "turn": 120,
+      "signal": "Edits 12 and reads 21 by T120: balanced implement-and-read loop; only 2 compactions"
+    }
+  ],
+  "early_signal_window_respected": true,
+  "recommended_exit": null,
+  "earliness": null,
+  "rationale": "Balanced read/edit/test progression; the slow scan is diagnosed and fixed rather than repeated. Waits are bounded. No sign of thrash or a pivot before T120.",
+  "pack_coverage": {
+    "T": 137,
+    "checkpoints_seen": [
+      75,
+      90,
+      105,
+      120,
+      135
+    ],
+    "unseen_tail_turns": 2
+  }
+}

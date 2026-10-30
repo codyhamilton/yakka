@@ -1,0 +1,61 @@
+{
+  "experiment": "shape-qual-full-maps-v1",
+  "worker_id": "5a152464f6e5",
+  "model": "Sonnet",
+  "narrative_shape": "Encoder implementation with an early round-trip proof. By T70-72 the type5 encoder is folded with angle_flags and three round-trips are byte-identical; edit count stays at 12 from T75 on, so the implementation was largely done by T75. Turns after are tests (T75-90 test_name_encoder.py), a Monitor/ToolSearch background step (T~100), and a rebuild with the vocab check (T104). Minimal re-reads.",
+  "shape_label": "unclear",
+  "shape_detail": "steady_build_to_commit",
+  "phases": [
+    {
+      "range": "1-75",
+      "name": "implement encoder",
+      "note": "Edit 12, Read 14, Bash 51; T70-72 angle_flags, byte-identical round-trips"
+    },
+    {
+      "range": "75-90",
+      "name": "write tests",
+      "note": "T75 check decode signatures; T83-86 Brisbane spot check, NameRecord imports; test_name_encoder.py read"
+    },
+    {
+      "range": "90-105",
+      "name": "background step + rebuild",
+      "note": "Monitor+ToolSearch+Write; T104 PBF present, rebuild with defaults and vocab check"
+    },
+    {
+      "range": "105-119",
+      "name": "unseen after T105",
+      "note": ""
+    }
+  ],
+  "early_signals": [
+    {
+      "turn": 72,
+      "signal": "All three round-trips byte-identical after the angle_flags fold"
+    },
+    {
+      "turn": 75,
+      "signal": "Edits already 12 and flat afterwards: implementation front-loaded"
+    },
+    {
+      "turn": 90,
+      "signal": "T83-86 repeated 'matches my summary' checks before writing the test file (post-compaction context rebuild; 2 compactions)"
+    },
+    {
+      "turn": 105,
+      "signal": "Re-reads limited to synth.py and osm_to_parcel_geometry.py at 3x"
+    }
+  ],
+  "early_signal_window_respected": true,
+  "recommended_exit": null,
+  "earliness": null,
+  "rationale": "Front-loaded implementation with proven round-trips, then tests and a rebuild check. Low re-read counts, no stall. The last 14 turns are unseen.",
+  "pack_coverage": {
+    "T": 119,
+    "checkpoints_seen": [
+      75,
+      90,
+      105
+    ],
+    "unseen_tail_turns": 14
+  }
+}

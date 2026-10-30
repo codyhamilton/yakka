@@ -1,0 +1,60 @@
+{
+  "experiment": "shape-qual-full-maps-v1",
+  "worker_id": "7c99c180742e",
+  "model": "Sonnet",
+  "narrative_shape": "Authoring-heavy start (11 writes, 12 edits by T75) then test and cleanup (152-test suite, kill of a stale orphan process running pre-fix code, T68-69), review of compare_disc.py and context.py (T74-75), and a long reference-disc self-check. The T84-85 hiccup: the earlier monitor died with a shell reset though the process survived, so a persistent monitor is armed. T86-89 waits on a two-pass check (walk summary, pointers).",
+  "shape_label": "unclear",
+  "shape_detail": "build_then_long_wait",
+  "phases": [
+    {
+      "range": "1-67",
+      "name": "author harness",
+      "note": "Write 11, Edit 12, Bash 39, Read 14"
+    },
+    {
+      "range": "68-75",
+      "name": "full suite + orphan cleanup",
+      "note": "T68 152 pass; stale process killed; monitor; review"
+    },
+    {
+      "range": "75-90",
+      "name": "reference check wait",
+      "note": "T84 monitor lost to shell reset; T85 persistent monitor; T89 pass 2 of 2"
+    },
+    {
+      "range": "90-100",
+      "name": "unseen",
+      "note": ""
+    }
+  ],
+  "early_signals": [
+    {
+      "turn": 68,
+      "signal": "Kills a stale orphaned process running pre-fix code to avoid confusion"
+    },
+    {
+      "turn": 75,
+      "signal": "Write 11 and Edit 12 at T75: large authoring volume, narration 1.9k chars"
+    },
+    {
+      "turn": 84,
+      "signal": "Monitor lost across a shell reset; process survived; re-armed as persistent"
+    },
+    {
+      "turn": 89,
+      "signal": "Reference self-check progress (level 0, 200/1836 blocks, pass 1 done); waiting for persistent monitor"
+    }
+  ],
+  "early_signal_window_respected": true,
+  "recommended_exit": null,
+  "earliness": null,
+  "rationale": "Productive authoring, bounded cleanup, then a long background check with one monitor mishap handled by re-arming. No thrash or pivot visible.",
+  "pack_coverage": {
+    "T": 100,
+    "checkpoints_seen": [
+      75,
+      90
+    ],
+    "unseen_tail_turns": 10
+  }
+}

@@ -1,0 +1,60 @@
+{
+  "experiment": "shape-qual-full-maps-v1",
+  "worker_id": "7af2854bba92",
+  "model": "Sonnet",
+  "narrative_shape": "A design-revision orchestrator: Agent 7, Skill 1, 13 reads, 38 bash by T75. It writes and commits an amendment, then waits on an adversarial review agent (T72-74), pushes after review, and at T88-90 applies review findings with four consecutive edits. Compactions are 4 by T75 with only 13 reads. T91-99 unseen.",
+  "shape_label": "unclear",
+  "shape_detail": "orchestrator_dispatch_wait",
+  "phases": [
+    {
+      "range": "1-70",
+      "name": "read plan docs, draft, dispatch agents",
+      "note": "Agent 7, Skill 1, Read 13, Bash 38"
+    },
+    {
+      "range": "70-75",
+      "name": "commit amendment, wait on adversarial review",
+      "note": "T72 amendment committed; T74 still waiting"
+    },
+    {
+      "range": "75-87",
+      "name": "bash/git steps",
+      "note": "+8 Bash, push/status checks"
+    },
+    {
+      "range": "88-99",
+      "name": "apply review edits",
+      "note": "T88-90 four edits; DESIGN.md re-read 3x"
+    }
+  ],
+  "early_signals": [
+    {
+      "turn": 68,
+      "signal": "Bash and Agent dispatched together (parallel review)"
+    },
+    {
+      "turn": 72,
+      "signal": "Amendment written and committed before the adversarial pass is back"
+    },
+    {
+      "turn": 74,
+      "signal": "Explicit wait on the review agent"
+    },
+    {
+      "turn": 90,
+      "signal": "Four consecutive edits after review returns (T88-90)"
+    }
+  ],
+  "early_signal_window_respected": true,
+  "recommended_exit": null,
+  "earliness": null,
+  "rationale": "Dispatch, wait, apply-findings shape typical of an orchestrator; waits are bounded and productive. No thrash visible.",
+  "pack_coverage": {
+    "T": 99,
+    "checkpoints_seen": [
+      75,
+      90
+    ],
+    "unseen_tail_turns": 9
+  }
+}

@@ -1,0 +1,61 @@
+{
+  "experiment": "shape-qual-full-maps-v1",
+  "worker_id": "52ea24516a6e",
+  "model": "Sonnet",
+  "narrative_shape": "The module rewrite is finished by T75 (10 edits, 2 writes). The visible story is waiting: a full-Australia extraction runs in the background (peak RSS about 4.1 GB), the worker reviews its own module while waiting (T68-69), arms and re-arms monitors (T88, one-hour window), and then does done-evidence checks, a full-suite pytest wait (T100-102) and commit of owned files (T105). Narration is large (3.4k->5.4k chars) but almost entirely status.",
+  "shape_label": "unclear",
+  "shape_detail": "build_then_long_wait",
+  "phases": [
+    {
+      "range": "1-68",
+      "name": "rewrite module",
+      "note": "Edit 10, Write 2, Read 11, Bash 58"
+    },
+    {
+      "range": "68-90",
+      "name": "full-Australia extraction wait",
+      "note": "T71-75 monitor armed; T88 re-armed 1-hour window; T90 results in hand"
+    },
+    {
+      "range": "90-103",
+      "name": "done-evidence + pytest wait",
+      "note": "T100 'already have a Monitor armed'; T102 waiting on suite and grep/git checks"
+    },
+    {
+      "range": "103-107",
+      "name": "stage and commit",
+      "note": "T105 only owned files staged"
+    }
+  ],
+  "early_signals": [
+    {
+      "turn": 68,
+      "signal": "Reviews own module end-to-end while a long run proceeds"
+    },
+    {
+      "turn": 75,
+      "signal": "Edit count already 10 and flat afterward: authoring front-loaded; remainder is waiting"
+    },
+    {
+      "turn": 88,
+      "signal": "Monitor re-armed after the first window lapsed; extractor in index-finalisation"
+    },
+    {
+      "turn": 102,
+      "signal": "Monitor watching full-suite pytest plus grep/git checks; no polling turns beyond a few waits"
+    }
+  ],
+  "early_signal_window_respected": true,
+  "recommended_exit": null,
+  "earliness": null,
+  "rationale": "Authoring finished early; later activity is bounded waits on extraction and tests, ending in a clean commit. Waits are explicit and not looped.",
+  "pack_coverage": {
+    "T": 107,
+    "checkpoints_seen": [
+      75,
+      90,
+      105
+    ],
+    "unseen_tail_turns": 2
+  }
+}

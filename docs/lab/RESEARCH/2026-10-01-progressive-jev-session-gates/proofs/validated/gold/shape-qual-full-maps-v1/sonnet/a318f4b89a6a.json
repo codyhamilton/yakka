@@ -1,0 +1,60 @@
+{
+  "experiment": "shape-qual-full-maps-v1",
+  "worker_id": "a318f4b89a6a",
+  "model": "Sonnet",
+  "narrative_shape": "A retry with an inherited dirty tree. 8 compactions by T75. After pytest 7/7 and a clean import grep (T75) it relaunches the heavy-lock disc check with a multiprocessing fix (T74-75). By T86 it diagnoses the runaway process as a memory-architecture problem (ShapeIndex.buckets is a defaultdict(list) of Python objects whose headers the GC keeps touching), reads walk.py/spool.py/quantisation_roundtrip.py repeatedly (5x, 4x, 3x) and issues three consecutive edits T87-89. Reads like a hard problem requiring redesign rather than a loop; T91-95 unseen.",
+  "shape_label": "unclear",
+  "shape_detail": "debug_iterate_runaway_job",
+  "phases": [
+    {
+      "range": "1-68",
+      "name": "orientation + scaffolding",
+      "note": "Bash 53, Read 18, Edit 8, Write 3; 8 compactions"
+    },
+    {
+      "range": "68-75",
+      "name": "multiprocessing fix + relaunch",
+      "note": "T72-73 edits; T74 pytest; T75 relaunch heavy-lock check"
+    },
+    {
+      "range": "75-85",
+      "name": "monitor runaway",
+      "note": "Bash +9, reads +2"
+    },
+    {
+      "range": "85-90",
+      "name": "diagnosis + rework",
+      "note": "T86 GC/memory diagnosis; T87-89 edits"
+    }
+  ],
+  "early_signals": [
+    {
+      "turn": 75,
+      "signal": "8 compactions by T75 at 126k context"
+    },
+    {
+      "turn": 75,
+      "signal": "Relaunches the heavy-lock check after a fix (a repeated launch)"
+    },
+    {
+      "turn": 86,
+      "signal": "Concludes runaway is a memory-architecture issue (defaultdict(list) of Python objects, GC)"
+    },
+    {
+      "turn": 90,
+      "signal": "quantisation_roundtrip.py 5x, walk.py 4x, spool.py 3x; three consecutive edits"
+    }
+  ],
+  "early_signal_window_respected": true,
+  "recommended_exit": null,
+  "earliness": null,
+  "rationale": "Debug cycle with explicit root-cause statement and targeted edits; rereads accompany edits. High compaction and a repeated heavy run mean this is costly, but the pack shows reasoned iteration, not a mindless loop.",
+  "pack_coverage": {
+    "T": 95,
+    "checkpoints_seen": [
+      75,
+      90
+    ],
+    "unseen_tail_turns": 5
+  }
+}

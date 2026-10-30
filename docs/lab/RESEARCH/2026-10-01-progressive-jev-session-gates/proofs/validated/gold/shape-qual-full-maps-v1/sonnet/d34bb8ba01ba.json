@@ -1,0 +1,61 @@
+{
+  "experiment": "shape-qual-full-maps-v1",
+  "worker_id": "d34bb8ba01ba",
+  "model": "Sonnet",
+  "narrative_shape": "Implementation/audit run: 18 edits by T75, with T73-75 repeatedly finding files 'already complete and correct' (walk.py, coord_scale_census.py, model.py), suggesting it is finishing or auditing prior work. It then adds tests (test_harness_walk T90, test_harness_core and test_road_density_census T105) and runs pytest in the background with a monitor (T99-103). Moderate re-reads (walk.py 5x, overlay_test.py 4x, road_density_census.py 4x). T106-116 unseen.",
+  "shape_label": "unclear",
+  "shape_detail": "steady_build_with_audit_of_existing",
+  "phases": [
+    {
+      "range": "1-75",
+      "name": "edits + audit of existing files",
+      "note": "Edit 18, Read 22; T69 parcel_metrics coord_max fix; T73-75 'already complete and correct'"
+    },
+    {
+      "range": "75-90",
+      "name": "remaining tools + test",
+      "note": "T75 overlay_test, continuity_census, boundary_mirror_census; test_harness_walk"
+    },
+    {
+      "range": "90-105",
+      "name": "tests + background pytest",
+      "note": "new test files; T98 ToolSearch; T99-103 wait on pytest/monitor"
+    },
+    {
+      "range": "105-116",
+      "name": "unseen",
+      "note": ""
+    }
+  ],
+  "early_signals": [
+    {
+      "turn": 69,
+      "signal": "Replaces peak-guessing fallback with coord_max consistently"
+    },
+    {
+      "turn": 75,
+      "signal": "Three consecutive 'already complete and correct' audit turns (T73-75) after 18 edits"
+    },
+    {
+      "turn": 105,
+      "signal": "walk.py 5x, overlay_test.py 4x, road_density_census.py 4x: modest re-reads on files with active edits"
+    },
+    {
+      "turn": 103,
+      "signal": "Waits for background pytest and monitor (T99-103)"
+    }
+  ],
+  "early_signal_window_respected": true,
+  "recommended_exit": null,
+  "earliness": null,
+  "rationale": "Edit-heavy with an audit phase and modest re-reads; wait at T99-103 is bounded. No decisive early thrash; tail unseen.",
+  "pack_coverage": {
+    "T": 116,
+    "checkpoints_seen": [
+      75,
+      90,
+      105
+    ],
+    "unseen_tail_turns": 11
+  }
+}

@@ -1,0 +1,57 @@
+{
+  "experiment": "shape-qual-full-maps-v1",
+  "worker_id": "daf933273c8f",
+  "model": "Sonnet",
+  "narrative_shape": "A retry of a roundtrip-redesign unit with a heavy early compaction history (6 by T75, 8 by T120) and almost no narration (196->251 chars over 120 turns). Reads freeze at 12 after T90; T75-T105 is Bash-only (+16 per checkpoint). A ToolSearch and a Monitor are armed around T113-115 (per the brief's wait contract) and the run keeps calling Bash. Cannot tell from the pack whether the Bash stream is productive build/test iteration or churn.",
+  "shape_label": "unclear",
+  "shape_detail": "silent_bash_loop_then_monitor",
+  "phases": [
+    {
+      "range": "1-75",
+      "name": "orientation + scaffolding",
+      "note": "Bash 67, Read 9, Write 2, Edit 1; 6 compactions"
+    },
+    {
+      "range": "75-105",
+      "name": "bash-only",
+      "note": "T90 reads reach 12 (new spool.py) and then stay flat; Bash +13 and +16 per checkpoint"
+    },
+    {
+      "range": "105-122",
+      "name": "arm monitor, continue",
+      "note": "T113 ToolSearch, T115 Monitor, T116-120 Bash"
+    }
+  ],
+  "early_signals": [
+    {
+      "turn": 75,
+      "signal": "6 compactions at T75 with context pinned at 125k and only 196 chars of narration"
+    },
+    {
+      "turn": 90,
+      "signal": "Reads rise to 12 then stop; no edits after the first"
+    },
+    {
+      "turn": 105,
+      "signal": "T98-105: 16 Bash calls in 15 turns, zero reads, zero narration growth (251 chars)"
+    },
+    {
+      "turn": 120,
+      "signal": "Monitor + ToolSearch added at T113-115 only after ~110 turns; compactions 8; quantisation_roundtrip.py re-read 3x"
+    }
+  ],
+  "early_signal_window_respected": true,
+  "recommended_exit": null,
+  "earliness": null,
+  "rationale": "Silent Bash-dominated run with high compaction and a late monitor. The pack gives no narration to separate productive iteration from a loop, so labelled unclear with the silent-loop shape noted.",
+  "pack_coverage": {
+    "T": 122,
+    "checkpoints_seen": [
+      75,
+      90,
+      105,
+      120
+    ],
+    "unseen_tail_turns": 2
+  }
+}

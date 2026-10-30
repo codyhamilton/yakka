@@ -1,0 +1,55 @@
+{
+  "experiment": "shape-qual-full-maps-v1",
+  "worker_id": "9b156dbab5d9",
+  "model": "Sonnet",
+  "narrative_shape": "Rerun unit: orientation and setup (Bash 52, Read 10, Edit 6), then four determinism runs (continuity x2, mirror x2) with waits (T70-74), sha256 identical across pairs (T83-84), JSON compared to brief expectations and EVIDENCE-2-14.json created, then commit of owned paths (T90).",
+  "shape_label": "unclear",
+  "shape_detail": "steady_build_to_commit",
+  "phases": [
+    {
+      "range": "1-70",
+      "name": "orientation + setup",
+      "note": "Bash 52, Read 10, Edit 6, Monitor 4"
+    },
+    {
+      "range": "70-82",
+      "name": "determinism runs",
+      "note": "T70 pause for R run; T72 run 1 ~1s; T74 waiting on remaining three"
+    },
+    {
+      "range": "83-90",
+      "name": "verify + record + commit",
+      "note": "T83-84 sha256 identical; build EVIDENCE-2-14.json; T90 commit"
+    }
+  ],
+  "early_signals": [
+    {
+      "turn": 70,
+      "signal": "Pauses explicitly for a background run"
+    },
+    {
+      "turn": 72,
+      "signal": "First run finished in ~1s: cheap check"
+    },
+    {
+      "turn": 74,
+      "signal": "Waits for three remaining runs, bounded"
+    },
+    {
+      "turn": 90,
+      "signal": "Commits owned paths only"
+    }
+  ],
+  "early_signal_window_respected": true,
+  "recommended_exit": null,
+  "earliness": null,
+  "rationale": "Cheap deterministic runs, verified and committed. No thrash.",
+  "pack_coverage": {
+    "T": 93,
+    "checkpoints_seen": [
+      75,
+      90
+    ],
+    "unseen_tail_turns": 3
+  }
+}

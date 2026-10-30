@@ -1,0 +1,62 @@
+{
+  "experiment": "shape-qual-full-maps-v1",
+  "worker_id": "6e06ab86aa72",
+  "model": "Sonnet",
+  "narrative_shape": "A verification-focused retry: by T75 it is almost all Bash (70) with 2 reads, 2 writes, and effectively no edits. Visible turns are launching and waiting on long full-disc checks: identity at -j1/-j4 and round-trip (T68-71), compare_disc (T83-89), and then a ~5 minute coord_scale check with repeated 'I'll wait' turns (T98-116). The check passes (0 of 1,461,347 exceeding, T118) and it commits (T119). Waiting is the dominant activity, but it terminates cleanly.",
+  "shape_label": "unclear",
+  "shape_detail": "poll_monitor_wait",
+  "phases": [
+    {
+      "range": "1-75",
+      "name": "run identity/roundtrip/compare checks",
+      "note": "Bash 70, Read 2, Write 2; T68 Perth identical at -j1/-j4"
+    },
+    {
+      "range": "75-90",
+      "name": "wait for compare_disc",
+      "note": "T83, T88, T89 waiting; T87 confirms owned paths only"
+    },
+    {
+      "range": "90-117",
+      "name": "wait for coord_scale full-disc check",
+      "note": "T98-105 'I'll wait' x5; T113-116 holds for monitor b76xgaipa"
+    },
+    {
+      "range": "117-123",
+      "name": "pass + commit",
+      "note": "T118 coord_scale PASS; T119 stage and commit"
+    }
+  ],
+  "early_signals": [
+    {
+      "turn": 75,
+      "signal": "Bash 70 vs 2 reads and 0 edits at T75: verification-only posture"
+    },
+    {
+      "turn": 90,
+      "signal": "T83, T88, T89 each say wait/still running for compare_disc"
+    },
+    {
+      "turn": 105,
+      "signal": "Five or more consecutive 'waiting for coord_scale' turns (T98-105); ~5 minutes elapsed, ctx rising 116k->135k"
+    },
+    {
+      "turn": 116,
+      "signal": "T113-116 hold for the monitor; no compaction"
+    }
+  ],
+  "early_signal_window_respected": true,
+  "recommended_exit": null,
+  "earliness": null,
+  "rationale": "Wait-dominated verification from the first visible turn, with repeated 'I'll wait' statements around the long coord_scale check. It ends in a pass and commit, so the polling is cost rather than failure. Distinct from build shapes.",
+  "pack_coverage": {
+    "T": 123,
+    "checkpoints_seen": [
+      75,
+      90,
+      105,
+      120
+    ],
+    "unseen_tail_turns": 3
+  }
+}

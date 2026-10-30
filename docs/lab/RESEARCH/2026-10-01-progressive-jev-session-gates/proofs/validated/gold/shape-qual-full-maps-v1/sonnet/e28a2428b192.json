@@ -1,0 +1,55 @@
+{
+  "experiment": "shape-qual-full-maps-v1",
+  "worker_id": "e28a2428b192",
+  "model": "Sonnet",
+  "narrative_shape": "Entirely Bash: 75 Bash calls plus two writes by T75 and no Read or Edit tool use at all, with no narration (0 chars at T75, 101 at T90). Compactions double from 2 to 4 by T90. The only visible text is T85 'now compare_disc coord_scale and the round-trip rerun', i.e. a verification gate. The pack cannot show whether the single-tool stream is productive or a loop; the posture is simply opaque.",
+  "shape_label": "unclear",
+  "shape_detail": "bash_only_silent",
+  "phases": [
+    {
+      "range": "1-75",
+      "name": "bash-only execution",
+      "note": "Bash 75, Write 2; no Read/Edit; 2 compactions"
+    },
+    {
+      "range": "75-90",
+      "name": "bash-only + verification gates",
+      "note": "+15 Bash; T85 coord_scale and round-trip rerun; compactions 4"
+    },
+    {
+      "range": "90-102",
+      "name": "unseen",
+      "note": ""
+    }
+  ],
+  "early_signals": [
+    {
+      "turn": 75,
+      "signal": "Bash 75, zero Read or Edit tool calls, zero characters of narration"
+    },
+    {
+      "turn": 75,
+      "signal": "Context 144k with 2 compactions already"
+    },
+    {
+      "turn": 85,
+      "signal": "Only visible text names a verification gate (coord_scale + round-trip rerun)"
+    },
+    {
+      "turn": 90,
+      "signal": "Compactions double to 4; +15 Bash with no narration"
+    }
+  ],
+  "early_signal_window_respected": true,
+  "recommended_exit": null,
+  "earliness": null,
+  "rationale": "Silent single-tool stream with rising compaction; no distinguishing evidence in the pack for productive vs looping behaviour. Labelled unclear.",
+  "pack_coverage": {
+    "T": 102,
+    "checkpoints_seen": [
+      75,
+      90
+    ],
+    "unseen_tail_turns": 12
+  }
+}

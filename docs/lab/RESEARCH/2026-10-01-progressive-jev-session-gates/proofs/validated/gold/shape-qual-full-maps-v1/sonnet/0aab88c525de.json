@@ -1,0 +1,66 @@
+{
+  "experiment": "shape-qual-full-maps-v1",
+  "worker_id": "0aab88c525de",
+  "model": "Sonnet",
+  "narrative_shape": "A healthy authoring run on the assembler. Orientation reads (36 across 20 paths) and first edits by T75, then an edit/test cycle that keeps correcting concrete defects (bsmr_offset mutation T74, hard-coded field lengths T86-90, MHT/MHR constants T98, test coordinates T118, decode-back T120). Mid-run it reworks has_bmt to be content-driven (T128-132), writes the contract-conformant builder (T148, T159) and gets tests green (T160-161). The tail turns into a wait: Perth-fixture extraction in the background with a monitor (T165-180). No pivot or thrash is visible.",
+  "shape_label": "unclear",
+  "shape_detail": "steady_build_then_wait",
+  "phases": [
+    {
+      "range": "1-75",
+      "name": "orientation + first edits",
+      "note": "36 reads, 47 bash, 3 edits across 20 distinct paths"
+    },
+    {
+      "range": "75-120",
+      "name": "edit/test/decode-back cycle",
+      "note": "edits 3->12; T74 mutation fix, T86-90 exact values, T118 coordinates, T120 builds and decodes back"
+    },
+    {
+      "range": "120-165",
+      "name": "has_bmt rework + contract builder",
+      "note": "T128 content-driven has_bmt; Write at T148/T159; T161 all tests pass"
+    },
+    {
+      "range": "165-192",
+      "name": "long background extraction wait",
+      "note": "Monitor + ToolSearch; T173-180 'wait for monitor notification'"
+    }
+  ],
+  "early_signals": [
+    {
+      "turn": 74,
+      "signal": "Early self-correction ('not frozen, mutate directly') followed by edits; edit count rises 3->7 by T90"
+    },
+    {
+      "turn": 90,
+      "signal": "narration growing (1.0k->1.65k chars) while verifying exact hex values against a prior session's inspection"
+    },
+    {
+      "turn": 105,
+      "signal": "alldata_writer.py re-read 12x, but paired with 9 edits (focused iteration, not a loop)"
+    },
+    {
+      "turn": 120,
+      "signal": "T118-120 loop is fix coordinates -> build -> decode back; context stable, only 4 compactions"
+    }
+  ],
+  "early_signal_window_respected": true,
+  "recommended_exit": null,
+  "earliness": null,
+  "rationale": "Edit counts and narration rise steadily, re-reads are paired with edits, compaction stays low. No early evidence of thrash or a pivot; the only change of character is the final wait on a long extraction, which is expected work rather than failure.",
+  "pack_coverage": {
+    "T": 192,
+    "checkpoints_seen": [
+      75,
+      90,
+      105,
+      120,
+      135,
+      150,
+      165,
+      180
+    ],
+    "unseen_tail_turns": 12
+  }
+}

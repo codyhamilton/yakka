@@ -1,0 +1,60 @@
+{
+  "experiment": "shape-qual-full-maps-v1",
+  "worker_id": "a3cc4da7e21c",
+  "model": "Sonnet",
+  "narrative_shape": "Handoff from a worker that died mid-run. At T70 test counts 518->520 (+2 new). T71-73 it launches a baseline script (Perth j1/j4 and three full-AU -j12 builds under the heavy lock, 90-minute window) and waits (T75). By T88-89 it notes unrelated changes by another unit and commits only owned paths. Narration is large (3.9k->4.5k chars); one Read at T75.",
+  "shape_label": "unclear",
+  "shape_detail": "build_then_long_wait",
+  "phases": [
+    {
+      "range": "1-67",
+      "name": "adopt inherited diff, test",
+      "note": "Bash 63, Edit 5, Write 2, 1 read"
+    },
+    {
+      "range": "68-75",
+      "name": "launch baseline script",
+      "note": "T70 518->520 passed; T71 launch; T73 90-min window; T75 waiting"
+    },
+    {
+      "range": "75-88",
+      "name": "wait",
+      "note": "Bash +13, 1 read (build_alldata.py)"
+    },
+    {
+      "range": "88-91",
+      "name": "stage/commit owned paths",
+      "note": "T88 unrelated changes left alone; T89 commit"
+    }
+  ],
+  "early_signals": [
+    {
+      "turn": 70,
+      "signal": "Test count 518->520 with no failures after restoring prior diff"
+    },
+    {
+      "turn": 73,
+      "signal": "Baseline wrapped in a bounded 90-minute window"
+    },
+    {
+      "turn": 75,
+      "signal": "Waits for a long script after launch"
+    },
+    {
+      "turn": 88,
+      "signal": "Identifies unrelated edits as another unit's and refuses to stage them"
+    }
+  ],
+  "early_signal_window_respected": true,
+  "recommended_exit": null,
+  "earliness": null,
+  "rationale": "Disciplined inherited-work run with a bounded long wait and clean commit.",
+  "pack_coverage": {
+    "T": 91,
+    "checkpoints_seen": [
+      75,
+      90
+    ],
+    "unseen_tail_turns": 1
+  }
+}

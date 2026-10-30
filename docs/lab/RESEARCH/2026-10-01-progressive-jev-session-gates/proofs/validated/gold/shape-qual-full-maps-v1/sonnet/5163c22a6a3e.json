@@ -1,0 +1,60 @@
+{
+  "experiment": "shape-qual-full-maps-v1",
+  "worker_id": "5163c22a6a3e",
+  "model": "Sonnet",
+  "narrative_shape": "Vocab mapping unit. Authoring early (Write 7, Edit 8 by T75). At T68 it builds the Perth fixture and runs extractor + build_alldata + compare_disc. T85 it examines a build_alldata breakage while waiting, T88-90 waits on a monitor for an extractor run that took ~1.5h for seven levels in a previous unit's report, and the last visible turn (T90) is a declaration that it will pause and wait. osm_to_parcel_geometry.py re-read 9x. No commit visible at T90; T91+ none.",
+  "shape_label": "unclear",
+  "shape_detail": "build_then_long_wait",
+  "phases": [
+    {
+      "range": "1-67",
+      "name": "author vocab mapping",
+      "note": "Write 7, Edit 8, Read 19, Bash 41"
+    },
+    {
+      "range": "68-75",
+      "name": "Perth fixture + checks",
+      "note": "T68 build fixture and run extractor/build_alldata/compare_disc"
+    },
+    {
+      "range": "75-88",
+      "name": "breakage investigation during wait",
+      "note": "T85 build_alldata.py breakage"
+    },
+    {
+      "range": "88-90",
+      "name": "park on extractor monitor",
+      "note": "T88 wait for notification; T90 'pause here and wait'"
+    }
+  ],
+  "early_signals": [
+    {
+      "turn": 68,
+      "signal": "Plans a full Perth fixture build + compare_disc chain"
+    },
+    {
+      "turn": 75,
+      "signal": "Authoring finished early (Write 7, Edit 8); later work is run/wait"
+    },
+    {
+      "turn": 85,
+      "signal": "Notices build_alldata.py breakage while a long job runs"
+    },
+    {
+      "turn": 90,
+      "signal": "Run's last visible turn is a pause-and-wait statement; osm_to_parcel_geometry.py re-read 9x"
+    }
+  ],
+  "early_signal_window_respected": true,
+  "recommended_exit": null,
+  "earliness": null,
+  "rationale": "Authoring done early, then a long background job and a final park. The run ends while waiting, which is the notable tail, but nothing at or before T120 is thrash.",
+  "pack_coverage": {
+    "T": 90,
+    "checkpoints_seen": [
+      75,
+      90
+    ],
+    "unseen_tail_turns": 0
+  }
+}

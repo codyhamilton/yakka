@@ -1,0 +1,86 @@
+{
+  "experiment": "shape-qual-full-maps-v1",
+  "worker_id": "92a48e004519",
+  "model": "Sonnet",
+  "narrative_shape": "Long, near-silent Bash/Read grind on the same seven files. Context is pinned near 130k and 12 compactions have already fired by T75 (14 by T90, 20 by T120, 36 by T210). Re-read counts on _cenc.c, divide.py and _e2.c climb steadily with zero new read paths from T75 through T210, and the whole prefix carries about 36 characters of assistant text until ~T225. The character changes around T225-240: a new scratch path appears, narration starts, and the tail becomes a closeout (tidy comments and delete files T236, ctest cases T266, brief amendment while gates run T284, Monitor wait T279). The pack cannot show whether the 150-turn middle was converging debugging or thrash; the churn signature is present from the first checkpoint and persists.",
+  "shape_label": "early_thrash",
+  "shape_detail": "churn_compaction_loop",
+  "phases": [
+    {
+      "range": "1-75",
+      "name": "silent read/bash churn",
+      "note": "31 reads and 55 bash on 7 distinct files; 12 compactions; _cenc.c read 10x"
+    },
+    {
+      "range": "75-120",
+      "name": "same-file loop continues",
+      "note": "no new read paths; compactions 12->20; _cenc.c 13x, divide.py 11x, _e2.c 10x"
+    },
+    {
+      "range": "120-210",
+      "name": "long grind",
+      "note": "Bash+Read only; _cenc.c 26x; compactions 36; ~36 chars of text in 210 turns"
+    },
+    {
+      "range": "210-240",
+      "name": "shift",
+      "note": "T225 first new path (scratch p1.c); narration begins; Bash-only from T225"
+    },
+    {
+      "range": "240-296",
+      "name": "closeout",
+      "note": "T236 tidy/delete, T266 add ctest cases, T279 Monitor, T284 amendment while gates run"
+    }
+  ],
+  "early_signals": [
+    {
+      "turn": 75,
+      "signal": "12 compactions and context pinned at ~130k by T75"
+    },
+    {
+      "turn": 75,
+      "signal": "_cenc.c read 10x, divide.py 7x, _e2.c 6x, on only 7 distinct read paths"
+    },
+    {
+      "turn": 75,
+      "signal": "about 36 characters of assistant text across the first 75 turns (silent execution)"
+    },
+    {
+      "turn": 90,
+      "signal": "compactions 14, still no new read paths; tail is Bash-only with an isolated Read at T88"
+    },
+    {
+      "turn": 105,
+      "signal": "_cenc.c 13x, build_alldata.py 6x; compactions 18; 81 bash vs 42 read"
+    },
+    {
+      "turn": 120,
+      "signal": "compactions 20; divide.py 11x and _e2.c 10x; no new files read since T75"
+    }
+  ],
+  "early_signal_window_respected": true,
+  "recommended_exit": null,
+  "earliness": null,
+  "rationale": "Churn signature is visible from T75: heavy compaction, rising re-reads on a fixed set of files, no new inputs, and almost no narration. Late closeout after T225 shows the run did recover, but nothing at or before T120 distinguishes productive debugging from a loop. Labelled early_thrash on the early signature; confidence moderate.",
+  "pack_coverage": {
+    "T": 296,
+    "checkpoints_seen": [
+      75,
+      90,
+      105,
+      120,
+      135,
+      150,
+      165,
+      180,
+      195,
+      210,
+      225,
+      240,
+      255,
+      270,
+      285
+    ],
+    "unseen_tail_turns": 11
+  }
+}

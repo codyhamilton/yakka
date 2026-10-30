@@ -1,0 +1,55 @@
+{
+  "experiment": "shape-qual-full-maps-v1",
+  "worker_id": "de5b76cc68a6",
+  "model": "Sonnet",
+  "narrative_shape": "Bash-only: 76 Bash calls at T75 and no reads, edits or writes; narration 109->168 chars; 2 compactions. T84 'census sha reproductions, find the commands' is the only visible text. Pack is opaque on productivity.",
+  "shape_label": "unclear",
+  "shape_detail": "bash_only_silent",
+  "phases": [
+    {
+      "range": "1-75",
+      "name": "bash-only execution",
+      "note": "Bash 76; no Read/Edit/Write; 2 compactions"
+    },
+    {
+      "range": "75-90",
+      "name": "census sha reproduction",
+      "note": "+16 Bash; T84 locate commands"
+    },
+    {
+      "range": "90-94",
+      "name": "unseen",
+      "note": ""
+    }
+  ],
+  "early_signals": [
+    {
+      "turn": 75,
+      "signal": "Bash 76 with zero Read/Edit/Write at T75"
+    },
+    {
+      "turn": 75,
+      "signal": "Only 109 characters of narration; 2 compactions with ctx 146k"
+    },
+    {
+      "turn": 84,
+      "signal": "Only visible text is about locating census sha commands"
+    },
+    {
+      "turn": 90,
+      "signal": "+16 Bash in 15 turns with a parallel pair at T83; narration 168 chars"
+    }
+  ],
+  "early_signal_window_respected": true,
+  "recommended_exit": null,
+  "earliness": null,
+  "rationale": "Silent single-tool stream; pack gives no basis to separate productive from looping.",
+  "pack_coverage": {
+    "T": 94,
+    "checkpoints_seen": [
+      75,
+      90
+    ],
+    "unseen_tail_turns": 4
+  }
+}

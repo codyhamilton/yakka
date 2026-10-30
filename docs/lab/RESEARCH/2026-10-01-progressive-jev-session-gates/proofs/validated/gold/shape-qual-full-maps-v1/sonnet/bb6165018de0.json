@@ -1,0 +1,64 @@
+{
+  "experiment": "shape-qual-full-maps-v1",
+  "worker_id": "bb6165018de0",
+  "model": "Sonnet",
+  "narrative_shape": "Read-only research whose visible turns are dominated by waiting on a long census job. From T68 the narration is 'standing by', 'waiting for the census job', 'wait for the next monitor event'; a second census is armed at T84 and the run then sits on block-count progress through level 0 (T99-119). Context barely moves (143k->146k across T105-T150). Census completes around T149 and analysis begins (T150). Productive waiting on a legitimately long job, but nearly every turn from ~T68 to T150 is a poll.",
+  "shape_label": "unclear",
+  "shape_detail": "poll_monitor_wait",
+  "phases": [
+    {
+      "range": "1-67",
+      "name": "write census script, start job",
+      "note": "Bash 66, Read 8, Write 1 (cumulative only)"
+    },
+    {
+      "range": "68-120",
+      "name": "wait/poll on census",
+      "note": "T68-71 standing by; T84 arm monitor for next run; T99-105 waiting on level-0 blocks; T115-119 'rely on the monitor'"
+    },
+    {
+      "range": "120-143",
+      "name": "continue waiting",
+      "note": "Bash +14 per checkpoint, no edits, 8-9 reads total"
+    },
+    {
+      "range": "143-154",
+      "name": "census completes, analysis",
+      "note": "T143 1200/1836 blocks; T147 1600; T149 finished; T150 reads analysis output"
+    }
+  ],
+  "early_signals": [
+    {
+      "turn": 75,
+      "signal": "Only 8 reads and 1 write against 66 Bash; zero edits; narration is waiting language ('standing by')"
+    },
+    {
+      "turn": 90,
+      "signal": "Third monitor armed at T84 for a further run; T85-86 'I'll wait for progress'"
+    },
+    {
+      "turn": 105,
+      "signal": "T99-105 repeated 'still waiting for next block-count line'; context flat (143k)"
+    },
+    {
+      "turn": 120,
+      "signal": "T115-119 several consecutive 'waiting/standing by' turns; context 146k unchanged since T105"
+    }
+  ],
+  "early_signal_window_respected": true,
+  "recommended_exit": null,
+  "earliness": null,
+  "rationale": "Pure wait/poll posture from the earliest visible turn: one Bash per turn with waiting narration, flat context, no edits. Not a failure (the job finishes and analysis follows), but the poll turns carry no new information. Labelled as a poll/monitor shape rather than build or thrash.",
+  "pack_coverage": {
+    "T": 154,
+    "checkpoints_seen": [
+      75,
+      90,
+      105,
+      120,
+      135,
+      150
+    ],
+    "unseen_tail_turns": 4
+  }
+}

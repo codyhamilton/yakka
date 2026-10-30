@@ -1,0 +1,62 @@
+{
+  "experiment": "shape-qual-full-maps-v1",
+  "worker_id": "89608cc68603",
+  "model": "Sonnet",
+  "narrative_shape": "Multi-brief implementation worker on a freshly updated master. Early reads and edits (brief 20), then a Perth place-name vocabulary fix verified by concrete numbers (names 17716->17733, type_code 308 in cell (206,216) at T87-88), an e2e test with a synthetic PBF (T98), repeated full-suite runs, and brief amendments recording resolutions (T115-120, 238 tests pass). Narration grows (2.5k->4.6k chars) and there are no compactions.",
+  "shape_label": "unclear",
+  "shape_detail": "steady_build_to_commit",
+  "phases": [
+    {
+      "range": "1-75",
+      "name": "brief 20 work",
+      "note": "Bash 67, Read 12, Edit 3"
+    },
+    {
+      "range": "75-90",
+      "name": "Perth place-name fix",
+      "note": "T83 rerun Perth extraction; T87 names 17716->17733; T88 confirmed cell (206,216)"
+    },
+    {
+      "range": "90-105",
+      "name": "tests",
+      "note": "T98 e2e synthetic PBF test; T102 run file; T105 waiting on pytest"
+    },
+    {
+      "range": "105-125",
+      "name": "suite + brief amendments",
+      "note": "T113-119 full suite 238 pass; T115-117 amend briefs 22 and 20"
+    }
+  ],
+  "early_signals": [
+    {
+      "turn": 75,
+      "signal": "Bash-heavy start (67 of ~82 calls) with only 3 edits: investigation before change"
+    },
+    {
+      "turn": 88,
+      "signal": "Concrete confirmation of fix: names count 17716->17733 and Perth record in the expected cell"
+    },
+    {
+      "turn": 98,
+      "signal": "Adds an e2e test around _handle_node for place=city"
+    },
+    {
+      "turn": 119,
+      "signal": "238 tests pass; moves to documentation/amendments"
+    }
+  ],
+  "early_signal_window_respected": true,
+  "recommended_exit": null,
+  "earliness": null,
+  "rationale": "Investigation, targeted fix with quantified confirmation, tests, then documentation. No compaction, narration growing, no re-read loop. Healthy completion shape.",
+  "pack_coverage": {
+    "T": 125,
+    "checkpoints_seen": [
+      75,
+      90,
+      105,
+      120
+    ],
+    "unseen_tail_turns": 5
+  }
+}

@@ -1,0 +1,60 @@
+{
+  "experiment": "shape-qual-full-maps-v1",
+  "worker_id": "8e36f8e80baa",
+  "model": "Sonnet",
+  "narrative_shape": "Orchestrator for a phase-2 execute: few reads (5) but Bash 51, Monitor 3, Agent 2, Sentinel 2. It records the outcome of unit 2-14 (T69), dispatches 2-15 to a fresh agent on Sonnet at medium effort (T71-72), parks on the completion notification (T74), then independently verifies: ledger entry check (T83), pytest/lint background rerun with monitor (T84-88). T91-97 unseen.",
+  "shape_label": "unclear",
+  "shape_detail": "orchestrator_dispatch_wait",
+  "phases": [
+    {
+      "range": "1-68",
+      "name": "close prior unit, prep",
+      "note": "Bash 51, Read 5, Monitor 3"
+    },
+    {
+      "range": "69-75",
+      "name": "record 2-14, dispatch 2-15, park",
+      "note": "T69 outcome recorded; T72 dispatch; T74 wait for notification"
+    },
+    {
+      "range": "75-90",
+      "name": "independent verification",
+      "note": "T83 only ledger touched; T84-88 monitor on pytest/lint rerun"
+    },
+    {
+      "range": "90-97",
+      "name": "unseen",
+      "note": ""
+    }
+  ],
+  "early_signals": [
+    {
+      "turn": 69,
+      "signal": "Records previous unit outcome in IMPLEMENTATION.md before dispatching the next"
+    },
+    {
+      "turn": 72,
+      "signal": "Dispatches next unit to a worker on Sonnet at medium effort"
+    },
+    {
+      "turn": 74,
+      "signal": "Explicit park on background completion notification"
+    },
+    {
+      "turn": 88,
+      "signal": "Waits on verification monitor event"
+    }
+  ],
+  "early_signal_window_respected": true,
+  "recommended_exit": null,
+  "earliness": null,
+  "rationale": "Dispatch and verify orchestrator with bounded waits. Little authoring by design. No thrash.",
+  "pack_coverage": {
+    "T": 97,
+    "checkpoints_seen": [
+      75,
+      90
+    ],
+    "unseen_tail_turns": 7
+  }
+}

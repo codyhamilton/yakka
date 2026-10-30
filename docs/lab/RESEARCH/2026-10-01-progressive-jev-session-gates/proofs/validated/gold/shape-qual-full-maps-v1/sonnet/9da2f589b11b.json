@@ -1,0 +1,49 @@
+{
+  "experiment": "shape-qual-full-maps-v1",
+  "worker_id": "9da2f589b11b",
+  "model": "Sonnet",
+  "narrative_shape": "Edit-heavy completion of prior uncommitted work (an 'amendment after first attempt'): Edit 23, Bash 49, Read 5, Write 2, narration only 246 chars. T74 appends the 2-03 handoff, the closing step. T76 end.",
+  "shape_label": "unclear",
+  "shape_detail": "steady_build_to_commit",
+  "phases": [
+    {
+      "range": "1-72",
+      "name": "edit-heavy completion",
+      "note": "Edit 23, Bash 49, Read 5, Write 2"
+    },
+    {
+      "range": "73-76",
+      "name": "handoff append and commit",
+      "note": "T73 read; T74 handoff"
+    }
+  ],
+  "early_signals": [
+    {
+      "turn": 74,
+      "signal": "Appends the 2-03 handoff (closing step)"
+    },
+    {
+      "turn": 75,
+      "signal": "Edit 23 against only 5 reads: building on prior work in the tree"
+    },
+    {
+      "turn": 75,
+      "signal": "Narration 246 chars; 2 compactions at 146k"
+    },
+    {
+      "turn": 75,
+      "signal": "No re-read loops visible (distinct read paths 4)"
+    }
+  ],
+  "early_signal_window_respected": true,
+  "recommended_exit": null,
+  "earliness": null,
+  "rationale": "Continuation of in-tree work with many edits and closing handoff. Limited narration; no thrash evidence.",
+  "pack_coverage": {
+    "T": 76,
+    "checkpoints_seen": [
+      75
+    ],
+    "unseen_tail_turns": 1
+  }
+}

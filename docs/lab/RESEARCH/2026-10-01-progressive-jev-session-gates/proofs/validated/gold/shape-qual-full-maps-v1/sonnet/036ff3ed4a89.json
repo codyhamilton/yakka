@@ -1,0 +1,69 @@
+{
+  "experiment": "shape-qual-full-maps-v1",
+  "worker_id": "036ff3ed4a89",
+  "model": "Sonnet",
+  "narrative_shape": "Verification-only run (continuing an abandoned attempt that stalled on a wait). From the first visible turns it is ~89% Bash with only six reads and no edits: it starts compare_disc plus monitors and explicitly says it will stop polling (T71). The run finishes (T90), inspects the report and failing checks (T104-105), waits again on a second run (T120), then confirms exit code and determinism (T143-144) and switches to writing the build record and docs (T145-150). Zero compactions throughout. Wait-heavy but orderly; ends in documentation.",
+  "shape_label": "unclear",
+  "shape_detail": "wait_verify_then_record",
+  "phases": [
+    {
+      "range": "1-75",
+      "name": "launch long check + monitors",
+      "note": "Bash 70, Read 6, Monitor 2; T71 declares it will not poll further"
+    },
+    {
+      "range": "75-90",
+      "name": "wait for compare_disc",
+      "note": "T90 compare_disc finished exit 0, report read"
+    },
+    {
+      "range": "90-120",
+      "name": "inspect findings + second wait",
+      "note": "T105 new reads (report.json, envelope.py, container.py); T104 investigates vocab offender '578'; T120 waits via real blocking wait"
+    },
+    {
+      "range": "120-143",
+      "name": "second run + wait",
+      "note": "Bash-only deltas of +15; T143 non-zero exit confirmed as real FAIL checks"
+    },
+    {
+      "range": "143-161",
+      "name": "documentation",
+      "note": "T145-149 PLAN.md build record edits; T148 target-disc.md"
+    }
+  ],
+  "early_signals": [
+    {
+      "turn": 71,
+      "signal": "Declares background waits and 'stopping tool calls' to await a notification (the brief itself mentions a predecessor stalling on a wait)"
+    },
+    {
+      "turn": 75,
+      "signal": "Bash 70 of ~79 tool calls, 6 reads, zero edits: pure run/verify posture"
+    },
+    {
+      "turn": 105,
+      "signal": "Monitors up to 3; new inputs read only after the first run completes"
+    },
+    {
+      "turn": 120,
+      "signal": "Still waiting on a long job at T120 ('real blocking wait'); no compaction and context 135k, rising slowly"
+    }
+  ],
+  "early_signal_window_respected": true,
+  "recommended_exit": null,
+  "earliness": null,
+  "rationale": "Run is dominated by launching and waiting on long checks, declared explicitly at T71. It is orderly (no re-read loops, no compaction) and ends in documentation work. Distinct from build runs because the first 120 turns contain almost no authoring.",
+  "pack_coverage": {
+    "T": 161,
+    "checkpoints_seen": [
+      75,
+      90,
+      105,
+      120,
+      135,
+      150
+    ],
+    "unseen_tail_turns": 11
+  }
+}

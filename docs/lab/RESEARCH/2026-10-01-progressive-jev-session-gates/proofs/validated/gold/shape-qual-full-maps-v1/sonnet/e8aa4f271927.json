@@ -1,0 +1,54 @@
+{
+  "experiment": "shape-qual-full-maps-v1",
+  "worker_id": "e8aa4f271927",
+  "model": "Sonnet",
+  "narrative_shape": "Wiring unit with an orientation phase (Read 20, 4 compactions by T75, re-reads build_alldata.py 5x and cenc.py 4x), a split script written at T68 and a gate wait (T69 'waiting for the monitor to report the gate outcome'), then git hygiene at T74 (drops already-staged deletions from the pathspec). Narration 270 chars. T76 end.",
+  "shape_label": "unclear",
+  "shape_detail": "steady_build_to_commit",
+  "phases": [
+    {
+      "range": "1-67",
+      "name": "orient and wire",
+      "note": "Read 20, Bash 60, Write 3; 4 compactions"
+    },
+    {
+      "range": "68-69",
+      "name": "split script + gate",
+      "note": "T68 Write; T69 wait for monitor"
+    },
+    {
+      "range": "70-76",
+      "name": "stage/commit hygiene",
+      "note": "T74 drop staged deletions from pathspec"
+    }
+  ],
+  "early_signals": [
+    {
+      "turn": 68,
+      "signal": "Writes a split script for the stop-point gate"
+    },
+    {
+      "turn": 69,
+      "signal": "Waits for monitor to report gate outcome"
+    },
+    {
+      "turn": 74,
+      "signal": "Adjusts pathspec for already staged deletions (commit prep)"
+    },
+    {
+      "turn": 75,
+      "signal": "4 compactions at T75; build_alldata.py 5x, cenc.py 4x re-reads"
+    }
+  ],
+  "early_signal_window_respected": true,
+  "recommended_exit": null,
+  "earliness": null,
+  "rationale": "Orient, wire, gate, commit hygiene. Compaction and re-reads are modest; no thrash.",
+  "pack_coverage": {
+    "T": 76,
+    "checkpoints_seen": [
+      75
+    ],
+    "unseen_tail_turns": 1
+  }
+}

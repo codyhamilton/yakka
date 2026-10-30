@@ -1,0 +1,45 @@
+{
+  "experiment": "shape-qual-full-maps-v1",
+  "worker_id": "582c23b3c6e4",
+  "model": "Sonnet",
+  "narrative_shape": "Bash-only (77 Bash calls by T75; zero Read/Edit/Write) with 2 compactions at 146k and no narration until T75, when a long terminal report states 'needs context': the full-disc sha moved because of the stored-pixel change the brief requires; nothing was committed, changes remain uncommitted in owned paths. The report (7.4k chars) is outcome, not early signal.",
+  "shape_label": "unclear",
+  "shape_detail": "bash_only_silent",
+  "phases": [
+    {
+      "range": "1-74",
+      "name": "bash-only silent",
+      "note": "Bash 77; no Read/Edit/Write; 2 compactions"
+    },
+    {
+      "range": "75",
+      "name": "terminal report",
+      "note": "'needs context'; full-disc sha moved; not committed"
+    }
+  ],
+  "early_signals": [
+    {
+      "turn": 75,
+      "signal": "Bash 77, zero Read/Edit/Write for the whole prefix"
+    },
+    {
+      "turn": 75,
+      "signal": "Context at 146k with 2 compactions"
+    },
+    {
+      "turn": 74,
+      "signal": "Tail T68-74 is Bash turns with no narration"
+    }
+  ],
+  "early_signal_window_respected": true,
+  "recommended_exit": null,
+  "earliness": null,
+  "rationale": "Silent Bash-only run ending in a blocked/needs-context report at T75; the pack has too little narrated evidence to say more about the shape of the run before that.",
+  "pack_coverage": {
+    "T": 77,
+    "checkpoints_seen": [
+      75
+    ],
+    "unseen_tail_turns": 2
+  }
+}

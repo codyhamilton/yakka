@@ -1,0 +1,54 @@
+{
+  "experiment": "shape-qual-full-maps-v1",
+  "worker_id": "91a9aa8050fb",
+  "model": "Sonnet",
+  "narrative_shape": "Implementation with fixture work: Write 4, Edit 3, Monitor 5 by T75. T68 drafts a fixture JSON; T69-71 runs done-evidence #2 against the reference (every row found=true; a few matches fail because the reference is 2007 WhereIS data, not OSM); T73 156 tests pass and compare_disc is finalised. Narration is high (4.7k chars at T75). T76-86 unseen.",
+  "shape_label": "unclear",
+  "shape_detail": "steady_build_to_commit",
+  "phases": [
+    {
+      "range": "1-67",
+      "name": "implement",
+      "note": "Bash 50, Read 12, Write 4, Edit 3"
+    },
+    {
+      "range": "68-75",
+      "name": "fixture + done evidence",
+      "note": "T68 draft fixture; T71 all found=true; T73 156 pass"
+    },
+    {
+      "range": "75-86",
+      "name": "unseen",
+      "note": ""
+    }
+  ],
+  "early_signals": [
+    {
+      "turn": 68,
+      "signal": "Drafts fixture JSON with confirmed data while waiting"
+    },
+    {
+      "turn": 71,
+      "signal": "Done-evidence matches expectation: every row found=true"
+    },
+    {
+      "turn": 73,
+      "signal": "Full pytest 156 passed"
+    },
+    {
+      "turn": 75,
+      "signal": "Monitors 5 used for bounded checks (place_city.py)"
+    }
+  ],
+  "early_signal_window_respected": true,
+  "recommended_exit": null,
+  "earliness": null,
+  "rationale": "Healthy implement-verify trajectory with explicit expectation checks.",
+  "pack_coverage": {
+    "T": 86,
+    "checkpoints_seen": [
+      75
+    ],
+    "unseen_tail_turns": 11
+  }
+}

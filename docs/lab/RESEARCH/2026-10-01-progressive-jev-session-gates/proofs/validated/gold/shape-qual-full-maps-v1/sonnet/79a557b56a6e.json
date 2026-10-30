@@ -1,0 +1,55 @@
+{
+  "experiment": "shape-qual-full-maps-v1",
+  "worker_id": "79a557b56a6e",
+  "model": "Sonnet",
+  "narrative_shape": "Implementation of a vocab fix: 12 edits by T75 then Bash verification (+13 per checkpoint); T70 explicitly waits for a notification instead of polling; T90 reads the brief file and amends it to record resolution. osm_to_parcel_geometry.py is re-read 8x but it is the owned/target file. No compactions.",
+  "shape_label": "unclear",
+  "shape_detail": "steady_build_to_commit",
+  "phases": [
+    {
+      "range": "1-75",
+      "name": "implement fix",
+      "note": "Edit 12, Write 1, Bash 51, Read 9"
+    },
+    {
+      "range": "75-89",
+      "name": "verify",
+      "note": "Bash +13; one more write"
+    },
+    {
+      "range": "90-95",
+      "name": "amend brief",
+      "note": "T90 read brief 23; record resolution"
+    }
+  ],
+  "early_signals": [
+    {
+      "turn": 70,
+      "signal": "Waits for notification instead of polling"
+    },
+    {
+      "turn": 75,
+      "signal": "Edits 12 by T75: implementation front-loaded"
+    },
+    {
+      "turn": 90,
+      "signal": "osm_to_parcel_geometry.py re-read 8x (target file), no other loops"
+    },
+    {
+      "turn": 90,
+      "signal": "Moves to amend brief with resolution; no compaction, ctx 139k"
+    }
+  ],
+  "early_signal_window_respected": true,
+  "recommended_exit": null,
+  "earliness": null,
+  "rationale": "Front-loaded edit, verification, documentation. Single-file rereads on the owned target only. Healthy.",
+  "pack_coverage": {
+    "T": 95,
+    "checkpoints_seen": [
+      75,
+      90
+    ],
+    "unseen_tail_turns": 5
+  }
+}

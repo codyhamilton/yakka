@@ -1,0 +1,69 @@
+{
+  "experiment": "shape-qual-full-maps-v1",
+  "worker_id": "0853bc21d3aa",
+  "model": "Sonnet",
+  "narrative_shape": "Straightforward implementation run: read brief and required reading (T1-73), edit alldata_writer.py to route through plan_divisions (T74-90), write test_divide.py (T105-118), then rebuild the Perth fixture and run compare_disc (T119-135) with a rework of plan_divisions (edits 12->20). Final turns show a long build completing, 224 tests passing and a concurrency check on another unit's files before commit (T149). Re-reads are modest (max 4x). No pivot.",
+  "shape_label": "unclear",
+  "shape_detail": "steady_build_to_commit",
+  "phases": [
+    {
+      "range": "1-73",
+      "name": "brief + required reading",
+      "note": "52 bash, 20 reads"
+    },
+    {
+      "range": "74-105",
+      "name": "implement divided-parcel writer",
+      "note": "T74-75 edits begin; T83 route _encode_level via plan_divisions; T86 update run()"
+    },
+    {
+      "range": "105-120",
+      "name": "tests",
+      "note": "T105 write test_divide.py; T118 5 pass; T119 only two pre-existing failures"
+    },
+    {
+      "range": "120-135",
+      "name": "Perth rebuild + plan_divisions rework",
+      "note": "edits 12->20; T134 rerun build; T135 completes"
+    },
+    {
+      "range": "135-155",
+      "name": "verify + commit",
+      "note": "T149 224 pass, check concurrent unit-14 agent, commit"
+    }
+  ],
+  "early_signals": [
+    {
+      "turn": 75,
+      "signal": "Edits begin at T74-75 after a clean read phase (20 reads, 52 bash, no churn)"
+    },
+    {
+      "turn": 90,
+      "signal": "10 edits by T90; T83 and T86 name concrete refactor steps"
+    },
+    {
+      "turn": 105,
+      "signal": "T105 identifies a test pattern and starts test_divide.py"
+    },
+    {
+      "turn": 119,
+      "signal": "T119: all tests pass except two named, pre-existing failures; moves on to rebuild Perth fixture"
+    }
+  ],
+  "early_signal_window_respected": true,
+  "recommended_exit": null,
+  "earliness": null,
+  "rationale": "Read, edit, test, rebuild progression with small re-read counts and one compaction pair around T120. Edits rise with narration. Nothing early indicates thrash or a pivot.",
+  "pack_coverage": {
+    "T": 155,
+    "checkpoints_seen": [
+      75,
+      90,
+      105,
+      120,
+      135,
+      150
+    ],
+    "unseen_tail_turns": 5
+  }
+}

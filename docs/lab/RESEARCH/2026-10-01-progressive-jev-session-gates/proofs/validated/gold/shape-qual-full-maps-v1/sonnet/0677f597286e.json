@@ -1,0 +1,60 @@
+{
+  "experiment": "shape-qual-full-maps-v1",
+  "worker_id": "0677f597286e",
+  "model": "Sonnet",
+  "narrative_shape": "C test scaffolding unit. Authoring (Edit 7, Write 5, Read 20), appending an entry to a shared IMPLEMENTATION.md without touching another unit's concurrent additions (T69-71), then a full pytest run under a bounded wait (T72-75, timeout 3300 polling every 10s). T85 confirms sha identical to the perth_j1 reference, T87-89 verifies gitignore, stages only owned paths and commits.",
+  "shape_label": "unclear",
+  "shape_detail": "steady_build_to_commit",
+  "phases": [
+    {
+      "range": "1-67",
+      "name": "build scaffolding",
+      "note": "Edit 7, Write 5, Read 20, Bash 46"
+    },
+    {
+      "range": "68-75",
+      "name": "doc entries + full pytest",
+      "note": "T69-71 append entry; T74-75 bounded wait"
+    },
+    {
+      "range": "75-85",
+      "name": "verify",
+      "note": "Bash +14; provenance.md re-read 5x"
+    },
+    {
+      "range": "85-93",
+      "name": "sha check + cleanup + commit",
+      "note": "T85 sha identical; T87-89 owned paths staged; committed"
+    }
+  ],
+  "early_signals": [
+    {
+      "turn": 70,
+      "signal": "Appends own entry carefully around other units' concurrent edits"
+    },
+    {
+      "turn": 75,
+      "signal": "Full suite run under bounded wait with ALLDONE/ABORT/FAIL sentinels"
+    },
+    {
+      "turn": 85,
+      "signal": "Output sha identical to reference; output-invariant as required"
+    },
+    {
+      "turn": 90,
+      "signal": "docs/provenance.md re-read 5x, _cenc.c 4x (modest)"
+    }
+  ],
+  "early_signal_window_respected": true,
+  "recommended_exit": null,
+  "earliness": null,
+  "rationale": "Disciplined build-verify-commit run with bounded waits. No thrash.",
+  "pack_coverage": {
+    "T": 93,
+    "checkpoints_seen": [
+      75,
+      90
+    ],
+    "unseen_tail_turns": 3
+  }
+}
