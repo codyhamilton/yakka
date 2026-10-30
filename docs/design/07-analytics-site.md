@@ -178,12 +178,14 @@ per-call rows in the conversation timeline.
 
   | Measure | Dimensions |
   |---|---|
-  | `hook_events` | `harness`, `repo_id`, `norm_event`, `event`, `tool`, `conversation_id` |
+  | `hook_events` | `harness`, `repo_id`, `norm_event`, `event`, `tool`, `tool_kind`, `conversation_id` |
   | `conversations` (distinct) | `harness`, `repo_id`, `model` |
   | `artifact_versions`, `distinct_content` | `harness`, `repo_id`, `kind`, `plan`, `source`, `conversation_id` |
   | `commits` | `harness`, `repo_id`, `conversation_id` |
   | `rejections` | `stage` |
   | `model_calls`, `tokens_in`, `tokens_out`, `tokens_cache_read`, `tokens_cache_write`, `tokens_reasoning`, `cost_usd`, `unpriced_calls` | `harness`, `repo_id`, `model`, `conversation_id` |
+
+  `tool_kind` groups tool names into `shell`, `read`, `edit`, `search`, `web`, `agent`, `plan`, `mcp` and `other`, so tool use compares across harnesses. It is computed from `tool` at query time (the table is in `internal/store/toolkind.go`), so editing the table changes old rows too; it is a dimension only, not a filter. Codex has no read tool and reads files through its shell, so those calls count as `shell`.
 
   Every measure also takes `hour_of_day` and `weekday`.
 - `GET /v1/analytics/conversation` (`id` required; unknown id is 404) — optional `from` and `to`,

@@ -21,7 +21,7 @@ type MeasureSpec struct {
 // The measure × dimension matrix, verbatim from DESIGN.md (phase 3, Analytics reads):
 //
 //	| Measure | Dimensions |
-//	| `hook_events` | `harness`, `repo_id`, `norm_event`, `event`, `tool`, `conversation_id` |
+//	| `hook_events` | `harness`, `repo_id`, `norm_event`, `event`, `tool`, `tool_kind`, `conversation_id` |
 //	| `conversations` (distinct) | `harness`, `repo_id`, `model` |
 //	| `artifact_versions`, `distinct_content` | `harness`, `repo_id`, `kind`, `plan`, `source`, `conversation_id` |
 //	| `commits` | `harness`, `repo_id`, `conversation_id` |
@@ -30,7 +30,7 @@ type MeasureSpec struct {
 //
 // Every measure also takes hour_of_day and weekday, appended by Measures.
 var measureMatrix = []MeasureSpec{
-	{Name: "hook_events", Unit: "count", Dims: []string{"harness", "repo_id", "norm_event", "event", "tool", "conversation_id"}},
+	{Name: "hook_events", Unit: "count", Dims: []string{"harness", "repo_id", "norm_event", "event", "tool", "tool_kind", "conversation_id"}},
 	{Name: "conversations", Unit: "count", Dims: []string{"harness", "repo_id", "model"}},
 	{Name: "artifact_versions", Unit: "count", Dims: []string{"harness", "repo_id", "kind", "plan", "source", "conversation_id"}},
 	{Name: "distinct_content", Unit: "count", Dims: []string{"harness", "repo_id", "kind", "plan", "source", "conversation_id"}},
@@ -107,14 +107,14 @@ type measureDef struct {
 
 var factColumns = map[string]string{
 	"harness": "harness", "repo_id": "repo_id", "norm_event": "norm_event",
-	"event": "event", "tool": "tool", "conversation_id": "conversation_id",
+	"event": "event", "tool": "tool", "tool_kind": toolKindExpr, "conversation_id": "conversation_id",
 	"model": "model", "kind": "kind", "plan": "plan", "source": "source",
 }
 
 func measureByName(name string) (measureDef, bool) {
 	switch name {
 	case "hook_events":
-		return measureDef{table: "facts", pred: "type='hook_event'", dims: []string{"harness", "repo_id", "norm_event", "event", "tool", "conversation_id"},
+		return measureDef{table: "facts", pred: "type='hook_event'", dims: []string{"harness", "repo_id", "norm_event", "event", "tool", "tool_kind", "conversation_id"},
 			rollup: "hook_events_hourly", rollupType: "hook_event",
 			rollupCols: []string{"harness", "repo_id", "norm_event", "event", "tool", "conversation_id"}}, true
 	case "conversations":

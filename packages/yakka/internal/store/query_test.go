@@ -12,7 +12,7 @@ import (
 func TestQueryMeasuresMatrix(t *testing.T) {
 	ud := []string{"harness", "repo_id", "model", "conversation_id"}
 	want := []MeasureSpec{
-		{Name: "hook_events", Unit: "count", Dims: []string{"harness", "repo_id", "norm_event", "event", "tool", "conversation_id", "hour_of_day", "weekday"}},
+		{Name: "hook_events", Unit: "count", Dims: []string{"harness", "repo_id", "norm_event", "event", "tool", "tool_kind", "conversation_id", "hour_of_day", "weekday"}},
 		{Name: "conversations", Unit: "count", Dims: []string{"harness", "repo_id", "model", "hour_of_day", "weekday"}},
 		{Name: "artifact_versions", Unit: "count", Dims: []string{"harness", "repo_id", "kind", "plan", "source", "conversation_id", "hour_of_day", "weekday"}},
 		{Name: "distinct_content", Unit: "count", Dims: []string{"harness", "repo_id", "kind", "plan", "source", "conversation_id", "hour_of_day", "weekday"}},
@@ -58,6 +58,12 @@ func TestQueryHookEventsDims(t *testing.T) {
 			{K: []string{"claude", "Bash"}, V: 1},
 			{K: []string{"claude", "Read"}, V: 1},
 			{K: []string{"cursor", "Bash"}, V: 1},
+		}},
+		{"harness,tool_kind", []string{"harness", "tool_kind"}, []QueryRow{
+			{K: []string{"claude", ""}, V: 1},
+			{K: []string{"claude", "read"}, V: 1},
+			{K: []string{"claude", "shell"}, V: 1},
+			{K: []string{"cursor", "shell"}, V: 1},
 		}},
 	}
 	for _, c := range cases {
