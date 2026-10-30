@@ -144,8 +144,15 @@ One table in `internal/ingest` maps `(harness, event)` to `keep` or `remove`; a 
   about 1.04M of 1.44M hook events in the first measured ledger. The OpenCode plugin does not forward them ([design
   2](02-edge-capture.md)); ingest answers any that arrive (older plugins, other clients)
   `accepted` and stores nothing: no fact and no archive line. A test asserts the plugin's remove
-  list equals the table's. Compaction and `yakka sync` apply the same table, so rows stored
-  before a rule are deleted at the next compaction and skipped when syncing.
+  list equals the table's. `yakka sync` applies the same table and skips rows stored before a rule.
+  Stored rows are deleted by a store migration, not by compaction: compaction applies the table
+  only to a ledger it has not yet compacted and never rescans one marked complete. Each migration
+  holds a frozen copy of the pairs removed so far and deletes those `hook_event` facts when a
+  tenant is opened, then rebuilds the rollups, so the purge runs on the first start after a
+  release, for a local ledger and a hosted one alike. A test fails when the table gains a `remove`
+  pair that no migration purges; the fix is a new migration. The archive is not rewritten: its
+  lines for removed events stay, and ingest and sync skip them by the table. The file is not
+  vacuumed, so it shrinks only when the operator vacuums it.
 
   The table also removes the tool-start and batch markers, because the end event already holds
   everything they do: OpenCode `tool.execute.before` and `PostToolBatch`, Claude `PreToolUse`

@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -22,6 +23,42 @@ import (
 
 // Options configures a Tenant.
 type Options struct{ GroupWindow time.Duration } // default about 2 ms
+
+// purgedEvents is the ingest remove list (ingest.policyTable) as of migration 9: hook events that
+// ingest no longer stores, deleted from a ledger written before they were dropped. A migration is a
+// snapshot, so this list is frozen. A pair added to the remove list later needs its own migration;
+// TestPolicyRemoveCoveredByMigration fails until it has one.
+var purgedEvents = [][2]string{
+	{"opencode", "experimental.chat.system.transform"},
+	{"opencode", "chat.params"},
+	{"opencode", "chat.headers"},
+	{"opencode", "shell.env"},
+	{"opencode", "message.part.delta"},
+	{"opencode", "message.part.updated"},
+	{"opencode", "session.status"},
+	{"opencode", "session.updated"},
+	{"opencode", "session.diff"},
+	{"opencode", "message.updated"},
+	{"opencode", "tool.execute.before"},
+	{"opencode", "PostToolBatch"},
+	{"claude", "PreToolUse"},
+	{"claude", "PostToolBatch"},
+	{"codex", "PreToolUse"},
+}
+
+// PurgedEvents returns the (harness, event) pairs the migrations delete, for the test that ties
+// them to the ingest remove list.
+func PurgedEvents() [][2]string { return append([][2]string(nil), purgedEvents...) }
+
+// purgeSQL deletes the hook facts of the given (harness, event) pairs.
+func purgeSQL(pairs [][2]string) string {
+	q := func(s string) string { return "'" + strings.ReplaceAll(s, "'", "''") + "'" }
+	var conds []string
+	for _, p := range pairs {
+		conds = append(conds, "(harness="+q(p[0])+" AND event="+q(p[1])+")")
+	}
+	return `DELETE FROM facts WHERE type='hook_event' AND (` + strings.Join(conds, " OR ") + `);`
+}
 
 // migrations is ordered; PRAGMA user_version records how many have run.
 // Append new migrations; never edit earlier ones.
@@ -104,6 +141,11 @@ var migrations = []string{
 	`CREATE TABLE IF NOT EXISTS facets_hourly (
     dim TEXT NOT NULL, hour INTEGER NOT NULL, value TEXT NOT NULL, n INTEGER NOT NULL,
     PRIMARY KEY (dim, hour, value)) WITHOUT ROWID;`,
+	// 9: drop the hook events ingest stopped storing (purgedEvents). Compaction applies the remove
+	// list only to a ledger it has not yet compacted, so a ledger that is already compacted keeps
+	// those rows until this runs. It deletes the facts only; the rollups that exist already are
+	// rebuilt in open, and the archive keeps its lines (sync and ingest skip them by policy).
+	purgeSQL(purgedEvents),
 }
 
 var hashRE = regexp.MustCompile(`^[0-9a-f]{64}$`)
@@ -190,6 +232,17 @@ func open(dir string, opts Options, how int, exclusive bool) (*Tenant, error) {
 	from, err := t.migrate()
 	if err == nil && from == 1 {
 		err = t.reindex(context.Background()) // existing db gaining the search index; writer not started yet
+	}
+	// Migration 9 deleted facts without going through Append, so a rollup that already existed holds
+	// the deleted rows' counts. One that migrates in below is backfilled from the purged facts instead.
+	if err == nil && from >= 6 && from < 9 {
+		err = t.RebuildHookRollup(context.Background())
+	}
+	if err == nil && from >= 7 && from < 9 {
+		err = t.RebuildConversationRollup(context.Background())
+	}
+	if err == nil && from >= 8 && from < 9 {
+		err = t.RebuildFacetRollup(context.Background())
 	}
 	if err == nil && from < 6 {
 		err = t.backfillHookRollup() // existing db gaining the rollup table; writer not started yet

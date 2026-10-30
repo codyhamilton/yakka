@@ -523,3 +523,68 @@ func TestMigrationFast100k(t *testing.T) {
 		t.Fatal("migration too slow")
 	}
 }
+
+// A ledger written before the remove list grew keeps those hook rows until migration 9 deletes
+// them, and the rollups that already exist stop counting them.
+func TestMigrationPurgesRemovedHookEvents(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "t")
+	tn, err := Open(dir, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	hook := func(i int, conv, harness, event, typ string) FactRow {
+		r := row(i, typ)
+		r.ConversationID, r.Harness, r.Event, r.NormEvent = conv, harness, event, "other"
+		return r
+	}
+	rows := []FactRow{
+		hook(1, "keep", "opencode", "tool.execute.after", "hook_event"),
+		hook(2, "keep", "opencode", "message.updated", "hook_event"),
+		hook(3, "keep", "claude", "PreToolUse", "hook_event"),
+		hook(4, "gone", "opencode", "session.status", "hook_event"),
+		hook(5, "gone", "codex", "PreToolUse", "hook_event"),
+		hook(6, "keep", "opencode", "message.updated", "artifact_version"), // not a hook fact: stays
+	}
+	if _, err := tn.Append(context.Background(), rows); err != nil {
+		t.Fatal(err)
+	}
+	if err := tn.Close(); err != nil {
+		t.Fatal(err)
+	}
+	db, err := sql.Open("sqlite", dsn(filepath.Join(dir, "ledger.db")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`PRAGMA user_version = 8`); err != nil {
+		t.Fatal(err)
+	}
+	db.Close()
+
+	tn, err = Open(dir, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tn.Close()
+	count := func(q string) (n int) {
+		t.Helper()
+		if err := tn.rdb.QueryRow(q).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	if n := count(`SELECT count(*) FROM facts`); n != 2 {
+		t.Fatalf("facts after purge %d want 2", n)
+	}
+	if n := count(`SELECT count(*) FROM facts WHERE event='tool.execute.after' OR type='artifact_version'`); n != 2 {
+		t.Fatalf("kept rows %d want 2", n)
+	}
+	if n := count(`SELECT COALESCE(sum(n),0) FROM hook_events_hourly`); n != 1 {
+		t.Fatalf("hook rollup counts %d want 1", n)
+	}
+	if n := count(`SELECT count(*) FROM conversations_hourly WHERE conversation_id='gone'`); n != 0 {
+		t.Fatalf("conversation rollup still holds a purged conversation: %d rows", n)
+	}
+	if n := count(`PRAGMA user_version`); n != len(migrations) {
+		t.Fatalf("user_version %d want %d", n, len(migrations))
+	}
+}
