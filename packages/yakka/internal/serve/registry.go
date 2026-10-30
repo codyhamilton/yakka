@@ -77,6 +77,7 @@ type registryDoc struct {
 	Policy      DomainPolicy             `json:"policy"`
 	Sessions    map[string]SessionRecord `json:"sessions"`
 	Owners      map[string]string        `json:"owners"`
+	Names       map[string]string        `json:"names,omitempty"`
 	TokenHashes []TokenHashRecord        `json:"token_hashes"`
 }
 
@@ -87,7 +88,8 @@ type Registry struct {
 
 	policy      DomainPolicy
 	sessions    map[string]SessionRecord
-	owners      map[string]string
+	owners      map[string]string // tenant ID -> owner GitHub ID
+	names       map[string]string // tenant ID -> display name; a missing entry means the name is the ID
 	tokenHashes []TokenHashRecord
 	dirty       bool
 }
@@ -99,6 +101,7 @@ func OpenRegistry(dataDir string) (*Registry, error) {
 		policy:   DomainPolicy{Mode: PolicyEveryone},
 		sessions: map[string]SessionRecord{},
 		owners:   map[string]string{},
+		names:    map[string]string{},
 	}
 	if err := r.load(); err != nil {
 		return nil, err
@@ -131,6 +134,9 @@ func (r *Registry) load() error {
 	if doc.Owners != nil {
 		r.owners = doc.Owners
 	}
+	if doc.Names != nil {
+		r.names = doc.Names
+	}
 	r.tokenHashes = doc.TokenHashes
 	var legacy struct {
 		DeviceCodes []legacyDeviceCodeRecord `json:"device_codes"`
@@ -161,6 +167,7 @@ func (r *Registry) saveLocked() error {
 		Policy:      r.policy,
 		Sessions:    r.sessions,
 		Owners:      r.owners,
+		Names:       r.names,
 		TokenHashes: r.tokenHashes,
 	}
 	b, err := json.MarshalIndent(doc, "", "  ")
@@ -264,17 +271,85 @@ func newTokenID() (string, error) {
 	return hex.EncodeToString(b[:]), nil
 }
 
-// CreateTenant registers name for githubID. Returns false when the name is taken.
-func (r *Registry) CreateTenant(name string, githubID int64) bool {
+// DefaultTenantName is the display name of the tenant every user gets on first sign-in.
+const DefaultTenantName = "default"
+
+func newTenantID() (string, error) {
+	var b [6]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return "", err
+	}
+	return "t-" + hex.EncodeToString(b[:]), nil
+}
+
+// createTenantLocked registers a tenant under a fresh unique ID. The caller holds r.mu.
+func (r *Registry) createTenantLocked(name, owner string) (string, error) {
+	for i := 0; i < 8; i++ {
+		id, err := newTenantID()
+		if err != nil {
+			return "", err
+		}
+		if _, taken := r.owners[id]; taken {
+			continue
+		}
+		r.owners[id] = owner
+		r.names[id] = name
+		r.dirty = true
+		return id, nil
+	}
+	return "", fmt.Errorf("registry: no free tenant id")
+}
+
+func (r *Registry) tenantNameLocked(id string) string {
+	if n := r.names[id]; n != "" {
+		return n
+	}
+	return id
+}
+
+// CreateTenant registers a tenant called name for githubID and returns its ID.
+// Names are unique per owner, not globally; ok is false when githubID already has that name.
+func (r *Registry) CreateTenant(name string, githubID int64) (id string, ok bool, err error) {
 	owner := fmt.Sprintf("%d", githubID)
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if r.owners[name] != "" {
-		return false
+	for tid, o := range r.owners {
+		if o == owner && r.tenantNameLocked(tid) == name {
+			return "", false, nil
+		}
 	}
-	r.owners[name] = owner
-	r.dirty = true
-	return true
+	id, err = r.createTenantLocked(name, owner)
+	return id, err == nil, err
+}
+
+// EnsureDefaultTenant gives githubID a tenant named "default" when they own none.
+// It reports whether it created one.
+func (r *Registry) EnsureDefaultTenant(githubID int64) (bool, error) {
+	owner := fmt.Sprintf("%d", githubID)
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, o := range r.owners {
+		if o == owner {
+			return false, nil
+		}
+	}
+	if _, err := r.createTenantLocked(DefaultTenantName, owner); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// TenantInfo is a tenant as shown to its owner.
+type TenantInfo struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+// TenantName returns the display name for a tenant ID (the ID itself when none was set).
+func (r *Registry) TenantName(id string) string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.tenantNameLocked(id)
 }
 
 // validateGrantLocked runs the scope, expiry and owner checks shared by ValidateGrant and CreateToken.

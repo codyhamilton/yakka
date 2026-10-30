@@ -12,6 +12,7 @@
 		safeReturnPath,
 		type MeResponse
 	} from '$lib/api';
+	import { initialTenantChoice, readRememberedTenant, showsTenantChoice } from '$lib/session-gate';
 	import { IdentityPanel } from '$lib/analysis';
 
 	const userCode = $derived((page.url.searchParams.get('user_code') ?? '').trim().toUpperCase());
@@ -61,6 +62,7 @@
 		needsSignIn = false;
 		try {
 			me = await fetchMe();
+			selectedTenant = initialTenantChoice(me.tenants, selectedTenant, readRememberedTenant());
 		} catch (e) {
 			me = null;
 			if (e instanceof ApiError && e.status === 401) {
@@ -133,11 +135,11 @@
 		e.preventDefault();
 		tenantStatus = '';
 		try {
-			const { name } = await createTenant(tenantName.trim());
+			const { id, name } = await createTenant(tenantName.trim());
 			tenantStatus = `Created tenant ${name}.`;
 			tenantName = '';
 			await reload();
-			selectedTenant = name;
+			selectedTenant = id;
 		} catch (err) {
 			tenantStatus = err instanceof ApiError ? err.message : 'Could not create tenant.';
 		}
@@ -200,15 +202,17 @@
 					}}
 					data-testid="device-authorize-form"
 				>
-					<label>
-						Tenant
-						<select data-testid="device-tenant" bind:value={selectedTenant} required>
-							<option value="" disabled selected>Select tenant</option>
-							{#each me.tenants as t (t.name)}
-								<option value={t.name}>{t.name}</option>
-							{/each}
-						</select>
-					</label>
+					{#if showsTenantChoice(me.tenants)}
+						<label>
+							Tenant
+							<select data-testid="device-tenant" bind:value={selectedTenant} required>
+								<option value="" disabled selected>Select tenant</option>
+								{#each me.tenants as t (t.id)}
+									<option value={t.id}>{t.name}</option>
+								{/each}
+							</select>
+						</label>
+					{/if}
 
 					<label>
 						Grant

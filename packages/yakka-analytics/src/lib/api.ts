@@ -13,16 +13,20 @@ export class ApiError extends Error {
 	}
 }
 
+/** A tenant: `id` is the immutable unique key the API takes; `name` is a display label, unique per owner only. */
+export type Tenant = { id: string; name: string };
+
 export type MeResponse = {
 	github_id: number;
 	github_login: string;
 	admin: boolean;
-	tenants: { name: string }[];
+	tenants: Tenant[];
 };
 
 export type TokenListItem = {
 	id: string;
 	tenant: string;
+	tenant_name: string;
 	scope: string;
 	expires_at: string;
 	revoked: boolean;
@@ -220,7 +224,7 @@ export async function apiPost<T = unknown>(path: string, body: unknown, signal?:
 	return parseJsonResponse<T>(res, url);
 }
 
-export async function createTenant(name: string, signal?: AbortSignal): Promise<{ name: string }> {
+export async function createTenant(name: string, signal?: AbortSignal): Promise<Tenant> {
 	return apiPost('tenants', { name }, signal);
 }
 

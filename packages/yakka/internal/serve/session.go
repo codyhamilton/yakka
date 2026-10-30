@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"sort"
 	"strings"
 	"time"
 )
@@ -100,17 +101,22 @@ func newSessionID() (string, error) {
 	return hex.EncodeToString(b[:]), nil
 }
 
-func (r *Registry) tenantsOwnedBy(githubID int64) []string {
+func (r *Registry) tenantsOwnedBy(githubID int64) []TenantInfo {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	want := fmt.Sprintf("%d", githubID)
-	var out []string
-	for name, owner := range r.owners {
+	out := []TenantInfo{}
+	for id, owner := range r.owners {
 		if owner == want {
-			out = append(out, name)
+			out = append(out, TenantInfo{ID: id, Name: r.tenantNameLocked(id)})
 		}
 	}
-	sortStrings(out)
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Name != out[j].Name {
+			return out[i].Name < out[j].Name
+		}
+		return out[i].ID < out[j].ID
+	})
 	return out
 }
 
@@ -118,16 +124,6 @@ func (r *Registry) ownsTenant(githubID int64, tenant string) bool {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	return r.owners[tenant] == fmt.Sprintf("%d", githubID)
-}
-
-func sortStrings(ss []string) {
-	for i := 0; i < len(ss); i++ {
-		for j := i + 1; j < len(ss); j++ {
-			if ss[j] < ss[i] {
-				ss[i], ss[j] = ss[j], ss[i]
-			}
-		}
-	}
 }
 
 func (s *Server) publicOrigin() string {
@@ -342,16 +338,11 @@ func (s *Server) remoteUnauthorizedMsg() string {
 }
 
 func (s *Server) handleMe(w http.ResponseWriter, r *http.Request, sess *Session) {
-	tenants := s.registry.tenantsOwnedBy(sess.GitHubID)
-	names := make([]map[string]string, len(tenants))
-	for i, n := range tenants {
-		names[i] = map[string]string{"name": n}
-	}
 	writeJSON(w, 200, map[string]any{
 		"github_id":    sess.GitHubID,
 		"github_login": sess.GitHubLogin,
 		"admin":        isAdmin(SessionRecord{VerifiedEmails: sess.VerifiedEmails}),
-		"tenants":      names,
+		"tenants":      s.registry.tenantsOwnedBy(sess.GitHubID),
 	})
 }
 

@@ -120,6 +120,8 @@ func (s *Server) oauthCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.registry.PutSession(sid, rec)
+	// A user always has somewhere to put data; this also backfills users who signed up before defaults existed.
+	_, _ = s.registry.EnsureDefaultTenant(user.ID)
 	_ = s.registry.Persist()
 	s.setSessionCookie(w, sid, rec.ExpiresAt)
 	dest := "/"
