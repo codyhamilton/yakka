@@ -110,3 +110,50 @@ func parse(path, text string) (Config, error) {
 	}
 	return cfg, nil
 }
+
+const (
+	envSyncEndpoint = "YAKKA_SYNC_ENDPOINT"
+	envSyncKey      = "YAKKA_SYNC_KEY"
+)
+
+// ErrNoSyncCredential means neither the YAKKA_SYNC_* variables nor sync.toml supply a credential.
+var ErrNoSyncCredential = errors.New("clientconfig: no sync credential; run `yakka login --sync` or set YAKKA_SYNC_ENDPOINT and YAKKA_SYNC_KEY")
+
+// ErrPartialSyncEnv means exactly one of YAKKA_SYNC_ENDPOINT and YAKKA_SYNC_KEY is set.
+var ErrPartialSyncEnv = errors.New("clientconfig: YAKKA_SYNC_ENDPOINT and YAKKA_SYNC_KEY must both be set or both unset")
+
+// SyncPath returns the sync credential file path: $YAKKA_SYNC_CONFIG when set, else
+// $HOME/.config/yakka/sync.toml.
+func SyncPath() string {
+	if p := os.Getenv("YAKKA_SYNC_CONFIG"); p != "" {
+		return p
+	}
+	home := os.Getenv("HOME")
+	if home == "" {
+		home, _ = os.UserHomeDir()
+	}
+	return filepath.Join(home, ".config", "yakka", "sync.toml")
+}
+
+// LoadSync resolves the credential `yakka sync` posts with: the YAKKA_SYNC_ENDPOINT and
+// YAKKA_SYNC_KEY pair, else sync.toml. It never falls back to client.toml or local mode, so a sync
+// can only reach a remote the user logged in to for that purpose.
+func LoadSync() (Config, error) {
+	ep := strings.TrimSpace(os.Getenv(envSyncEndpoint))
+	key := strings.TrimSpace(os.Getenv(envSyncKey))
+	switch {
+	case ep != "" && key != "":
+		return Config{Endpoint: ep, Key: key}, nil
+	case ep != "" || key != "":
+		return Config{}, ErrPartialSyncEnv
+	}
+	path := SyncPath()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return Config{}, ErrNoSyncCredential
+		}
+		return Config{}, fmt.Errorf("clientconfig: read %s: %w", path, err)
+	}
+	return parse(path, string(data))
+}
