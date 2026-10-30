@@ -144,7 +144,7 @@ func loopback(host string) bool {
 		return true
 	}
 	ip := net.ParseIP(host)
-	return ip != nil && ip.IsLoopback()
+	return ip != nil && (ip.IsLoopback() || ip.IsUnspecified())
 }
 
 type whoami struct {
