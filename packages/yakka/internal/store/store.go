@@ -718,8 +718,9 @@ func (t *Tenant) Promote(ctx context.Context, hash string, s Screen, scores ...S
 	})
 }
 
-// DropBlob deletes stored content and records the rejection (the flag path for a blob that was
-// promoted but never screened).
+// DropBlob deletes stored content and records the rejection. It is the flag path for a blob that
+// was already promoted: crash recovery (no screen row yet) and a rescore of an unscreened blob.
+// The screen and score rows go too, so reads show the flag instead of a stale unscreened verdict.
 func (t *Tenant) DropBlob(ctx context.Context, hash string, r Rejection) error {
 	if err := validHash(hash); err != nil {
 		return err
@@ -731,8 +732,14 @@ func (t *Tenant) DropBlob(ctx context.Context, hash string, r Rejection) error {
 		r.ContentHash = hash
 	}
 	return t.submit(ctx, func(tx *sql.Tx) error {
-		if _, err := tx.Exec(`DELETE FROM search WHERE content_hash=?`, hash); err != nil {
-			return err
+		for _, q := range []string{
+			`DELETE FROM search WHERE content_hash=?`,
+			`DELETE FROM screens WHERE content_hash=?`,
+			`DELETE FROM scores WHERE content_hash=?`,
+		} {
+			if _, err := tx.Exec(q, hash); err != nil {
+				return err
+			}
 		}
 		return insertRejection(tx, r)
 	})

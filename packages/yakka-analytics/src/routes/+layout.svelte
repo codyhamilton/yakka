@@ -44,6 +44,7 @@
 		page.url.pathname !== '/settings' &&
 			page.url.pathname !== '/login' &&
 			page.url.pathname !== '/profile' &&
+			page.url.pathname !== '/admin' &&
 			page.url.pathname !== '/device' &&
 			!page.url.pathname.startsWith('/oauth/')
 	);

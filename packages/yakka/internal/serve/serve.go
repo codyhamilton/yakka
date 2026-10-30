@@ -222,6 +222,7 @@ type tenantState struct {
 	started bool
 	gaps    atomic.Int64            // screen gaps counted at worker start
 	fails   map[string]*hashFailure // worker-only: pending hashes whose screen step keeps failing
+	rescore rescoreState            // the admin rescore job
 }
 
 // hashFailure is the in-memory retry state of one pending hash. A restart forgets it, which gives
@@ -508,6 +509,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/v1/tokens/", s.handleTokensSubpath)
 	mux.HandleFunc("/v1/admin/tokens", s.method(http.MethodGet, s.sessionOnly(s.handleAdminListTokens)))
 	mux.HandleFunc("/v1/admin/policy", s.method(http.MethodPut, s.originGuard(s.sessionOnly(s.handleAdminPolicy))))
+	mux.HandleFunc("/v1/admin/status", s.method(http.MethodGet, s.sessionOnly(s.adminOnly(s.handleAdminStatus))))
+	mux.HandleFunc("/v1/admin/rescore", s.method(http.MethodPost, s.originGuard(s.sessionOnly(s.adminOnly(s.handleAdminRescore)))))
 	if s.cfg.Remote() {
 		mux.HandleFunc("/v1/device/code", s.handleDeviceCodeRoute)
 		mux.HandleFunc("/v1/device/authorize", s.handleDeviceAuthorizeRoute)

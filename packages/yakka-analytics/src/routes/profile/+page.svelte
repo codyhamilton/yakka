@@ -229,6 +229,7 @@
 	{#if me.admin}
 		<section>
 			<h2>All tokens (admin)</h2>
+			<p><a href="/admin" data-testid="profile-admin-link">Operations</a>: disk use, scoring and failures.</p>
 			<table data-testid="profile-admin-token-table">
 				<thead>
 					<tr>

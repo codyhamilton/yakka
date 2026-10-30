@@ -116,6 +116,14 @@ endpoints. Unknown fields in a fact are kept in its raw payload, never rejected.
 | `POST /v1/device/authorize` | session (tenant owner), same-origin | approve or deny a `user_code` with tenant, scope, `lifetime` and optional `name` (default: the reported host, then `token`); no token is minted here |
 | `POST /v1/device/token` | none (the `device_code` is the credential) | the client polls; `authorization_pending`, `slow_down`, `access_denied`, `expired_token`, or 200 with `token`, `name`, `tenant`, `endpoint`, `expires_at`; the token is minted on the one successful poll |
 | `GET /v1/admin/tokens` | session (admin) | list every token without plaintext |
+| `GET /v1/admin/status` | session (admin) | per tenant: fact count, disk by part (ledger, WAL, archive, blobs, pending), latest screen verdicts, score counts, recent screen failures, rescore progress; plus data-volume total and free bytes and whether scoring is configured |
+| `POST /v1/admin/rescore` | session (admin), same-origin, JSON | body `{"tenant"}`; screens every blob whose latest verdict is `unscreened` in the background and answers `202` with the job state. `409` when no scorer is configured or a rescore is already running for that tenant |
+
+Admin operations are remote-only: local mode has no session, so `/v1/admin/*` answers `401`. A
+rescore runs through the same screen step the worker uses, one blob at a time, and counts a
+per-blob failure without stopping; an unreachable scorer aborts the job. The status page lists
+screen failures but offers no retry, because content that fails five times is deleted from
+`pending/` and has to be sent again.
 
 Outside `/v1`, a binary with the site embedded serves it at `/`. The production Fly image does not
 embed the site, so those paths are `analytics bundle not embedded`. Browsers follow the CORS rules

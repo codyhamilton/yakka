@@ -4,6 +4,8 @@ import {
 	apiGet,
 	apiPost,
 	createToken,
+	fetchAdminStatus,
+	startRescore,
 	fetchMe,
 	approveDevice,
 	DEFAULT_TOKEN_LIFETIME,
@@ -105,6 +107,21 @@ describe('apiGet', () => {
 		const [url, init] = fetchMock.mock.calls[0];
 		expect(url).toBe('/v1/tokens/abc/revoke');
 		expect(init?.method).toBe('POST');
+	});
+
+	it('admin status and rescore use the session transport', async () => {
+		fetchMock.mockImplementation(() => ok({ version: 'v', scoring: {}, tenants: [] }));
+		await fetchAdminStatus();
+		const [url, init] = fetchMock.mock.calls[0];
+		expect(url).toBe('/v1/admin/status');
+		expect(init?.credentials).toBe('include');
+		fetchMock.mockImplementation(() => ok({ running: true, total: 2, done: 0, failed: 0, started: 1, finished: 0 }, 202));
+		await startRescore('t-1');
+		const [rurl, rinit] = fetchMock.mock.calls[1];
+		expect(rurl).toBe('/v1/admin/rescore');
+		expect(rinit?.method).toBe('POST');
+		expect(rinit?.credentials).toBe('include');
+		expect(rinit?.body).toBe(JSON.stringify({ tenant: 't-1' }));
 	});
 
 	it('createToken uses apiPost', async () => {
