@@ -221,6 +221,10 @@ The OpenCode plugin does not forward the `remove` events of the ingest policy
 forms alike. The list is declared once in the plugin between `remove-list` markers, and a test
 asserts it equals the ingest table's.
 
+It also trims the `trim` events of the policy: `message.updated` is spooled without
+`event.properties.info.summary.diffs`, on a copy, so the live event is untouched. That list sits
+between `trim-list` markers and is asserted the same way. The server trims too, for older plugins.
+
 The `artifact_submit.py hook` registrations are removed from all four. Codex hook timeouts stay
 within its 3 s ceiling. Pinned plugin copies (the Codex copy at `451e009`) are design 5's problem,
 but until updated they keep running the old hooks.

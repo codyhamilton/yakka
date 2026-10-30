@@ -129,7 +129,7 @@ class TestStart(LoginEnv):
         with open(self._pending) as f:
             p = json.load(f)
         self.assertEqual(
-            sorted(p), ["device_code", "endpoint", "expires_at", "interval", "user_code"]
+            sorted(p), ["device_code", "endpoint", "expires_at", "interval", "target", "user_code"]
         )
         self.assertEqual(p["endpoint"], self.fake.url)
         self.assertEqual(p["interval"], 5)
@@ -338,6 +338,108 @@ class TestCommand(LoginEnv):
         )
         self.assertEqual(proc.returncode, 0)
         self.assertEqual(len(proc.stdout.splitlines()), 3)
+
+
+class TestSyncLogin(LoginEnv):
+    """`login --sync` writes sync.toml and never touches client.toml (the drain's login)."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self._sync = os.path.join(self._tmpdir, "sync.toml")
+        patcher = mock.patch.dict(os.environ, {"YAKKA_SYNC_CONFIG": self._sync})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def _read(self, path: str) -> str:
+        with open(path, encoding="utf-8") as f:
+            return f.read()
+
+    def test_sync_path_default_and_override(self) -> None:
+        self.assertEqual(yakka.SyncPath(), self._sync)
+        with mock.patch.dict(os.environ, {"YAKKA_SYNC_CONFIG": "", "HOME": "/home/x"}):
+            self.assertEqual(yakka.SyncPath(), "/home/x/.config/yakka/sync.toml")
+
+    def test_sync_login_writes_sync_toml_only(self) -> None:
+        with open(self._cfg, "w", encoding="utf-8") as f:
+            f.write('endpoint = "https://drain.example"\nkey = "wk_drain"\n')
+        out, err = io.StringIO(), io.StringIO()
+        self.assertEqual(yakka.login_start(self.fake.url, out, err, sync=True), 0)
+        self.assertEqual(json.load(open(self._pending))["target"], "sync")
+        self.fake.token_script = [self.fake.ok_token()]
+        rc, err = self.wait()
+        self.assertEqual(rc, 0, err)
+        self.assertIn(f"wrote {self._sync}", err)
+        self.assertNotIn(_TOKEN, err)
+        self.assertEqual(
+            self._read(self._sync), f'endpoint = "{self.fake.url}"\nkey = "{_TOKEN}"\n'
+        )
+        self.assertEqual(stat.S_IMODE(os.stat(self._sync).st_mode), 0o600)
+        self.assertEqual(
+            self._read(self._cfg), 'endpoint = "https://drain.example"\nkey = "wk_drain"\n'
+        )
+        self.assertFalse(os.path.exists(self._pending))
+
+    def test_normal_login_does_not_write_sync_toml(self) -> None:
+        self.assertEqual(self.start()[0], 0)
+        self.assertEqual(json.load(open(self._pending))["target"], "client")
+        self.fake.token_script = [self.fake.ok_token()]
+        self.assertEqual(self.wait()[0], 0)
+        self.assertTrue(os.path.exists(self._cfg))
+        self.assertFalse(os.path.exists(self._sync))
+
+    def test_pending_without_target_is_a_normal_login(self) -> None:
+        self.assertEqual(self.start()[0], 0)
+        info = json.load(open(self._pending))
+        del info["target"]
+        json.dump(info, open(self._pending, "w"))
+        self.fake.token_script = [self.fake.ok_token()]
+        self.assertEqual(self.wait()[0], 0)
+        self.assertTrue(os.path.exists(self._cfg))
+        self.assertFalse(os.path.exists(self._sync))
+
+    def test_unknown_target_is_rejected(self) -> None:
+        self.assertEqual(self.start()[0], 0)
+        info = json.load(open(self._pending))
+        info["target"] = "elsewhere"
+        json.dump(info, open(self._pending, "w"))
+        rc, err = self.wait()
+        self.assertEqual(rc, 1)
+        self.assertIn("invalid pending", err)
+        self.assertFalse(os.path.exists(self._sync))
+        self.assertFalse(os.path.exists(self._cfg))
+
+    def test_sync_login_ignores_client_toml_endpoint(self) -> None:
+        with open(self._cfg, "w", encoding="utf-8") as f:
+            f.write('endpoint = "https://old.example"\nkey = "wk_old"\n')
+        self.assertEqual(yakka.resolve_endpoint("", sync=True), ("https://api.yakka.build", None))
+        self.assertEqual(yakka.resolve_endpoint("", sync=False), ("https://old.example", None))
+        self.assertEqual(
+            yakka.resolve_endpoint("https://flag.example", sync=True), ("https://flag.example", None)
+        )
+
+    def test_run_login_sync_end_to_end(self) -> None:
+        self.fake.token_script = [self.fake.ok_token()]
+        rc = yakka.run_login(
+            self.fake.url,
+            io.StringIO(),
+            io.StringIO(),
+            open_browser=lambda url: None,
+            sleep=self.sleeps.append,
+            clock=self.clock,
+            sync=True,
+        )
+        self.assertEqual(rc, 0)
+        self.assertTrue(os.path.exists(self._sync))
+        self.assertFalse(os.path.exists(self._cfg))
+
+    def test_command_sync_flag(self) -> None:
+        with mock.patch.object(yakka, "login_start", return_value=0) as ls:
+            self.assertEqual(yakka.cmd_login(["yakka", "login", "start", "--sync"]), 0)
+        ls.assert_called_once_with("", sync=True)
+        with mock.patch.object(yakka, "login_wait", return_value=0) as lw:
+            self.assertEqual(yakka.cmd_login(["yakka", "login", "wait"]), 0)
+            self.assertEqual(yakka.cmd_login(["yakka", "login", "wait", "--sync"]), 2)
+        lw.assert_called_once_with()
 
 
 if __name__ == "__main__":

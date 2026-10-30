@@ -97,3 +97,43 @@ func TestMalformed(t *testing.T) {
 		t.Fatalf("got %v", err)
 	}
 }
+
+func TestLoadSync(t *testing.T) {
+	t.Setenv("YAKKA_SYNC_ENDPOINT", "")
+	t.Setenv("YAKKA_SYNC_KEY", "")
+	// client.toml and the drain's env never stand in for a sync credential.
+	write(t, "endpoint = \"https://drain.example\"\nkey = \"drainkey\"\n")
+	t.Setenv("YAKKA_ENDPOINT", "https://env.example")
+	t.Setenv("YAKKA_KEY", "envkey")
+	t.Setenv("YAKKA_SYNC_CONFIG", filepath.Join(t.TempDir(), "none.toml"))
+	if _, err := LoadSync(); !errors.Is(err, ErrNoSyncCredential) {
+		t.Fatalf("no credential: %v", err)
+	}
+
+	p := filepath.Join(t.TempDir(), "sync.toml")
+	if err := os.WriteFile(p, []byte("endpoint = \"https://sync.example\"\nkey = \"synckey\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("YAKKA_SYNC_CONFIG", p)
+	c, err := LoadSync()
+	if err != nil || c.Endpoint != "https://sync.example" || c.Key != "synckey" || SyncPath() != p {
+		t.Fatalf("file: %+v %v", c, err)
+	}
+
+	t.Setenv("YAKKA_SYNC_ENDPOINT", "https://senv.example")
+	if _, err := LoadSync(); !errors.Is(err, ErrPartialSyncEnv) {
+		t.Fatalf("partial env: %v", err)
+	}
+	t.Setenv("YAKKA_SYNC_KEY", "senvkey")
+	if c, err := LoadSync(); err != nil || c.Endpoint != "https://senv.example" || c.Key != "senvkey" {
+		t.Fatalf("env: %+v %v", c, err)
+	}
+}
+
+func TestSyncDefaultPath(t *testing.T) {
+	t.Setenv("YAKKA_SYNC_CONFIG", "")
+	t.Setenv("HOME", "/home/x")
+	if got := SyncPath(); got != "/home/x/.config/yakka/sync.toml" {
+		t.Fatalf("got %s", got)
+	}
+}
