@@ -3,6 +3,8 @@ package serve
 import (
 	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -97,6 +99,20 @@ func TestAdminStatusAndRescore(t *testing.T) {
 	if code, _, _ := doWithCookies(t, hAdmin, "GET", "/v1/admin/status", origin, "", nil); code != 401 {
 		t.Fatalf("status without session: %d", code)
 	}
+	bearer := httptest.NewRequest(http.MethodGet, "/v1/admin/status", nil)
+	bearer.Header.Set("Authorization", "Bearer wk_not-a-session")
+	bearer.Header.Set("Origin", origin)
+	for _, c := range admin {
+		bearer.AddCookie(c)
+	}
+	rec := httptest.NewRecorder()
+	hAdmin.ServeHTTP(rec, bearer)
+	if rec.Code != 401 {
+		t.Fatalf("bearer on status: %d", rec.Code)
+	}
+	if code, _, _ := doWithCookies(t, hAdmin, "POST", "/v1/admin/rescore", "https://evil.example", `{"tenant":"`+tid+`"}`, admin); code != 403 {
+		t.Fatalf("rescore from another origin: %d", code)
+	}
 
 	status := func() adminStatusResp {
 		code, body, _ := doWithCookies(t, hAdmin, "GET", "/v1/admin/status", origin, "", admin)
@@ -152,6 +168,51 @@ func mustAppendRejection(s *Server, tenant string) error {
 	}
 	return ts.t.AppendRejection(context.Background(), store.Rejection{Stage: "screen", Pattern: "screen_error",
 		Reason: "screen error: boom", FactType: "artifact_version", ContentHash: strings.Repeat("a", 64), Path: "docs/x.md"})
+}
+
+func TestAdminRescoreFlagClearsUnscreened(t *testing.T) {
+	gh := mockGitHub(t, 1, "codyh", []mockEmail{{Email: adminEmail, Verified: true}})
+	t.Cleanup(gh.Close)
+	origin := "https://collector.example"
+	step := func(ctx context.Context, tn *store.Tenant, hash string) error {
+		return tn.DropBlob(ctx, hash, store.Rejection{Stage: "screen", Pattern: "jev_screen", Reason: "flagged"})
+	}
+	s := adminTestServer(t, t.TempDir(), gh.URL, step)
+	h := s.Handler()
+	admin := loginRemote(t, h, origin)
+	tid := remoteCreateTenant(t, h, origin, admin, "ops")
+	seedUnscored(t, s, tid, "# design\n")
+	code, body, _ := doWithCookies(t, h, "POST", "/v1/admin/rescore", origin, `{"tenant":"`+tid+`"}`, admin)
+	if code != 202 {
+		t.Fatalf("rescore: %d %s", code, body)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	var flagged adminStatusResp
+	for {
+		code, body, _ = doWithCookies(t, h, "GET", "/v1/admin/status", origin, "", admin)
+		if code != 200 {
+			t.Fatalf("status: %d %s", code, body)
+		}
+		// A fresh value each poll: encoding/json keeps map keys that the next body omits.
+		flagged = adminStatusResp{}
+		if err := json.Unmarshal([]byte(body), &flagged); err != nil {
+			t.Fatal(err)
+		}
+		if len(flagged.Tenants) == 1 && !flagged.Tenants[0].Rescore.Running && flagged.Tenants[0].Screens.Verdicts["unscreened"] == 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("rescore did not clear the unscreened verdict: %+v", flagged)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	flaggedTenant := flagged.Tenants[0]
+	if flaggedTenant.Rescore.Failed != 0 || flaggedTenant.Rescore.Done != 1 {
+		t.Fatalf("after flag: %+v", flaggedTenant)
+	}
+	if len(flaggedTenant.Failures) != 1 || flaggedTenant.Failures[0].Pattern != "jev_screen" {
+		t.Fatalf("failures: %+v", flaggedTenant.Failures)
+	}
 }
 
 func TestAdminRescoreNeedsScorer(t *testing.T) {

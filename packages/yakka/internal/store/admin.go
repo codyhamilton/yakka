@@ -2,7 +2,9 @@ package store
 
 import (
 	"context"
+	"errors"
 	"io/fs"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -28,12 +30,22 @@ type Footprint struct {
 func (t *Tenant) Footprint() (Footprint, error) {
 	var f Footprint
 	err := filepath.WalkDir(t.dir, func(p string, d fs.DirEntry, err error) error {
-		if err != nil || d.IsDir() {
+		if err != nil {
+			// A file promoted or deleted mid-walk is not a failed measurement.
+			if errors.Is(err, os.ErrNotExist) {
+				return nil
+			}
+			return err
+		}
+		if d.IsDir() {
 			return nil
 		}
 		info, err := d.Info()
 		if err != nil {
-			return nil
+			if errors.Is(err, os.ErrNotExist) {
+				return nil
+			}
+			return err
 		}
 		size := info.Size()
 		rel, _ := filepath.Rel(t.dir, p)
@@ -94,6 +106,10 @@ func (t *Tenant) ScreenSummary(ctx context.Context) (ScreenSummary, error) {
 			return s, err
 		}
 		s.Verdicts[v] = n
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return s, err
 	}
 	if err := rows.Close(); err != nil {
 		return s, err
@@ -159,33 +175,29 @@ func (t *Tenant) RecentRejections(ctx context.Context, stage string, limit int) 
 	return out, rows.Err()
 }
 
-// UnscoredBlobs lists promoted blobs whose latest screen is "unscreened", plus blobs with no screen
-// row at all: content stored while no scorer was configured. It is the set a rescore works through.
+// UnscoredBlobs lists promoted blobs whose latest screen is "unscreened": content stored while no
+// scorer was configured. It is the set a rescore works through. Blobs with no screen row are the
+// worker's crash-recovery set (UnscreenedBlobs) and are not included here.
 func (t *Tenant) UnscoredBlobs(ctx context.Context) ([]string, error) {
 	rows, err := t.rdb.QueryContext(ctx, `SELECT content_hash FROM screens s WHERE verdict = 'unscreened'
 		AND id = (SELECT max(id) FROM screens WHERE content_hash = s.content_hash)`)
 	if err != nil {
 		return nil, err
 	}
+	defer rows.Close()
 	var out []string
 	for rows.Next() {
 		var h string
 		if err := rows.Scan(&h); err != nil {
-			rows.Close()
 			return nil, err
 		}
 		if validHash(h) == nil && exists(t.blobPath(h)) {
 			out = append(out, h)
 		}
 	}
-	if err := rows.Close(); err != nil {
+	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	none, err := t.UnscreenedBlobs(ctx)
-	if err != nil {
-		return nil, err
-	}
-	out = append(out, none...)
 	sort.Strings(out)
 	return out, nil
 }

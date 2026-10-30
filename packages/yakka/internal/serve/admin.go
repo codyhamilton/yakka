@@ -123,7 +123,10 @@ func (s *Server) adminTenantIDs() []string {
 }
 
 func (s *Server) adminTenantStatus(ctx context.Context, id string) adminTenant {
-	out := adminTenant{ID: id, Name: s.registry.TenantName(id), Failures: []store.RejectionEntry{}}
+	out := adminTenant{
+		ID: id, Name: s.registry.TenantName(id), Failures: []store.RejectionEntry{},
+		Screens: store.ScreenSummary{Verdicts: map[string]int{}},
+	}
 	ts, err := s.tenant(id)
 	if err != nil {
 		out.Error = shortCause(err)
@@ -172,6 +175,7 @@ func (s *Server) handleAdminRescore(w http.ResponseWriter, r *http.Request, _ *S
 	var body struct {
 		Tenant string `json:"tenant"`
 	}
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<16)
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Tenant == "" {
 		writeJSON(w, 400, map[string]string{"error": "tenant is required"})
 		return
@@ -220,13 +224,15 @@ func (s *Server) handleAdminRescore(w http.ResponseWriter, r *http.Request, _ *S
 
 // runRescore screens each hash in turn. A scorer that is unreachable ends the job; any other
 // failure is counted and the job moves on, so one bad blob cannot hold the rest back.
+// end always runs, including on panic, so a failed step cannot leave the job slot stuck running.
 func (s *Server) runRescore(ts *tenantState, hashes []string) {
 	defer s.wg.Done()
 	var abort error
+	defer func() { ts.rescore.end(abort) }()
 	for _, h := range hashes {
 		if err := s.ctx.Err(); err != nil {
 			abort = err
-			break
+			return
 		}
 		err := s.screen(s.ctx, ts.t, h)
 		ts.rescore.step(err == nil, err)
@@ -234,9 +240,8 @@ func (s *Server) runRescore(ts *tenantState, hashes []string) {
 			fmt.Fprintf(os.Stderr, "yakka serve: rescore %s: %v\n", h, err)
 			if errors.Is(err, scorer.ErrUnreachable) {
 				abort = err
-				break
+				return
 			}
 		}
 	}
-	ts.rescore.end(abort)
 }

@@ -16,20 +16,25 @@
 	let admin = $state<boolean | null>(null);
 	let loading = $state(true);
 	let note = $state('');
+	let starting = $state<string[]>([]);
 	let timer: ReturnType<typeof setTimeout> | undefined;
+	let alive = true;
 
 	const anyRunning = $derived(status?.tenants.some((t) => t.rescore.running) ?? false);
 
 	async function load() {
 		try {
-			status = await fetchAdminStatus();
+			const next = await fetchAdminStatus();
+			if (!alive) return;
+			status = next;
 		} catch (e) {
+			if (!alive) return;
 			if (e instanceof ApiError && (e.status === 403 || e.status === 401)) admin = false;
 			else setError(e);
 		} finally {
-			loading = false;
+			if (alive) loading = false;
 		}
-		schedule();
+		if (alive && admin !== false) schedule();
 	}
 
 	// Poll quickly while a rescore runs; otherwise leave the page alone.
@@ -39,36 +44,56 @@
 	}
 
 	$effect(() => {
+		alive = true;
 		if (!isCollectorMode()) {
 			loading = false;
-			return;
+			return () => {
+				alive = false;
+				clearTimeout(timer);
+			};
 		}
 		void (async () => {
 			try {
-				admin = (await fetchMe()).admin;
+				const me = await fetchMe();
+				if (!alive) return;
+				admin = me.admin;
 			} catch (e) {
+				if (!alive) return;
 				setError(e);
 				loading = false;
 				return;
 			}
+			if (!alive) return;
 			if (admin) await load();
 			else loading = false;
 		})();
-		return () => clearTimeout(timer);
+		return () => {
+			alive = false;
+			clearTimeout(timer);
+		};
 	});
 
+	function isStarting(id: string): boolean {
+		return starting.includes(id);
+	}
+
 	async function rescore(t: AdminTenantStatus) {
+		if (isStarting(t.id)) return;
 		note = '';
+		starting = [...starting, t.id];
 		try {
 			await startRescore(t.id);
 			await load();
 		} catch (e) {
+			if (!alive) return;
 			note = e instanceof ApiError ? e.message : 'Could not start the rescore.';
+		} finally {
+			starting = starting.filter((id) => id !== t.id);
 		}
 	}
 
 	function unscored(t: AdminTenantStatus): number {
-		return t.screens.verdicts['unscreened'] ?? 0;
+		return t.screens.verdicts?.['unscreened'] ?? 0;
 	}
 
 	function when(unix: number): string {
@@ -138,7 +163,7 @@
 				<h3>Scoring</h3>
 				<table>
 					<tbody>
-						{#each Object.entries(t.screens.verdicts) as [verdict, n] (verdict)}
+						{#each Object.entries(t.screens.verdicts ?? {}) as [verdict, n] (verdict)}
 							<tr><th>{verdict}</th><td>{n.toLocaleString()}</td></tr>
 						{/each}
 						<tr><th>Scored content</th><td>{t.screens.scored_content.toLocaleString()} ({t.screens.score_rows.toLocaleString()} scores)</td></tr>
@@ -149,7 +174,7 @@
 					<button
 						type="button"
 						data-testid="admin-rescore-{t.id}"
-						disabled={!status.scoring.rescorable || t.rescore.running || unscored(t) === 0}
+						disabled={!status.scoring.rescorable || t.rescore.running || unscored(t) === 0 || isStarting(t.id)}
 						onclick={() => rescore(t)}
 					>
 						Rescore {unscored(t).toLocaleString()} unscored
@@ -177,7 +202,7 @@
 					<table data-testid="admin-failures-{t.id}">
 						<thead><tr><th>When</th><th>Path</th><th>Reason</th></tr></thead>
 						<tbody>
-							{#each t.failures as f (f.at + f.content_hash)}
+							{#each t.failures as f, i (`${f.at}:${f.content_hash}:${i}`)}
 								<tr><td>{when(f.at)}</td><td>{f.path || '–'}</td><td>{f.reason}</td></tr>
 							{/each}
 						</tbody>
