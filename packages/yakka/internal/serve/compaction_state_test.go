@@ -23,7 +23,7 @@ func legacyLedger(t *testing.T, dir string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.Exec(`CREATE TABLE facts (row_hash TEXT PRIMARY KEY, type TEXT NOT NULL)`); err != nil {
+	if _, err := db.Exec(`CREATE TABLE facts (row_hash TEXT PRIMARY KEY, type TEXT NOT NULL, harness TEXT NOT NULL DEFAULT '', event TEXT NOT NULL DEFAULT '')`); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := db.Exec(`INSERT INTO facts(row_hash,type) VALUES('x','hook')`); err != nil {

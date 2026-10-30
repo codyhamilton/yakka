@@ -199,17 +199,6 @@ func Ingest(ctx context.Context, tenant *store.Tenant, facts []json.RawMessage) 
 				results[i].Status = Accepted
 				continue
 			}
-			if action == Trimmed && Trim(obj) {
-				// Hash and archive the trimmed object, not the received bytes.
-				var buf bytes.Buffer
-				enc := json.NewEncoder(&buf)
-				enc.SetEscapeHTML(false)
-				if err := enc.Encode(obj); err != nil {
-					results[i].Status, results[i].Reason = Rejected, invalid("cannot canonicalise fact")
-					continue
-				}
-				raw = bytes.TrimRight(buf.Bytes(), "\n")
-			}
 		}
 		conv, _ := str(obj, "conversation_id")
 		path, _ := str(obj, "path")

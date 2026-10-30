@@ -63,6 +63,7 @@ type Report struct {
 	Duplicate TypeCounts `json:"duplicate"`
 	Rejected  TypeCounts `json:"rejected"`
 	NoBody    int        `json:"no_body"`
+	Removed   int        `json:"removed"`
 	NoContent int        `json:"no_content"`
 	TooLarge  int        `json:"too_large"`
 	Bytes     int64      `json:"bytes"`
@@ -89,7 +90,7 @@ func (r *Report) Print(w io.Writer) {
 		fmt.Fprintf(w, "%-17s sent %d  accepted %d  duplicate %d  rejected %d\n", typ, n,
 			r.Accepted[typ], r.Duplicate[typ], r.Rejected[typ])
 	}
-	fmt.Fprintf(w, "skipped           no_body %d  no_content %d  too_large %d\n", r.NoBody, r.NoContent, r.TooLarge)
+	fmt.Fprintf(w, "skipped           no_body %d  no_content %d  too_large %d  removed %d\n", r.NoBody, r.NoContent, r.TooLarge, r.Removed)
 	fmt.Fprintf(w, "bytes %d  distinct artifact contents %d  cursor %d\n", r.Bytes, r.Contents, r.Cursor)
 	for _, x := range r.Rejects {
 		fmt.Fprintf(w, "rejected %s: %s\n", x.ID, x.Reason)
@@ -271,12 +272,19 @@ func decode(raw []byte) (map[string]any, error) {
 	return m, nil
 }
 
+// removedByPolicy reports whether the ingest policy drops this row's event. A ledger stored before
+// an event joined the remove list still holds it, and the remote would answer it accepted and keep
+// nothing, so sync does not send it.
+func removedByPolicy(r store.SyncRow) bool {
+	return r.Type == "hook_event" && ingest.Policy(r.Harness, r.Event, nil) == ingest.Remove
+}
+
 // build turns one page of ledger rows into wire facts in rowid order. Rows with nothing to send
 // are counted in rep and skipped.
 func build(ro *store.ReadOnly, rows []store.SyncRow, rep *Report) ([]outFact, error) {
 	byConv := map[string]map[string]archive.Line{}
 	for _, r := range rows {
-		if r.Type != "hook_event" {
+		if r.Type != "hook_event" || removedByPolicy(r) {
 			continue
 		}
 		if _, ok := byConv[r.ConversationID]; ok {
@@ -295,6 +303,10 @@ func build(ro *store.ReadOnly, rows []store.SyncRow, rep *Report) ([]outFact, er
 	var out []outFact
 	for _, r := range rows {
 		id := fmt.Sprintf("sync:%d", r.Rowid)
+		if removedByPolicy(r) {
+			rep.Removed++
+			continue
+		}
 		switch r.Type {
 		case "hook_event":
 			l, ok := byConv[r.ConversationID][r.RowHash]
@@ -307,7 +319,6 @@ func build(ro *store.ReadOnly, rows []store.SyncRow, rep *Report) ([]outFact, er
 				rep.NoBody++
 				continue
 			}
-			ingest.Trim(m)
 			m["id"] = id
 			b, err := encode(m)
 			if err != nil {

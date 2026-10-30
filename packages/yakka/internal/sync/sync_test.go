@@ -59,13 +59,9 @@ func ingestInto(t *testing.T, dir string, facts ...map[string]any) {
 	}
 }
 
-func updated(id string, withDiffs bool) map[string]any {
-	summary := map[string]any{"title": "t"}
-	if withDiffs {
-		summary["diffs"] = []any{map[string]any{"patch": "x"}}
-	}
-	return hook(id, "c1", 1700000001, "message.updated", map[string]any{"hook_event_name": "message.updated",
-		"event": map[string]any{"properties": map[string]any{"info": map[string]any{"id": id, "summary": summary}}}})
+func toolDone(id string) map[string]any {
+	return hook(id, "c1", 1700000001, "tool.execute.after", map[string]any{"hook_event_name": "tool.execute.after",
+		"tool_name": "read", "tool_response": "ok"})
 }
 
 // remote starts a keyed-mode collector with one tenant "t" and returns its URL and tenant dir.
@@ -113,7 +109,7 @@ func TestSyncCopiesDedupsAndIsIncremental(t *testing.T) {
 	src := t.TempDir()
 	ingestInto(t, src,
 		art("a#0", "c1", "docs/plans/01-x/DESIGN.md", "# one\n"),
-		updated("a#1", true),
+		toolDone("a#1"),
 		commit("a#2", "c1", "abc"),
 		art("a#3", "c1", "docs/plans/01-x/DESIGN.md", "# two\n"),
 	)
@@ -149,11 +145,6 @@ func TestSyncCopiesDedupsAndIsIncremental(t *testing.T) {
 	}
 	if n := len(remoteFacts(t, rdir)); n != 4 {
 		t.Fatalf("remote facts %d", n)
-	}
-	for _, l := range mustRead(t, rdir, "c1") {
-		if strings.Contains(string(l.Fact), "diffs") {
-			t.Fatalf("remote archive kept diffs: %s", l.Fact)
-		}
 	}
 	blob := filepath.Join(rdir, "pending", keys.ContentHash([]byte("# two\n")))
 	if b, err := os.ReadFile(blob); err != nil || string(b) != "# two\n" {
@@ -197,7 +188,7 @@ func TestSyncSkipsFactsWithoutBodyOrContent(t *testing.T) {
 	src := t.TempDir()
 	ingestInto(t, src,
 		art("a#0", "c1", "docs/plans/01-x/DESIGN.md", "# gone\n"),
-		updated("a#1", false),
+		toolDone("a#1"),
 		commit("a#2", "c1", "abc"),
 	)
 	if err := os.Remove(filepath.Join(src, "pending", keys.ContentHash([]byte("# gone\n")))); err != nil {
@@ -417,5 +408,20 @@ func TestSyncDoesNotModifySource(t *testing.T) {
 		if after[p] != n {
 			t.Fatalf("%s changed size %d -> %d", p, n, after[p])
 		}
+	}
+}
+
+// A row whose event the ingest policy removes is counted and skipped before any archive read, so a
+// ledger stored before the rule is not sent. The nil ReadOnly proves no archive is touched.
+func TestBuildSkipsEventsTheRemoveListDrops(t *testing.T) {
+	rows := []store.SyncRow{
+		{Rowid: 1, Type: "hook_event", ConversationID: "c1", Harness: "opencode", Event: "message.part.updated", RowHash: "h1"},
+		{Rowid: 2, Type: "hook_event", ConversationID: "c1", Harness: "opencode", Event: "message.updated", RowHash: "h2"},
+		{Rowid: 3, Type: "hook_event", ConversationID: "c1", Harness: "opencode", Event: "session.diff", RowHash: "h3"},
+	}
+	var rep Report
+	out, err := build(nil, rows, &rep)
+	if err != nil || len(out) != 0 || rep.Removed != 3 || rep.NoBody != 0 {
+		t.Fatalf("%v out=%d %+v", err, len(out), rep)
 	}
 }
