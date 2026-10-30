@@ -1,10 +1,17 @@
 # Changelog
 
-## 3.3.0 — 2026-10-30 — token lifetime and name
+## 3.4.0 — 2026-10-30 — token lifetime and name
 
 - Tokens have a name and are issued for a lifetime chosen from a dropdown (1 day, 1 week, 1 month, 3 months, 6 months, 1 year; default 3 months) instead of a date. The server computes the expiry and rejects `expires_at`.
 - `yakka login` sends this machine's host name when it asks for a device code. The approval page prefills the token name with it, so each token on the profile page shows which host it belongs to. Older clients send no host and get the name `token` unless the user types one.
 - Tokens issued before this release show as `(unnamed)`.
+
+## 3.3.0 — 2026-10-30 — fewer tool events
+
+- Claude and Codex no longer register `PreToolUse`, and Claude no longer registers `PostToolBatch`. `PostToolUse` already carries the tool name, input and response, so each tool call is captured once and no hook process starts before it. Cursor's `preToolUse` is unchanged. The server also drops these events, so an older plugin that still sends them stores nothing.
+- The OpenCode plugin drops `tool.execute.before`, the derived `PostToolBatch` marker, and the bus events `message.updated`, `message.part.updated`, `session.status`, `session.updated` and `session.diff`. `tool.execute.after` now carries `started_at`, and a call still open at `session.idle` is written as `tool.execute.incomplete` (normalised to `tool_fail`).
+- `yakka sync` skips events the ingest policy removes.
+- Store migration 9 deletes the `hook_event` facts of every event the ingest policy removes, when a tenant is opened, and rebuilds the hook, conversation and facet rollups. A local or hosted ledger is purged on the first start after this release, which can take a while on a large ledger. The archive keeps its lines. A migrated ledger is newer than older `yakka sync` binaries understand, so sync with this release or later. Later changes to the remove list need their own migration; a test enforces it.
 
 ## 3.2.0 — 2026-10-30 — login for sync
 

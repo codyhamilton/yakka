@@ -8,10 +8,10 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[3]
 PLUGIN = ROOT / "plugins" / "yakka"
-CLAUDE = set('SessionStart Setup InstructionsLoaded UserPromptSubmit UserPromptExpansion MessageDisplay PreToolUse PermissionRequest PermissionDenied PostToolUse PostToolUseFailure PostToolBatch Notification SubagentStart SubagentStop TaskCreated TaskCompleted Stop StopFailure TeammateIdle ConfigChange CwdChanged DirectoryAdded FileChanged WorktreeCreate WorktreeRemove PreCompact PostCompact PreModelSwitch PostModelSwitch Elicitation ElicitationResult SessionEnd'.split())
+CLAUDE = set('SessionStart Setup InstructionsLoaded UserPromptSubmit UserPromptExpansion MessageDisplay PermissionRequest PermissionDenied PostToolUse PostToolUseFailure Notification SubagentStart SubagentStop TaskCreated TaskCompleted Stop StopFailure TeammateIdle ConfigChange CwdChanged DirectoryAdded FileChanged WorktreeCreate WorktreeRemove PreCompact PostCompact PreModelSwitch PostModelSwitch Elicitation ElicitationResult SessionEnd'.split())
 # The supplied catalog's 22 subtotal enumerates only these 21 names; see README caveat.
 CURSOR = set('sessionStart sessionEnd preToolUse postToolUse postToolUseFailure subagentStart subagentStop beforeShellExecution afterShellExecution beforeMCPExecution afterMCPExecution beforeReadFile afterFileEdit beforeSubmitPrompt preCompact stop afterAgentResponse afterAgentThought beforeTabFileRead afterTabFileEdit workspaceOpen'.split())
-CODEX = set('SessionStart SessionEnd SubagentStart SubagentStop PreToolUse PermissionRequest PostToolUse PreCompact PostCompact UserPromptSubmit Stop Interrupt'.split())
+CODEX = set('SessionStart SessionEnd SubagentStart SubagentStop PermissionRequest PostToolUse PreCompact PostCompact UserPromptSubmit Stop Interrupt'.split())
 START = {'claude': 'SessionStart', 'cursor': 'sessionStart', 'codex': 'SessionStart'}
 
 

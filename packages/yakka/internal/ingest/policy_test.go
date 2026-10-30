@@ -15,6 +15,7 @@ import (
 
 	"github.com/codyhamilton/yakka/packages/yakka/internal/archive"
 	"github.com/codyhamilton/yakka/packages/yakka/internal/keys"
+	"github.com/codyhamilton/yakka/packages/yakka/internal/store"
 	"github.com/klauspost/compress/zstd"
 )
 
@@ -285,7 +286,7 @@ func TestIngestPolicyFixture(t *testing.T) {
 // (g) a hook body containing a secret is rejected and not archived.
 func TestIngestSecretHookNotArchived(t *testing.T) {
 	tn := open(t)
-	f := map[string]any{"id": "s#0", "type": "hook_event", "conversation_id": "sec", "harness": "opencode", "event": "session.status", "ts": 5,
+	f := map[string]any{"id": "s#0", "type": "hook_event", "conversation_id": "sec", "harness": "opencode", "event": "tool.execute.after", "ts": 5,
 		"payload": map[string]any{"event": map[string]any{"properties": map[string]any{"messageID": "m", "partID": "p", "field": "text", "delta": "k " + secretText()}}}}
 	res, err := Ingest(context.Background(), tn, marshal(t, f))
 	if err != nil {
@@ -299,5 +300,20 @@ func TestIngestSecretHookNotArchived(t *testing.T) {
 	}
 	if n := len(rawArchiveLines(t, tn.Dir())); n != 0 {
 		t.Fatalf("archive files hold %d lines", n)
+	}
+}
+
+// TestPolicyRemoveCoveredByMigration asserts every Remove entry is deleted from an existing ledger
+// by a store migration. Ingest drops the event for new facts; a ledger written earlier still holds
+// it, and compaction does not rescan a ledger it already marked complete.
+func TestPolicyRemoveCoveredByMigration(t *testing.T) {
+	covered := map[policyKey]bool{}
+	for _, p := range store.PurgedEvents() {
+		covered[policyKey{p[0], p[1]}] = true
+	}
+	for k, a := range policyTable {
+		if a == Remove && !covered[k] {
+			t.Errorf("%s %s is removed at ingest but no migration purges it: add a store migration", k.harness, k.event)
+		}
 	}
 }

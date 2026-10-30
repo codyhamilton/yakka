@@ -34,12 +34,12 @@
    "type": "hook_event",
    "conversation_id": "fx-conv-claude",
    "harness": "claude",
-   "event": "PreToolUse",
+   "event": "PostToolUseFailure",
    "ts": 1791100002.0,
    "payload": {
     "cwd": "/work/fixture",
     "session_id": "fx-conv-claude",
-    "hook_event_name": "PreToolUse",
+    "hook_event_name": "PostToolUseFailure",
     "tool_name": "Bash",
     "tool_input": {
      "command": "ls"
@@ -105,20 +105,12 @@
    "type": "hook_event",
    "conversation_id": "fx-conv-claude",
    "harness": "claude",
-   "event": "PostToolBatch",
+   "event": "Notification",
    "ts": 1791100006.0,
    "payload": {
     "cwd": "/work/fixture",
     "session_id": "fx-conv-claude",
-    "hook_event_name": "PostToolBatch",
-    "tool_calls": [
-     {
-      "tool_use_id": "tu1"
-     },
-     {
-      "tool_use_id": "tu2"
-     }
-    ]
+    "hook_event_name": "Notification"
    }
   },
   {
@@ -380,12 +372,12 @@
    "type": "hook_event",
    "conversation_id": "fx-conv-codex",
    "harness": "codex",
-   "event": "PreToolUse",
+   "event": "PermissionRequest",
    "ts": 1791100021.0,
    "payload": {
     "cwd": "/work/fixture",
     "session_id": "fx-conv-codex",
-    "hook_event_name": "PreToolUse",
+    "hook_event_name": "PermissionRequest",
     "tool_name": "shell",
     "tool_use_id": "x1"
    }
@@ -539,12 +531,12 @@
    "type": "hook_event",
    "conversation_id": "fx-conv-opencode",
    "harness": "opencode",
-   "event": "tool.execute.before",
+   "event": "tool.execute.incomplete",
    "ts": 1791100030.0,
    "payload": {
     "cwd": "/work/fixture",
     "session_id": "fx-conv-opencode",
-    "hook_event_name": "tool.execute.before",
+    "hook_event_name": "tool.execute.incomplete",
     "tool_name": "read",
     "tool_call_id": "c1"
    }
@@ -569,17 +561,12 @@
    "type": "hook_event",
    "conversation_id": "fx-conv-opencode",
    "harness": "opencode",
-   "event": "PostToolBatch",
+   "event": "permission.replied",
    "ts": 1791100032.0,
    "payload": {
     "cwd": "/work/fixture",
     "session_id": "fx-conv-opencode",
-    "hook_event_name": "PostToolBatch",
-    "tool_calls": [
-     {
-      "tool_use_id": "c1"
-     }
-    ]
+    "hook_event_name": "permission.replied"
    }
   },
   {
@@ -614,20 +601,18 @@
    "type": "hook_event",
    "conversation_id": "fx-conv-opencode",
    "harness": "opencode",
-   "event": "message.part.updated",
+   "event": "permission.asked",
    "ts": 1791100035.0,
    "payload": {
     "cwd": "/work/fixture",
     "session_id": "fx-conv-opencode",
-    "hook_event_name": "message.part.updated",
+    "hook_event_name": "permission.asked",
     "source": "bus",
     "event": {
-     "type": "message.part.updated",
+     "type": "permission.asked",
      "properties": {
-      "part": {
-       "id": "prt_1",
-       "type": "text"
-      }
+      "id": "per_1",
+      "sessionID": "fx-conv-opencode"
      }
     }
    }
@@ -637,12 +622,12 @@
    "type": "hook_event",
    "conversation_id": "fx-conv-opencode",
    "harness": "opencode",
-   "event": "message.updated",
+   "event": "todo.updated",
    "ts": 1791100036.0,
    "payload": {
     "cwd": "/work/fixture",
     "session_id": "fx-conv-opencode",
-    "hook_event_name": "message.updated",
+    "hook_event_name": "todo.updated",
     "source": "bus"
    }
   },
@@ -1101,7 +1086,7 @@
   {
    "id": "fx-claude-03",
    "policy": "keep",
-   "norm_event": "tool_pre",
+   "norm_event": "tool_fail",
    "tool": "Bash",
    "model": "",
    "tok_in": 0,
@@ -1161,7 +1146,7 @@
   {
    "id": "fx-claude-07",
    "policy": "keep",
-   "norm_event": "batch_end",
+   "norm_event": "other",
    "tool": "",
    "model": "",
    "tok_in": 0,
@@ -1386,8 +1371,8 @@
   {
    "id": "fx-codex-22",
    "policy": "keep",
-   "norm_event": "tool_pre",
-   "tool": "shell",
+   "norm_event": "other",
+   "tool": "",
    "model": "",
    "tok_in": 0,
    "tok_out": 0,
@@ -1521,7 +1506,7 @@
   {
    "id": "fx-opencode-31",
    "policy": "keep",
-   "norm_event": "tool_pre",
+   "norm_event": "tool_fail",
    "tool": "read",
    "model": "",
    "tok_in": 0,
@@ -1551,7 +1536,7 @@
   {
    "id": "fx-opencode-33",
    "policy": "keep",
-   "norm_event": "batch_end",
+   "norm_event": "other",
    "tool": "",
    "model": "",
    "tok_in": 0,
@@ -1596,7 +1581,7 @@
   {
    "id": "fx-opencode-36",
    "policy": "keep",
-   "norm_event": "message_part",
+   "norm_event": "other",
    "tool": "",
    "model": "",
    "tok_in": 0,

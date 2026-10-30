@@ -10,7 +10,7 @@ import plugin from '../src/index.ts'
 
 const named = 'event config dispose chat.message chat.params chat.headers permission.ask command.execute.before tool.execute.before tool.execute.after tool.definition shell.env experimental.chat.messages.transform experimental.chat.system.transform experimental.session.compacting experimental.compaction.autocontinue experimental.text.complete experimental.provider.small_model'.split(' ')
 const bus = 'command.executed file.edited file.watcher.updated installation.updated lsp.client.diagnostics lsp.updated message.part.removed message.part.updated message.removed message.updated permission.asked permission.replied server.connected session.created session.compacted session.deleted session.diff session.error session.idle session.status session.updated todo.updated shell.env tool.execute.before tool.execute.after tui.prompt.append tui.command.execute tui.toast.show'.split(' ')
-const removed = ['experimental.chat.system.transform', 'chat.params', 'chat.headers', 'shell.env', 'message.part.delta']
+const removed = ['experimental.chat.system.transform', 'chat.params', 'chat.headers', 'shell.env', 'message.part.delta', 'message.part.updated', 'message.updated', 'session.status', 'session.updated', 'session.diff', 'tool.execute.before', 'PostToolBatch']
 const spoolSh = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'packages', 'hooklog', 'spool.sh')
 const sleep = (ms) => new Promise(r => setTimeout(r, ms))
 
@@ -54,7 +54,6 @@ test('18 callbacks and 28 bus types queue payloads, sessions and boundaries', as
       assert.equal(JSON.stringify({ input, output }), before, name)
     }
     for (const type of bus) await hooks.event({ event: { type, properties: { info: { id: 's', directory: '/tmp/project' } } } })
-    await hooks.event({ event: { type: 'message.part.updated', properties: { part: { id: 'part', sessionID: 's', type: 'step-finish' } } } })
     const cyclic = { sessionID: 's' }
     cyclic.properties = cyclic
     await hooks['chat.params'](cyclic, output)
@@ -69,7 +68,7 @@ test('18 callbacks and 28 bus types queue payloads, sessions and boundaries', as
     assert.deepEqual(hookEvents, new Set(hookNames.filter(n => !removed.includes(n))))
     const busEvents = new Set(rows.filter(([, p]) => p.source === 'bus').map(([env]) => env.event))
     assert.deepEqual(busEvents, new Set(bus.filter(n => !removed.includes(n))))
-    assert(rows.some(([env]) => env.event === 'PostToolBatch'))
+    assert(rows.every(([env]) => env.event !== 'PostToolBatch'))
     assert(rows.some(([env]) => env.event === 'Stop'))
     const ts = rows.map(([env]) => env.ts)
     assert(ts.every(t => typeof t === 'number'))
@@ -112,6 +111,34 @@ test('tool.execute.after writes one queue file named like spool.sh with the open
   } finally { await sb.done() }
 })
 
+test('tool.execute.after carries started_at; a call still open at session.idle is written as incomplete', async () => {
+  const sb = await sandbox()
+  try {
+    const hooks = await plugin({ directory: '/tmp/project' })
+    const t0 = Date.now() / 1000
+    await hooks['tool.execute.before']({ sessionID: 's', tool: 'bash', callID: 'done' }, { args: { command: 'ls' } })
+    await hooks['tool.execute.before']({ sessionID: 's', tool: 'bash', callID: 'open' }, { args: { command: 'sleep 9' } })
+    await hooks['tool.execute.before']({ sessionID: 'other', tool: 'read', callID: 'o1' }, { args: { path: 'a' } })
+    assert.equal((await evts(sb.queue)).length, 0)
+    await hooks['tool.execute.after']({ sessionID: 's', tool: 'bash', callID: 'done', args: { command: 'ls' } }, { output: 'x', title: 't' })
+    await hooks.event({ event: { type: 'session.idle', properties: { sessionID: 's' } } })
+    await hooks.event({ event: { type: 'session.idle', properties: { sessionID: 's' } } })
+    const rows = []
+    for (const n of await evts(sb.queue)) rows.push((await read(sb.queue, n))[1])
+    const by = (e) => rows.filter(p => p.hook_event_name === e)
+    const [after] = by('tool.execute.after')
+    assert(after.started_at >= t0 && after.started_at <= Date.now() / 1000)
+    const inc = by('tool.execute.incomplete')
+    assert.equal(inc.length, 1)
+    assert.equal(inc[0].tool_use_id, 'open')
+    assert.equal(inc[0].tool_name, 'bash')
+    assert.equal(inc[0].tool_input.command, 'sleep 9')
+    assert.equal(inc[0].incomplete, true)
+    assert(inc[0].started_at >= t0)
+    assert.equal(by('Stop').length, 2)
+  } finally { await sb.done() }
+})
+
 test('a record without a sessionID is dropped', async () => {
   const sb = await sandbox()
   try {
@@ -122,17 +149,22 @@ test('a record without a sessionID is dropped', async () => {
   } finally { await sb.done() }
 })
 
-test('message.part.delta queues nothing while message.part.updated still queues', async () => {
+test('streamed part, message, status and session-snapshot events queue nothing; session.created still queues', async () => {
   const sb = await sandbox()
   try {
     const hooks = await plugin({ directory: '/tmp/project' })
     await hooks.event({ event: { type: 'message.part.delta', properties: { sessionID: 's', partID: 'p', field: 'text', delta: 'hi' } } })
-    assert.equal((await evts(sb.queue)).length, 0)
     await hooks.event({ event: { type: 'message.part.updated', properties: { part: { id: 'part', sessionID: 's', type: 'text' } } } })
+    await hooks.event({ event: { type: 'session.status', properties: { sessionID: 's', status: { type: 'busy' } } } })
+    await hooks.event({ event: { type: 'session.updated', properties: { info: { id: 's' } } } })
+    await hooks.event({ event: { type: 'session.diff', properties: { sessionID: 's', diff: [] } } })
+    await hooks.event({ event: { type: 'message.updated', properties: { info: { id: 'm', sessionID: 's' } } } })
+    assert.equal((await evts(sb.queue)).length, 0)
+    await hooks.event({ event: { type: 'session.created', properties: { sessionID: 's', info: { id: 's' } } } })
     const names = await evts(sb.queue)
     assert.equal(names.length, 1)
     const [env] = await read(sb.queue, names[0])
-    assert.equal(env.event, 'message.part.updated')
+    assert.equal(env.event, 'session.created')
   } finally { await sb.done() }
 })
 
@@ -180,30 +212,6 @@ test('remove list block in src/index.ts is the stable source for the Go equality
   const m = src.match(/\/\/ remove-list:begin\n([\s\S]*?)\/\/ remove-list:end/)
   assert(m, 'markers present')
   assert.deepEqual([...m[1].matchAll(/"([^"]+)"/g)].map(x => x[1]), removed)
-})
-
-test('message.updated is spooled without info.summary.diffs and the live event is untouched', async () => {
-  const sb = await sandbox()
-  try {
-    const hooks = await plugin({ directory: '/tmp/project' })
-    const diffs = [{ file: 'a.ts', patch: 'x'.repeat(1000) }]
-    const event = { type: 'message.updated', properties: { info: { id: 'm', sessionID: 's', summary: { title: 't', diffs } } } }
-    await hooks.event({ event })
-    assert.equal(event.properties.info.summary.diffs, diffs)
-    const rows = []
-    for (const n of await evts(sb.queue)) rows.push(await read(sb.queue, n))
-    const [env, payload] = rows.find(([e]) => e.event === 'message.updated')
-    assert.equal(env.harness, 'opencode')
-    assert.deepEqual(payload.event.properties.info.summary, { title: 't' })
-    assert.equal(payload.event.properties.info.id, 'm')
-  } finally { await sb.done() }
-})
-
-test('trim list block in src/index.ts is the stable source for the Go equality test', () => {
-  const src = readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'src', 'index.ts'), 'utf8')
-  const m = src.match(/\/\/ trim-list:begin\n([\s\S]*?)\/\/ trim-list:end/)
-  assert(m, 'markers present')
-  assert.deepEqual([...m[1].matchAll(/"([^"]+)"/g)].map(x => x[1]), ['message.updated'])
 })
 
 test('unset YAKKA_BIN drain kick spawns python3 on the client script', async () => {
