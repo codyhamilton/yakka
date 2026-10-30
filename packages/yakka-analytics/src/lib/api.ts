@@ -243,6 +243,71 @@ export async function listAdminTokens(signal?: AbortSignal): Promise<AdminTokenL
 	return apiGet('admin/tokens', undefined, signal);
 }
 
+export type AdminFootprint = {
+	ledger_bytes: number;
+	wal_bytes: number;
+	archive_bytes: number;
+	archive_files: number;
+	blob_bytes: number;
+	blobs: number;
+	pending_bytes: number;
+	pending: number;
+	other_bytes: number;
+};
+
+export type AdminRescore = {
+	running: boolean;
+	total: number;
+	done: number;
+	failed: number;
+	started: number;
+	finished: number;
+	error?: string;
+};
+
+export type AdminFailure = {
+	stage: string;
+	pattern: string;
+	reason: string;
+	path: string;
+	content_hash: string;
+	at: number;
+};
+
+export type AdminTenantStatus = {
+	id: string;
+	name: string;
+	facts: number;
+	compaction: string;
+	footprint: AdminFootprint;
+	screens: {
+		verdicts: Record<string, number>;
+		scored_content: number;
+		score_rows: number;
+		rejections: { stage: string; pattern: string; count: number; last: number }[] | null;
+		total_rejections: number;
+	};
+	failures: AdminFailure[];
+	rescore: AdminRescore;
+	error?: string;
+};
+
+export type AdminStatus = {
+	version: string;
+	scoring: { scorer: boolean; checks: boolean; rescorable: boolean };
+	volume?: { total_bytes: number; free_bytes: number };
+	tenants: AdminTenantStatus[];
+};
+
+export async function fetchAdminStatus(signal?: AbortSignal): Promise<AdminStatus> {
+	return apiGet('admin/status', undefined, signal);
+}
+
+/** Starts a background rescore of a tenant's unscored content. Resolves with the job's initial state. */
+export async function startRescore(tenant: string, signal?: AbortSignal): Promise<AdminRescore> {
+	return apiPost('admin/rescore', { tenant }, signal);
+}
+
 export async function revokeToken(id: string, signal?: AbortSignal): Promise<void> {
 	await apiPost(`tokens/${id}/revoke`, {}, signal);
 }
