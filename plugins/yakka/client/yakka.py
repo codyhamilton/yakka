@@ -13,6 +13,7 @@ import os
 import random
 import re
 import shutil
+import socket
 import subprocess
 import sys
 import threading
@@ -2683,7 +2684,8 @@ def _start(
     if err is not None:
         print("yakka login:", err, file=stderr)
         return None, 1
-    status, out = _device_post(base, "/v1/device/code", {})
+    # The host name becomes the default token name on the approval page.
+    status, out = _device_post(base, "/v1/device/code", {"host": socket.gethostname()})
     if status == 404:
         print(f"yakka login: {_NO_DEVICE_LOGIN}", file=stderr)
         return None, 1

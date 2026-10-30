@@ -54,23 +54,36 @@ func (s *Server) handleCreateToken(w http.ResponseWriter, r *http.Request, sess 
 	var body struct {
 		Tenant    string `json:"tenant"`
 		Scope     string `json:"scope"`
+		Name      string `json:"name"`
+		Lifetime  string `json:"lifetime"`
 		ExpiresAt string `json:"expires_at"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeJSON(w, 400, map[string]string{"error": "invalid body"})
 		return
 	}
-	if body.Tenant == "" || body.Scope == "" || body.ExpiresAt == "" {
+	if body.ExpiresAt != "" {
+		writeJSON(w, 400, map[string]string{"error": "expires_at is not accepted; send lifetime"})
+		return
+	}
+	if body.Tenant == "" || body.Scope == "" {
 		writeJSON(w, 400, map[string]string{"error": "invalid body"})
 		return
 	}
-	exp, err := time.Parse(time.RFC3339, body.ExpiresAt)
-	if err != nil {
-		writeJSON(w, 400, map[string]string{"error": "invalid expires_at"})
+	now := time.Now()
+	exp, ok := tokenExpiry(body.Lifetime, now)
+	if !ok {
+		writeJSON(w, 400, map[string]string{"error": "invalid lifetime"})
 		return
 	}
-	now := time.Now()
-	created, err := s.registry.CreateToken(body.Tenant, body.Scope, exp, sess.GitHubID, now)
+	name := strings.TrimSpace(body.Name)
+	if name == "" {
+		name = defaultTokenName
+	} else if !validTokenName(name) {
+		writeJSON(w, 400, map[string]string{"error": "invalid token name"})
+		return
+	}
+	created, err := s.registry.CreateToken(body.Tenant, body.Scope, name, exp, sess.GitHubID, now)
 	if err != nil {
 		if err.Error() == "forbidden tenant" {
 			writeJSON(w, 403, map[string]string{"error": "forbidden"})
@@ -86,6 +99,7 @@ func (s *Server) handleCreateToken(w http.ResponseWriter, r *http.Request, sess 
 	rec := created.Record
 	writeJSON(w, 201, map[string]any{
 		"id":         rec.ID,
+		"name":       rec.Name,
 		"token":      created.Plaintext,
 		"tenant":     rec.Tenant,
 		"scope":      rec.Scope,
@@ -96,6 +110,7 @@ func (s *Server) handleCreateToken(w http.ResponseWriter, r *http.Request, sess 
 func (s *Server) tokenListItem(rec TokenHashRecord) map[string]any {
 	return map[string]any{
 		"id":          rec.ID,
+		"name":        rec.Name,
 		"tenant":      rec.Tenant,
 		"tenant_name": s.registry.TenantName(rec.Tenant),
 		"scope":       rec.Scope,

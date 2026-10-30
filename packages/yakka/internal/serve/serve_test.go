@@ -832,8 +832,8 @@ func remoteCreateTenant(t *testing.T, h http.Handler, origin string, sess []*htt
 	return resp.ID
 }
 
-func remoteIssueToken(t *testing.T, h http.Handler, origin string, sess []*http.Cookie, tenant, scope string, expires time.Time) (id, plain string) {
-	payload := `{"tenant":"` + tenant + `","scope":"` + scope + `","expires_at":"` + expires.UTC().Format(time.RFC3339) + `"}`
+func remoteIssueToken(t *testing.T, h http.Handler, origin string, sess []*http.Cookie, tenant, scope, lifetime string) (id, plain string) {
+	payload := `{"tenant":"` + tenant + `","scope":"` + scope + `","lifetime":"` + lifetime + `"}`
 	code, body, _ := doWithCookies(t, h, "POST", "/v1/tokens", origin, payload, sess)
 	if code != 201 {
 		t.Fatalf("issue token: %d %s", code, body)
@@ -880,9 +880,8 @@ func TestTokenBearerIngestScopes(t *testing.T) {
 	origin := "https://collector.example"
 	sess := loginRemote(t, h, origin)
 	tid := remoteCreateTenant(t, h, origin, sess, "t1")
-	exp := time.Now().Add(24 * time.Hour)
-	_, rwTok := remoteIssueToken(t, h, origin, sess, tid, TokenScopeReadWrite, exp)
-	_, roTok := remoteIssueToken(t, h, origin, sess, tid, TokenScopeRead, exp)
+	_, rwTok := remoteIssueToken(t, h, origin, sess, tid, TokenScopeReadWrite, "1d")
+	_, roTok := remoteIssueToken(t, h, origin, sess, tid, TokenScopeRead, "1d")
 
 	if code, body := do(t, h, "POST", "/v1/ingest", rwTok, `{"facts":[]}`); code != 200 {
 		t.Fatalf("read_write ingest: %d %s", code, body)
@@ -909,8 +908,7 @@ func TestTokenRevokeAndExpiry(t *testing.T) {
 	origin := "https://collector.example"
 	sess := loginRemote(t, h, origin)
 	tid := remoteCreateTenant(t, h, origin, sess, "rev")
-	exp := time.Now().Add(24 * time.Hour)
-	id, tok := remoteIssueToken(t, h, origin, sess, tid, TokenScopeReadWrite, exp)
+	id, tok := remoteIssueToken(t, h, origin, sess, tid, TokenScopeReadWrite, "1d")
 
 	if code, _, _ := doWithCookies(t, h, "POST", "/v1/tokens/"+id+"/revoke", origin, "{}", sess); code != 204 {
 		t.Fatalf("revoke: %d", code)
@@ -922,7 +920,7 @@ func TestTokenRevokeAndExpiry(t *testing.T) {
 		t.Fatalf("second revoke: %d", code)
 	}
 
-	_, expTok := remoteIssueToken(t, h, origin, sess, tid, TokenScopeReadWrite, time.Now().Add(2*time.Hour))
+	_, expTok := remoteIssueToken(t, h, origin, sess, tid, TokenScopeReadWrite, "1d")
 	s.registry.mu.Lock()
 	for i := range s.registry.tokenHashes {
 		if s.registry.tokenHashes[i].Hash == hashTokenPlaintext(expTok) {
@@ -943,10 +941,10 @@ func TestTokenListAndBearerReject(t *testing.T) {
 	origin := "https://collector.example"
 	sess := loginRemote(t, h, origin)
 	tid := remoteCreateTenant(t, h, origin, sess, "listme")
-	remoteIssueToken(t, h, origin, sess, tid, TokenScopeRead, time.Now().Add(time.Hour))
+	remoteIssueToken(t, h, origin, sess, tid, TokenScopeRead, "1d")
 
 	code, body, _ := doWithCookies(t, h, "GET", "/v1/tokens", origin, "", sess)
-	if code != 200 || strings.Contains(body, `"token"`) || !strings.Contains(body, `"scope":"read"`) {
+	if code != 200 || strings.Contains(body, `"token":`) || !strings.Contains(body, `"scope":"read"`) {
 		t.Fatalf("owner list: %d %s", code, body)
 	}
 	if code, _ := do(t, h, "GET", "/v1/tokens", "wk_notreal", ""); code != 401 {
@@ -963,7 +961,7 @@ func TestTokenAdminListRevoke(t *testing.T) {
 	origin := "https://collector.example"
 	member := loginRemote(t, hUser, origin)
 	tid := remoteCreateTenant(t, hUser, origin, member, "shared")
-	id, tok := remoteIssueToken(t, hUser, origin, member, tid, TokenScopeReadWrite, time.Now().Add(time.Hour))
+	id, tok := remoteIssueToken(t, hUser, origin, member, tid, TokenScopeReadWrite, "1d")
 
 	ghAdmin := mockGitHub(t, 1, "codyh", []mockEmail{{Email: adminEmail, Verified: true}})
 	t.Cleanup(ghAdmin.Close)
@@ -972,7 +970,7 @@ func TestTokenAdminListRevoke(t *testing.T) {
 	admin := loginRemote(t, hAdmin, origin)
 
 	code, body, _ := doWithCookies(t, hAdmin, "GET", "/v1/admin/tokens", origin, "", admin)
-	if code != 200 || !strings.Contains(body, `"github_id":20`) || strings.Contains(body, `"token"`) {
+	if code != 200 || !strings.Contains(body, `"github_id":20`) || strings.Contains(body, `"token":`) {
 		t.Fatalf("admin list: %d %s", code, body)
 	}
 	if code, _, _ := doWithCookies(t, hAdmin, "GET", "/v1/admin/tokens", origin, "", member); code != 403 {
@@ -994,7 +992,7 @@ func TestTokenPolicyDoesNotRevoke(t *testing.T) {
 	origin := "https://collector.example"
 	sess := loginRemote(t, h, origin)
 	tid := remoteCreateTenant(t, h, origin, sess, "polt")
-	_, tok := remoteIssueToken(t, h, origin, sess, tid, TokenScopeReadWrite, time.Now().Add(time.Hour))
+	_, tok := remoteIssueToken(t, h, origin, sess, tid, TokenScopeReadWrite, "1d")
 
 	body := `{"mode":"allow_list","domains":["other.example"]}`
 	if code, _, _ := doWithCookies(t, h, "PUT", "/v1/admin/policy", origin, body, sess); code != 403 {
@@ -1018,7 +1016,7 @@ func TestRegistryRestartLoad(t *testing.T) {
 	origin := "https://collector.example"
 	sess := loginRemote(t, h1, origin)
 	tid := remoteCreateTenant(t, h1, origin, sess, "persist")
-	id, tok := remoteIssueToken(t, h1, origin, sess, tid, TokenScopeReadWrite, time.Now().Add(time.Hour))
+	id, tok := remoteIssueToken(t, h1, origin, sess, tid, TokenScopeReadWrite, "1d")
 	s1.Close()
 
 	s2 := remoteTestConfig(t, dir, gh.URL)

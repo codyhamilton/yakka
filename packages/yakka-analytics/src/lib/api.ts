@@ -28,10 +28,26 @@ export type TokenListItem = {
 	tenant: string;
 	tenant_name: string;
 	scope: string;
+	/** Absent on tokens issued before names existed. */
+	name?: string;
 	expires_at: string;
 	revoked: boolean;
 	created_at: string;
 };
+
+/** Token lifetimes the server accepts; it computes the expiry, so no date is ever sent. */
+export const TOKEN_LIFETIMES = [
+	{ value: '1d', label: '1 day' },
+	{ value: '1w', label: '1 week' },
+	{ value: '1m', label: '1 month' },
+	{ value: '3m', label: '3 months' },
+	{ value: '6m', label: '6 months' },
+	{ value: '1y', label: '1 year' }
+] as const;
+
+export type TokenLifetime = (typeof TOKEN_LIFETIMES)[number]['value'];
+
+export const DEFAULT_TOKEN_LIFETIME: TokenLifetime = '3m';
 
 export type CreatedTokenResponse = TokenListItem & { token: string };
 
@@ -229,7 +245,7 @@ export async function createTenant(name: string, signal?: AbortSignal): Promise<
 }
 
 export async function createToken(
-	body: { tenant: string; scope: string; expires_at: string },
+	body: { tenant: string; scope: string; lifetime: TokenLifetime; name?: string },
 	signal?: AbortSignal
 ): Promise<CreatedTokenResponse> {
 	return apiPost('tokens', body, signal);
@@ -307,7 +323,7 @@ export type DeviceDecision = { approved: true } | { denied: true };
 
 /** Approve a device user code (`POST /v1/device/authorize`, session cookie). */
 export async function approveDevice(
-	body: { user_code: string; tenant: string; scope: string; expires_at: string },
+	body: { user_code: string; tenant: string; scope: string; lifetime: TokenLifetime; name?: string },
 	signal?: AbortSignal
 ): Promise<DeviceDecision> {
 	return apiPost('device/authorize', body, signal);
@@ -316,4 +332,9 @@ export async function approveDevice(
 /** Deny a device user code. */
 export async function denyDevice(userCode: string, signal?: AbortSignal): Promise<DeviceDecision> {
 	return apiPost('device/authorize', { user_code: userCode, action: 'deny' }, signal);
+}
+
+/** The host name the device reported for a pending user code (`GET /v1/device/grant`), "" if none. */
+export async function fetchDeviceGrant(userCode: string, signal?: AbortSignal): Promise<{ host: string }> {
+	return apiGet('device/grant', new URLSearchParams({ user_code: userCode }), signal);
 }

@@ -6,6 +6,9 @@ import {
 	createToken,
 	fetchMe,
 	approveDevice,
+	DEFAULT_TOKEN_LIFETIME,
+	fetchDeviceGrant,
+	TOKEN_LIFETIMES,
 	denyDevice,
 	oauthApiBase,
 	oauthCallbackTarget,
@@ -87,13 +90,13 @@ describe('apiGet', () => {
 	});
 
 	it('apiPost in collector mode sends credentials and JSON without Authorization', async () => {
-		await apiPost('tokens', { tenant: 't', scope: 'read', expires_at: '2099-01-01T00:00:00Z' });
+		await apiPost('tokens', { tenant: 't', scope: 'read', lifetime: '3m' });
 		const [url, init] = fetchMock.mock.calls[0];
 		expect(url).toBe('/v1/tokens');
 		expect(init?.method).toBe('POST');
 		expect(new Headers(init?.headers).has('authorization')).toBe(false);
 		expect(init?.credentials).toBe('include');
-		expect(init?.body).toBe(JSON.stringify({ tenant: 't', scope: 'read', expires_at: '2099-01-01T00:00:00Z' }));
+		expect(init?.body).toBe(JSON.stringify({ tenant: 't', scope: 'read', lifetime: '3m' }));
 	});
 
 	it('revokeToken posts to the revoke subpath', async () => {
@@ -106,7 +109,7 @@ describe('apiGet', () => {
 
 	it('createToken uses apiPost', async () => {
 		fetchMock.mockImplementation(() => ok({ id: '1', token: 'wk_x', tenant: 't', scope: 'read', expires_at: 'x' }));
-		await createToken({ tenant: 't', scope: 'read', expires_at: '2099-01-01T00:00:00Z' });
+		await createToken({ tenant: 't', scope: 'read', lifetime: '3m' });
 		expect(fetchMock.mock.calls[0][0]).toBe('/v1/tokens');
 	});
 
@@ -213,9 +216,9 @@ describe('apiGet', () => {
 		expect(isValidLoopbackRedirectUri('http://127.0.0.1\\@evil.com/cb')).toBe(false);
 	});
 
-	it('approveDevice posts the four fields with credentials and no bearer', async () => {
+	it('approveDevice posts the grant fields with credentials and no bearer', async () => {
 		fetchMock.mockImplementation(() => ok({ approved: true }));
-		const body = { user_code: 'WDJB-MJHT', tenant: 'acme', scope: 'read', expires_at: '2099-01-01T00:00:00Z' };
+		const body = { user_code: 'WDJB-MJHT', tenant: 'acme', scope: 'read', lifetime: '3m' as const, name: 'laptop' };
 		await expect(approveDevice(body)).resolves.toEqual({ approved: true });
 		const [url, init] = fetchMock.mock.calls[0];
 		expect(url).toBe('/v1/device/authorize');
@@ -223,6 +226,19 @@ describe('apiGet', () => {
 		expect(init?.credentials).toBe('include');
 		expect(new Headers(init?.headers).has('authorization')).toBe(false);
 		expect(JSON.parse(init?.body as string)).toEqual(body);
+	});
+
+	it('fetchDeviceGrant reads the reported host with credentials', async () => {
+		fetchMock.mockImplementation(() => ok({ host: 'laptop' }));
+		await expect(fetchDeviceGrant('WDJB-MJHT')).resolves.toEqual({ host: 'laptop' });
+		const [url, init] = fetchMock.mock.calls[0];
+		expect(url).toBe('/v1/device/grant?user_code=WDJB-MJHT');
+		expect(init?.credentials).toBe('include');
+	});
+
+	it('offers six lifetimes, from a day to a year, defaulting to 3 months', () => {
+		expect(TOKEN_LIFETIMES.map((l) => l.value)).toEqual(['1d', '1w', '1m', '3m', '6m', '1y']);
+		expect(DEFAULT_TOKEN_LIFETIME).toBe('3m');
 	});
 
 	it('denyDevice posts user_code and action deny; a 404 is an ApiError', async () => {

@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"strings"
 	"testing"
-	"time"
 )
 
 type meTenants struct {
@@ -99,7 +98,7 @@ func TestTokenListCarriesTenantName(t *testing.T) {
 	origin := "https://collector.example"
 	sess := loginRemote(t, h, origin)
 	tid := remoteCreateTenant(t, h, origin, sess, "Pretty Name")
-	remoteIssueToken(t, h, origin, sess, tid, TokenScopeRead, time.Now().Add(time.Hour))
+	remoteIssueToken(t, h, origin, sess, tid, TokenScopeRead, "1d")
 	code, body, _ := doWithCookies(t, h, "GET", "/v1/tokens", origin, "", sess)
 	if code != 200 || !strings.Contains(body, `"tenant":"`+tid+`"`) || !strings.Contains(body, `"tenant_name":"Pretty Name"`) {
 		t.Fatalf("%d %s", code, body)

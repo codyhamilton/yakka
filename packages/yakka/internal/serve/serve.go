@@ -511,6 +511,7 @@ func (s *Server) Handler() http.Handler {
 	if s.cfg.Remote() {
 		mux.HandleFunc("/v1/device/code", s.handleDeviceCodeRoute)
 		mux.HandleFunc("/v1/device/authorize", s.handleDeviceAuthorizeRoute)
+		mux.HandleFunc("/v1/device/grant", s.method(http.MethodGet, s.sessionOnly(s.handleDeviceGrant)))
 		mux.HandleFunc("/v1/device/token", s.handleDeviceTokenRoute)
 	}
 	mux.HandleFunc("/oauth/login", s.method(http.MethodGet, s.oauthLogin))

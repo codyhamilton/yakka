@@ -3,14 +3,17 @@
 		ApiError,
 		createTenant,
 		createToken,
+		DEFAULT_TOKEN_LIFETIME,
 		fetchMe,
 		isCollectorMode,
 		listAdminTokens,
 		listTokens,
 		revokeToken,
+		TOKEN_LIFETIMES,
 		type AdminTokenListItem,
 		type CreatedTokenResponse,
 		type MeResponse,
+		type TokenLifetime,
 		type TokenListItem
 	} from '$lib/api';
 	import { setError } from '$lib/state.svelte';
@@ -25,19 +28,12 @@
 	let tenantName = $state('');
 	let tokenTenant = $state('');
 	let tokenScope = $state<'read' | 'read_write'>('read_write');
-	let tokenExpires = $state('');
+	let tokenLifetime = $state<TokenLifetime>(DEFAULT_TOKEN_LIFETIME);
+	let tokenName = $state('');
 	let createdPlaintext = $state<CreatedTokenResponse | null>(null);
 
 	let tenantStatus = $state('');
 	let tokenStatus = $state('');
-
-	function defaultExpiry(): string {
-		const d = new Date();
-		d.setUTCMonth(d.getUTCMonth() + 3);
-		return d.toISOString().slice(0, 16);
-	}
-
-	tokenExpires = defaultExpiry();
 
 	async function reload() {
 		loading = true;
@@ -80,9 +76,13 @@
 		e.preventDefault();
 		tokenStatus = '';
 		createdPlaintext = null;
-		const expires_at = new Date(tokenExpires).toISOString();
 		try {
-			const created = await createToken({ tenant: tokenTenant, scope: tokenScope, expires_at });
+			const created = await createToken({
+				tenant: tokenTenant,
+				scope: tokenScope,
+				lifetime: tokenLifetime,
+				name: tokenName.trim() || undefined
+			});
 			createdPlaintext = created;
 			tokenStatus = 'Token created. Copy it now; it will not be shown again.';
 			await reload();
@@ -159,12 +159,21 @@
 				</select>
 			</label>
 			<label>
-				Expires (UTC)
+				Expires in
+				<select data-testid="profile-token-lifetime" bind:value={tokenLifetime}>
+					{#each TOKEN_LIFETIMES as l (l.value)}
+						<option value={l.value}>{l.label}</option>
+					{/each}
+				</select>
+			</label>
+			<label>
+				Name
 				<input
-					data-testid="profile-token-expires"
-					type="datetime-local"
-					bind:value={tokenExpires}
-					required
+					data-testid="profile-token-name"
+					bind:value={tokenName}
+					maxlength="64"
+					autocomplete="off"
+					placeholder="e.g. work laptop"
 				/>
 			</label>
 			<button type="submit" data-testid="profile-token-submit" disabled={!tokenTenant}>Create token</button>
@@ -187,6 +196,7 @@
 			<table data-testid="profile-token-table">
 				<thead>
 					<tr>
+						<th>Name</th>
 						<th>Tenant</th>
 						<th>Scope</th>
 						<th>Expires</th>
@@ -197,6 +207,7 @@
 				<tbody>
 					{#each tokens as row (row.id)}
 						<tr>
+							<td>{row.name || '(unnamed)'}</td>
 							<td>{row.tenant_name}</td>
 							<td>{row.scope}</td>
 							<td>{row.expires_at}</td>
@@ -222,6 +233,7 @@
 				<thead>
 					<tr>
 						<th>GitHub id</th>
+						<th>Name</th>
 						<th>Tenant</th>
 						<th>Scope</th>
 						<th>Expires</th>
@@ -233,6 +245,7 @@
 					{#each adminTokens as row (row.id)}
 						<tr>
 							<td>{row.github_id}</td>
+							<td>{row.name || '(unnamed)'}</td>
 							<td>{row.tenant_name}</td>
 							<td>{row.scope}</td>
 							<td>{row.expires_at}</td>
