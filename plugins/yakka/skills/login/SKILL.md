@@ -15,8 +15,12 @@ Log in with the device-code flow. The user approves on a web page; the client st
 4. When it exits, run `yakka status` and report its `config:` and `endpoint:` lines to the user.
 5. If `config:` says `env`, warn the user that the environment (`YAKKA_ENDPOINT`/`YAKKA_KEY`) overrides the login, so the login just made is not the one in use until those variables are unset.
 
+## Login for `yakka sync`
+
+Only when the user is migrating local data to the hosted service (`yakka sync`): run `yakka login start --sync` instead, then `yakka login wait` as above. The token goes to `sync.toml`, not `client.toml`, so the drain's target does not change. The user picks a `read_write` token for the tenant they are migrating into. Skip step 4; `yakka status` reports the drain's login, not this one.
+
 ## Rules
 
-- Never read, print or edit `client.toml` or the `.pending` file. Never print a token or a `device_code`.
+- Never read, print or edit `client.toml`, `sync.toml` or the `.pending` file. Never print a token or a `device_code`.
 - Do not choose the tenant, scope or expiry for the user; they choose on the page.
 - For a remote or headless session, do not run the flow. Tell the user to set `YAKKA_ENDPOINT` and `YAKKA_KEY` in the environment instead.

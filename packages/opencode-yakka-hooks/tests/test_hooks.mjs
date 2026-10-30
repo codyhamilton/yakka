@@ -182,6 +182,30 @@ test('remove list block in src/index.ts is the stable source for the Go equality
   assert.deepEqual([...m[1].matchAll(/"([^"]+)"/g)].map(x => x[1]), removed)
 })
 
+test('message.updated is spooled without info.summary.diffs and the live event is untouched', async () => {
+  const sb = await sandbox()
+  try {
+    const hooks = await plugin({ directory: '/tmp/project' })
+    const diffs = [{ file: 'a.ts', patch: 'x'.repeat(1000) }]
+    const event = { type: 'message.updated', properties: { info: { id: 'm', sessionID: 's', summary: { title: 't', diffs } } } }
+    await hooks.event({ event })
+    assert.equal(event.properties.info.summary.diffs, diffs)
+    const rows = []
+    for (const n of await evts(sb.queue)) rows.push(await read(sb.queue, n))
+    const [env, payload] = rows.find(([e]) => e.event === 'message.updated')
+    assert.equal(env.harness, 'opencode')
+    assert.deepEqual(payload.event.properties.info.summary, { title: 't' })
+    assert.equal(payload.event.properties.info.id, 'm')
+  } finally { await sb.done() }
+})
+
+test('trim list block in src/index.ts is the stable source for the Go equality test', () => {
+  const src = readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'src', 'index.ts'), 'utf8')
+  const m = src.match(/\/\/ trim-list:begin\n([\s\S]*?)\/\/ trim-list:end/)
+  assert(m, 'markers present')
+  assert.deepEqual([...m[1].matchAll(/"([^"]+)"/g)].map(x => x[1]), ['message.updated'])
+})
+
 test('unset YAKKA_BIN drain kick spawns python3 on the client script', async () => {
   await sleep(10_100) // spawnBin kickDrain shares a 10 s module cooldown with earlier tests
   const sb = await sandbox({ YAKKA_HOOKLOG_KICK: '1' })

@@ -65,6 +65,14 @@ def Path() -> str:
     return os.path.join(_home(), ".config", "yakka", "client.toml")
 
 
+def SyncPath() -> str:
+    """Where `yakka login --sync` stores the migration credential; the Go `yakka sync` reads it."""
+    p = os.environ.get("YAKKA_SYNC_CONFIG", "")
+    if p:
+        return p
+    return os.path.join(_home(), ".config", "yakka", "sync.toml")
+
+
 def Load() -> Config:
     ep = os.environ.get(_ENV_ENDPOINT, "").strip()
     key = os.environ.get(_ENV_KEY, "").strip()
@@ -2524,11 +2532,17 @@ def normalize_origin(raw: str) -> Tuple[str, Optional[BaseException]]:
     return base, None
 
 
-def resolve_endpoint(flag: str) -> Tuple[str, Optional[BaseException]]:
-    """--endpoint, else endpoint in client.toml, else DefaultEndpoint (login only)."""
+def resolve_endpoint(flag: str, sync: bool = False) -> Tuple[str, Optional[BaseException]]:
+    """--endpoint, else endpoint in client.toml, else DefaultEndpoint (login only).
+
+    A sync login never reads client.toml: its credential is separate from the drain's, so the
+    drain's current target says nothing about where to migrate to.
+    """
     flag = flag.strip()
     if flag:
         return normalize_origin(flag)
+    if sync:
+        return DefaultEndpoint, None
     try:
         with open(Path(), encoding="utf-8") as f:
             data = f.read()
@@ -2659,9 +2673,13 @@ def _remove_pending() -> None:
 
 
 def _start(
-    endpoint_flag: str, stdout: Any, stderr: Any, clock: Callable[[], float]
+    endpoint_flag: str,
+    stdout: Any,
+    stderr: Any,
+    clock: Callable[[], float],
+    sync: bool = False,
 ) -> Tuple[Optional[dict], int]:
-    base, err = resolve_endpoint(endpoint_flag)
+    base, err = resolve_endpoint(endpoint_flag, sync)
     if err is not None:
         print("yakka login:", err, file=stderr)
         return None, 1
@@ -2697,6 +2715,7 @@ def _start(
             "user_code": uc,
             "interval": iv,
             "expires_at": expires_at,
+            "target": "sync" if sync else "client",
         }
     )
     if werr is not None:
@@ -2714,10 +2733,11 @@ def login_start(
     stdout: Any = None,
     stderr: Any = None,
     clock: Callable[[], float] = time.time,
+    sync: bool = False,
 ) -> int:
     stdout = stdout if stdout is not None else sys.stdout
     stderr = stderr if stderr is not None else sys.stderr
-    _, rc = _start(endpoint_flag, stdout, stderr, clock)
+    _, rc = _start(endpoint_flag, stdout, stderr, clock, sync)
     return rc
 
 
@@ -2733,7 +2753,14 @@ def login_wait(
         base, dc = p["endpoint"], p["device_code"]
         interval = int(p["interval"])
         deadline = _parse_rfc3339(p["expires_at"])
-        if not isinstance(base, str) or not isinstance(dc, str) or interval <= 0:
+        # A pending file from before --sync existed has no target and is a normal login.
+        target = p.get("target", "client")
+        if (
+            not isinstance(base, str)
+            or not isinstance(dc, str)
+            or interval <= 0
+            or target not in ("client", "sync")
+        ):
             raise ValueError("bad pending file")
     except FileNotFoundError:
         print("yakka login: no pending login (run yakka login start)", file=stderr)
@@ -2756,13 +2783,14 @@ def login_wait(
             ep = out.get("endpoint")
             ep = normalize_origin(ep)[0] if isinstance(ep, str) and ep else ""
             tenant = out.get("tenant")
-            werr = write_client_config(Path(), ep or base, token)
+            dest = SyncPath() if target == "sync" else Path()
+            werr = write_client_config(dest, ep or base, token)
             if werr is not None:
                 print(f"yakka login: write config: {werr}", file=stderr)
                 _remove_pending()
                 return 1
             _remove_pending()
-            print(f"wrote {Path()}", file=stderr)
+            print(f"wrote {dest}", file=stderr)
             print(f"tenant: {tenant if isinstance(tenant, str) else ''}", file=stderr)
             return 0
         code = out.get("error") if out is not None else None
@@ -2789,10 +2817,11 @@ def run_login(
     open_browser: Optional[Callable[[str], Optional[BaseException]]] = None,
     sleep: Callable[[float], None] = time.sleep,
     clock: Callable[[], float] = time.time,
+    sync: bool = False,
 ) -> int:
     stdout = stdout if stdout is not None else sys.stdout
     stderr = stderr if stderr is not None else sys.stderr
-    info, rc = _start(endpoint_flag, stdout, stderr, clock)
+    info, rc = _start(endpoint_flag, stdout, stderr, clock, sync)
     if info is None:
         return rc
     open_fn = open_browser if open_browser is not None else default_open_browser
@@ -2862,16 +2891,24 @@ def cmd_login(argv: List[str]) -> int:
         default="",
         help="collector origin (https URL, no path); default https://api.yakka.build",
     )
+    parser.add_argument(
+        "--sync",
+        action="store_true",
+        help="log in for `yakka sync` (writes sync.toml, leaves client.toml and the drain alone)",
+    )
     try:
         args = parser.parse_args(argv[2:])
     except SystemExit as e:
         code = e.code
         return int(code) if isinstance(code, int) and code != 0 else 2
-    if args.sub == "start":
-        return login_start(args.endpoint)
     if args.sub == "wait":
+        if args.sync or args.endpoint:
+            print("yakka login: wait takes no options; they belong to start", file=sys.stderr)
+            return 2
         return login_wait()
-    return run_login(args.endpoint)
+    if args.sub == "start":
+        return login_start(args.endpoint, sync=args.sync)
+    return run_login(args.endpoint, sync=args.sync)
 
 
 def cmd_status(argv: List[str]) -> int:

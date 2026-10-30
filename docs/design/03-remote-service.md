@@ -105,6 +105,7 @@ endpoints. Unknown fields in a fact are kept in its raw payload, never rejected.
 | `POST /v1/ingest` | local: none; remote: bearer `read_write` | a batch of facts from a drain |
 | advisory reads (`/v1/artifacts`, `/v1/checks`, `/v1/baselines`, `/v1/search`) | local: none; remote: bearer `read` or `read_write`, or session with `?tenant=` for an owned tenant | defined by [design 4](04-advisory-surface.md#api) |
 | analytics reads (`/v1/analytics/*`) | same as advisory reads | defined by [design 7](07-analytics-site.md#analytics-reads) |
+| `GET /v1/whoami` | bearer only (local: none) | the tenant, scope and `expires_at` (Unix seconds, 0 for none) a bearer token resolves to; no cookie, never opens the tenant. `yakka sync` calls it before sending to check the target tenant and `read_write` scope. A 404 means a collector too old to be a sync target |
 | `GET /v1/me` | session | signed-in GitHub identity and owned tenants (collector dashboard) |
 | `POST /v1/tenants`, `POST /v1/tokens`, `GET /v1/tokens`, `POST /v1/tokens/<id>/revoke` | session (tenant owner) | create tenant; issue, list, or revoke tokens; plaintext `token` only in the `POST /v1/tokens` response |
 | `POST /v1/device/code` | none (rate limited per IP) | start a device grant; returns `device_code`, `user_code`, `verification_uri_complete`, `interval`, `expires_in` |

@@ -70,6 +70,19 @@ for the plugin to presume one, and local mode needs no generated state:
   browser (remote sessions); the environment overrides `client.toml`, and `yakka status` then prints
   `config: env (remote mode)`. There is no `yakka init`.
 
+**Migrating local history.** `yakka sync --to <tenant-id>` (Go binary) copies a local tenant's
+hook events, artifact versions and commits to a hosted tenant; ingest is idempotent by row hash, so
+it can be rerun. It authenticates with its own credential, never the drain's: `yakka login --sync`
+(or `start --sync`) runs the same device flow but writes `sync.toml` (`$YAKKA_SYNC_CONFIG`, else
+`~/.config/yakka/sync.toml`, mode 0600) and leaves `client.toml` alone; `YAKKA_SYNC_ENDPOINT` plus
+`YAKKA_SYNC_KEY` override it. Sync refuses a loopback endpoint, a credential not bound to `--to`,
+a non-`read_write` scope, and a ledger whose schema version this binary does not write. Two recipes:
+
+- Migrate: `yakka login --sync`; `yakka sync --to <t>`; `yakka login` for the same tenant, so the
+  drain posts to the remote; wait for local serve to log `not hosting the drain`; `yakka sync --to <t>`
+  once more to pick up what arrived meanwhile.
+- Mirror: keep the normal login local and run `yakka sync --to <t>` whenever wanted.
+
 With no `serve` running and no remote configured, the drain finds the endpoint unreachable and the
 queue grows; `yakka status` reports it as a failure, not as idle.
 

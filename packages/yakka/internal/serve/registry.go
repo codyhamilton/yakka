@@ -469,7 +469,7 @@ func (r *Registry) TokenByID(id string) (TokenHashRecord, bool) {
 }
 
 // resolveBearer maps a plaintext bearer to tenant and scope. Expired and revoked tokens do not match.
-func (r *Registry) resolveBearer(plaintext string, now time.Time) (tenant, scope string, ok bool) {
+func (r *Registry) resolveBearerExpiry(plaintext string, now time.Time) (tenant, scope string, expires time.Time, ok bool) {
 	kh := sha256.Sum256([]byte(plaintext))
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -488,10 +488,15 @@ func (r *Registry) resolveBearer(plaintext string, now time.Time) (tenant, scope
 		match |= eq
 	}
 	if match != 1 || found == nil {
-		return "", "", false
+		return "", "", time.Time{}, false
 	}
 	if found.Revoked || !now.Before(found.ExpiresAt) {
-		return "", "", false
+		return "", "", time.Time{}, false
 	}
-	return found.Tenant, found.Scope, true
+	return found.Tenant, found.Scope, found.ExpiresAt, true
+}
+
+func (r *Registry) resolveBearer(plaintext string, now time.Time) (tenant, scope string, ok bool) {
+	tenant, scope, _, ok = r.resolveBearerExpiry(plaintext, now)
+	return tenant, scope, ok
 }
