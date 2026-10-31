@@ -1,0 +1,138 @@
+{
+  "model": "jev-1.13.0",
+  "state": {
+    "scenario_id": "case.PR-VALIDATION-PHASE|worker.0677f597286e|checkpoint.75",
+    "checkpoint_turn": 75,
+    "evidence_class": "validation-phase-earlycps-prefix",
+    "snapshot": {
+      "question_id": "PR-VALIDATION-PHASE",
+      "worker_id": "0677f597286e",
+      "checkpoint_turn": 75,
+      "prior_checkpoint_turn": 60,
+      "evidence_class": "validation-phase-earlycps-prefix",
+      "brief_anchor": "You are the worker for unit 3C-02 of plan `docs/plans/03-map-layer-parity-remediation/`. Repo: <REPO>, branch master. Your brief is `docs/plans/03-map-layer-parity-remediation/briefs/3C-02-c-test-scaffolding.md`. Read it first and follow it exactly: owned paths, done evidence, boundary rule, waiting rules, machine facts, report format.\n\nOther units run alongside you right now (3C-03 golden capture, 3C-04 round-trip redesign), and they have their own uncommitted ed",
+      "cumulative": {
+        "api_turns": 75,
+        "peak_ctx_tokens": 126023,
+        "prefix_bytes": 1306824,
+        "tool_histogram": {
+          "Bash": 46,
+          "Read": 20,
+          "Edit": 7,
+          "Write": 5,
+          "ToolSearch": 1
+        },
+        "reread_paths": [
+          {
+            "path": "<REPO>/docs/provenance.md",
+            "count": 5
+          },
+          {
+            "path": "<REPO>/parser/kiwiw/_cenc.c",
+            "count": 4
+          }
+        ],
+        "distinct_read_paths": 9,
+        "compaction_event_count": 2,
+        "assistant_text_chars": 3263
+      },
+      "delta_since_prior": {
+        "new_read_paths": [
+          "<REPO>/.gitignore"
+        ],
+        "tool_histogram_delta": {
+          "Bash": 5,
+          "Read": 5,
+          "Edit": 3,
+          "ToolSearch": 1
+        }
+      },
+      "thrash_top_rereads": [
+        {
+          "path": "<REPO>/docs/provenance.md",
+          "count": 5
+        },
+        {
+          "path": "<REPO>/parser/kiwiw/_cenc.c",
+          "count": 4
+        }
+      ],
+      "tail": [
+        {
+          "turn": 68,
+          "excerpt": "",
+          "tool_names": [
+            "Read"
+          ]
+        },
+        {
+          "turn": 69,
+          "excerpt": "I'll correct the now-inaccurate \"rebuilt when the source is newer\" line (it describes the exact mechanism I changed) and append my own new entry for the Contract T build products.",
+          "tool_names": [
+            "Edit"
+          ]
+        },
+        {
+          "turn": 70,
+          "excerpt": "Now append my own new entry at the end of the file (after 3C-01's or others' latest entries, appending only — not touching 3C-03's concurrent additions).",
+          "tool_names": [
+            "Read"
+          ]
+        },
+        {
+          "turn": 71,
+          "excerpt": "That's the end of the file (231 lines original + my 3 added lines = 234). I'll append my new entry there.",
+          "tool_names": [
+            "Edit"
+          ]
+        },
+        {
+          "turn": 72,
+          "excerpt": "Now let's check on the full pytest run.",
+          "tool_names": [
+            "Bash"
+          ]
+        },
+        {
+          "turn": 73,
+          "excerpt": "",
+          "tool_names": [
+            "Bash"
+          ]
+        },
+        {
+          "turn": 74,
+          "excerpt": "I'll wait for this notification. Meanwhile, let's prepare the commit message and double-check nothing else needs attention while it's still running — no further action possible until it completes, so I'll pause here.",
+          "tool_names": [
+            "Bash"
+          ]
+        },
+        {
+          "turn": 75,
+          "excerpt": "The full pytest suite is running in the background under a bounded wait (`timeout 3300`, polling every 10s for `ALLDONE`/`ABORT`/`FAIL`/`Traceback`). I'll continue once that notification arrives.",
+          "tool_names": []
+        }
+      ]
+    }
+  },
+  "questions": {
+    "response": {
+      "type": "choice",
+      "instructions": "Is this worker already in validation (reactive read/fix/test loop) versus forward build? Answer exactly one of in_validation, building, or inconclusive from the supplied prefix only.",
+      "criteria": {
+        "in_validation": "A reactive read/fix/test loop is already the dominant pattern in this prefix.",
+        "building": "Forward implementation or construction is the dominant pattern in this prefix.",
+        "inconclusive": "The prefix does not distinguish validation from forward build with adequate confidence."
+      }
+    },
+    "pattern_note": {
+      "type": "choice",
+      "instructions": "Add one concise pattern note by choosing the best label from the prefix only.",
+      "criteria": {
+        "test_fix_loop": "Reactive tests, reads, fixes, retries, or verification dominate the recent pattern.",
+        "forward_edit": "Forward edits or implementation construction dominate the recent pattern.",
+        "mixed_or_unclear": "The pattern is mixed or cannot be distinguished from the prefix."
+      }
+    }
+  }
+}

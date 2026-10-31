@@ -1,0 +1,121 @@
+{
+  "model": "jev-1.13.0",
+  "state": {
+    "scenario_id": "case.PR-VALIDATION-PHASE|worker.15f24c7ba18c|checkpoint.75",
+    "checkpoint_turn": 75,
+    "evidence_class": "validation-phase-earlycps-prefix",
+    "snapshot": {
+      "question_id": "PR-VALIDATION-PHASE",
+      "worker_id": "15f24c7ba18c",
+      "checkpoint_turn": 75,
+      "prior_checkpoint_turn": 60,
+      "evidence_class": "validation-phase-earlycps-prefix",
+      "brief_anchor": "Invoke the Skill `workflow:execute` and run exactly ONE phase — Phase 2 of docs/plans/03-map-layer-parity-remediation/DESIGN.md (repo <REPO>, branch master). This is a RESTART: a first attempt did not close (see IMPLEMENTATION.md Phase 2 sections, EVIDENCE-2-03.json, WORD7-ANALYSIS.md). Follow the skill's rules; append to IMPLEMENTATION.md, commit and push (project CLAUDE.md; no large binaries; update docs/provenance.md for new untracked material). Close with a co",
+      "cumulative": {
+        "api_turns": 75,
+        "peak_ctx_tokens": 138468,
+        "prefix_bytes": 985261,
+        "tool_histogram": {
+          "Monitor": 28,
+          "Bash": 25,
+          "Read": 8,
+          "Agent": 6,
+          "Edit": 6,
+          "Skill": 1,
+          "ToolSearch": 1
+        },
+        "reread_paths": [],
+        "distinct_read_paths": 8,
+        "compaction_event_count": 0,
+        "assistant_text_chars": 1289
+      },
+      "delta_since_prior": {
+        "new_read_paths": [],
+        "tool_histogram_delta": {
+          "Bash": 8,
+          "Edit": 4,
+          "Agent": 3
+        }
+      },
+      "thrash_top_rereads": [],
+      "tail": [
+        {
+          "turn": 68,
+          "excerpt": "",
+          "tool_names": [
+            "Edit"
+          ]
+        },
+        {
+          "turn": 69,
+          "excerpt": "",
+          "tool_names": [
+            "Bash"
+          ]
+        },
+        {
+          "turn": 70,
+          "excerpt": "2-05 and 2-07 recorded. Waiting on 2-06.",
+          "tool_names": [
+            "Bash"
+          ]
+        },
+        {
+          "turn": 71,
+          "excerpt": "",
+          "tool_names": [
+            "Bash"
+          ]
+        },
+        {
+          "turn": 72,
+          "excerpt": "",
+          "tool_names": [
+            "Edit"
+          ]
+        },
+        {
+          "turn": 73,
+          "excerpt": "Dispatching 2-08 (overlay re-run) and a small fixer for the bug 2-05 deferred.",
+          "tool_names": [
+            "Agent"
+          ]
+        },
+        {
+          "turn": 74,
+          "excerpt": "",
+          "tool_names": [
+            "Agent"
+          ]
+        },
+        {
+          "turn": 75,
+          "excerpt": "",
+          "tool_names": [
+            "Bash"
+          ]
+        }
+      ]
+    }
+  },
+  "questions": {
+    "response": {
+      "type": "choice",
+      "instructions": "Is this worker already in validation (reactive read/fix/test loop) versus forward build? Answer exactly one of in_validation, building, or inconclusive from the supplied prefix only.",
+      "criteria": {
+        "in_validation": "A reactive read/fix/test loop is already the dominant pattern in this prefix.",
+        "building": "Forward implementation or construction is the dominant pattern in this prefix.",
+        "inconclusive": "The prefix does not distinguish validation from forward build with adequate confidence."
+      }
+    },
+    "pattern_note": {
+      "type": "choice",
+      "instructions": "Add one concise pattern note by choosing the best label from the prefix only.",
+      "criteria": {
+        "test_fix_loop": "Reactive tests, reads, fixes, retries, or verification dominate the recent pattern.",
+        "forward_edit": "Forward edits or implementation construction dominate the recent pattern.",
+        "mixed_or_unclear": "The pattern is mixed or cannot be distinguished from the prefix."
+      }
+    }
+  }
+}
