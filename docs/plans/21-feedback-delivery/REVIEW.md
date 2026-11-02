@@ -2,7 +2,7 @@
 
 Verdict: **PASS_WITH_FOLLOWUPS**
 
-Reviewed SHA: `1049941de47aac798d31b21658e773e972ec963c` (includes citation fix and this review file).
+Reviewed SHA: `aa9f475` (branch `docs/21-feedback-delivery` at approval).
 
 Plan sufficiency: the design is enough to judge intent, phase outcomes, ledger entries, and downstream QA. Build phases 4, 5, and 6 correctly carry **open** approach flags where live deployment, Codex harness behaviour, or staging mechanics must be settled against the code.
 
