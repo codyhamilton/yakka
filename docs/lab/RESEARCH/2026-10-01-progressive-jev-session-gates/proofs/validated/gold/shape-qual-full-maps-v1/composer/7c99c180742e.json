@@ -1,0 +1,28 @@
+{
+  "experiment": "shape-qual-full-maps-v1",
+  "worker_id": "7c99c180742e",
+  "model": "Composer",
+  "narrative_shape": "Harness compare work: rich Edit/Write/Read from cp75, parallel review of compare_disc/context while walks run\u2014productive through T~100.",
+  "shape_label": "unclear",
+  "phases": [
+    {
+      "range": "75-90",
+      "name": "harness_implementation",
+      "note": "12 Edits, 11 Writes; walk.py re-reads; report.py added."
+    }
+  ],
+  "early_signals": [
+    {
+      "turn": 75,
+      "signal": "Edit=12, Write=11 at cp75 with compare_disc review excerpt."
+    },
+    {
+      "turn": 90,
+      "signal": "New report.py read; good progress on walk_summary excerpt."
+    }
+  ],
+  "early_signal_window_respected": true,
+  "recommended_exit": null,
+  "earliness": null,
+  "rationale": "High artifact velocity from first checkpoint; no pivot or thrash shape."
+}

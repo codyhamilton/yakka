@@ -1,0 +1,46 @@
+{
+  "experiment": "shape-qual-full-maps-v1",
+  "worker_id": "92a48e004519",
+  "model": "Composer",
+  "narrative_shape": "3C-09 division-into-e2 run spends most of the session in Bash/Read gate loops on _cenc/divide/_e2 with no Edit/Write and frozen assistant narration, then pivots after ~225T into scratch-part work, growing excerpts, and gate closeout.",
+  "shape_label": "late_pivot",
+  "phases": [
+    {
+      "range": "75-210",
+      "name": "bash_read_thrash",
+      "note": "Zero Edit/Write; _cenc re-reads and compactions climb; empty tail excerpts."
+    },
+    {
+      "range": "225-270",
+      "name": "implementation_recovery",
+      "note": "New scratch paths; assistant chars rise; struct rewrite excerpts."
+    },
+    {
+      "range": "270-285",
+      "name": "gate_closeout",
+      "note": "Dense Bash; Monitor/ToolSearch; amendment while gates run."
+    }
+  ],
+  "early_signals": [
+    {
+      "turn": 75,
+      "signal": "Cp75 already Bash/Read-only with _cenc 10\u00d7 re-reads and 12 compactions\u2014no edits on a parity brief."
+    },
+    {
+      "turn": 90,
+      "signal": "Delta +15 Bash, zero new_read_paths; same seven brief-owned files."
+    },
+    {
+      "turn": 105,
+      "signal": "Compactions 18, _cenc 13\u00d7, still zero Edit/Write."
+    },
+    {
+      "turn": 120,
+      "signal": "Assistant_text_chars still 36 through cp120 while Bash/Read histogram grows."
+    }
+  ],
+  "early_signal_window_respected": true,
+  "recommended_exit": 180,
+  "earliness": "on_time vs thrash peak before recovery; too_late vs first frozen pattern at 90.",
+  "rationale": "Early window already shows ca977-class bash/read thrash without artifacts; the late pivot to scratch implementation is not foreshadowed before ~120 beyond deepening re-read stats."
+}

@@ -1,0 +1,41 @@
+{
+  "experiment": "shape-qual-full-maps-v1",
+  "worker_id": "6e06ab86aa72",
+  "model": "Composer",
+  "narrative_shape": "Build worker launches long background coord_scale/full-disc checks, waits with cleanup prep, then reports PASS and dirty-path hygiene by cp120.",
+  "shape_label": "unclear",
+  "phases": [
+    {
+      "range": "75-105",
+      "name": "bg_check_wait",
+      "note": "Bash-only intervals; wait-for-notification excerpts."
+    },
+    {
+      "range": "105-120",
+      "name": "evidence_and_hygiene",
+      "note": "coord_scale PASS excerpt; owned-path dirty check."
+    }
+  ],
+  "early_signals": [
+    {
+      "turn": 75,
+      "signal": "Write=2 at cp75\u2014artifacts exist despite bash-heavy hist."
+    },
+    {
+      "turn": 90,
+      "signal": "Scratch cleanup while waiting; only owned paths touched excerpt."
+    },
+    {
+      "turn": 105,
+      "signal": "Blocking wait on full-disc coord_scale background task."
+    },
+    {
+      "turn": 120,
+      "signal": "PASS excerpt with counts; intended files dirty only."
+    }
+  ],
+  "early_signal_window_respected": true,
+  "recommended_exit": null,
+  "earliness": null,
+  "rationale": "External gate runtime drives waits; not read-loop thrash. Early signals show parallel prep, not mistaken continuation."
+}

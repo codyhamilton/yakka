@@ -1,0 +1,28 @@
+{
+  "experiment": "shape-qual-full-maps-v1",
+  "worker_id": "15f24c7ba18c",
+  "model": "Composer",
+  "narrative_shape": "workflow:execute single phase: Monitor-heavy orchestration, Agent dispatches for overlay units, small Edit growth cp75\u219290.",
+  "shape_label": "unclear",
+  "phases": [
+    {
+      "range": "75-90",
+      "name": "multi_agent_coordination",
+      "note": "Monitor=28; Agent dispatches; Edit 6\u21928."
+    }
+  ],
+  "early_signals": [
+    {
+      "turn": 75,
+      "signal": "Monitor-heavy hist at cp75 with Agent dispatch excerpt."
+    },
+    {
+      "turn": 90,
+      "signal": "+11 Bash, +2 Edit; continued orchestration deltas."
+    }
+  ],
+  "early_signal_window_respected": true,
+  "recommended_exit": null,
+  "earliness": null,
+  "rationale": "Shape is parent-run coordination, not a single-worker thrash or late recovery arc."
+}

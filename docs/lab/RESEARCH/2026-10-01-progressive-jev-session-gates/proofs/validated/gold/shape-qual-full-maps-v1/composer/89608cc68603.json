@@ -1,0 +1,37 @@
+{
+  "experiment": "shape-qual-full-maps-v1",
+  "worker_id": "89608cc68603",
+  "model": "Composer",
+  "narrative_shape": "Ad-hoc multi-brief worker: Edit/Bash on divide and vocab tests, background pytest wait, then amendment finalize with all tests passing by cp120.",
+  "shape_label": "unclear",
+  "phases": [
+    {
+      "range": "75-105",
+      "name": "implement_and_confirm",
+      "note": "Edits; Perth name-record confirmation excerpt."
+    },
+    {
+      "range": "105-120",
+      "name": "pytest_wait_then_close",
+      "note": "Wait for bg pytest; 238 tests pass; amendment tail."
+    }
+  ],
+  "early_signals": [
+    {
+      "turn": 75,
+      "signal": "Edit=3, Bash-heavy but on owned test_divide paths."
+    },
+    {
+      "turn": 90,
+      "signal": "New vocab test path; confirmed census type_code excerpt."
+    },
+    {
+      "turn": 105,
+      "signal": "Explicit wait-for-pytest-notification excerpt."
+    }
+  ],
+  "early_signal_window_respected": true,
+  "recommended_exit": null,
+  "earliness": null,
+  "rationale": "Brief bg-test wait is on-brief validation, not thrash; edits and checkable excerpts present throughout \u2264120."
+}

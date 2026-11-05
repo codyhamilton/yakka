@@ -1,0 +1,41 @@
+{
+  "experiment": "shape-qual-full-maps-v1",
+  "worker_id": "7b00225cb824",
+  "model": "Composer",
+  "narrative_shape": "Extractor-scale brief: edits and reads broaden through cp120, scratch JSON and selection.json appear, then owned-path commit by cp135\u2014compact productive arc.",
+  "shape_label": "unclear",
+  "phases": [
+    {
+      "range": "75-105",
+      "name": "scoped_reads_and_edits",
+      "note": "osm_to_parcel_geometry re-reads; provenance/selection paths added."
+    },
+    {
+      "range": "105-135",
+      "name": "commit_ready",
+      "note": "Edit burst; commit excerpt at cp135."
+    }
+  ],
+  "early_signals": [
+    {
+      "turn": 75,
+      "signal": "Edit=5, Write=3 at cp75 with wait-on-notification excerpt for bg work."
+    },
+    {
+      "turn": 90,
+      "signal": "New test_extractor_scale read; continued owned-file focus."
+    },
+    {
+      "turn": 105,
+      "signal": "New provenance and selection.py reads\u2014broadening but with Edit deltas."
+    },
+    {
+      "turn": 120,
+      "signal": "Scratch way_tag_counts JSON plus Edit +4 in delta."
+    }
+  ],
+  "early_signal_window_respected": true,
+  "recommended_exit": null,
+  "earliness": null,
+  "rationale": "Thrashing screen class (d) not borne out in packs\u2014steady edit motion and sanctioned scope language early."
+}

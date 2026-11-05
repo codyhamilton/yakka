@@ -1,0 +1,28 @@
+{
+  "experiment": "shape-qual-full-maps-v1",
+  "worker_id": "7af2854bba92",
+  "model": "Composer",
+  "narrative_shape": "workflow:design on parity plan: Agent subtask for adversarial review, Bash/Read on DESIGN.md, small Edit burst by cp90 while waiting on review agent.",
+  "shape_label": "unclear",
+  "phases": [
+    {
+      "range": "75-90",
+      "name": "design_orchestration",
+      "note": "Agent=7; waiting on review; edits on DESIGN.md."
+    }
+  ],
+  "early_signals": [
+    {
+      "turn": 75,
+      "signal": "Skill tool used; Agent calls; 'waiting on adversarial review' excerpt."
+    },
+    {
+      "turn": 90,
+      "signal": "Delta +4 Edit while review still pending."
+    }
+  ],
+  "early_signal_window_respected": true,
+  "recommended_exit": null,
+  "earliness": null,
+  "rationale": "Orchestration wait is intrinsic to design skill, not implementation thrash."
+}
