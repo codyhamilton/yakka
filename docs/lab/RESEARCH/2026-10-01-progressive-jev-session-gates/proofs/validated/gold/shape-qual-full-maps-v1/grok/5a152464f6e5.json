@@ -1,0 +1,46 @@
+{
+  "experiment": "shape-qual-full-maps-v1",
+  "worker_id": "5a152464f6e5",
+  "model": "Grok",
+  "narrative_shape": "Name-type encoder work that moves from edits to tests to a rebuild. Turns 68–75 edit the type5 path until three round-trips are byte-identical, then line up pytest. Turns 83–90 write the test file against name-record and parcel decode. Turn 104 rebuilds and runs the vocab check. Edit count freezes at 12 after the first checkpoint; the rest is read and bash. Mild rereads (synth.py and the extractor, three each) start only at turn 90.",
+  "shape_label": "unclear",
+  "phases": [
+    {
+      "range": "68-75",
+      "name": "encoder edits",
+      "note": "angle_flags folded in; three round-trips byte-identical; decode signatures read for tests. Edit 12, no reread table yet."
+    },
+    {
+      "range": "83-90",
+      "name": "test file",
+      "note": "test_name_encoder.py created; Brisbane/name-record checks. Rereads of synth.py and osm_to_parcel_geometry.py begin."
+    },
+    {
+      "range": "98-105",
+      "name": "rebuild and vocab check",
+      "note": "Mostly bash. One Monitor, one Write. Edit count unchanged."
+    }
+  ],
+  "early_signals": [
+    {
+      "turn": 72,
+      "signal": "Three round-trips are byte-identical; next step is the pytest file."
+    },
+    {
+      "turn": 75,
+      "signal": "Reading decode_parcel and decode_name_frame in order to write tests."
+    },
+    {
+      "turn": 83,
+      "signal": "Test file is being written from the current _make_name_record shape."
+    },
+    {
+      "turn": 104,
+      "signal": "PBF present; rebuild with defaults and run the vocab check."
+    }
+  ],
+  "early_signal_window_respected": true,
+  "recommended_exit": null,
+  "earliness": null,
+  "rationale": "Implement, test, rebuild is already the ≤120 story, and the last checkpoint is 105. No pivot or thrash is visible."
+}

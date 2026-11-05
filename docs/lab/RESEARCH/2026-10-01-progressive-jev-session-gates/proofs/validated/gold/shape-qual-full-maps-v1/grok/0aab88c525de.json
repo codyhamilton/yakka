@@ -1,0 +1,42 @@
+{
+  "experiment": "shape-qual-full-maps-v1",
+  "worker_id": "0aab88c525de",
+  "model": "Grok",
+  "narrative_shape": "A long assembler implementation that actually lands edits, then a late park. Through turn 165 the worker fixes alldata_writer field layout, switches has_bmt to content-driven, writes files, and reports tests passing. Edit count then freezes at 14. Turns 173–180 are only a monitor wait for a background Perth extraction before build_alldata and compare_disc. That wait is the end state (last checkpoint 180, T=192).",
+  "shape_label": "late_pivot",
+  "phases": [
+    {
+      "range": "75-120",
+      "name": "implement and first verify",
+      "note": "Edits 3→12 on alldata_writer. Turn 74 fixes bsmr_offset; turn 90 pastes exact field lengths; turn 120 says it builds and moves to decode-back."
+    },
+    {
+      "range": "135-165",
+      "name": "corrections, tests, e2e prep",
+      "note": "has_bmt reconsidered and smoke re-run. Writes appear. Turn 161 tests pass. Turn 165 starts waiting on a background suite while prepping the Perth fixture."
+    },
+    {
+      "range": "173-180",
+      "name": "parked on extraction monitor",
+      "note": "No new edits or reads. Tail is four versions of waiting for the Perth extraction monitor before compare_disc."
+    }
+  ],
+  "early_signals": [
+    {
+      "turn": 74,
+      "signal": "Still editing build_alldata_kwi (bsmr_offset) — forward work, not a stuck loop."
+    },
+    {
+      "turn": 90,
+      "signal": "Matching field lengths and writing the exact strings after a value dump."
+    },
+    {
+      "turn": 120,
+      "signal": "\"It builds. Now let's decode it back to verify correctness\" — the build-to-verify handoff inside the early window, before the later park."
+    }
+  ],
+  "early_signal_window_respected": true,
+  "recommended_exit": 165,
+  "earliness": "on time to slightly early — turn 165 already says it is waiting; 173–180 is the fully parked tail",
+  "rationale": "Progress is real through the early window. The turn-120 verify sentence is the foreshadowing. The monitor park itself is after 120 and is the outcome, so it is not listed as an early signal."
+}

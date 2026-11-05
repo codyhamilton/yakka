@@ -1,0 +1,46 @@
+{
+  "experiment": "shape-qual-full-maps-v1",
+  "worker_id": "7b00225cb824",
+  "model": "Grok",
+  "narrative_shape": "Waits on a long scan, then implements, then commits. Turns 70–88 are parked on a pytest/scan notification. Turns 100–120 edit the node() hot path and add background_all in selection. Turn 131 says all 227 tests pass and the worker commits. The osm extractor is reread 6–7 times, but edits keep landing and the run closes. The early wait does not stay the trajectory.",
+  "shape_label": "unclear",
+  "phases": [
+    {
+      "range": "70-90",
+      "name": "wait on scan/pytest",
+      "note": "Chooses notification over polling. One new test path. Edit only +1."
+    },
+    {
+      "range": "100-120",
+      "name": "implement selection fixes",
+      "note": "node() hot path, background_all, reads of selection and tag-count scratch. Edit 8→12, Read 15→21."
+    },
+    {
+      "range": "128-135",
+      "name": "green suite and commit",
+      "note": "227 pass, scope check, commit and push."
+    }
+  ],
+  "early_signals": [
+    {
+      "turn": 70,
+      "signal": "Waits for the pytest notification rather than polling."
+    },
+    {
+      "turn": 87,
+      "signal": "Scan still running; the worker budgets a long wait."
+    },
+    {
+      "turn": 100,
+      "signal": "Edits the node() hot path — the wait was not the whole session."
+    },
+    {
+      "turn": 116,
+      "signal": "Implements background_all after reading the level-filter code."
+    }
+  ],
+  "early_signal_window_respected": true,
+  "recommended_exit": null,
+  "earliness": null,
+  "rationale": "The ≤120 window contains both the scan wait and the edit burst that follows it. The commit just after 120 matches that arc. No failed pivot shows up."
+}

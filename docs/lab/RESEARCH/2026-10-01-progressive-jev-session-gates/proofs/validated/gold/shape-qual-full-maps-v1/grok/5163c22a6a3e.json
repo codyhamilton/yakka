@@ -1,0 +1,41 @@
+{
+  "experiment": "shape-qual-full-maps-v1",
+  "worker_id": "5163c22a6a3e",
+  "model": "Grok",
+  "narrative_shape": "Vocab-mapping implementation is already in the histogram, then the session parks on a long Perth extractor. At turn 75: Edit 8, Write 7, and osm_to_parcel_geometry.py reread 9 times, while turn 68 is launching the fixture, extractor, build_alldata, and compare_disc. Turn 85 digresses into build_alldata breakage during the wait. Turns 88–90 stop polling and pause until the extractor finishes, citing a multi-hour full run as the scale. T=90, so the pause is the end state.",
+  "shape_label": "late_pivot",
+  "phases": [
+    {
+      "range": "68-75",
+      "name": "launch the long fixture path",
+      "note": "Edits and writes already accumulated. Turn 68 starts extractor plus build_alldata plus compare_disc. Extractor reread is 9."
+    },
+    {
+      "range": "83-90",
+      "name": "breakage digression, then pause",
+      "note": "Examines build_alldata breakage while waiting. Turn 88 stops polling. Turn 90 pauses until the background extractor finishes. No new edits or reads."
+    }
+  ],
+  "early_signals": [
+    {
+      "turn": 68,
+      "signal": "Starts the Perth extractor and the downstream build/compare chain — a long job is the plan."
+    },
+    {
+      "turn": 75,
+      "signal": "osm_to_parcel_geometry.py already reread 9 times, with Edit 8 and Write 7 — build is concentrated and largely behind the tail."
+    },
+    {
+      "turn": 85,
+      "signal": "While waiting, starts examining a build_alldata.py breakage rather than only holding."
+    },
+    {
+      "turn": 90,
+      "signal": "Pauses until the extractor finishes before validation and the report."
+    }
+  ],
+  "early_signal_window_respected": true,
+  "recommended_exit": 90,
+  "earliness": "on time — the pause is the last turn, after the breakage side-look",
+  "rationale": "The early window is both the built histogram and the decision to park on a long extractor. The breakage digression is the drift inside that wait. The run ends in the pause, so the stall is the end state, not a wait that returns."
+}

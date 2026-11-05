@@ -1,0 +1,41 @@
+{
+  "experiment": "shape-qual-full-maps-v1",
+  "worker_id": "daf933273c8f",
+  "model": "Grok",
+  "narrative_shape": "The pack never says what the bash is doing. Every tail excerpt is empty. Assistant text moves from 196 to 251 and then freezes through turn 120. Edit stays at 1 and Write at 2 while Bash goes 67→109. quantisation_roundtrip.py is reread three times. Compactions are already 6 at turn 75 and reach 8. Prefix bytes keep growing (~2.5MB to ~3.2MB), so tool output is accumulating. A single Monitor appears at turn 115.",
+  "shape_label": "unclear",
+  "phases": [
+    {
+      "range": "75-90",
+      "name": "silent bash, one new read",
+      "note": "Empty tails. spool.py appears as a new path. Text reaches 251. Compactions stay 6."
+    },
+    {
+      "range": "105-120",
+      "name": "bash-only deltas",
+      "note": "No new reads, text frozen at 251, bash +16 then +13. Monitor and a second ToolSearch only at the last checkpoint."
+    }
+  ],
+  "early_signals": [
+    {
+      "turn": 75,
+      "signal": "Compactions already 6, assistant text 196, tail is tool calls with no prose."
+    },
+    {
+      "turn": 90,
+      "signal": "Text only 251, edit still 1, the roundtrip tool still the only reread."
+    },
+    {
+      "turn": 105,
+      "signal": "Bash +16, no new read paths, text unchanged."
+    },
+    {
+      "turn": 120,
+      "signal": "Text still 251 after another silent bash window; one Monitor at 115."
+    }
+  ],
+  "early_signal_window_respected": true,
+  "recommended_exit": null,
+  "earliness": null,
+  "rationale": "Frozen prose and a flat edit count look like low progress, but growing prefix bytes fit a heavy job and there is no reread storm or wait sentence. The empty tails do not establish thrash."
+}
