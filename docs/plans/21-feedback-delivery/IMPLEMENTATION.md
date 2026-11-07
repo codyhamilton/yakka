@@ -78,3 +78,11 @@ oneshot state), with a new invocation ID. No remote service call was made.
   chased.
 - `artifact_feedback` feedback checks for the Phase 2 brief and report remain for Cody because
   they require egress.
+
+## Phase 4 — Delivered means screened and scored
+
+Run (phase 4): tool Claude Code, model claude-haiku-5-5, session `4a06dd49-fc90-4b9d-9b9c-70efe21d24ab`, started 2026-11-08T01:44:36+10:00. Run for Plan 21 phase 4 only; no review, terminal review or close-out.
+
+Approach: the design marks this phase `open` because its live closure depends on the live scorer state. Read as the invoker's instruction to refine it: the code outcome is settled against the code in `briefs/phase4-scoring-line.md`, built and tested against fakes, and the live closure is recorded as gated.
+
+Single unit, so the brief is authored inline (`briefs/phase4-scoring-line.md`) and committed before the build. No worker is dispatched; the build is inline because the change is one server file, its tests, and the report.
