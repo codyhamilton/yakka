@@ -290,6 +290,13 @@ export type AdminFailure = {
 	at: number;
 };
 
+export type AdminActions = {
+	tagged: number;
+	untagged: number;
+	failed: number;
+	[key: `rejected:${string}`]: number;
+};
+
 export type AdminTenantStatus = {
 	id: string;
 	name: string;
@@ -305,6 +312,7 @@ export type AdminTenantStatus = {
 	};
 	failures: AdminFailure[];
 	rescore: AdminRescore;
+	actions: AdminActions;
 	error?: string;
 };
 

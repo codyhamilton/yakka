@@ -106,6 +106,7 @@ endpoints. Unknown fields in a fact are kept in its raw payload, never rejected.
 |---|---|---|
 | `GET /v1/health` | none | liveness, version, pending count, screen gaps, `compaction` (`complete` or `required`) |
 | `POST /v1/ingest` | local: none; remote: bearer `read_write` | a batch of facts from a drain |
+| `GET /v1/actions` | local: none; remote: bearer `read` or `read_write` | projected session action rows; conversation queries also report projection `pending` count |
 | advisory reads (`/v1/artifacts`, `/v1/checks`, `/v1/baselines`, `/v1/search`) | local: none; remote: bearer `read` or `read_write`, or session with `?tenant=` for an owned tenant | defined by [design 4](04-advisory-surface.md#api) |
 | analytics reads (`/v1/analytics/*`) | same as advisory reads | defined by [design 7](07-analytics-site.md#analytics-reads) |
 | `GET /v1/whoami` | bearer only (local: none) | the tenant, scope and `expires_at` (Unix seconds, 0 for none) a bearer token resolves to; no cookie, never opens the tenant. `yakka sync` calls it before sending to check the target tenant and `read_write` scope. A 404 means a collector too old to be a sync target |
@@ -116,7 +117,7 @@ endpoints. Unknown fields in a fact are kept in its raw payload, never rejected.
 | `POST /v1/device/authorize` | session (tenant owner), same-origin | approve or deny a `user_code` with tenant, scope, `lifetime` and optional `name` (default: the reported host, then `token`); no token is minted here |
 | `POST /v1/device/token` | none (the `device_code` is the credential) | the client polls; `authorization_pending`, `slow_down`, `access_denied`, `expired_token`, or 200 with `token`, `name`, `tenant`, `endpoint`, `expires_at`; the token is minted on the one successful poll |
 | `GET /v1/admin/tokens` | session (admin) | list every token without plaintext |
-| `GET /v1/admin/status` | session (admin) | per tenant: fact count, disk by part (ledger, WAL, archive, blobs, pending), latest screen verdicts, score counts, recent screen failures, rescore progress; plus data-volume total and free bytes and whether scoring is configured |
+| `GET /v1/admin/status` | session (admin) | per tenant: fact count, disk by part (ledger, WAL, archive, blobs, pending), latest screen verdicts, score counts, recent screen failures, rescore progress, tagged and untagged action conversation counts, rejected action counts by reason and failed action projections; plus data-volume total and free bytes and whether scoring is configured |
 | `POST /v1/admin/rescore` | session (admin), same-origin, JSON | body `{"tenant"}`; screens every blob whose latest verdict is `unscreened` in the background and answers `202` with the job state. `409` when no scorer is configured or a rescore is already running for that tenant |
 | `POST /v1/mcp` | bearer (per-tool `read` or `read_write`; keyless loopback local mode) | stateless JSON-RPC endpoint used by the `yakka mcp` stdio shim for server-defined MCP tools. The shim supplies declared local context and relays replies; cookie sessions and requests with an `Origin` header are refused. |
 
@@ -133,7 +134,7 @@ in [design 7](07-analytics-site.md#browser-access). `/v1` paths are never HTML.
 ### Ingest
 
 Request: `{"facts": [fact, …]}`, each fact one design 1 envelope (`hook_event`,
-`artifact_version`, `commit`) carrying the drain's `id` for that fact (`<queue file name>#<n>`,
+`artifact_version`, `commit`, or `session_action`) carrying the drain's `id` for that fact (`<queue file name>#<n>`,
 design 2 Delivery).
 
 Response: `200` with one result per fact, in order:
@@ -143,6 +144,9 @@ Response: `200` with one result per fact, in order:
 ```
 
 - `accepted` and `duplicate` mean delivered: the drain deletes the file.
+- A `session_action` fact is accepted when its fact structure and `conversation_id` are valid. Its
+  action values are validated later by the projection worker; invalid values remain delivered and
+  appear as rejected rows from `GET /v1/actions`.
 - `rejected` is per fact: the drain moves that file only to `rejected/` with the reason. One bad
   fact never rejects its batch.
 - Whole-request errors: `400` for a body that is not a facts batch, `401` for missing, unknown,
@@ -200,6 +204,8 @@ The one sanctioned exception is offline compaction (below).
 | `rejections` | the precheck and screen rejections described above |
 | `screens` | content hash, verdict, scorer, at |
 | `scores` | content hash, check, result, scorer, at |
+| `action_projection` | exact pending/projected/failed state and bounded retry count for each session action fact |
+| `session_actions` | one validated or rejected projection per action fact, including raw and normalised values and effective segment boundaries |
 | `meta` | key/value store state; `compaction` is `complete` or absent |
 | `hook_events_hourly`, `conversations_hourly`, `facets_hourly` | hourly counts the analytics reads use for whole interior hours ([design 7](07-analytics-site.md#analytics-reads)); maintained in the fact insert's transaction and rebuilt by compaction |
 
@@ -267,6 +273,9 @@ decision 6), and the artifact scorer.
 - No `TYPESAFE_API_KEY`: the screen verdict is `unscreened` and content moves to `blobs/` after
   the precheck alone. This is the expected local mode without a scorer, and the verdict says so in
   every read.
+- Session action projection runs on its own worker cadence, including while scoring is disabled or
+  unreachable. Projection failures are retried at most three times and then recorded as failed;
+  they do not hold up content screening.
 - The scorer sits behind a `Scorer` interface (`Screen`, `Score`). The model behind Jev is not part
   of any contract here.
 

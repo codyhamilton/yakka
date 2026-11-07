@@ -74,6 +74,27 @@ func TestIngestBatchAndResend(t *testing.T) {
 	}
 }
 
+func TestSessionActionAcceptsValueErrorsAndPreservesPrecheck(t *testing.T) {
+	tn := open(t)
+	bad := map[string]any{"id": "q#action", "type": "session_action", "conversation_id": "c1", "harness": "codex", "ts": 1,
+		"source": "env", "action": map[string]any{"kind": "bogus", "phase": "two"}}
+	res, err := Ingest(context.Background(), tn, marshal(t, bad))
+	if err != nil || len(res) != 1 || res[0].Status != Accepted {
+		t.Fatalf("invalid action values must be accepted for projection: %#v %v", res, err)
+	}
+	secret := map[string]any{"id": "q#secret-action", "type": "session_action", "conversation_id": "c1", "harness": "codex", "ts": 2,
+		"action": map[string]any{"kind": "build", "subject_id": "key " + secretText()}}
+	res, err = Ingest(context.Background(), tn, marshal(t, secret))
+	if err != nil || len(res) != 1 || res[0].Status != Rejected || !strings.HasPrefix(res[0].Reason, "precheck:") {
+		t.Fatalf("secret scan must still refuse action facts: %#v %v", res, err)
+	}
+	missingConversation := map[string]any{"id": "q#missing", "type": "session_action", "action": map[string]any{"kind": "build"}}
+	res, err = Ingest(context.Background(), tn, marshal(t, missingConversation))
+	if err != nil || len(res) != 1 || res[0].Status != Rejected {
+		t.Fatalf("conversation_id remains structurally required: %#v %v", res, err)
+	}
+}
+
 func TestIngestSecretInContent(t *testing.T) {
 	tn := open(t)
 	res, _ := Ingest(context.Background(), tn, marshal(t, artifact("x#0", "a\nb "+secretText()+"\n")))

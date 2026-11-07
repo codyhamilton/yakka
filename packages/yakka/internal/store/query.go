@@ -118,8 +118,8 @@ func measureByName(name string) (measureDef, bool) {
 			rollup: "hook_events_hourly", rollupType: "hook_event",
 			rollupCols: []string{"harness", "repo_id", "norm_event", "event", "tool", "conversation_id"}}, true
 	case "conversations":
-		return measureDef{table: "facts", distinct: "conversation_id", dims: []string{"harness", "repo_id", "model"},
-			rollup:     "conversations_hourly",
+		return measureDef{table: "facts", pred: "type!='session_action'", distinct: "conversation_id", dims: []string{"harness", "repo_id", "model"},
+			rollup: "conversations_hourly", rollupType: "legacy_fact",
 			rollupCols: []string{"harness", "repo_id", "model", "conversation_id"}}, true
 	case "artifact_versions":
 		return measureDef{table: "facts", pred: "type='artifact_version'", dims: []string{"harness", "repo_id", "kind", "plan", "source", "conversation_id"}}, true

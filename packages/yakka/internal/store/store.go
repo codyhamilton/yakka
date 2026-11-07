@@ -146,6 +146,22 @@ var migrations = []string{
 	// those rows until this runs. It deletes the facts only; the rollups that exist already are
 	// rebuilt in open, and the archive keeps its lines (sync and ingest skip them by policy).
 	purgeSQL(purgedEvents),
+	// 10: durable state and rows for asynchronous session action projection.
+	`CREATE TABLE IF NOT EXISTS action_projection (
+		row_hash TEXT PRIMARY KEY, attempts INTEGER NOT NULL DEFAULT 0,
+		state TEXT NOT NULL DEFAULT 'pending', error TEXT NOT NULL DEFAULT '',
+		FOREIGN KEY(row_hash) REFERENCES facts(row_hash));
+	CREATE INDEX IF NOT EXISTS action_projection_state ON action_projection(state, attempts);
+	CREATE TABLE IF NOT EXISTS session_actions (
+		row_hash TEXT PRIMARY KEY, conversation_id TEXT NOT NULL, started_at REAL NOT NULL,
+		source TEXT NOT NULL, method TEXT NOT NULL, confidence REAL, status TEXT NOT NULL,
+		reasons TEXT NOT NULL, kind TEXT NOT NULL, subject_type TEXT NOT NULL,
+		subject_id TEXT NOT NULL, phase TEXT NOT NULL, repo TEXT NOT NULL, pr TEXT NOT NULL,
+		raw_kind TEXT NOT NULL, raw_subject_type TEXT NOT NULL, raw_subject_id TEXT NOT NULL,
+		raw_phase TEXT NOT NULL, raw_repo TEXT NOT NULL, raw_pr TEXT NOT NULL,
+		segment_start REAL, segment_end REAL, effective INTEGER NOT NULL DEFAULT 0);
+	CREATE INDEX IF NOT EXISTS session_actions_conversation ON session_actions(conversation_id, started_at);
+	CREATE INDEX IF NOT EXISTS session_actions_status ON session_actions(status, source);`,
 }
 
 var hashRE = regexp.MustCompile(`^[0-9a-f]{64}$`)
@@ -527,16 +543,26 @@ func (t *Tenant) Append(ctx context.Context, rows []FactRow) ([]bool, error) {
 			inserted[i] = n > 0
 			// A collapsed duplicate inserts no fact, so it must not touch the rollups either.
 			if inserted[i] {
+				if r.Type == "session_action" {
+					if _, err := tx.Exec(`INSERT OR IGNORE INTO action_projection(row_hash) VALUES(?)`, r.RowHash); err != nil {
+						return err
+					}
+				}
 				hour := int64(r.TS) / 3600 * 3600
 				if r.Type == "hook_event" {
 					if _, err := stRoll.Exec(hour, r.Harness, r.RepoID, r.NormEvent, r.Event, r.Tool, r.ConversationID); err != nil {
 						return err
 					}
 				}
-				if _, err := stConv.Exec(hour, r.Harness, r.RepoID, r.Model, r.ConversationID); err != nil {
-					return err
+				if r.Type != "session_action" {
+					if _, err := stConv.Exec(hour, r.Harness, r.RepoID, r.Model, r.ConversationID); err != nil {
+						return err
+					}
 				}
 				for _, d := range facetDims {
+					if r.Type == "session_action" {
+						continue
+					}
 					if d.typ != "" && r.Type != d.typ {
 						continue
 					}
