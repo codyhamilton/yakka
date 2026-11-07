@@ -1,13 +1,13 @@
 # Design Intent 4: Agent Advisory Surface
 
-What the agent can ask the system, through the local shim. Part of
+What the agent can ask the system through the local shim and server. Part of
 [system-architecture.md](system-architecture.md); the shim's plumbing is in
 [02-edge-capture.md](02-edge-capture.md#mcp-shim) and the service it reads is
 [03-remote-service.md](03-remote-service.md).
 
 ## Problem
 
-The current MCP has sixteen tools. Most exist to feed the dataset (`post_design`,
+The legacy MCP exposed sixteen tools. Most existed to feed the dataset (`post_design`,
 `start_execution`, `complete_execution`, …), and the skills require the agent to call them, which is
 what principle 1 removes. The agent still benefits from a few answers that change what it does in
 this run: whether its artifact arrived and how it was judged, what it will be judged on, and what
@@ -15,27 +15,23 @@ similar work exists.
 
 ## Shape
 
-> **Proposed bounded extension, authorized 7 Nov 2026; implementation requires separate verification.**
-> [Plan 24's v2 addendum](../plans/24-server-mcp-shim/DESIGN.md#authorized-amendment-bounded-enqueue-declaration-v2)
-> and [Plan 21's reconciliation](../plans/21-feedback-delivery/DESIGN.md#bounded-action-approval-and-amendment-basis)
-> permit the server to request one guarded pointer enqueue for the specific reviewed file. Only
-> the final server answer reaches the agent after refreshed context. `readOnlyHint:true` and read
-> scope describe service reads; the explicit local-action declaration and bounded approval separately
-> govern the local queue effect and must be disclosed to the harness. Enqueue acknowledgment is not
-> proof of queued/delivered: those require current covering queue evidence/matching service hash.
-> Unsupported versions, unknown effect outcomes and failures stay visible. No MCP file content,
-> direct post, secret scan, worker wake, arbitrary commands/paths or queue deletion is authorized.
-> Pointer freshness and the spool's normal Python-drain kick follow Plan 24; this note claims no
-> implementation or deployment and preserves the historical v1 proposal below.
+`python3 plugins/yakka/client/yakka.py mcp` is a stdio shim registered by each harness. The server
+owns all three tool definitions, argument validation, state logic and user-facing wording. The
+shim forwards `initialize`, `tools/list` and `tools/call` to `POST /v1/mcp` using the shared login,
+injects the declared facts it reads from its fixed local reader table, and relays server replies.
+Local read failures are injected context, not synthesized tool results. A remote transport or
+configuration failure is the shim's own error; it never answers from local queue state while the
+service is down.
 
-> **Proposed by [plan 24](../plans/24-server-mcp-shim/DESIGN.md), not built.** Today this document describes the shim as the
-> owner of the three tools. Plan 24 moves every tool, its wording and its state logic to a `POST /v1/mcp` endpoint on the
-> server; the shim then only adds the bearer and reader-collected local context (`_local`) and relays replies. Until that
-> plan's Phase 4 closes, the text below is what runs.
-
-`python3 plugins/yakka/client/yakka.py mcp` is a stdio MCP server, spawned by each harness,
-reading the client config (design 2). It forwards to the service's advisory reads and adds local
-queue state. Every tool is read-only.
+The v2 declaration authorizes one bounded `enqueue_file_snapshot` pointer action for the exact
+reviewed file resolved and guarded during the call. The server decides whether the action is needed
+and supplies the final wording after the shim returns effect facts and refreshed context. The
+`readOnlyHint:true` annotation and read scope describe service access; the declared local action is
+a separate, explicitly bounded queue effect. It writes pointer metadata through the existing
+spool path; the drain remains the content reader and uploader. Enqueue acknowledgment does not
+prove queued or delivered: those states require current covering queue evidence or a matching
+service hash. Unsupported versions, unknown outcomes and failures remain visible. The shim does
+not upload content, scan secrets, wake workers, run arbitrary commands or delete queue entries.
 
 | Tool | Answers | Changes the agent's decision by |
 |---|---|---|
@@ -48,28 +44,15 @@ only.
 
 ## `artifact_feedback`
 
-> **Proposed by [plan 24](../plans/24-server-mcp-shim/DESIGN.md), not built:** the states and wording below are decided on the server from reader-collected context
-> (file metadata and hash, repository identity, queue and drain facts). The shim no longer kicks the drain; hooks own that.
-> The only intended differences are listed in the plan's parity table.
-
-The shim resolves `path` against the working directory, reads the file, and hashes it. Then, in
-order:
-
-1. **Queued.** Any queue file whose envelope refers to `path` after normalisation (resolved
-   against the envelope's `cwd`, then made repo-relative with the drain's function). The shim parses
-   each queue file to check; the queue is normally a handful of files, so this is accepted. If present, the shim kicks the drain,
-   waits up to about 1.5 s, and re-checks. Still queued: report count, oldest age, and why
-   (`bad config`, `remote unreachable`, `draining`).
-2. **Rejected.** Any `rejected/` file for `path`: report the reason. The fix is to rewrite the file;
-   that fires a new hook.
-3. **Delivered.** Ask the service for `(repo_id, path)`: the latest version's hash, its screen
-   verdict, and its scores. If that hash differs from the file's current hash, say the current
-   content is not yet delivered, which is normally a write still in the batch window.
-
-Matching is by path and content hash, not by conversation. The shim is not told which conversation
-spawned it, and an artifact written in an earlier conversation is still answerable.
-
-The repo ID is computed by the shim the same way the drain computes it (design 1).
+The server evaluates `artifact_feedback` from its authenticated tenant's artifact and baseline
+data plus the declared local facts: resolved path, file metadata and hash, repository identity,
+queue coverage and rejection facts, and drain liveness. It owns path-kind checks, feedback states
+and wording. The queue reader returns bounded diagnostic samples; for the v2 enqueue action its
+complete-coverage facts are computed over the full matching set, so a truncated sample cannot be
+treated as proof of absence. If a required reader fails or is missing, the server reports local
+context unavailable rather than a clean delivery state. Matching is by repository/path and current
+content hash, not conversation. The shim computes repository identity using the same rules as the
+drain (design 1).
 
 ## API
 
@@ -94,13 +77,10 @@ the current skills, ratings are comparative: the outlier is the signal, not the 
 
 ## Unreachable service
 
-> **Proposed by [plan 24](../plans/24-server-mcp-shim/DESIGN.md), not built:** the shim no longer answers from local state when the service is down. A configured
-> remote that cannot be reached is the shim's own `unreachable` error (naming the host, the count of local writes still
-> queued, and the fix); an unresolved login is `bad config`. Neither falls back to local mode or to a local answer.
-
-The shim never fails a tool call because the service is down. It answers with what it knows locally
-(queued, rejected) and says the service is unreachable. A missing config says so and names the
-file.
+A configured endpoint that cannot be reached produces the shim's `unreachable` error, with the
+local pending-write count and a fix. An unresolved login produces `bad config`. Neither condition
+falls back to local mode or a local answer. The server remains the only source of advisory tool
+results and wording.
 
 ## What changes in the skills
 
@@ -125,8 +105,9 @@ removed.
 
 ## Tests
 
-1. Over stdio against a temp service: `initialize`, `tools/list` shows exactly the three tools,
-   each call returns.
+1. Over stdio against a test service: `initialize`, `tools/list` relays the server's three tools,
+   and each declared call carries the required reader facts to the server.
 2. `artifact_feedback` for a file that is queued, rejected, delivered, and delivered at an older
-   hash gives the four distinct answers.
-3. Service down: the call returns local state and says so, with no MCP error.
+   hash gives the corresponding server-formatted states; failed required context never becomes a
+   clean state.
+3. Service down: the shim reports its transport error and does not synthesize a local tool answer.

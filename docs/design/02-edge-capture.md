@@ -155,39 +155,28 @@ The drain never starts or manages the quality service, local or remote (principl
 
 ## MCP shim
 
-> **Proposed bounded extension, authorized 7 Nov 2026; implementation requires separate verification.**
-> [Plan 24's declaration v2 addendum](../plans/24-server-mcp-shim/DESIGN.md#authorized-amendment-bounded-enqueue-declaration-v2)
-> permits only one server-declared `enqueue_file_snapshot` for the call's already-resolved reviewed file,
-> followed by one continuation with effect facts and refreshed declared context. The server owns need
-> and final wording; the shim owns the fixed primitive and safety guards. Capability/version mismatch
-> stays visibly unsupported/not-delivered. The entry contains pointer metadata only, with the existing
-> spool format, locks and kick policy. The normal Python drain alone reads, scans and uploads content;
-> no MCP direct upload or content scan is added. The spool's ordinary kick may start that drain after
-> the bounded enqueue; no shim-owned launcher is restored. This is the sole exception to the v1
-> auth/context-only boundary, not a statement that the extension has been built or deployed.
+`python3 plugins/yakka/client/yakka.py mcp` is a local stdio shim. It uses the shared login,
+forwards MCP requests to `POST /v1/mcp`, relays server tool definitions and replies, and injects
+only the local facts declared by each server tool from a fixed reader table. The server owns tool
+names, schemas, validation, state and user-facing wording. An unknown or unsupported declaration
+is reported as local context failure; local read failures are facts sent to the server, never
+locally synthesized tool answers. A remote transport or configuration failure is the shim's own
+error. It never answers from local queue state when the service is unavailable.
 
-> **Proposed by [plan 24](../plans/24-server-mcp-shim/DESIGN.md), not built.** The shim becomes a thin wrapper: it forwards
-> `initialize`, `tools/list` and `tools/call` to the server's `POST /v1/mcp`, adds the bearer from the shared login, and fills
-> `_local` from a fixed table of read-only readers the server's tool declaration names. "Queue awareness" below moves to the
-> server's `artifact_feedback`, fed by the `queue` and `drain` readers; the shim does not kick the drain and does not answer
-> when the server is unreachable. Until that plan's Phase 4 closes, the text below is what runs.
+The v2 declaration adds one bounded local action: the server may request one
+`enqueue_file_snapshot` for the exact file already resolved and guarded for that call. The shim
+rechecks file identity and complete queue coverage, then invokes the installed spool entry point
+with pointer metadata and continues the same call once with effect facts and refreshed readers.
+Capability or version mismatch and unknown outcomes remain visible. The action does not send file
+content to the MCP server. The normal Python drain reads, scans and uploads content; the spool's
+existing kick rules may start that drain. The shim does not own a drain launcher or alternate kick
+policy. An enqueue acknowledgment alone does not establish that an item remains queued or was
+delivered; feedback uses current queue coverage and the service's content hash.
 
-The advisory MCP is registered with every harness as a local stdio command, not a URL. The shim
-reads the shared config and forwards to the remote's advisory API. Design 4 owns what it exposes;
-design 2 fixes two things it relies on:
-
-- **Endpoint by resolution.** Local or remote comes from the env pair, `client.toml`, or the local
-  default above. No harness config holds an endpoint or a key.
-- **Queue awareness.** Before answering about a file, the shim checks `queue/` and `rejected/` for
-  envelopes that refer to it. If files are pending, it kicks the drain and waits up to about 1.5 s.
-  If they are still pending, the answer says so ("3 events for this file still queued, oldest 40 s,
-  remote unreachable"). If any are in `rejected/`, the answer gives the reason; the agent's fix is
-  to rewrite the file, which fires a new hook. The rewrite is the repair. Matching is by path, not
-  conversation, because an MCP server is not told which conversation spawned it
-  ([design 4](04-advisory-surface.md#artifact_feedback)).
-
-A pre-tool hook could do the same check, but whether MCP calls reach a pre-tool hook differs per
-harness, and the shim behaves identically everywhere.
+The shared endpoint and bearer still come from the env pair, `client.toml`, or the local default
+above. Harness configuration holds neither endpoint nor key. The queue and drain readers provide
+bounded facts for server-side `artifact_feedback`; the shim does not decide queue, rejection or
+delivery wording ([design 4](04-advisory-surface.md#artifact_feedback)).
 
 ## No repair submit
 
