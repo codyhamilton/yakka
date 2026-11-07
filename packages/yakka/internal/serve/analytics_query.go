@@ -48,10 +48,10 @@ func (s *Server) analyticsSchema(w http.ResponseWriter, r *http.Request, _ strin
 		"measures": measures, "buckets": store.Buckets,
 		"resolutions": map[string]any{"auto": true, "year": true, "multi_year_steps": []int{2, 5, 10, 20, 50, 100, 200, 500, 1000}},
 		"budgets": map[string]any{"max_cells": 20000, "deadline_s": analyticsDeadline.Seconds(), "top_max": maxLimit,
-			"page_max": maxLimit, "scatter_points": 5000, "content_bytes": 16 * 1024 * 1024, "explore_page_max": exploreCap, "heavy_read_concurrency": analyticsHeavyConcurrency,
+			"page_max": maxLimit, "scatter_points": 5000, "content_bytes": analyticsContentLimit, "explore_page_max": exploreCap, "heavy_read_concurrency": analyticsHeavyConcurrency,
 			"time_range": map[string]string{"min": minAnalyticsTime.Format(time.RFC3339Nano), "max": maxAnalyticsTime.Format(time.RFC3339Nano)}},
 		"grains": grains, "lenses": lenses, "coverage": coverage,
-		"features": map[string]bool{"bucket_auto": true, "entities_session": true, "entities_time": true, "exclude": true, "scores_by_lens": true},
+		"features": map[string]bool{"bucket_auto": true, "entities_session": true, "entities_time": true, "exclude": true, "scores_by_lens": true, "artifact_content": true},
 	})
 }
 

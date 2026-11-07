@@ -107,7 +107,7 @@ endpoints. Unknown fields in a fact are kept in its raw payload, never rejected.
 | `GET /v1/health` | none | liveness, version, pending count, screen gaps, `compaction` (`complete` or `required`) |
 | `POST /v1/ingest` | local: none; remote: bearer `read_write` | a batch of facts from a drain |
 | advisory reads (`/v1/artifacts`, `/v1/checks`, `/v1/baselines`, `/v1/search`) | local: none; remote: bearer `read` or `read_write`, or session with `?tenant=` for an owned tenant | defined by [design 4](04-advisory-surface.md#api) |
-| analytics reads (`/v1/analytics/*`) | same as advisory reads | defined by [design 7](07-analytics-site.md#analytics-reads) |
+| analytics reads (`/v1/analytics/*`) | same as advisory reads | defined by [design 7](07-analytics-site.md#analytics-reads); artifact content is read only from exact tenant-local design, brief and report versions, with full hash verification and a schema-advertised byte budget |
 | `GET /v1/whoami` | bearer only (local: none) | the tenant, scope and `expires_at` (Unix seconds, 0 for none) a bearer token resolves to; no cookie, never opens the tenant. `yakka sync` calls it before sending to check the target tenant and `read_write` scope. A 404 means a collector too old to be a sync target |
 | `GET /v1/me` | session | signed-in GitHub identity and owned tenants (collector dashboard) |
 | `POST /v1/tenants`, `POST /v1/tokens`, `GET /v1/tokens`, `POST /v1/tokens/<id>/revoke` | session (tenant owner) | create tenant; issue, list, or revoke tokens; plaintext `token` only in the `POST /v1/tokens` response |
@@ -260,7 +260,11 @@ design 4 and the lab.
 bucket vocabulary remain stable; additive metadata publishes the active budgets, time resolutions,
 supported grains, lens provenance and tenant coverage. The server advertises only capabilities it
 serves. Phase 4 exposes session and time entities through
-`GET /v1/analytics/entities?grain=session|time`; later artifact, plan, execution, content, activity,
+`GET /v1/analytics/entities?grain=session|time`; Plan 20 Phase 5 exposes artifact and plan entities
+and bounded artifact content through `GET /v1/analytics/content?repo_id=&path=&hash=`. Content reads
+require the exact tenant-local version identity, return complete bytes only after SHA-256 checking,
+and distinguish screened-pass from explicit unscreened content in `X-Yakka-Screen-Verdict`. Later
+execution, activity,
 cohort and review capabilities remain absent until their phases are implemented.
 
 Session rows are keyed by `conversation_id`. Measures use the requested event-time window, while

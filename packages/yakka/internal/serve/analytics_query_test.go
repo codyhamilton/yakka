@@ -88,7 +88,10 @@ func TestAnalyticsSchema(t *testing.T) {
 			t.Errorf("missing Phase 4 feature %s: %v", name, features)
 		}
 	}
-	for _, name := range []string{"entities_artifact", "entities_plan", "entities_execution", "artifact_content", "activity", "cohort", "actions", "reviews"} {
+	if features["artifact_content"] != true {
+		t.Errorf("artifact content capability not advertised: %v", features)
+	}
+	for _, name := range []string{"entities_artifact", "entities_plan", "entities_execution", "activity", "cohort", "actions", "reviews"} {
 		if _, ok := features[name]; ok {
 			t.Errorf("later phase feature advertised: %s", name)
 		}
