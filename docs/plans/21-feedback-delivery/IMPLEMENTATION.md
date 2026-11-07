@@ -86,3 +86,49 @@ Run (phase 4): tool Claude Code, model claude-haiku-5-5, session `4a06dd49-fc90-
 Approach: the design marks this phase `open` because its live closure depends on the live scorer state. Read as the invoker's instruction to refine it: the code outcome is settled against the code in `briefs/phase4-scoring-line.md`, built and tested against fakes, and the live closure is recorded as gated.
 
 Single unit, so the brief is authored inline (`briefs/phase4-scoring-line.md`) and committed before the build. No worker is dispatched; the build is inline because the change is one server file, its tests, and the report.
+
+### Brief `phase4-scoring-line.md`
+
+Status: closed.
+
+- Built the `scoring:` line on `state: delivered` in `packages/yakka/internal/serve/mcp_feedback.go`.
+  The value is decided server-side by `feedbackScoring` from the server's `scoring()` state: `off`
+  when no scorer or no checks are loaded, `pending` while the screen is unrecorded and the version
+  is under 30 s old, otherwise `on`. When scoring is configured and unscreened, the call waits up
+  to `feedbackScreenWait` (10 s) for the screen, polling every 100 ms.
+- Surfaces touched: `artifact_feedback` delivered branch (`mcpArtifactFeedback`, `feedbackDelivered`)
+  and its two call sites; new helpers `feedbackScoring`, `feedbackScreened`, `scoringConfigured`
+  and `awaitScreen`. Tests are in the new file `internal/serve/mcp_feedback_scoring_test.go`.
+- Deviations: the tests are in a new file rather than `mcp_feedback_test.go`; the server with
+  neither scorer nor checks is decided by the same function and not tested on its own. No other
+  departure from the brief.
+- Inline execution (single unit; no worker dispatched). Per agent: none dispatched.
+- Evidence: `go test ./internal/serve/ -count=1` ok (10.321 s); the four new tests pass; `go vet
+  ./internal/serve/` and `gofmt -l` are clean. All tests use fakes (`DisableWorker: true`, `Promote`
+  from the test as the screen worker); no live call was made.
+- The report is `reports/phase4-scoring-line.md`.
+
+### Verification
+
+The outcome's entry point is the in-process MCP `artifact_feedback` handler; the action is an
+ingest plus a call with a fake screen worker, and the result is the `scoring:` line for each of
+off, on after a screen recorded 200 ms later, and pending when no screen arrives inside the
+shortened wait. This is observed through the real handler, not through the report. It was run
+inline and not by a separate cheap-tier agent. The live closure is gated and was not run.
+
+### Carried
+
+- `on` does not mean a screen ran. With scoring configured, a version still unscreened after 30 s
+  reads `scoring: on` next to `screen: awaiting screen`. The brief's rule gives this; a new state
+  would need a brief amendment.
+- `handleAdminRescore` in `internal/serve/admin.go` gates on the scorer alone, while `scoring()`
+  also needs checks. A server with a key and no `YAKKA_CHECKS_DIR` can rescore while delivered
+  answers read `scoring: off`. `admin.go` was outside this phase and is unchanged.
+- Phases 1 and 2 close with `Workflow-Phase` trailers only, the legacy form. This phase's closing
+  commit carries both `Yakka-Phase: 21-feedback-delivery:4` and `Workflow-Phase: 21-feedback-delivery:4`.
+- The unrelated `tools/release/test_layout.py::test_repo_passes_layout_check` failure on ignored
+  `packages/yakka-analytics/node_modules/**` is documented by Plan 19 Phase 4; it was not run or
+  chased.
+- Gates for Cody (egress or production): the live `scoring:` line on the deployed service; turning
+  scoring on (scorer key and `YAKKA_CHECKS_DIR`, ledger 28); the admin rescore of the budget file
+  (admin browser session, ledger 21); a live agent session showing `delivered` with the line.

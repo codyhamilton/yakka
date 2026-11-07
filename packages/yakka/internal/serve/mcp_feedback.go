@@ -15,6 +15,39 @@ import (
 const mcpFeedbackFix = "Fix: rewrite the file; the new write is the repair."
 const mcpFeedbackNoDrainFix = "Fix: start the plugin drain at the next hook event, or run the plugin's bin/yakka drain"
 
+// feedbackPendingWindow is how long a delivered version may wait for its screen before a
+// scoring value of pending no longer applies.
+const feedbackPendingWindow = 30 * time.Second
+
+// feedbackScreenWait bounds how long a delivered answer waits for the screen when scoring
+// is configured and the version is still inside feedbackPendingWindow.
+var feedbackScreenWait = 10 * time.Second
+
+// feedbackScoring is the scoring value a delivered answer reports: off unless the server has
+// a scorer and its checks loaded; pending while no screen is recorded and the version arrived
+// under feedbackPendingWindow ago; otherwise on.
+func feedbackScoring(configured, screened bool, received, now time.Time) string {
+	switch {
+	case !configured:
+		return "off"
+	case !screened && now.Sub(received) < feedbackPendingWindow:
+		return "pending"
+	default:
+		return "on"
+	}
+}
+
+// feedbackScreened reports whether the screen step has recorded its outcome for the latest version.
+func feedbackScreened(a *store.Artifact) bool {
+	return a.Latest.Screen != nil || (a.Latest.Rejection != nil && a.Latest.Rejection.Stage == "screen")
+}
+
+// scoringConfigured is true when the server has both a scorer and checks loaded.
+func (s *Server) scoringConfigured() bool {
+	scorer, checks := s.scoring()
+	return scorer && checks
+}
+
 type feedbackLocal struct {
 	resolved map[string]any
 	file     map[string]any
@@ -118,7 +151,7 @@ func (s *Server) mcpArtifactFeedback(ctx context.Context, _ string, ts *tenantSt
 					return nil, fmt.Errorf("artifact read failed")
 				}
 				if a != nil && a.Latest.ContentHash == contentHash {
-					return s.feedbackDelivered(ctx, ts, a, keys.Kind(rel), state, nil)
+					return s.feedbackDelivered(ctx, ts, a, repo, rel, contentHash, state, nil)
 				}
 				select {
 				case <-ctx.Done():
@@ -179,7 +212,7 @@ func (s *Server) mcpArtifactFeedback(ctx context.Context, _ string, ts *tenantSt
 		}
 		return state("stale", append([]string{fmt.Sprintf("current content not yet delivered (service has %s from %s); normally a write still in the batch window", short, a.Latest.ReceivedAt.UTC().Format(time.RFC3339))}, note...)...), nil
 	}
-	return s.feedbackDelivered(ctx, ts, a, keys.Kind(rel), state, note)
+	return s.feedbackDelivered(ctx, ts, a, repo, rel, contentHash, state, note)
 }
 
 func feedbackState(name, path, repo, hash string, lines ...string) any {
@@ -191,7 +224,38 @@ func feedbackState(name, path, repo, hash string, lines ...string) any {
 	return mcpText(strings.Join(parts, "\n"))
 }
 
-func (s *Server) feedbackDelivered(ctx context.Context, ts *tenantState, a *store.Artifact, kind string, state func(string, ...string) any, note []string) (any, error) {
+// awaitScreen waits, while the version is pending, for the screen step to record its outcome.
+// It polls the store every 100 ms for at most feedbackScreenWait and stops early when the
+// screen is recorded or the latest version is no longer this hash.
+func (s *Server) awaitScreen(ctx context.Context, ts *tenantState, repo, rel, hash string, a *store.Artifact) (*store.Artifact, error) {
+	deadline := time.Now().Add(feedbackScreenWait)
+	for !feedbackScreened(a) && time.Since(a.Latest.ReceivedAt) < feedbackPendingWindow && time.Now().Before(deadline) {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(100 * time.Millisecond):
+		}
+		cur, err := ts.t.Artifact(ctx, repo, rel)
+		if err != nil {
+			return nil, fmt.Errorf("artifact read failed")
+		}
+		if cur == nil || cur.Latest.ContentHash != hash {
+			return a, nil
+		}
+		a = cur
+	}
+	return a, nil
+}
+
+func (s *Server) feedbackDelivered(ctx context.Context, ts *tenantState, a *store.Artifact, repo, rel, hash string, state func(string, ...string) any, note []string) (any, error) {
+	configured := s.scoringConfigured()
+	if configured && !feedbackScreened(a) {
+		var err error
+		if a, err = s.awaitScreen(ctx, ts, repo, rel, hash, a); err != nil {
+			return nil, err
+		}
+	}
+	kind := keys.Kind(rel)
 	lines := []string{}
 	screen, rejection := a.Latest.Screen, a.Latest.Rejection
 	switch {
@@ -208,6 +272,14 @@ func (s *Server) feedbackDelivered(ctx context.Context, ts *tenantState, a *stor
 		if rejection != nil && rejection.Stage != "" {
 			lines = append(lines, fmt.Sprintf("rejection at %s: %s", rejection.Stage, rejection.Reason))
 		}
+	}
+	switch feedbackScoring(configured, feedbackScreened(a), a.Latest.ReceivedAt, time.Now()) {
+	case "off":
+		lines = append(lines, "scoring: off; scoring is not configured on the service, and stored content is scored by an admin rescore once it is")
+	case "pending":
+		lines = append(lines, "scoring: pending; the screen has not run yet, so call again in a few seconds")
+	default:
+		lines = append(lines, "scoring: on")
 	}
 	if len(a.Latest.Scores) != 0 {
 		rows, err := ts.t.LatestScores(ctx)
