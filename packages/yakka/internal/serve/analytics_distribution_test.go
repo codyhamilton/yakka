@@ -33,9 +33,12 @@ func TestDistributionShape(t *testing.T) {
 	}
 }
 
-func TestDistributionRangeTooWide(t *testing.T) {
+func TestDistributionAcceptsWideRange(t *testing.T) {
 	s, _ := queryFixture(t)
 	from := time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC).Format(time.RFC3339)
 	to := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC).Format(time.RFC3339)
-	aerr(t, s, "/v1/analytics/distribution?measure=cost_usd&from="+from+"&to="+to, 400, "range too wide")
+	m := aok(t, s, "/v1/analytics/distribution?measure=cost_usd&from="+from+"&to="+to)
+	if m["measure"] != "cost_usd" {
+		t.Fatalf("wide-range response: %v", m)
+	}
 }

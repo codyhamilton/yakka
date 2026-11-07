@@ -72,6 +72,7 @@ func (s *Server) analyticsDistribution(w http.ResponseWriter, r *http.Request, _
 	if len(res.IgnoredFilters) > 0 {
 		out["ignored_filters"] = res.IgnoredFilters
 	}
+	addAnalyticsPartial(out, ts)
 	writeJSON(w, 200, out)
 }
 

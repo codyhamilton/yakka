@@ -220,6 +220,22 @@ func TestAnalyticsSeries(t *testing.T) {
 	}
 }
 
+func TestAnalyticsSeriesUsesTimezoneForCalendarBuckets(t *testing.T) {
+	tn, f := fixture(t)
+	f.TZ, _ = time.LoadLocation("America/New_York")
+	got, err := tn.Series(context.Background(), f, "hook_events", "day", "none")
+	if err != nil {
+		t.Fatal(err)
+	}
+	counts := map[string]int{}
+	for _, p := range got {
+		counts[p.T] = p.N
+	}
+	if counts["2026-10-04"] != 2 || counts["2026-10-05"] != 1 {
+		t.Fatalf("local day buckets = %v", counts)
+	}
+}
+
 func TestAnalyticsWindowScores(t *testing.T) {
 	tn, f := fixture(t)
 	ctx := context.Background()

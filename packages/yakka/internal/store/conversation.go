@@ -31,7 +31,7 @@ type ConversationEvent struct {
 	SHA       string
 	Tokens    *Tokens
 	CostUSD   *float64
-	priced    bool
+	Priced    bool
 }
 
 // ConversationTotals sums the kept usage calls of a conversation.
@@ -200,7 +200,7 @@ func (t *Tenant) Conversation(ctx context.Context, id string, bounds Conversatio
 				reported = &v
 			}
 			usd, priced := Cost(harness, e.Model, tok, reported)
-			e.Tokens, e.CostUSD, e.priced = &tok, &usd, priced
+			e.Tokens, e.CostUSD, e.Priced = &tok, &usd, priced
 		}
 		d.Events = append(d.Events, e)
 	}

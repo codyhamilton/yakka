@@ -48,5 +48,7 @@ func (s *Server) analyticsScoreSeries(w http.ResponseWriter, r *http.Request, _ 
 		}
 		outChecks = append(outChecks, map[string]any{"name": c.Name, "points": pts})
 	}
-	writeJSON(w, 200, map[string]any{"kind": kind, "bucket": bucket, "checks": outChecks})
+	out := map[string]any{"kind": kind, "bucket": bucket, "checks": outChecks}
+	addAnalyticsPartial(out, ts)
+	writeJSON(w, 200, out)
 }

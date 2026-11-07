@@ -20,6 +20,13 @@ func conversationTotalsMap(t store.ConversationTotals) map[string]any {
 	}
 }
 
+func addAnalyticsPartial(out map[string]any, ts *tenantState) {
+	if ts.t.CompactionState() != "complete" {
+		out["partial"] = true
+		out["partial_reasons"] = []string{"compaction_incomplete"}
+	}
+}
+
 // analyticsConversation returns one conversation's timeline and totals (DESIGN.md plan 12). The
 // id is required; an id with no facts is a 404. Facts are returned in time order, capped by the
 // store, with no bodies. Optional from/to set window_totals only; events stay the full run.
@@ -76,6 +83,7 @@ func (s *Server) analyticsConversation(w http.ResponseWriter, r *http.Request, _
 		}
 		if e.CostUSD != nil {
 			m["cost_usd"] = *e.CostUSD
+			m["priced"] = e.Priced
 		}
 		events = append(events, m)
 	}
@@ -95,5 +103,6 @@ func (s *Server) analyticsConversation(w http.ResponseWriter, r *http.Request, _
 	if d.Truncated {
 		out["truncated"] = true
 	}
+	addAnalyticsPartial(out, ts)
 	writeJSON(w, 200, out)
 }

@@ -31,6 +31,28 @@ func init() {
 		s, _ := args[0].(string)
 		return planOf(s), nil
 	})
+	sqlite.RegisterDeterministicScalarFunction("wf_series_bucket", 3, func(_ *sqlite.FunctionContext, args []driver.Value) (driver.Value, error) {
+		seconds, ok := args[0].(float64)
+		if !ok {
+			return nil, fmt.Errorf("series timestamp is not numeric")
+		}
+		unit, _ := args[1].(string)
+		zone, _ := args[2].(string)
+		loc, err := time.LoadLocation(zone)
+		if err != nil {
+			return nil, err
+		}
+		t := time.Unix(0, int64(seconds*1e9)).In(loc)
+		switch unit {
+		case "day":
+			return t.Format("2006-01-02"), nil
+		case "week":
+			days := (int(t.Weekday()) + 6) % 7
+			return t.AddDate(0, 0, -days).Format("2006-01-02"), nil
+		default:
+			return nil, fmt.Errorf("unknown series bucket %q", unit)
+		}
+	})
 }
 
 func planOf(p string) string {
@@ -107,8 +129,8 @@ type ExploreRow struct {
 	TS                                                                                                                           float64
 	Harness, RepoID, Plan, Kind, Event, Tool, NormEvent, Model, Path, ConversationID, Source, SHA, ScreenVerdict, RejectionStage string
 	CostUSD                                                                                                                      *float64
+	Priced                                                                                                                       bool
 }
-
 func inList(expr string, vals []string, args *[]any) string {
 	if len(vals) == 0 {
 		return ""
@@ -418,12 +440,16 @@ func (t *Tenant) Summary(ctx context.Context, f AnalyticsFilter) (Summary, error
 // Series: see the brief for metric/bucket/group. The caller validates pairings; an unsupported
 // one is an error.
 func (t *Tenant) Series(ctx context.Context, f AnalyticsFilter, metric, bucket, group string) ([]SeriesPoint, error) {
+	zone := "UTC"
+	if f.TZ != nil {
+		zone = f.TZ.String()
+	}
 	bucketOf := func(ts string) (string, error) {
 		switch bucket {
 		case "day":
-			return `strftime('%Y-%m-%d', ` + ts + `, 'unixepoch')`, nil
-		case "week": // Monday of the ISO week, UTC
-			return `date(` + ts + `, 'unixepoch', 'weekday 0', '-6 days')`, nil
+			return `wf_series_bucket(` + ts + `, 'day', '` + strings.ReplaceAll(zone, "'", "''") + `')`, nil
+		case "week":
+			return `wf_series_bucket(` + ts + `, 'week', '` + strings.ReplaceAll(zone, "'", "''") + `')`, nil
 		}
 		return "", fmt.Errorf("store: unknown bucket %q", bucket)
 	}
@@ -892,10 +918,10 @@ func (t *Tenant) fillConvUsage(ctx context.Context, f AnalyticsFilter, out []Con
 		return err
 	}
 	type acc struct {
-		modelCalls, unpriced              int
-		tokensIn, tokensOut               int64
-		cost                              float64
-		models                            map[string]int
+		modelCalls, unpriced int
+		tokensIn, tokensOut  int64
+		cost                 float64
+		models               map[string]int
 	}
 	m := map[string]*acc{}
 	for _, r := range kept {
@@ -974,8 +1000,9 @@ func (t *Tenant) Explore(ctx context.Context, f AnalyticsFilter, limit int) ([]E
 				v := cost.Float64
 				reported = &v
 			}
-			usd, _ := Cost(r.Harness, r.Model, Tokens{In: tokIn, Out: tokOut, CacheRead: tokCR, CacheWrite: tokCW, Reasoning: tokReas}, reported)
+			usd, priced := Cost(r.Harness, r.Model, Tokens{In: tokIn, Out: tokOut, CacheRead: tokCR, CacheWrite: tokCW, Reasoning: tokReas}, reported)
 			r.CostUSD = &usd
+			r.Priced = priced
 		}
 		facts = append(facts, r)
 		hashes = append(hashes, contentHash)
