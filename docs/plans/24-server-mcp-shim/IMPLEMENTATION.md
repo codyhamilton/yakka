@@ -91,3 +91,16 @@ Status: closed, 2026-11-07 (closing commit carries `Workflow-Phase: 24-server-mc
 1. Phase 4 refinement must include the design addendum's v2 `enqueue_file_snapshot` compatibility and directive deltas; Phase 3 retains read-only v1 behavior.
 2. The store's normal path does not provide a deterministic `LatestScores` failure fixture. The `baselines unavailable` fallback is implemented, while ordinary baseline formatting is covered.
 3. The unrelated pre-existing layout test failure remains uninvestigated and unchanged; do not chase it in this plan.
+
+## Phase 4 — The thin shim, its readers, and the guard
+
+### Unit `phase4-01-transport`
+
+Status: done with concerns; committed as `eba14b3`. Report artifact feedback returned delivered, screen pass. The amended Phase 4 brief was committed before dispatch.
+
+- Built: replaced the client-owned MCP implementation with generic stdio-to-server transport, auth/config handling, response relay, declaration caching and one stale-revision refresh/retry, bounded concurrency, cancellation, EOF handling, redirect refusal and transport errors. Left a narrow context-preparation seam for the next unit.
+- Surfaces: `plugins/yakka/client/yakka.py` and `reports/phase4-01-transport.md`.
+- Deviations/concerns: the legacy `python3 -m unittest test_mcp` suite still asserts local parsing and synthesized tool results; it blocked awaiting a local parse-error answer and was interrupted. Test replacement is assigned to `phase4-03-conformance-and-guard`.
+- Agent: harness did not expose turn/context counts.
+
+- Checks: focused relay probe passed 5 cases; `py_compile`, static scan of the MCP section, and `git diff --check` passed. The test-suite incompatibility is carried to the conformance unit.
