@@ -131,3 +131,5 @@ Run ID: feat/20-analytics-reset phase 4 execution
 Start time: 2026-11-08 06:56 Australia/Brisbane (2026-11-07 20:56 UTC)
 
 Inline refinement: Phase 4 is one server unit. Brief `4-01-capability-schema-and-session-grain.md` fixes the signed outcome, bounds the open implementation choice to session attribute derivation under the Phase 3 budgets, and explicitly excludes later-phase capabilities and any new grain/join/route/dependency/contract. Committed before dispatch as `bc74c12`. Runner `artifact_feedback` returned delivered / screen pass (`jev-1.13.0`); the initial relative-path call resolved against the plugin cache, so the absolute worktree path was used.
+
+The worker identified two omitted integration seams in the first brief: route registration for the signed `/analytics/entities` route and parsing/application of the signed shared `exclude` filter. Brief amendment `ad42d3b` adds `serve.go` and `analytics.go` for those existing semantics only; it adds no route/filter behavior.
