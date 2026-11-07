@@ -1,7 +1,7 @@
 # Brief: 6-01d — Derived plan measure sorting
 
 Consumer: the Phase 6 server worker.
-Owned paths: `packages/yakka/internal/serve/analytics_entities.go`, `packages/yakka/internal/store/plan_entities.go`, focused plan entity tests under `packages/yakka/internal/{serve,store}/`, and this brief's report. Touch nothing else.
+Owned paths: `packages/yakka/internal/serve/analytics_entities.go`, `packages/yakka/internal/serve/analytics_query.go` (plan sort schema declaration only), `packages/yakka/internal/store/plan_entities.go`, focused plan entity tests under `packages/yakka/internal/{serve,store}/`, and this brief's report. Touch nothing else.
 Commits: Commit to the current branch when done evidence passes, with a plain-summary title.
 Report: before committing, write `docs/plans/20-analytics-reset/reports/6-01d-derived-plan-sort.md` and include it in the commit.
 Depends on: 6-01c; Phases 1–5.
