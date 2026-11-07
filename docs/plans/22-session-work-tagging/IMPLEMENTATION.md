@@ -170,7 +170,7 @@ Evidence (synthetic fixtures and fake transports only):
 
 ### Phase 6 verification
 
-The phase outcome's entry point (`kind_pass.main`, dry run and live-with-fake) was exercised by the tests above. The live path reaches TypeSafe only through `--live --confirm-egress`, and no live call was made. The real behaviour checks (a raw TypeSafe response, a gold threshold, the drain and analytics check) are not verified; each is gated below. `artifact_feedback` was not called because it sends the report to a remote screen.
+The phase outcome's entry points were exercised by the tests above: `kind_pass.main` for the dry run and the CLI refusals, and `run_pass` with a fake transport for the live routing. The live path reaches TypeSafe only through `--live --confirm-egress`, and no live call was made. The real behaviour checks (a raw TypeSafe response, a gold threshold, the drain and analytics check) are not verified; each is gated below. `artifact_feedback` was not called because it sends the report to a remote screen.
 
 ### Carried
 
