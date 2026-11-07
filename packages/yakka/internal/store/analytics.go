@@ -73,7 +73,14 @@ type AnalyticsFilter struct {
 	Tools, Models, Sources         []string
 	ConversationIDs                []string
 	Excludes                       map[string][]string
+	SessionRanges                  []SessionRange
 	TZ                             *time.Location // nil means UTC
+}
+
+// SessionRange is an inclusive numeric predicate over a session measure. Nil bounds are open.
+type SessionRange struct {
+	Measure string
+	Lo, Hi  *float64
 }
 
 type ToolCount struct {

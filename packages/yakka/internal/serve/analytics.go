@@ -150,7 +150,7 @@ func canonFilter(q url.Values) string {
 	out := url.Values{}
 	for _, k := range []string{"from", "to", "repo_id", "harness", "kind", "plan",
 		"norm_event", "event", "tool", "model", "source", "conversation_id", "tz", "all",
-		"shape", "bucket", "exclude", "sort", "mode", "grain", "field", "fields", "stat"} {
+		"shape", "bucket", "exclude", "sort", "mode", "grain", "field", "fields", "stat", "where"} {
 		if v, ok := q[k]; ok {
 			c := append([]string(nil), v...)
 			sort.Strings(c)

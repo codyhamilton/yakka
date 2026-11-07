@@ -1,6 +1,8 @@
 package serve
 
 import (
+	"fmt"
+	"math"
 	"net/http"
 	"sort"
 	"strconv"
@@ -35,6 +37,10 @@ func (s *Server) analyticsSessionEntities(w http.ResponseWriter, r *http.Request
 		s.analyticsSessionScatter(w, r, ts)
 		return
 	}
+	if mode == "aggregate" {
+		s.analyticsSessionAggregate(w, r, ts)
+		return
+	}
 	if mode != "list" {
 		errJSON(w, 400, "unsupported session mode")
 		return
@@ -61,6 +67,16 @@ func (s *Server) analyticsSessionEntities(w http.ResponseWriter, r *http.Request
 	if !ok {
 		return
 	}
+	if len(r.URL.RawQuery) > 8192 {
+		errJSON(w, 400, "session predicate exceeds the 8 KiB URL budget")
+		return
+	}
+	ranges, err := parseSessionRanges(q["where"])
+	if err != nil {
+		errJSON(w, 400, err.Error())
+		return
+	}
+	f.SessionRanges = ranges
 	if cur != nil && (cur.Route != "entities:session" || cur.Filter != canonFilter(q)) {
 		errJSON(w, 400, "cursor mismatch")
 		return
@@ -117,6 +133,123 @@ func (s *Server) analyticsSessionEntities(w http.ResponseWriter, r *http.Request
 	writeJSON(w, 200, out)
 }
 
+func (s *Server) analyticsSessionAggregate(w http.ResponseWriter, r *http.Request, ts *tenantState) {
+	q := r.URL.Query()
+	if len(r.URL.RawQuery) > 8192 {
+		errJSON(w, 400, "session predicate exceeds the 8 KiB URL budget")
+		return
+	}
+	if len(q["dim"]) > 0 {
+		errJSON(w, 400, "session aggregate dimensions are not supported")
+		return
+	}
+	stat := q.Get("stat")
+	if stat == "" {
+		stat = "count"
+	}
+	field := q.Get("field")
+	if stat != "count" && stat != "sum" && stat != "percentiles" && stat != "histogram" {
+		errJSON(w, 400, "unsupported session aggregate stat "+stat)
+		return
+	}
+	if stat != "count" && !store.SessionSortMeasure(field) {
+		errJSON(w, 400, "unsupported session aggregate field "+field)
+		return
+	}
+	if stat == "count" && field != "" {
+		errJSON(w, 400, "count does not accept field")
+		return
+	}
+	if stat == "sum" && (field == "first_ts" || field == "last_ts") {
+		errJSON(w, 400, "unsupported session sum field "+field)
+		return
+	}
+	f, ok := parseFilter(w, r, filterOpts{query: true})
+	if !ok {
+		return
+	}
+	ranges, err := parseSessionRanges(q["where"])
+	if err != nil {
+		errJSON(w, 400, err.Error())
+		return
+	}
+	f.SessionRanges = ranges
+	result, err := ts.t.SessionAggregate(r.Context(), f, stat, field)
+	if err != nil {
+		readFailed(w)
+		return
+	}
+	pop, err := ts.t.ConversationCount(r.Context(), f)
+	if err != nil {
+		readFailed(w)
+		return
+	}
+	eligible := pop
+	if n, ok := result["eligible_n"].(int); ok {
+		eligible = n
+	}
+	lowerBound := false
+	if field == "cost_usd" && stat != "count" {
+		var lowerBoundN int
+		eligible, lowerBoundN, err = ts.t.SessionCostCoverage(r.Context(), f)
+		if err != nil {
+			readFailed(w)
+			return
+		}
+		lowerBound = lowerBoundN > 0
+	}
+	result["grain"] = "session"
+	missing := map[string]int{}
+	if field == "cost_usd" && eligible < pop {
+		missing["unpriced_cost"] = pop - eligible
+	}
+	result["population"] = map[string]any{"grain": "session", "unit": "conversation_id", "scope_n": pop, "cohort_n": pop, "eligible_n": eligible, "returned_n": 1, "missing_by_reason": missing}
+	if lowerBound {
+		result["cost_lower_bound"] = true
+	}
+	writeJSON(w, 200, result)
+}
+
+func parseSessionRanges(values []string) ([]store.SessionRange, error) {
+	out := make([]store.SessionRange, 0, len(values))
+	for _, raw := range values {
+		measure, bounds, ok := strings.Cut(raw, ":")
+		if !ok || !store.SessionSortMeasure(measure) {
+			return nil, fmt.Errorf("unsupported session predicate measure %s", measure)
+		}
+		loText, hiText, ok := strings.Cut(bounds, "..")
+		if !ok || (loText == "" && hiText == "") {
+			return nil, fmt.Errorf("where must be <measure>:<lo>..<hi>")
+		}
+		var lo, hi *float64
+		parse := func(v string) (*float64, error) {
+			n, e := strconv.ParseFloat(v, 64)
+			if e != nil || math.IsNaN(n) || math.IsInf(n, 0) {
+				return nil, fmt.Errorf("where bounds must be finite numbers")
+			}
+			return &n, nil
+		}
+		var err error
+		if loText != "" {
+			lo, err = parse(loText)
+			if err != nil {
+				return nil, err
+			}
+		}
+		if hiText != "" {
+			hi, err = parse(hiText)
+			if err != nil {
+				return nil, err
+			}
+		}
+		if lo != nil && hi != nil && *lo > *hi {
+			return nil, fmt.Errorf("where lower bound exceeds upper bound")
+		}
+		out = append(out, store.SessionRange{Measure: measure, Lo: lo, Hi: hi})
+	}
+	return out, nil
+}
+
 func (s *Server) analyticsSessionScatter(w http.ResponseWriter, r *http.Request, ts *tenantState) {
 	q := r.URL.Query()
 	fields := append([]string(nil), q["field"]...)
@@ -145,6 +278,16 @@ func (s *Server) analyticsSessionScatter(w http.ResponseWriter, r *http.Request,
 	if !ok {
 		return
 	}
+	if len(r.URL.RawQuery) > 8192 {
+		errJSON(w, 400, "session predicate exceeds the 8 KiB URL budget")
+		return
+	}
+	ranges, err := parseSessionRanges(q["where"])
+	if err != nil {
+		errJSON(w, 400, err.Error())
+		return
+	}
+	filter.SessionRanges = ranges
 	population, err := ts.t.ConversationCount(r.Context(), filter)
 	if err != nil {
 		readFailed(w)

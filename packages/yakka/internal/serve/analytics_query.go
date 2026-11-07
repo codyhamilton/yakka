@@ -27,9 +27,17 @@ func (s *Server) analyticsSchema(w http.ResponseWriter, r *http.Request, _ strin
 	coverage["compaction"] = ts.t.CompactionState()
 	coverage["screen_gaps"] = ts.gaps.Load()
 	coverage["scorer_configured"] = s.screen != nil
+	if footprint, e := ts.t.Footprint(); e == nil {
+		coverage["pending"] = footprint.Pending
+	} else {
+		readFailed(w)
+		return
+	}
+	coverage["revisions"] = map[string]any{"pricing": nil, "catalogue": nil, "tool_kind": nil}
+	coverage["revision_gaps"] = map[string]string{"pricing": "embedded pricing table exposes source and fetched date but no revision identifier", "catalogue": "active catalogue is loaded as check data but has no stable revision identifier in serving configuration", "tool_kind": "tool-kind mapping is compiled from source and has no published revision identifier"}
 	grains := map[string]any{
 		"time":    map[string]any{"identity": []string{"t", "tz"}, "modes": []string{"aggregate"}, "measures": measures, "time_basis": "facts.ts; rejections.at", "null_rules": map[string]string{"cost_usd": "priced calls only; absent calls are zero", "session_repo": "unsupported for rejections"}},
-		"session": map[string]any{"identity": []string{"conversation_id"}, "modes": []string{"list", "scatter"}, "measures": []string{"hook_events", "artifact_versions", "commits", "distinct_content", "model_calls", "unpriced_calls", "cost_usd", "tokens_in", "tokens_out", "tokens_cache_read", "tokens_cache_write", "tokens_reasoning", "first_ts", "last_ts", "duration_s"}, "scatter_fields": []string{"cost_usd", "tokens_in", "tokens_out", "tokens_cache_read", "tokens_cache_write", "tokens_reasoning"}, "time_basis": "in-window facts.ts; provenance is lifetime-derived", "cost_null_rules": map[string]any{"no_calls": 0, "all_unpriced": nil, "partial": "priced lower bound"}, "session_model": map[string]any{"threshold": 0.8, "mixed": "(mixed)", "none": "(none)", "unknown": "unknown"}, "session_repo": map[string]any{"single": "repo_id", "multi": "(multi)", "none": "(none)"}},
+		"session": map[string]any{"identity": []string{"conversation_id"}, "modes": []string{"list", "scatter", "aggregate"}, "aggregate_stats": []string{"count", "sum", "percentiles", "histogram"}, "aggregate_fields": []string{"hook_events", "artifact_versions", "commits", "distinct_content", "model_calls", "unpriced_calls", "cost_usd", "tokens_in", "tokens_out", "tokens_cache_read", "tokens_cache_write", "tokens_reasoning", "first_ts", "last_ts", "duration_s"}, "aggregate_dimensions": []string{}, "measures": []string{"hook_events", "artifact_versions", "commits", "distinct_content", "model_calls", "unpriced_calls", "cost_usd", "tokens_in", "tokens_out", "tokens_cache_read", "tokens_cache_write", "tokens_reasoning", "first_ts", "last_ts", "duration_s"}, "scatter_fields": []string{"cost_usd", "tokens_in", "tokens_out", "tokens_cache_read", "tokens_cache_write", "tokens_reasoning"}, "time_basis": "in-window facts.ts; provenance is lifetime-derived", "cost_null_rules": map[string]any{"no_calls": 0, "all_unpriced": nil, "partial": "priced lower bound"}, "session_model": map[string]any{"threshold": 0.8, "mixed": "(mixed)", "none": "(none)", "unknown": "unknown"}, "session_repo": map[string]any{"single": "repo_id", "multi": "(multi)", "none": "(none)"}},
 	}
 	lenses := map[string]any{
 		"session_repo":  map[string]any{"grain": "session", "cardinality": "single-valued", "values": []string{"(multi)", "(none)"}},

@@ -98,6 +98,20 @@ func TestAnalyticsSchema(t *testing.T) {
 	if _, ok := m["grains"].(map[string]any)["time"]; !ok {
 		t.Error("time grain missing")
 	}
+	sessionSchema := m["grains"].(map[string]any)["session"].(map[string]any)
+	if !equalStrs(strs(sessionSchema["modes"]), []string{"list", "scatter", "aggregate"}) || !equalStrs(strs(sessionSchema["aggregate_stats"]), []string{"count", "sum", "percentiles", "histogram"}) {
+		t.Errorf("session aggregate capability missing: %v", sessionSchema)
+	}
+	coverage := m["coverage"].(map[string]any)
+	if _, ok := coverage["pending"]; !ok {
+		t.Errorf("pending coverage missing: %v", coverage)
+	}
+	if kinds, ok := coverage["scored_content_by_kind"].(map[string]any); !ok || kinds["design"] == nil || kinds["brief"] == nil || kinds["report"] == nil {
+		t.Errorf("per-kind score coverage missing: %v", coverage)
+	}
+	if _, ok := coverage["revisions"]; !ok {
+		t.Errorf("revision coverage missing: %v", coverage)
+	}
 	// The design's measure × dimension matrix, verbatim; every measure also takes hour_of_day, weekday.
 	design := []struct {
 		name, unit string
@@ -140,6 +154,16 @@ func TestAnalyticsSessionTimeEntitiesAndExclusions(t *testing.T) {
 	qadd(t, ts, store.FactRow{Type: "artifact_version", ConversationID: "session-a", Harness: "beta", RepoID: "repo-b", Path: "docs/plans/x/DESIGN.md", ContentHash: keys.ContentHash([]byte("x")), TS: float64(time.Date(2026, 11, 7, 2, 0, 0, 0, time.UTC).Unix())}, nil)
 	qadd(t, ts, store.FactRow{Type: "hook_event", ConversationID: "session-a", Harness: "alpha", NormEvent: "usage", Model: "", TokIn: 3, TS: float64(time.Date(2026, 11, 8, 3, 0, 0, 0, time.UTC).Unix())}, nil)
 	qadd(t, ts, store.FactRow{Type: "hook_event", ConversationID: "session-b", Harness: "", Event: "tool", NormEvent: "tool_use", TS: float64(time.Date(2026, 11, 8, 4, 0, 0, 0, time.UTC).Unix())}, nil)
+	schema := aok(t, s, "/v1/analytics/schema")
+	coverage := schema["coverage"].(map[string]any)
+	byKind := coverage["scored_content_by_kind"].(map[string]any)
+	if coverage["pending"] != 0.0 || byKind["design"].(map[string]any)["total"] != 1.0 || byKind["design"].(map[string]any)["scored"] != 0.0 {
+		t.Fatalf("schema coverage populations=%v", coverage)
+	}
+	revisions := coverage["revisions"].(map[string]any)
+	if revisions["pricing"] != nil || revisions["catalogue"] != nil || revisions["tool_kind"] != nil || coverage["revision_gaps"] == nil {
+		t.Fatalf("unknown revisions should remain explicitly unavailable: %v", coverage)
+	}
 	page := aok(t, s, "/v1/analytics/entities?grain=session&"+win)
 	rows := rowsOf(page, "rows")
 	if len(rows) != 2 {
@@ -160,6 +184,39 @@ func TestAnalyticsSessionTimeEntitiesAndExclusions(t *testing.T) {
 	}
 	if found["flags"].(map[string]any)["cost_lower_bound"] != true {
 		t.Fatalf("cost flags=%v", found["flags"])
+	}
+	filteredSessions := aok(t, s, "/v1/analytics/entities?grain=session&where=commits:1..1&"+win)
+	if len(rowsOf(filteredSessions, "rows")) != 1 || filteredSessions["population"].(map[string]any)["scope_n"] != 1.0 {
+		t.Fatalf("numeric predicate did not select exact session population: %v", filteredSessions)
+	}
+	aggregate := aok(t, s, "/v1/analytics/entities?grain=session&mode=aggregate&stat=sum&field=commits&where=commits:1..1&"+win)
+	if aggregate["value"] != 1.0 || aggregate["population"].(map[string]any)["eligible_n"] != 1.0 {
+		t.Fatalf("session aggregate mismatch: %v", aggregate)
+	}
+	countAggregate := aok(t, s, "/v1/analytics/entities?grain=session&mode=aggregate&stat=count&"+win)
+	if countAggregate["value"] != 2.0 {
+		t.Fatalf("session count aggregate=%v", countAggregate)
+	}
+	percentiles := aok(t, s, "/v1/analytics/entities?grain=session&mode=aggregate&stat=percentiles&field=commits&"+win)
+	if percentiles["p25"] != 0.0 || percentiles["p50"] != 0.0 || percentiles["p75"] != 1.0 {
+		t.Fatalf("session percentiles=%v", percentiles)
+	}
+	histogram := aok(t, s, "/v1/analytics/entities?grain=session&mode=aggregate&stat=histogram&field=commits&"+win)
+	if len(rowsOf(histogram, "bins")) != 2 || histogram["population"].(map[string]any)["eligible_n"] != 2.0 {
+		t.Fatalf("session histogram=%v", histogram)
+	}
+	costAggregate := aok(t, s, "/v1/analytics/entities?grain=session&mode=aggregate&stat=sum&field=cost_usd&"+win)
+	if costAggregate["population"].(map[string]any)["eligible_n"] != 1.0 || costAggregate["cost_lower_bound"] != true || costAggregate["population"].(map[string]any)["missing_by_reason"].(map[string]any)["unpriced_cost"] != 1.0 {
+		t.Fatalf("session cost eligibility=%v", costAggregate)
+	}
+	if code, body := aget(t, s, "/v1/analytics/entities?grain=session&where=unknown:0..1&"+win); code != 400 || !strings.Contains(body["error"].(string), "unsupported session predicate") {
+		t.Fatalf("unsupported predicate status=%d body=%v", code, body)
+	}
+	if code, body := aget(t, s, "/v1/analytics/entities?grain=session&where=commits:bad..1&"+win); code != 400 || !strings.Contains(body["error"].(string), "finite numbers") {
+		t.Fatalf("malformed predicate status=%d body=%v", code, body)
+	}
+	if code, body := aget(t, s, "/v1/analytics/entities?grain=session&mode=aggregate&stat=bogus&field=commits&"+win); code != 400 || !strings.Contains(body["error"].(string), "unsupported session aggregate stat") {
+		t.Fatalf("unsupported aggregate status=%d body=%v", code, body)
 	}
 	timeRows := aok(t, s, "/v1/analytics/entities?grain=time&field=commits&field=hook_events&bucket=day&"+win)
 	if timeRows["grain"] != "time" || len(rowsOf(timeRows, "rows")) != 1 {

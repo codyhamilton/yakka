@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -19,6 +20,110 @@ var sessionSortMeasures = map[string]bool{"hook_events": true, "artifact_version
 
 func SessionSortMeasure(name string) bool { return sessionSortMeasures[name] }
 
+func sessionAggregateCTE(f AnalyticsFilter) (string, []any) {
+	usageCTE, usageArgs := usageRowsWhere(f)
+	factWhere, factArgs := f.factWhere()
+	args := append(append([]any{}, usageArgs...), factArgs...)
+	query := usageCTE + `, usage AS (
+	 SELECT conversation_id,COUNT(*) model_calls,SUM(1-wf_usage_priced(harness,model,tok_in,tok_out,tok_cache_read,tok_cache_write,tok_reasoning,cost_reported)) unpriced_calls,
+	 COALESCE(SUM(wf_usage_cost(harness,model,tok_in,tok_out,tok_cache_read,tok_cache_write,tok_reasoning,cost_reported)),0) cost_usd,
+	 COALESCE(SUM(tok_in),0) tokens_in,COALESCE(SUM(tok_out),0) tokens_out,COALESCE(SUM(tok_cache_read),0) tokens_cache_read,
+	 COALESCE(SUM(tok_cache_write),0) tokens_cache_write,COALESCE(SUM(tok_reasoning),0) tokens_reasoning FROM kept GROUP BY conversation_id
+	), base AS (SELECT conversation_id,MIN(ts) first_ts,MAX(ts) last_ts,
+	 SUM(CASE WHEN type='hook_event' THEN 1 ELSE 0 END) hook_events,
+	 SUM(CASE WHEN type='artifact_version' THEN 1 ELSE 0 END) artifact_versions,
+	 SUM(CASE WHEN type='commit' THEN 1 ELSE 0 END) commits,
+	 COUNT(DISTINCT CASE WHEN type='artifact_version' THEN content_hash END) distinct_content
+	 FROM facts WHERE ` + factWhere + ` GROUP BY conversation_id
+	), result AS (SELECT base.*,COALESCE(usage.model_calls,0) model_calls,COALESCE(usage.unpriced_calls,0) unpriced_calls,
+	 COALESCE(usage.cost_usd,0) cost_usd,COALESCE(usage.tokens_in,0) tokens_in,COALESCE(usage.tokens_out,0) tokens_out,
+	 COALESCE(usage.tokens_cache_read,0) tokens_cache_read,COALESCE(usage.tokens_cache_write,0) tokens_cache_write,COALESCE(usage.tokens_reasoning,0) tokens_reasoning
+	 FROM base LEFT JOIN usage USING(conversation_id)), result2 AS (SELECT result.*,(last_ts-first_ts) duration_s FROM result), filtered AS (SELECT * FROM result2 WHERE 1=1` + sessionRangeWhere(f.SessionRanges, &args) + `)`
+	return query, args
+}
+
+// SessionAggregate runs scalar or histogram aggregates in SQLite. It never materializes the
+// session population in Go; the response is bounded by the operation (at most ten bins).
+func (t *Tenant) SessionAggregate(ctx context.Context, f AnalyticsFilter, stat, field string) (map[string]any, error) {
+	if stat != "count" && !sessionSortMeasures[field] {
+		return nil, fmt.Errorf("unsupported session aggregate field")
+	}
+	if stat != "count" && stat != "sum" && stat != "percentiles" && stat != "histogram" {
+		return nil, fmt.Errorf("unsupported session aggregate stat")
+	}
+	if stat == "sum" && (field == "first_ts" || field == "last_ts") {
+		return nil, fmt.Errorf("unsupported session sum field")
+	}
+	cte, args := sessionAggregateCTE(f)
+	source := "filtered"
+	if stat == "count" {
+		var n int
+		err := t.rdb.QueryRowContext(ctx, cte+` SELECT COUNT(*) FROM filtered`, args...).Scan(&n)
+		return map[string]any{"stat": "count", "value": n}, err
+	}
+	if stat != "count" && field == "cost_usd" {
+		cte += `, eligible AS (SELECT * FROM filtered WHERE model_calls=0 OR model_calls>unpriced_calls)`
+		source = "eligible"
+	}
+	switch stat {
+	case "sum":
+		var value sql.NullFloat64
+		err := t.rdb.QueryRowContext(ctx, cte+` SELECT SUM(`+field+`) FROM `+source, args...).Scan(&value)
+		if !value.Valid {
+			return map[string]any{"stat": "sum", "field": field, "value": nil, "eligible_n": 0}, err
+		}
+		var n int
+		_ = t.rdb.QueryRowContext(ctx, cte+` SELECT COUNT(*) FROM `+source, args...).Scan(&n)
+		return map[string]any{"stat": "sum", "field": field, "value": value.Float64, "eligible_n": n}, err
+	case "percentiles":
+		var n int
+		if err := t.rdb.QueryRowContext(ctx, cte+` SELECT COUNT(`+field+`) FROM `+source, args...).Scan(&n); err != nil {
+			return nil, err
+		}
+		out := map[string]any{"stat": "percentiles", "field": field, "eligible_n": n}
+		if n == 0 {
+			out["p25"], out["p50"], out["p75"] = nil, nil, nil
+			return out, nil
+		}
+		for name, rank := range map[string]int{"p25": max(1, (n+3)/4), "p50": max(1, (n+1)/2), "p75": max(1, (3*n+3)/4)} {
+			var v float64
+			if err := t.rdb.QueryRowContext(ctx, cte+`, ranked AS (SELECT `+field+`,ROW_NUMBER() OVER (ORDER BY `+field+`) rn FROM `+source+` WHERE `+field+` IS NOT NULL) SELECT `+field+` FROM ranked WHERE rn=?`, append(append([]any{}, args...), rank)...).Scan(&v); err != nil {
+				return nil, err
+			}
+			out[name] = v
+		}
+		return out, nil
+	default:
+		bucket := `CASE WHEN stats.hi=stats.lo THEN 1 ELSE MIN(10,CAST((` + field + `-stats.lo)/(stats.hi-stats.lo)*10 AS INTEGER)+1) END`
+		rows, err := t.rdb.QueryContext(ctx, cte+`, stats AS (SELECT MIN(`+field+`) lo,MAX(`+field+`) hi FROM `+source+` WHERE `+field+` IS NOT NULL), binned AS (SELECT `+field+`,`+bucket+` bin FROM `+source+` CROSS JOIN stats WHERE `+field+` IS NOT NULL) SELECT bin,MIN(`+field+`),MAX(`+field+`),COUNT(*) FROM binned GROUP BY bin ORDER BY bin`, args...)
+		if err != nil {
+			return nil, err
+		}
+		defer rows.Close()
+		bins := []map[string]any{}
+		eligible := 0
+		for rows.Next() {
+			var b int
+			var lo, hi float64
+			var n int
+			if err := rows.Scan(&b, &lo, &hi, &n); err != nil {
+				return nil, err
+			}
+			bins = append(bins, map[string]any{"bin": b, "lo": lo, "hi": hi, "n": n})
+			eligible += n
+		}
+		return map[string]any{"stat": "histogram", "field": field, "bins": bins, "eligible_n": eligible}, rows.Err()
+	}
+}
+
+// SessionCostCoverage reports priced eligibility and lower-bound sessions without materializing
+// session rows in Go.
+func (t *Tenant) SessionCostCoverage(ctx context.Context, f AnalyticsFilter) (eligible, lowerBound int, err error) {
+	cte, args := sessionAggregateCTE(f)
+	err = t.rdb.QueryRowContext(ctx, cte+` SELECT COALESCE(SUM(CASE WHEN model_calls=0 OR model_calls>unpriced_calls THEN 1 ELSE 0 END),0),COALESCE(SUM(CASE WHEN model_calls>0 AND unpriced_calls>0 THEN 1 ELSE 0 END),0) FROM filtered`, args...).Scan(&eligible, &lowerBound)
+	return
+}
+
 // SessionEntitiesPage pages a selected-window population in SQL for every published measure sort.
 func (t *Tenant) SessionEntitiesPage(ctx context.Context, f AnalyticsFilter, sortBy string, desc bool, cur *ConvCursor, limit int) ([]SessionEntityRow, bool, error) {
 	if !sessionSortMeasures[sortBy] && sortBy != "sample_hash" {
@@ -26,6 +131,7 @@ func (t *Tenant) SessionEntitiesPage(ctx context.Context, f AnalyticsFilter, sor
 	}
 	usageCTE, usageArgs := usageRowsWhere(f)
 	factWhere, factArgs := f.factWhere()
+	args := append(append([]any{}, usageArgs...), factArgs...)
 	usageValue := func(col string) string { return "COALESCE(SUM(" + col + "),0)" }
 	query := usageCTE + `, usage AS (
 	 SELECT conversation_id,COUNT(*) model_calls,SUM(1-wf_usage_priced(harness,model,tok_in,tok_out,tok_cache_read,tok_cache_write,tok_reasoning,cost_reported)) unpriced_calls,
@@ -43,9 +149,8 @@ func (t *Tenant) SessionEntitiesPage(ctx context.Context, f AnalyticsFilter, sor
 	), result AS (SELECT base.*,COALESCE(usage.model_calls,0) model_calls,COALESCE(usage.unpriced_calls,0) unpriced_calls,
 	 COALESCE(usage.cost_usd,0) cost_usd,COALESCE(usage.tokens_in,0) tokens_in,COALESCE(usage.tokens_out,0) tokens_out,
 	 COALESCE(usage.tokens_cache_read,0) tokens_cache_read,COALESCE(usage.tokens_cache_write,0) tokens_cache_write,COALESCE(usage.tokens_reasoning,0) tokens_reasoning
-	 FROM base LEFT JOIN usage USING(conversation_id)) SELECT conversation_id,first_ts,last_ts,hook_events,artifact_versions,commits,distinct_content,
-	 model_calls,unpriced_calls,cost_usd,tokens_in,tokens_out,tokens_cache_read,tokens_cache_write,tokens_reasoning FROM result`
-	args := append(append([]any{}, usageArgs...), factArgs...)
+	 FROM base LEFT JOIN usage USING(conversation_id)), result2 AS (SELECT result.*,(last_ts-first_ts) duration_s FROM result), filtered AS (SELECT * FROM result2 WHERE 1=1` + sessionRangeWhere(f.SessionRanges, &args) + `) SELECT conversation_id,first_ts,last_ts,hook_events,artifact_versions,commits,distinct_content,
+	 model_calls,unpriced_calls,cost_usd,tokens_in,tokens_out,tokens_cache_read,tokens_cache_write,tokens_reasoning FROM filtered`
 	order := sortBy
 	if sortBy == "sample_hash" {
 		order = "wf_session_hash(conversation_id)"
@@ -231,10 +336,45 @@ func (t *Tenant) SessionProvenanceFor(ctx context.Context, ids []string) (map[st
 
 // ConversationCount reports the full in-window session population without loading its identities.
 func (t *Tenant) ConversationCount(ctx context.Context, f AnalyticsFilter) (int, error) {
+	if len(f.SessionRanges) > 0 {
+		a, err := t.SessionAggregate(ctx, f, "count", "")
+		if err != nil {
+			return 0, err
+		}
+		return a["value"].(int), nil
+	}
 	w, args := f.factWhere()
 	var n int
 	err := t.rdb.QueryRowContext(ctx, `SELECT count(DISTINCT conversation_id) FROM facts WHERE `+w, args...).Scan(&n)
 	return n, err
+}
+
+func sessionRangeWhere(ranges []SessionRange, args *[]any) string {
+	var w strings.Builder
+	for _, r := range ranges {
+		if !sessionSortMeasures[r.Measure] {
+			continue
+		}
+		w.WriteString(" AND ")
+		w.WriteString(r.Measure)
+		w.WriteString(" IS NOT NULL")
+		if r.Measure == "cost_usd" {
+			w.WriteString(" AND (model_calls=0 OR model_calls>unpriced_calls)")
+		}
+		if r.Lo != nil {
+			w.WriteString(" AND ")
+			w.WriteString(r.Measure)
+			w.WriteString(" >= ?")
+			*args = append(*args, *r.Lo)
+		}
+		if r.Hi != nil {
+			w.WriteString(" AND ")
+			w.WriteString(r.Measure)
+			w.WriteString(" <= ?")
+			*args = append(*args, *r.Hi)
+		}
+	}
+	return w.String()
 }
 
 func (t *Tenant) SessionCallConversationCount(ctx context.Context, f AnalyticsFilter) (int, error) {
@@ -276,12 +416,31 @@ func (t *Tenant) AnalyticsCoverage(ctx context.Context) (map[string]any, error) 
 		return nil, err
 	}
 	rows.Close()
+	scoredByKind := map[string]map[string]int{"design": {"scored": 0, "total": 0}, "brief": {"scored": 0, "total": 0}, "report": {"scored": 0, "total": 0}}
+	kr, err := t.rdb.QueryContext(ctx, `WITH content AS (SELECT wf_kind(path) kind,content_hash FROM facts WHERE type='artifact_version' AND wf_kind(path)!='' GROUP BY wf_kind(path),content_hash) SELECT kind,COUNT(*),SUM(CASE WHEN EXISTS(SELECT 1 FROM scores s WHERE s.content_hash=content.content_hash) THEN 1 ELSE 0 END) FROM content GROUP BY kind`)
+	if err != nil {
+		return nil, err
+	}
+	for kr.Next() {
+		var kind string
+		var total, scored int
+		if err := kr.Scan(&kind, &total, &scored); err != nil {
+			kr.Close()
+			return nil, err
+		}
+		scoredByKind[kind] = map[string]int{"scored": scored, "total": total}
+	}
+	if err := kr.Err(); err != nil {
+		kr.Close()
+		return nil, err
+	}
+	kr.Close()
 	var sessions, withRepo, withoutRepo int
 	err = t.rdb.QueryRowContext(ctx, `WITH repos AS (SELECT conversation_id,COUNT(DISTINCT repo_id) n FROM facts WHERE type IN ('artifact_version','commit') AND repo_id!='' GROUP BY conversation_id), sessions AS (SELECT DISTINCT conversation_id FROM facts) SELECT COUNT(*),SUM(CASE WHEN coalesce(r.n,0)>0 THEN 1 ELSE 0 END),SUM(CASE WHEN coalesce(r.n,0)=0 THEN 1 ELSE 0 END) FROM sessions s LEFT JOIN repos r USING(conversation_id)`).Scan(&sessions, &withRepo, &withoutRepo)
 	if err != nil {
 		return nil, err
 	}
-	return map[string]any{"facts": firstLast, "sessions": map[string]int{"total": sessions, "with_session_repo": withRepo, "without_session_repo": withoutRepo}}, nil
+	return map[string]any{"facts": firstLast, "sessions": map[string]int{"total": sessions, "with_session_repo": withRepo, "without_session_repo": withoutRepo}, "scored_content_by_kind": scoredByKind}, nil
 }
 
 func placeholders(n int) string {
