@@ -3,6 +3,7 @@ package serve
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -56,7 +57,7 @@ func TestMCPTransportAndConformanceRegistry(t *testing.T) {
 	if result["tenant"] != "a" || strings.Contains(body, "secret") {
 		t.Fatalf("call: %s", body)
 	}
-	if scopeAllows(TokenScopeRead, TokenScopeReadWrite) || !scopeAllows(TokenScopeReadWrite, TokenScopeReadWrite) {
+	if scopeAllows(TokenScopeRead, TokenScopeReadWrite) || !scopeAllows(TokenScopeReadWrite, TokenScopeReadWrite) || !scopeAllows(TokenScopeRead, TokenScopeRead) || scopeAllows("", TokenScopeRead) || scopeAllows("other", TokenScopeReadWrite) {
 		t.Fatal("MCP scope filtering is incorrect")
 	}
 	req := httptest.NewRequest(http.MethodPost, "/v1/mcp", strings.NewReader(`{"jsonrpc":"2.0","id":5,"method":"ping"}`))
@@ -94,5 +95,21 @@ func TestMCPRegistrationValidation(t *testing.T) {
 	}
 	if err := s.RegisterMCPTool(MCPTool{Name: "effect", Handler: handler, LocalActions: []string{"write"}}); err == nil {
 		t.Fatal("local action accepted")
+	}
+}
+
+type mcpErrReader struct{}
+
+func (mcpErrReader) Read([]byte) (int, error) { return 0, io.ErrUnexpectedEOF }
+
+func TestMCPShortReadIsNotTooLarge(t *testing.T) {
+	s, _ := newServer(t, true)
+	req := httptest.NewRequest(http.MethodPost, "/v1/mcp", mcpErrReader{})
+	req.Header.Set("Authorization", "Bearer ka")
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, req)
+	if rec.Code != 400 || strings.Contains(rec.Body.String(), "too large") {
+		t.Fatalf("short read: %d %s", rec.Code, rec.Body.String())
 	}
 }

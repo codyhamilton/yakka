@@ -315,7 +315,10 @@ func (s *Server) authorizeRequest(r *http.Request) authResult {
 // Both REST and MCP share tenant selection, token expiry and scope semantics.
 func (s *Server) authorizeBearer(r *http.Request) authResult {
 	if s.cfg.Local() {
-		return authResult{tenant: LocalTenant, status: authOK}
+		// Keyless loopback is the local tenant with every scope. An empty scope
+		// must not mean the same thing, or a token record with a missing scope
+		// would pass the read_write gate.
+		return authResult{tenant: LocalTenant, scope: TokenScopeReadWrite, status: authOK}
 	}
 	if tok, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer "); ok {
 		now := time.Now()
