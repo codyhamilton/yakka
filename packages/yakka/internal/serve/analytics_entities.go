@@ -251,7 +251,26 @@ func (s *Server) analyticsPlanEntities(w http.ResponseWriter, r *http.Request, t
 		if execN == 0 {
 			flags["complete_share_null_reason"] = "no_executions"
 		}
-		rows = append(rows, map[string]any{"id": map[string]any{"repo_id": x.RepoID, "plan": x.Plan}, "m": m, "l": map[string]any{"repo_id": x.RepoID}, "flags": flags})
+		ids, idsErr := ts.t.PlanSessionIDs(r.Context(), f, x.RepoID, x.Plan)
+		if idsErr != nil {
+			readFailed(w)
+			return
+		}
+		prov, provErr := ts.t.SessionProvenanceFor(r.Context(), ids)
+		if provErr != nil {
+			readFailed(w)
+			return
+		}
+		harnesses, models := map[string]int{}, map[string]int{}
+		for _, id := range ids {
+			harnesses[prov[id].Harness]++
+			models[prov[id].Model]++
+		}
+		lenses := map[string]any{"repo_id": x.RepoID, "harness": modeLens(harnesses), "session_model": dominantModelLens(models, len(ids))}
+		m["artifacts_by_kind"] = x.ArtifactsByKind
+		for kind, n := range x.ArtifactsByKind { m["artifacts:"+kind] = n }
+		for check, score := range x.DesignScores { m["design_score:"+check] = score }
+		rows = append(rows, map[string]any{"id": map[string]any{"repo_id": x.RepoID, "plan": x.Plan}, "m": m, "l": lenses, "flags": flags})
 	}
 	out := map[string]any{"grain": "plan", "rows": rows, "sort": sortSpec, "population": map[string]any{"grain": "plan", "unit": "repo_id,plan", "scope_n": n, "cohort_n": n, "eligible_n": n, "returned_n": len(rows), "missing_by_reason": map[string]int{}}}
 	if more && len(page) > 0 {
@@ -259,6 +278,35 @@ func (s *Server) analyticsPlanEntities(w http.ResponseWriter, r *http.Request, t
 		out["next"] = (cursor{Route: "entities:plan", Filter: canonFilter(q), From: f.From.UnixNano(), To: f.To.UnixNano(), TS: planMeasure(last, p[0]), Key: []string{last.RepoID, last.Plan}}).encode()
 	}
 	writeJSON(w, 200, out)
+}
+
+func modeLens(counts map[string]int) string {
+	best, n := "unknown", 0
+	for value, count := range counts {
+		if count > n || count == n && value < best {
+			best, n = value, count
+		}
+	}
+	return best
+}
+
+func dominantModelLens(counts map[string]int, total int) string {
+	if total == 0 {
+		return "(none)"
+	}
+	best, n := "unknown", 0
+	for value, count := range counts {
+		if count > n || count == n && value < best {
+			best, n = value, count
+		}
+	}
+	if best == "unknown" && n == total {
+		return best
+	}
+	if float64(n)/float64(total) < 0.8 {
+		return "(mixed)"
+	}
+	return best
 }
 
 func planMeasure(x store.PlanEntity, name string) float64 {
@@ -333,7 +381,15 @@ func (s *Server) analyticsExecutionEntities(w http.ResponseWriter, r *http.Reque
 				}
 			}
 		}
-		rows = append(rows, map[string]any{"id": map[string]any{"repo_id": x.RepoID, "conversation_id": x.ConversationID, "brief_path": x.BriefPath}, "m": m, "l": map[string]any{"shape": x.Shape, "plan": x.Plan, "repo_id": x.RepoID, "harness": x.Harness}, "flags": flags})
+		prov, provErr := ts.t.SessionProvenanceFor(r.Context(), []string{x.ConversationID})
+		if provErr != nil {
+			readFailed(w)
+			return
+		}
+		scores, scoreErr := ts.t.ExecutionScores(r.Context(), x.RepoID, x.Plan, x.ConversationID, x.BriefPath)
+		if scoreErr != nil { readFailed(w); return }
+		for name, score := range scores { m[name] = score }
+		rows = append(rows, map[string]any{"id": map[string]any{"repo_id": x.RepoID, "conversation_id": x.ConversationID, "brief_path": x.BriefPath}, "m": m, "l": map[string]any{"shape": x.Shape, "plan": x.Plan, "repo_id": x.RepoID, "harness": x.Harness, "session_model": prov[x.ConversationID].Model}, "flags": flags})
 	}
 	n := counts["complete"] + counts["unreported"] + counts["started"]
 	out := map[string]any{"grain": "execution", "rows": rows, "population": map[string]any{"grain": "execution", "unit": "repo_id,conversation_id,brief_path", "scope_n": n, "cohort_n": n, "eligible_n": n, "returned_n": len(rows), "missing_by_reason": map[string]int{}}}

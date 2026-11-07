@@ -31,6 +31,12 @@ func TestAnalyticsPlanEntitiesExposeScopedIdentityAndDetails(t *testing.T) {
 	if rows[0]["m"].(map[string]any)["shared_sessions"] != float64(1) {
 		t.Fatalf("shared-session overlap missing: %v", rows[0])
 	}
+	if _, ok := rows[0]["m"].(map[string]any)["artifacts_by_kind"]; !ok {
+		t.Fatalf("plan artifact-kind counts missing: %v", rows[0])
+	}
+	if _, ok := rows[0]["l"].(map[string]any)["harness"]; !ok {
+		t.Fatalf("plan harness lens missing: %v", rows[0])
+	}
 	if rows[0]["m"].(map[string]any)["unpriced_calls"] != float64(1) || rows[0]["m"].(map[string]any)["associated_cost_usd"] != nil || rows[0]["flags"].(map[string]any)["associated_cost_lower_bound"] != true {
 		t.Fatalf("missing-pricing semantics=%v", rows[0])
 	}
@@ -55,6 +61,9 @@ func TestAnalyticsExecutionEntitiesUseProcessShapeAndIdentityTie(t *testing.T) {
 	rows := rowsOf(first, "rows")
 	if len(rows) != 1 || rows[0]["l"].(map[string]any)["shape"] != "started" {
 		t.Fatalf("execution rows=%v", first)
+	}
+	if _, ok := rows[0]["l"].(map[string]any)["session_model"]; !ok {
+		t.Fatalf("execution session-model lens missing: %v", rows[0])
 	}
 	next := first["next"].(string)
 	second := aok(t, s, base+"&limit=1&cursor="+url.QueryEscape(next))
