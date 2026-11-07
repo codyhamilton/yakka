@@ -192,3 +192,28 @@ Refinement commit: `d23bf4693bab93a79e32096cb830fbd301037341`; three sequential 
 ### Runner verification finding after `5-03-artifact-content.md`
 
 The integrated store/serve tests passed, but `TestAnalyticsSchema` confirmed `entities_artifact` remains absent and the artifact row path does not return `band:<check>` or the contract's writing-session measures. Those are explicit Phase 5 §17.2/17.3 requirements. Added a focused integration unit 5-04 before closure; its brief is `briefs/5-04-artifact-schema-and-bands.md`.
+
+### `5-03-artifact-content.md`
+
+- Outcome: committed as `e5fcb50`; added the tenant-bound exact-version content route with complete-byte hash verification, read-scope/session authorization, size refusal, no-partial reads and explicit screening/missing states. `/schema` advertises `artifact_content` with its limit only alongside the route.
+- Surfaces: `packages/yakka/internal/{serve,store}/` content path, auth/route registration, focused tests and remote-service documentation.
+- Deviations and carried: none for the unit. The artifact time-bucket question remains separate and does not affect exact-version content.
+- Verification: bounded store/serve tests passed (store 7.025s; serve 25.068s); focused content tests passed after the final refinement. `artifact_feedback` on the report and brief returned delivered / screen pass (`jev-1.13.0`).
+
+### `5-04-artifact-schema-and-bands.md`
+
+- Outcome: committed as `13a3a7e`; `/schema` now advertises the implemented artifact grain and `entities_artifact`; artifact rows expose scorer-specific bands and selected writer cost/call/token/hook measures; derived harness/model filtering follows lifetime writer selection. Design-only Phase 6 flags remain absent.
+- Surfaces: schema and artifact population serving under `packages/yakka/internal/serve/`, bounded session aggregation, focused fixture tests and remote-service documentation.
+- Deviations and carried: no contract changes. Artifact bucket grouping remains rejected and absent from advertised modes because no file-to-time-bucket timestamp rule exists. Score lens aggregation retains observations in memory under the request deadline; a cross-size memory-growth proof is not recorded.
+- Verification: `GOMEMLIMIT=8GiB GOMAXPROCS=3 go test -p=3 ./internal/store ./internal/serve -count=1` passed (store 7.299s; serve 26.032s); focused artifact/schema tests and `git diff --check` passed. `artifact_feedback` on the brief and report returned delivered / screen pass (`jev-1.13.0`).
+
+### Phase 5 verification and closure
+
+- Entry point → action → result: fixture-backed HTTP tests exercise `/v1/analytics/schema`, artifact `/entities` and `/entity`, score and score-series lenses, content baselines, distribution lenses, and `/content`. The schema now reports artifact entities, scorer lenses and content with budgets, while plan/execution/cohort/activity/actions/reviews stay absent. Artifact fixtures prove file identity versus shared hash identity, lifetime selected-version and writer attribution, version paging, score/scorer/band behavior, grouped populations and missing coverage, windowed writer measures, and exact content authorization/integrity/refusal states.
+- Integrated verification on the closing tree: `GOMEMLIMIT=8GiB GOMAXPROCS=3 go test -p=3 ./internal/store ./internal/serve -count=1` passed (store 7.495s; serve 26.640s); `git diff --check` passed. No animation/timing tests, live service, production data, credentials, deployment or migrations were used.
+- Runner `artifact_feedback` on every Phase 5 brief and report returned delivered / screen pass (`jev-1.13.0`); no checks were flagged.
+
+Carried
+
+- `gate: Cody define the artifact file-to-time-bucket assignment in the design before artifact bucket grouping can be implemented or advertised.`
+- Score lens exact aggregation retains observations in memory under request deadlines; no cross-size memory-growth proof is recorded. A later bounded-query review should measure or replace that retention without changing the signed population semantics.
