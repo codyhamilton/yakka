@@ -1,0 +1,46 @@
+{
+  "captured_from": "plugins/yakka/client/test_mcp.py via current Python yakka mcp",
+  "captured_on": "2026-11-07",
+  "instructions": "Read-only advice on design, brief and report files: delivery state and scores for a file, the checks a kind is scored against, and similar past artifacts.",
+  "tools": [
+    {
+      "name": "list_checks",
+      "description": "The checks a design, brief or report is scored against.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "kind": {"type": "string", "enum": ["design", "brief", "report"]}
+        },
+        "required": ["kind"],
+        "additionalProperties": false
+      },
+      "annotations": {"readOnlyHint": true}
+    },
+    {
+      "name": "search_artifacts",
+      "description": "Similar past designs, briefs and reports in this tenant, with path, repo and a snippet.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {"type": "string"},
+          "kind": {"type": "string", "enum": ["design", "brief", "report"]}
+        },
+        "required": ["query"],
+        "additionalProperties": false
+      },
+      "annotations": {"readOnlyHint": true}
+    }
+  ],
+  "calls": [
+    {"name": "list_checks", "arguments": {"kind": "design"}, "text": "clarity [levels no/partly/yes]: Is it clear?\ndebt [levels low/high] [inverted]: Is there debt?", "isError": false},
+    {"name": "list_checks", "arguments": {"kind": "report"}, "text": "no checks loaded on the service", "isError": false},
+    {"name": "list_checks", "arguments": {}, "text": "kind must be one of design, brief, report", "isError": true},
+    {"name": "list_checks", "arguments": {"kind": "x"}, "text": "kind must be one of design, brief, report", "isError": true},
+    {"name": "search_artifacts", "arguments": {"query": "match"}, "text": "design root:abc:docs/plans/y/DESIGN.md (rank -1.5)\na [match] here", "isError": false},
+    {"name": "search_artifacts", "arguments": {"query": "missingword"}, "text": "no matches", "isError": false},
+    {"name": "search_artifacts", "arguments": {}, "text": "query must be a non-empty string", "isError": true},
+    {"name": "search_artifacts", "arguments": {"query": null}, "text": "query must be a non-empty string", "isError": true},
+    {"name": "search_artifacts", "arguments": {"query": "  "}, "text": "query must be a non-empty string", "isError": true},
+    {"name": "search_artifacts", "arguments": {"query": "match", "kind": "x"}, "text": "kind must be one of design, brief, report", "isError": true}
+  ]
+}
