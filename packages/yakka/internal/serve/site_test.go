@@ -136,6 +136,24 @@ func TestSiteHandlerDirectCallbackFallback(t *testing.T) {
 	}
 }
 
+func TestOAuthCallbackRouteIsShellLocallyAndJSONRemotely(t *testing.T) {
+	old := siteFS
+	siteFS = builtFS()
+	t.Cleanup(func() { siteFS = old })
+	local := New(Config{Data: t.TempDir()}, Options{DisableWorker: true})
+	t.Cleanup(func() { local.Close() })
+	w := siteReq(local.Handler(), "GET", "/oauth/callback?code=x&state=y")
+	if w.Code != http.StatusOK || w.Body.String() != builtIndex || !strings.HasPrefix(w.Header().Get("Content-Type"), "text/html") {
+		t.Fatalf("local callback: %d %q %q", w.Code, w.Header().Get("Content-Type"), w.Body.String())
+	}
+	remote := New(Config{Addr: "0.0.0.0:8770", Data: t.TempDir(), PublicURL: "https://collector.example", GitHubOAuthClientID: "fixture-id", GitHubOAuthClientSecret: "fixture-secret"}, Options{DisableWorker: true})
+	t.Cleanup(func() { remote.Close() })
+	w = siteReq(remote.Handler(), "GET", "/oauth/callback?code=x&state=y")
+	if w.Code != http.StatusUnauthorized || !strings.Contains(w.Header().Get("Content-Type"), "application/json") || !strings.Contains(w.Body.String(), "unauthorized") {
+		t.Fatalf("remote callback: %d %q %q", w.Code, w.Header().Get("Content-Type"), w.Body.String())
+	}
+}
+
 func assertSiteSecurityHeaders(t *testing.T, got http.Header) {
 	t.Helper()
 	_, file, _, ok := runtime.Caller(0)

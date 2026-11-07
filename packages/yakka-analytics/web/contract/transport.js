@@ -46,8 +46,32 @@ export function createTransport(scheduler, { fetchImpl = fetch } = {}) {
     const body = await response.json().catch(() => ({}));
     return { response, body };
   }
+  async function request(path, { method = 'GET', body, params = new URLSearchParams(), signal, stateKey = '' } = {}) {
+    const query = new URLSearchParams(params);
+    const base = resolvedBase();
+    const url = `${base}/v1/${path}${query.size ? `?${query}` : ''}`;
+    const auth = authInit(`v1/${path}`);
+    const headers = new Headers(auth.headers);
+    headers.set('Accept', 'application/json');
+    if (body !== undefined) headers.set('Content-Type', 'application/json');
+    const response = await scheduler.request(url, { ...auth, headers, method, ...(body === undefined ? {} : { body: JSON.stringify(body) }), signal }, stateKey);
+    const data = response.status === 204 ? null : await response.json().catch(() => ({}));
+    return { response, body: data };
+  }
   return {
     get,
+    request,
+    async callback(params) {
+      const base = resolvedBase();
+      const url = `${base}/oauth/callback?${new URLSearchParams(params)}`;
+      const response = await fetchImpl(url, { credentials: 'include', headers: { Accept: 'application/json' }, redirect: 'manual' });
+      const body = await response.json().catch(() => ({}));
+      return { response, body, url, requestUrl: url };
+    },
+    async logout() {
+      const base = resolvedBase();
+      return fetchImpl(`${base}/logout`, { method: 'POST', credentials: 'include', headers: { Accept: 'application/json', 'Content-Type': 'application/json' }, body: '{}' });
+    },
     async schema(tenant = '') {
       if (!schemas.has(tenant)) schemas.set(tenant, get('schema', new URLSearchParams(), { tenant }).then(({ response, body }) => ({ response, body })));
       return schemas.get(tenant);

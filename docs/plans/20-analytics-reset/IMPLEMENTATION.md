@@ -55,3 +55,23 @@ Start time: 2026-11-08 05:42 Australia/Brisbane (2026-11-07 19:42 UTC)
 
 Inline refinement: Phase 2 is one unit. The brief `2-01-identity-flows.md` is committed before implementation and covers the session gate, account routes, device login, credential handling and local/remote OAuth callback routing under CONTRACTS.md. The Phase 1 carried callback collision is included in the route seam. `artifact_feedback` pending for the brief.
 `artifact_feedback` on the inline brief returned `not delivered`: the service has no version and nothing is queued, even after retrying with an absolute path. Recorded; proceed with local contract verification.
+
+### `2-01-identity-flows.md`
+
+- Outcome: committed in the phase-closing commit; added safe return-path and session-gate contracts, credential-aware account requests, and Login, OAuth callback, Device, Profile and Settings UI flows. Local `/oauth/callback` serves the shell; remote collector mode retains the JSON callback API.
+- Surfaces: `packages/yakka-analytics/web/contract/`, `web/js/identity/`, `web/js/app.js`, `packages/yakka/internal/serve/serve.go`, focused tests.
+- Deviations: none identified against the brief or CONTRACTS.md. No Plan 21/22/23 capability was invented.
+- Unit evidence: report `reports/2-01-identity-flows.md`; `artifact_feedback` on the report and brief both returned delivered / screen pass (`jev-1.13.0`). Worker-reported checks: Node identity/static-shell/scheduler 12 passed; focused Go callback routing passed; syntax checks passed.
+
+### Phase 2 verification and closure
+
+- Entry point → action → result: `GET /oauth/callback?code=x&state=y` through `Server.Handler()` returns the embedded static shell in local mode and the JSON callback handler's unauthorized response in remote mode. Focused browser-contract tests cover safe callback targets, sign-in returns, the session gate, tenant recovery, auth headers and normalized device approval fields. The Chromium UI smoke could not run because `playwright`, `@playwright/test`, `playwright-core` and Vitest are absent, and the installed Chromium Snap wrapper fails to start (`snap-confine` missing `cap_dac_override`).
+- Independent checks: `PUBLIC_CANVAS_TEST_MODE=true NODE_OPTIONS=--max-old-space-size=8192 node --test packages/yakka-analytics/tests/identity/contracts.test.mjs packages/yakka-analytics/tests/static-shell.test.mjs packages/yakka-analytics/tests/request-scheduler.test.mjs` passed 12/12; `GOMAXPROCS=3 GOMEMLIMIT=8GiB go test -p=3 ./internal/serve -run 'TestOAuthCallbackRouteIsShellLocallyAndJSONRemotely|TestSiteHandlerDirectCallbackFallback' -count=1` passed. No animation/timing tests or live systems were used.
+- `artifact_feedback`: report and brief delivered / screen pass (`jev-1.13.0`).
+- gate: provide a working Playwright/Chromium harness and verify the Pages-faithful callback, device approval, profile/token and Settings flows end to end.
+
+Carried
+
+- Playwright browser acceptance for the complete identity flow; runner/browser unavailable in this worktree.
+- Verify that external Pages automation accepts `./web` as its output directory (Phase 13).
+- Reuse the 32,767-hash fixture once per test setup; its generation and verification take about 187 seconds (Phase 3).

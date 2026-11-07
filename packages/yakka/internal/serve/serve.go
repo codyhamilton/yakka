@@ -520,8 +520,10 @@ func (s *Server) Handler() http.Handler {
 		mux.HandleFunc("/v1/device/grant", s.method(http.MethodGet, s.sessionOnly(s.handleDeviceGrant)))
 		mux.HandleFunc("/v1/device/token", s.handleDeviceTokenRoute)
 	}
-	mux.HandleFunc("/oauth/login", s.method(http.MethodGet, s.oauthLogin))
-	mux.HandleFunc("/oauth/callback", s.method(http.MethodGet, s.oauthCallback))
+	if s.cfg.Remote() {
+		mux.HandleFunc("/oauth/login", s.method(http.MethodGet, s.oauthLogin))
+		mux.HandleFunc("/oauth/callback", s.method(http.MethodGet, s.oauthCallback))
+	}
 	mux.HandleFunc("/logout", s.method(http.MethodPost, s.originGuard(s.logout)))
 	mux.HandleFunc("/", siteHandler(siteFS))
 	h := s.withSession(s.cors(mux))
