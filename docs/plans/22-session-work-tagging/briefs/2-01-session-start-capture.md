@@ -36,8 +36,8 @@ Do not change the drain/network behavior, Phase 1 server logic, MCP tools, or an
 Identify the failing check before changing code and report output before and after.
 
 - `python3 plugins/yakka/script/test_kick.py` → spool fixtures preserve JSON and always exit zero.
-- `cd plugins/yakka/client && python3 -m unittest test_facts test_config` → action facts, no-action compatibility, malformed envelope, and config isolation pass.
-- `cd packages/opencode-yakka-hooks && npm test` → OpenCode session-start capture and length guard pass.
+- `cd plugins/yakka/client && python3 -m unittest test_facts test_clientconfig` → action facts, no-action compatibility, malformed envelope, and config isolation pass.
+- `cd packages/opencode-yakka-hooks && npm run test:hooks` → OpenCode session-start capture and length guard pass.
 - `git diff --check` → clean.
 - For each harness probe (`claude -p`, `codex exec`, `opencode run`, `cursor-agent -p`), record whether the hook/plugin runs and sees an exported test variable. Do not use a prompt/config that causes real classification or external egress. If that cannot be established safely, report the precise gate.
 
