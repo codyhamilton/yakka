@@ -152,3 +152,32 @@ Not measured or not met:
 - Claude discovery includes its subagent transcripts (about 361) while Cursor excludes its own (619). Open design question.
 
 Phase 5 stays open. Carried: Cody to choose the queue-log-to-session join and the Flash rule, decide the subagent treatment, and separately authorise the real enqueue and drain check. The unrelated layout-test failure was not run in this step and was not chased.
+
+## Phase 6 — Back-fill pass 2: TypeSafe kind classification
+
+### Unit outcome — `6-01-typesafe-kind-pass.md`
+
+Built the TypeSafe kind schema and client (`tools/session_backfill/typesafe_kind.py`) and the pass that computes the gold threshold, routes results and enqueues `method=typesafe` facts (`tools/session_backfill/kind_pass.py`). Surfaces: `tools/session_backfill/` (both modules, the fake-only test file, the README Pass 2 section), and the brief and report under this plan. Brief commit: `36ba83a`. Closing commit: this phase's commit.
+
+Departures from the brief (detail in the report): an `empty_prompt` route; `SystemExit` caught in the transport path; overall accuracy counts `unclear` as a miss; the scrub runs on the whole first line before the 1000-character cut; a dry run writes nothing; the CLI checks `TYPESAFE_API_KEY`; a private `_scrub_evidence` import from `backfill`.
+
+Evidence (synthetic fixtures and fake transports only):
+
+- `python3 -m unittest discover -s tools/session_backfill/tests`: 34 OK (12 before; 22 new).
+- `python3 -m unittest discover -s plugins/yakka/client -p test_facts.py`: 15 OK.
+- `python3 -m unittest discover -s tools/transcript/tests`: 11 OK.
+- `py_compile` on the three new Python files and `git diff --check`: clean.
+
+### Phase 6 verification
+
+The phase outcome's entry point (`kind_pass.main`, dry run and live-with-fake) was exercised by the tests above. The live path reaches TypeSafe only through `--live --confirm-egress`, and no live call was made. The real behaviour checks (a raw TypeSafe response, a gold threshold, the drain and analytics check) are not verified; each is gated below. `artifact_feedback` was not called because it sends the report to a remote screen.
+
+### Carried
+
+- gate: Cody to authorise the live TypeSafe run and prompt egress (scrubbed 1000-character prefixes of partial and gold sessions), per Assumption 19 and Open Questions.
+- gate: Cody to choose the queue-log-to-session join so the gold set is non-empty; until then the threshold is unset and no label completes.
+- gate: Cody to confirm the accuracy bars (0.90 threshold bar and per-kind bar).
+- gate: Cody to authorise the real enqueue and the drain and analytics check (`GET /v1/actions?source=backfill&max_confidence=<T>`).
+- The live response shape is assumed from the jev-variants choice answer; inspect one raw response before trusting the parse.
+- The unrelated layout-test failure (recorded above) was not run by these suites and was not chased.
+- The private `_scrub_evidence` import from `backfill` should become a public function in a later refactor.

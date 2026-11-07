@@ -40,3 +40,41 @@ files. The tool never reads or moves `~/.local/share/workflow/queue`.
 Use temporary synthetic roots and a temporary `--queue-dir` for tests and dry-run checks. The
 codyh-ubuntu data pass and any real queue drain are operational steps; they must be performed
 separately from synthetic verification.
+
+# Session back-fill, pass 2: TypeSafe kind
+
+`kind_pass.py` classifies the kind of each partial pass-1 label (subject, no kind) with TypeSafe
+System One. It uses the same explicit `--root` and `--queue-logs` inputs as pass 1. Gold items are
+queue-log sessions whose kind is known; they set the confidence threshold.
+
+Each request carries one prompt prefix and nothing else: the first non-empty line, secret-scrubbed
+(assignment pattern, `yakka.Redact`), whitespace-collapsed, then cut to 1000 characters. The
+request shape is `{"model", "state": {"prompt"}, "questions": {"work_kind": ...}}`, checked by
+`validate_systemone_request` before any transport call.
+
+```sh
+# Dry run (default): no network call, no file written.
+python3 tools/session_backfill/kind_pass.py --root claude="$HOME/.claude/projects" \
+  --queue-logs "$HOME/workspace/.briefs/q" --repo owner/repo
+
+# Live classification: sends prompt prefixes to TypeSafe. Needs TYPESAFE_API_KEY and --confirm-egress.
+python3 tools/session_backfill/kind_pass.py ... --live --confirm-egress --review session-kind-review.jsonl
+
+# Live, and write complete labels to the local queue. Needs --live.
+python3 tools/session_backfill/kind_pass.py ... --live --confirm-egress --enqueue --queue-dir DIR
+```
+
+Threshold: the lowest gold confidence `c` at which accuracy over answers with confidence at or
+above `c` is at least 0.90. `unclear` answers are excluded from the threshold. With no gold answers,
+or no qualifying `c`, the threshold is `null` and no label completes.
+
+Routing: a result at or above the threshold, not `unclear`, becomes a complete label with
+`method=typesafe` and is enqueued under `--enqueue`. Everything else goes to the review JSONL with
+its scrubbed prompt prefix and the reason: `below_threshold`, `no_threshold`, `model_unclear`,
+`invalid_answer`, `transport_error`, or `empty_prompt`. A transport error or invalid answer on one
+item does not stop the others. Unclear results never enqueue.
+
+The report reports gold accuracy overall and per kind (an `unclear` or unusable answer counts as a
+miss), a confusion matrix whose rows sum to the gold count, the threshold, and completed, review
+and enqueued counts. The live transport is `jev_client.post_systemone`. Only `--live` reaches it,
+and tests use fake transports only.
