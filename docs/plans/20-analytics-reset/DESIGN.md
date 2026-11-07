@@ -498,6 +498,21 @@ The count/order is fixed at this headless checkpoint: 13 outcome phases. Phase 1
 - Approach: open (SQL aggregation, a day-grain rollup, or both, and how cancellation reaches the driver).
 - Depends on: Phase 1 (the fixture generator).
 
+**Units**
+
+| Unit | Brief | Depends on | May run alongside |
+|---|---|---|---|
+| Range resolution and budget responses | [3-01-range-resolution](briefs/3-01-range-resolution.md) | Nothing | Nothing |
+| Bounded aggregate storage reads | [3-02-bounded-aggregation](briefs/3-02-bounded-aggregation.md) | 3-01 | Nothing |
+| Paged reads and honest coverage | [3-03-paged-reads-and-coverage](briefs/3-03-paged-reads-and-coverage.md) | 3-01, 3-02 | Nothing |
+| Runtime bounds and benchmark | [3-04-runtime-bounds-and-benchmark](briefs/3-04-runtime-bounds-and-benchmark.md) | 3-01, 3-02, 3-03 | Nothing |
+
+**Carried from Phase 2**
+
+- Reuse the 32,767-hash fixture once per setup: absorbed into 3-02.
+- Playwright identity-flow acceptance: bounced from Phase 3; it verifies Phase 2 UI behavior and does not bear on Phase 3 server outcomes.
+- External Pages output-directory check: bounced from Phase 3 to release readiness; it is not a Phase 3 server dependency.
+
 ### Phase 4 — Capability schema and session grain
 
 - Outcome: The schema advertises exactly the implemented session/time/entity modes, budgets, lens/null/time rules and typed coverage; later-phase capabilities remain absent. On the fixture, session repo/model/harness provenance is stable across window changes, unknown/mixed/multi groups are explicit, additive sums reconcile, and null/lower-bound/no-call money differs correctly. Session rows page and sort by every supported measure; legacy counts agree on matching eligibility, with documented lifetime-derived lens differences exposed. Numeric predicates, deterministic scatter samples, whole-population marginals, time-grain shared bucket grids and session aggregates match fixture populations. Exclusions work server-side. Existing response fields and defaults retain their legacy meaning, permitting the documented additive metadata and corrections.
