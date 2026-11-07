@@ -1,3 +1,9 @@
+Run: Codex execute skill, run ID 22-p3-2026-11-07
+Started: 2026-11-07 10:41:49 UTC
+Branch: feat/22-session-work-tagging
+
+Previous run: 22-p2-2026-11-07
+
 Run: Codex execute skill, run ID 22-p2-2026-11-07
 Started: 2026-11-07 10:25:59 UTC
 Branch: feat/22-session-work-tagging
@@ -48,3 +54,25 @@ Phase 2 closes via its documented-limit alternative; runtime support is not clai
 
 - Before CHM relies on launch-time tags from any harness, record hook/plugin execution and exported-variable visibility using a safe, non-classifying and non-egress probe; verify action projection if possible without real egress. Each harness currently has a documented limit in the Phase 2 report.
 - The unrelated layout-test failure documented in the design was not rerun or investigated; do not chase it unless it blocks later Plan 22 work.
+
+## Phase 3 — Cost by work
+
+### Unit outcome — `3-01-cost-by-work-query.md`
+
+Extended the in-memory usage query to attribute cost-bearing calls to the projected action segment at each call timestamp. Added the six `action_*` dimensions and filters, distinct-conversation `sessions`, special buckets for untagged and rejected-only conversations, top-N preservation, and HTTP validation for up to three all-action dimensions. Updated `docs/design/03-remote-service.md`. Unit commit: `72531ecd1f80ef29fe335ab98d3b295bcab7438f`.
+
+Seeded coverage exercises action segment boundaries, rejected actions between accepted actions, reconciliation and top-N survival for `(untagged)` and `(rejected)`, `(none)` dimensions, unpriced calls, distinct sessions, filter and measure validation, and the HTTP dimension limit. The no-action HTTP golden remains byte-identical. The unit report's pre-change regression failed because `cost_usd` rejected `action_kind`; after implementation, the complete store and serve suites passed.
+
+`artifact_feedback` for brief `3-01-cost-by-work-query.md` and report `3-01-cost-by-work-query.md` returned `delivered`, screened `pass` by jev-1.13.0 (version 1) for each. The service was initially called with relative paths and returned a path error; the corrected absolute-path calls passed. The runtime did not provide per-agent turn or final-context counts.
+
+### Phase verification
+
+Verified seeded tenant behavior through the `/v1/analytics/query` handler into the usage aggregation and projected action segments. Runner rerun `cd packages/yakka && go test -count=1 ./internal/store ./internal/serve` passed (`store` 5.710s, `serve` 10.658s). `git diff HEAD^ HEAD --check` was clean. These checks cover action bucket attribution and reconciliation, the mid-session timestamp split, special bucket visibility, rejected segment continuity, unpriced calls, distinct sessions, action-field validation, three-dimension HTTP behavior, and unchanged no-action JSON.
+
+Phase 3's fake-backed query implementation is verified. No live classification, egress, private tenant data, real endpoint, or real `harness pick` launch was used.
+
+### Carried
+
+- Cody: verify Phase 3 real-data item 4 in an authorized environment. Message-time versus import-time timestamps for each harness, Phase 2 session cost, and subagent and Cursor counts remain unverified.
+- Cody/CHM: after CHM's change lands, verify Phase 3 item 5 with one `harness pick` build launch per harness, accepted `source=env` action rows, and an `action_plan` cost query.
+- The unrelated layout-test failure noted in the design remains unreproduced and uninvestigated; do not chase it unless it blocks later Plan 22 work.
