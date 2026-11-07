@@ -205,8 +205,9 @@ The one sanctioned exception is offline compaction (below).
 
 A hook fact's `raw` is its envelope with no payload (design 1). Its analytics columns are filled at
 insert: `norm_event`, `tool`, `model`, `tok_in`, `tok_out`, `tok_cache_read`, `tok_cache_write`,
-`tok_reasoning` and `cost_reported` (null unless the harness reported a cost). Artifact and commit
-facts carry `kind`, `plan`, `source` and `sha`. Schema migrations run in `Open()` and only add
+`tok_reasoning` and `cost_reported` (null unless the harness reported a cost). Artifact facts carry
+`kind`, `plan`, `source` and (commit-sourced ones) `sha`; commit facts carry `sha`, with `kind` and
+`plan` empty because they have no path. Schema migrations run in `Open()` and only add
 columns, indexes and tables, so they never rewrite rows.
 
 ### Event archive

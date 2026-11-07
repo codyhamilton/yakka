@@ -167,7 +167,8 @@ One table in `internal/ingest` maps `(harness, event)` to `keep` or `remove`; a 
 - **`keep`** stores the event as an envelope plus extracted fields. Row-hash identity is the
   full received envelope's, as above.
 - **Stored form.** A hook fact's stored `raw` is its envelope (`type`, `harness`, `event`,
-  `conversation_id`, `ts`, `repo_id`) with no `payload`. The body goes verbatim, after secret
+  `conversation_id`, `ts`) with no `payload`; a hook fact has no `repo_id` (only artifact and commit
+  facts carry one, so a session's repos are known only through those). The body goes verbatim, after secret
   redaction, to the per-conversation archive ([design 3](03-remote-service.md#event-archive)), so
   a session whose hooks are the only transcript keeps its source outside the database.
   `artifact_version` and `commit` facts keep their full `raw`.
