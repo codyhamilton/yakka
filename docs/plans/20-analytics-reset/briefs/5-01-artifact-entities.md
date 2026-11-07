@@ -38,3 +38,14 @@ Identify a missing/failing check before edits. Record exact bounded verification
 ## Report back
 
 Include implementation summary, fixture outcomes, verification commands/results, deviations and unresolved gates. If the contract cannot support the work without new scope, report the precise gap and bounce.
+
+## Retry: uncovered existing section 17.3 requirements
+
+Complete the existing contract surface left unfinished by the first implementation:
+
+- Aggregate supports zero to two supported artifact dimensions and deterministic groups, with whole-population group coverage under the published cell budget.
+- Every supported numeric artifact measure accepts `where`; Boolean predicates and exclusions use the existing bounded grammar and shared filter semantics. Unsupported lenses/measures remain explicit errors. Score baseline/band and writing-session lens extensions stay with 5-02.
+- List, aggregate and scatter report typed whole-population eligibility and missing-score/content reasons per requested measure, independent of paging or sampling.
+- Remove the unpublished 20,000-file content-size scan ceiling; enforce the existing published request deadline and output cell budget instead of an invented population cap.
+
+Identify focused failing fixtures for these requirements before code edits. Keep the result unfinished if any assigned behavior is unresolved. No contract change is authorized.
