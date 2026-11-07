@@ -7,6 +7,7 @@ import (
 	_ "embed"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -336,7 +337,13 @@ func (s *Server) mcp(w http.ResponseWriter, r *http.Request) {
 	}
 	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, int64(s.mcpTools.maxBody)))
 	if err != nil {
-		writeJSON(w, 413, map[string]string{"error": "request body too large"})
+		var tooBig *http.MaxBytesError
+		if errors.As(err, &tooBig) {
+			writeJSON(w, 413, map[string]string{"error": "request body too large"})
+			return
+		}
+		// A disconnect or short read is not a size rejection.
+		writeJSON(w, 400, map[string]string{"error": "request body unreadable"})
 		return
 	}
 	var msg map[string]json.RawMessage
@@ -404,8 +411,19 @@ func (s *Server) mcpTool(name string) *MCPTool {
 	}
 	return nil
 }
+
+// scopeAllows reports whether credential scope have satisfies tool scope need.
+// Only the two issued scopes match. An empty or unknown scope matches nothing;
+// loopback local mode sets read_write on the bearer result explicitly.
 func scopeAllows(have, need string) bool {
-	return have == TokenScopeReadWrite || need == TokenScopeRead || have == ""
+	switch have {
+	case TokenScopeReadWrite:
+		return need == TokenScopeRead || need == TokenScopeReadWrite
+	case TokenScopeRead:
+		return need == TokenScopeRead
+	default:
+		return false
+	}
 }
 func (s *Server) mcpInitialize(p map[string]json.RawMessage, scope string) any {
 	var v string
