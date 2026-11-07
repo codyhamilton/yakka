@@ -123,3 +123,11 @@ Carried
 - Run the analytics benchmark against an owner-provided real ledger via `YAKKA_BENCH_DIR` for additional corpus evidence.
 - Playwright browser acceptance for Phase 2 identity flows remains outstanding (carried from Phase 2; not a Phase 3 blocker).
 - Verify the external Pages automation accepts `./web` as its output directory (release readiness).
+
+## Phase 4 — Capability schema and session grain
+
+Tool: Codex execute skill
+Run ID: feat/20-analytics-reset phase 4 execution
+Start time: 2026-11-08 06:56 Australia/Brisbane (2026-11-07 20:56 UTC)
+
+Inline refinement: Phase 4 is one server unit. Brief `4-01-capability-schema-and-session-grain.md` fixes the signed outcome, bounds the open implementation choice to session attribute derivation under the Phase 3 budgets, and explicitly excludes later-phase capabilities and any new grain/join/route/dependency/contract. Committed before dispatch as `bc74c12`. Runner `artifact_feedback` returned delivered / screen pass (`jev-1.13.0`); the initial relative-path call resolved against the plugin cache, so the absolute worktree path was used.
