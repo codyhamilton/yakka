@@ -36,3 +36,45 @@ Status: closed.
   not run or investigated in this phase.
 - `packages/hooklog/README.md` still describes the old no-config loopback default. That file is
   outside Phase 1's named documentation surfaces; place any correction in a later scoped change.
+
+## Phase 2 — Retire the legacy MCP and its launcher
+
+### Brief `phase2-retire-legacy-mcp.md`
+
+Status: closed.
+
+- The preflight found no running `workflow-linux-amd64` process. The user-level
+  `codex-usage-probe.service` was the active root launcher; its tmux command runs the Codex probe,
+  whose MCP list already contained only enabled `yakka`.
+- Restarted `codex-usage-probe.service` at 2026-11-07 21:00:45 AEST. After more than 60 seconds,
+  the process search still found no `workflow-linux-amd64` process and no process launched from
+  the retired paths. `env -u CODEX_HOME codex mcp list` continued to list only `yakka` as enabled.
+- Archived the old plugin cache and binary at
+  `/home/codyh/.local/share/yakka/retired/plan21-legacy-mcp/workflow-plugin/` and
+  `/home/codyh/.local/share/yakka/retired/plan21-legacy-mcp/workflow-0.1.0/`. The probe unit
+  remains enabled and active because it now launches the Yakka-only Codex probe.
+- The Codex probe remained running after restart. Its screen displayed current usage readings
+  (`5h 64% left · weekly 94% left`) both shortly after restart and after the 60-second check.
+- The workflow queue contained 37,950 `*.evt` files before and after. No files under the queue
+  were changed. The key-bearing backup and unrelated workflow units were left untouched.
+- No departure from the brief. No application tests apply to this operational phase. Inline
+  execution (single unit; no worker dispatched).
+- `artifact_feedback` was not called for the brief or report because it would make a prohibited
+  egress call; this gate is recorded in the result file.
+
+### Verification
+
+The design's process, MCP, usage-reading, archive and queue-count outcomes were observed after the
+restart; the process and MCP checks were repeated more than 60 seconds afterward.
+`codex-usage-probe.service` reports `ActiveState=active`, `SubState=exited` (its configured
+oneshot state), with a new invocation ID. No remote service call was made.
+
+### Carried
+
+- `packages/hooklog/README.md` still describes the previous no-config local default; it remains
+  outside the phase surfaces already closed.
+- The unrelated `tools/release/test_layout.py::test_repo_passes_layout_check` failure on ignored
+  `packages/yakka-analytics/node_modules/**` is documented by Plan 19 Phase 4; it was not run or
+  chased.
+- `artifact_feedback` feedback checks for the Phase 2 brief and report remain for Cody because
+  they require egress.
