@@ -155,6 +155,12 @@ The drain never starts or manages the quality service, local or remote (principl
 
 ## MCP shim
 
+> **Proposed by [plan 24](../plans/24-server-mcp-shim/DESIGN.md), not built.** The shim becomes a thin wrapper: it forwards
+> `initialize`, `tools/list` and `tools/call` to the server's `POST /v1/mcp`, adds the bearer from the shared login, and fills
+> `_local` from a fixed table of read-only readers the server's tool declaration names. "Queue awareness" below moves to the
+> server's `artifact_feedback`, fed by the `queue` and `drain` readers; the shim does not kick the drain and does not answer
+> when the server is unreachable. Until that plan's Phase 4 closes, the text below is what runs.
+
 The advisory MCP is registered with every harness as a local stdio command, not a URL. The shim
 reads the shared config and forwards to the remote's advisory API. Design 4 owns what it exposes;
 design 2 fixes two things it relies on:
