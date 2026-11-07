@@ -209,6 +209,22 @@ The one sanctioned exception is offline compaction (below).
 | `meta` | key/value store state; `compaction` is `complete` or absent |
 | `hook_events_hourly`, `conversations_hourly`, `facets_hourly` | hourly counts the analytics reads use for whole interior hours ([design 7](07-analytics-site.md#analytics-reads)); maintained in the fact insert's transaction and rebuilt by compaction |
 
+Cost-bearing usage measures (`cost_usd`, token measures, `model_calls`, `unpriced_calls`, and
+`sessions`) also accept `action_kind`, `action_plan`, `action_phase`, `action_subject`, `action_pr`
+and `action_source` dimensions and repeated filters on the same names at `/v1/analytics/query`.
+These dimensions are joined in the in-memory usage aggregation against effective
+`session_actions` segments at each call's timestamp; they are not SQL dimension columns and cost
+is still priced on read. Up to three dimensions may be combined when all are `action_*`; queries
+that include a legacy dimension retain the two-dimension limit. Other measures reject action
+dimensions and filters. Queries with no action fields retain their existing response shape.
+
+Calls without a segment are reported as `(untagged)`, while conversations with rejected actions
+and no accepted action are reported as `(rejected)`. These buckets survive top-N folding and are
+excluded by action filters. A rejected action does not end an accepted segment. Missing values on
+an accepted action, including a non-plan subject in `action_plan`, are reported as `(none)`.
+`sessions` counts distinct conversations per result bucket; `unpriced_calls` remains visible by
+action bucket.
+
 A hook fact's `raw` is its envelope with no payload (design 1). Its analytics columns are filled at
 insert: `norm_event`, `tool`, `model`, `tok_in`, `tok_out`, `tok_cache_read`, `tok_cache_write`,
 `tok_reasoning` and `cost_reported` (null unless the harness reported a cost). Artifact and commit
