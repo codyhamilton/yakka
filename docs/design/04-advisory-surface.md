@@ -35,7 +35,7 @@ only.
 
 ## `artifact_feedback`
 
-> **Proposed by plan 24, not built:** the states and wording below are decided on the server from reader-collected context
+> **Proposed by [plan 24](../plans/24-server-mcp-shim/DESIGN.md), not built:** the states and wording below are decided on the server from reader-collected context
 > (file metadata and hash, repository identity, queue and drain facts). The shim no longer kicks the drain; hooks own that.
 > The only intended differences are listed in the plan's parity table.
 
@@ -81,7 +81,7 @@ the current skills, ratings are comparative: the outlier is the signal, not the 
 
 ## Unreachable service
 
-> **Proposed by plan 24, not built:** the shim no longer answers from local state when the service is down. A configured
+> **Proposed by [plan 24](../plans/24-server-mcp-shim/DESIGN.md), not built:** the shim no longer answers from local state when the service is down. A configured
 > remote that cannot be reached is the shim's own `unreachable` error (naming the host, the count of local writes still
 > queued, and the fix); an unresolved login is `bad config`. Neither falls back to local mode or to a local answer.
 
