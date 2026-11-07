@@ -527,6 +527,18 @@ The count/order is fixed at this headless checkpoint: 13 outcome phases. Phase 1
 - Approach: known (reads of existing tables; the observation/partition rules are fixed in CONTRACTS.md 17.3).
 - Depends on: Phase 4.
 
+#### Units
+
+| Unit | Brief | Depends on | Runs alongside |
+|---|---|---|---|
+| 5-01 Artifact identity, history and observations | [briefs/5-01-artifact-entities.md](briefs/5-01-artifact-entities.md) | Phases 1–4 | Nothing; establishes artifact observation semantics for 5-02. |
+| 5-02 Hash-weighted scores by lens | [briefs/5-02-scores-by-lens.md](briefs/5-02-scores-by-lens.md) | 5-01 | Nothing; shares score/read and schema surfaces with adjacent units. |
+| 5-03 Bounded artifact content reads | [briefs/5-03-artifact-content.md](briefs/5-03-artifact-content.md) | 5-02 | Nothing; route registration and capability schema are already established. |
+
+Phase 4 carried items were reviewed. Null revision identifiers remain valid under CONTRACTS.md 17.2; stable local identifiers do not exist, and Phase 5 does not add a source or alter that contract. Session aggregate dimensions remain unsupported and are outside Phase 5's artifact/content contracts. Both remain documented Phase 4 limitations; no Phase 5 work is authorized to change them.
+
+Refinement verdict: **Proceed**, three sequential units. The fixture ledger and existing schema, artifact, score and blob paths are available locally; no live service, production ledger or credential is needed. No additional orchestrator decision is required.
+
 ### Phase 6 — Plan and execution entities and the cohort predicate
 
 - Outcome: Plan/execution entities and each independently paged detail collection match fixture identities, counts and process shapes. Shared-session plan costs show overlap and missing pricing. Cohort predicates support union, negation, subtraction and fixed source scopes across every listed route: empty source sets include nothing or exclude nothing respectively; invalid/over-budget/unsupported requests return named errors. A session writing both low- and high-score artifacts proves that board exclusion subtracts the resolved positive session set rather than resolving the complemented artifact predicate. Cross-grain responses explain expansion within typed units. Cursor watermark/revision changes are safe. The merged activity feed pages deterministically and the receive-watermark probe counts late arrivals without fetching raw history. Entity, aggregate, marginal and cohort operations meet the same memory/deadline/cancellation/benchmark contract.
