@@ -547,6 +547,19 @@ Refinement verdict: **Proceed**, three sequential units. The fixture ledger and 
 - Approach: open (resolving a cohort inside one statement without materialising ids).
 - Depends on: Phases 4 and 5.
 
+#### Units
+
+| Unit | Brief | Depends on | Runs alongside |
+|---|---|---|---|
+| 6-01 Plan and execution entities | [briefs/6-01-plan-execution-entities.md](briefs/6-01-plan-execution-entities.md) | Phases 1–5 | Nothing; establishes plan/execution rows and detail collections. |
+| 6-02 Cohort predicates and resolution | [briefs/6-02-cohort-predicates-and-resolution.md](briefs/6-02-cohort-predicates-and-resolution.md) | 6-01; Phases 1–5 | Nothing; establishes the shared bounded resolver. |
+| 6-03 Cohort target-route integration | [briefs/6-03-cohort-target-integration.md](briefs/6-03-cohort-target-integration.md) | 6-02; Phases 1–5 | Nothing; applies resolution consistently to every listed target. |
+| 6-04 Time cohorts and activity feed | [briefs/6-04-time-cohorts-and-activity.md](briefs/6-04-time-cohorts-and-activity.md) | 6-01, 6-02, 6-03; Phases 1–5 | Nothing; closes time-source membership and the merged feed/probe. |
+
+Phase 5 carried items were reviewed. The artifact file-to-time-bucket assignment is unrelated to Phase 6's plan/execution/cohort contract and remains gated: it must be defined before artifact bucket grouping is implemented or advertised. The score-lens memory-growth proof concerns the Phase 5 score aggregation path and is not expanded into Phase 6; it remains for a later bounded-query review. Neither item changes the Phase 6 contract or blocks these units.
+
+Refinement verdict: **Proceed**, four sequential units. Entity, cohort, route-filter and activity/schema code share server surfaces, so no units can run in parallel. All evidence can use local fixtures; no live service, production data, credential, deployment or migration is required. No additional orchestrator decision is required.
+
 ### Phase 7 — Time-series chart kit
 
 - Outcome: In the browser gallery, real mouse/keyboard/touch interactions on line, area, stacked columns, cumulative/share, ECDF and numeric scatter produce the interaction contract's settled states. Hover/inspect, selection union/subtraction, brush versus zoom, pan, legend behavior and history are verified using chart coordinates and the table view. Scatter hit-testing and rectangle membership match an independent reference at the point budget. Resolution/sample/coverage badges and both themes are correct. If uPlot cannot carry scatter, the declared first-party canvas fallback satisfies the same proof without another dependency.
