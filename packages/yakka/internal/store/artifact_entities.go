@@ -3,7 +3,6 @@ package store
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"fmt"
 	"os"
 	"sort"
@@ -131,7 +130,6 @@ func (t *Tenant) ArtifactEntitiesPage(ctx context.Context, f AnalyticsFilter, ra
 }
 
 var artifactNumericMeasures = map[string]string{"versions": "versions", "distinct_writing_sessions": "writing_sessions", "first_ts": "first_ts", "last_ts": "last_ts"}
-var ErrArtifactBudget = errors.New("artifact aggregate exceeds the 20000 entity work budget")
 
 // ArtifactAggregate computes exact file-weighted statistics in SQLite, without materializing the
 // population in the serving process. Score and blob measures are added only when their full
@@ -276,9 +274,6 @@ func (t *Tenant) artifactFileAggregate(ctx context.Context, f AnalyticsFilter, r
 	if err != nil {
 		return nil, err
 	}
-	if count > 20000 {
-		return nil, ErrArtifactBudget
-	}
 	values := make([]float64, 0, count)
 	missing := 0
 	missingReason := "unscored"
@@ -292,6 +287,9 @@ func (t *Tenant) artifactFileAggregate(ctx context.Context, f AnalyticsFilter, r
 			return nil, e
 		}
 		for _, x := range page {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
 			var value float64
 			ok := false
 			if field == "content_bytes" {

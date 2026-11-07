@@ -1,7 +1,6 @@
 package serve
 
 import (
-	"errors"
 	"fmt"
 	"math"
 	"net/http"
@@ -10,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/codyhamilton/yakka/packages/yakka/internal/keys"
 	"github.com/codyhamilton/yakka/packages/yakka/internal/store"
 )
 
@@ -31,281 +29,6 @@ func (s *Server) analyticsEntities(w http.ResponseWriter, r *http.Request, _ str
 	}
 }
 
-func (s *Server) analyticsArtifactEntities(w http.ResponseWriter, r *http.Request, ts *tenantState) {
-	q := r.URL.Query()
-	mode := q.Get("mode")
-	if mode == "" {
-		mode = "list"
-	}
-	switch mode {
-	case "aggregate":
-		s.analyticsArtifactAggregate(w, r, ts)
-		return
-	case "scatter":
-		s.analyticsArtifactScatter(w, r, ts)
-		return
-	case "list":
-	default:
-		errJSON(w, 400, "unsupported artifact mode")
-		return
-	}
-	sortSpec := q.Get("sort")
-	if sortSpec == "" {
-		sortSpec = "last_ts:desc"
-	}
-	parts := strings.Split(sortSpec, ":")
-	if len(parts) != 2 || (parts[1] != "asc" && parts[1] != "desc") || !store.ArtifactSortMeasure(parts[0]) {
-		errJSON(w, 400, "unsupported artifact sort")
-		return
-	}
-	limit, cur, ok := pageParams(w, r)
-	if !ok {
-		return
-	}
-	f, ok := parseFilter(w, r, filterOpts{route: "entities:artifact", cur: cur})
-	if !ok {
-		return
-	}
-	if len(r.URL.RawQuery) > 8192 {
-		errJSON(w, 400, "artifact predicate exceeds the 8 KiB URL budget")
-		return
-	}
-	if cur != nil && (cur.Route != "entities:artifact" || cur.Filter != canonFilter(q)) {
-		errJSON(w, 400, "cursor mismatch")
-		return
-	}
-	ranges, err := parseArtifactRanges(q["where"])
-	if err != nil {
-		errJSON(w, 400, err.Error())
-		return
-	}
-	count, err := ts.t.ArtifactEntityCount(r.Context(), f, ranges)
-	if err != nil {
-		readFailed(w)
-		return
-	}
-	var sc *store.ArtifactCursor
-	if cur != nil && len(cur.Key) >= 2 {
-		sc = &store.ArtifactCursor{Value: cur.TS, RepoID: cur.Key[0], Path: cur.Key[1]}
-	}
-	page, more, err := ts.t.ArtifactEntitiesPage(r.Context(), f, ranges, parts[0], parts[1] == "desc", sc, limit)
-	if err != nil {
-		readFailed(w)
-		return
-	}
-	ids := make([]string, 0, len(page))
-	for _, x := range page {
-		if x.ConversationID != "" {
-			ids = append(ids, x.ConversationID)
-		}
-	}
-	prov, err := ts.t.SessionProvenanceFor(r.Context(), ids)
-	if err != nil {
-		readFailed(w)
-		return
-	}
-	rows := make([]map[string]any, 0, len(page))
-	for _, x := range page {
-		p := prov[x.ConversationID]
-		kind := keys.Kind(x.Path)
-		plan := ""
-		if kind != "" {
-			plan = strings.Split(strings.ReplaceAll(x.Path, "\\", "/"), "/")[2]
-		}
-		m := map[string]any{"versions": x.Versions, "distinct_writing_sessions": x.WritingSessions, "first_ts": x.FirstTS, "last_ts": x.LastTS, "latest_version_ts": x.LatestTS}
-		l := map[string]any{"repo_id": x.RepoID, "kind": kind, "plan": plan, "source": x.Source, "writing_session": x.ConversationID, "harness": p.Harness, "session_model": p.Model}
-		flags := map[string]any{"writing_session_label": "earliest observed writing session for this version", "writing_session_is_captured_provenance": true}
-		if x.LatestTS < float64(f.From.UnixNano())/1e9 || x.LatestTS > float64(f.To.UnixNano())/1e9 {
-			flags["latest_version_outside_window"] = true
-		} else {
-			flags["latest_version_outside_window"] = false
-		}
-		byteCount, available, e := ts.t.ArtifactContentBytes(x.Hash)
-		if e != nil {
-			readFailed(w)
-			return
-		}
-		if available {
-			m["content_bytes"] = byteCount
-		} else {
-			m["content_bytes"] = nil
-			flags["content_unavailable"] = true
-		}
-		scores, e := ts.t.ArtifactVersionScores(r.Context(), x.Hash)
-		if e != nil {
-			readFailed(w)
-			return
-		}
-		for check, score := range scores {
-			m["score:"+check] = score["score"]
-			m["score_scorer:"+check] = score["scorer"]
-		}
-		screen, e := ts.t.ArtifactScreen(r.Context(), x.Hash)
-		if e != nil {
-			readFailed(w)
-			return
-		}
-		if screen == nil {
-			l["screen_verdict"] = "unknown"
-		} else {
-			l["screen_verdict"] = screen.Verdict
-		}
-		rows = append(rows, map[string]any{"id": map[string]any{"repo_id": x.RepoID, "path": x.Path}, "m": m, "l": l, "flags": flags})
-	}
-	out := map[string]any{"grain": "artifact", "rows": rows, "sort": sortSpec, "population": map[string]any{"grain": "artifact", "unit": "repo_id,path", "scope_n": count, "cohort_n": count, "eligible_n": count, "returned_n": len(rows), "missing_by_reason": map[string]int{}}, "partial": ts.t.CompactionState() != "complete"}
-	if more && len(page) > 0 {
-		last := page[len(page)-1]
-		out["next"] = (cursor{Route: "entities:artifact", Filter: canonFilter(q), From: f.From.UnixNano(), To: f.To.UnixNano(), TS: artifactMeasure(last, parts[0]), Key: []string{last.RepoID, last.Path}}).encode()
-	}
-	writeJSON(w, 200, out)
-}
-
-func (s *Server) analyticsArtifactAggregate(w http.ResponseWriter, r *http.Request, ts *tenantState) {
-	q := r.URL.Query()
-	if len(q["dim"]) > 0 {
-		errJSON(w, 400, "artifact aggregate dimensions are not supported")
-		return
-	}
-	stat := q.Get("stat")
-	if stat == "" {
-		stat = "count"
-	}
-	field := q.Get("field")
-	if stat != "count" && stat != "sum" && stat != "percentiles" && stat != "histogram" {
-		errJSON(w, 400, "unsupported artifact aggregate stat")
-		return
-	}
-	if stat == "count" && field != "" {
-		errJSON(w, 400, "count does not accept field")
-		return
-	}
-	f, ok := parseFilter(w, r, filterOpts{query: true})
-	if !ok {
-		return
-	}
-	ranges, err := parseArtifactRanges(q["where"])
-	if err != nil {
-		errJSON(w, 400, err.Error())
-		return
-	}
-	result, err := ts.t.ArtifactAggregate(r.Context(), f, ranges, stat, field)
-	if err != nil {
-		if errors.Is(err, store.ErrArtifactBudget) {
-			errCodeJSON(w, 400, "too_many_cells", "artifact aggregate exceeds its entity work budget", map[string]any{"max_entities": 20000})
-			return
-		}
-		if err.Error() == "unsupported artifact aggregate field" {
-			errJSON(w, 400, "unsupported artifact aggregate field "+field)
-		} else {
-			readFailed(w)
-		}
-		return
-	}
-	count, err := ts.t.ArtifactEntityCount(r.Context(), f, ranges)
-	if err != nil {
-		readFailed(w)
-		return
-	}
-	result["grain"] = "artifact"
-	result["population"] = map[string]any{"grain": "artifact", "unit": "repo_id,path", "scope_n": count, "cohort_n": count, "eligible_n": result["eligible_n"], "returned_n": 1, "missing_by_reason": result["missing_by_reason"]}
-	writeJSON(w, 200, result)
-}
-
-func (s *Server) analyticsArtifactScatter(w http.ResponseWriter, r *http.Request, ts *tenantState) {
-	q := r.URL.Query()
-	fields := append([]string(nil), q["field"]...)
-	if len(fields) == 0 {
-		fields = append(fields, q["fields"]...)
-	}
-	var expanded []string
-	for _, v := range fields {
-		expanded = append(expanded, strings.Split(v, ",")...)
-	}
-	fields = expanded
-	if len(fields) < 2 || len(fields) > 4 {
-		errJSON(w, 400, "artifact scatter requires two to four fields")
-		return
-	}
-	allowed := map[string]bool{"versions": true, "distinct_writing_sessions": true, "first_ts": true, "last_ts": true, "content_bytes": true}
-	seen := map[string]bool{}
-	for _, v := range fields {
-		if !(allowed[v] || strings.HasPrefix(v, "score:") && len(strings.TrimPrefix(v, "score:")) > 0) || seen[v] {
-			errJSON(w, 400, "unsupported artifact scatter field "+v)
-			return
-		}
-		seen[v] = true
-	}
-	f, ok := parseFilter(w, r, filterOpts{})
-	if !ok {
-		return
-	}
-	ranges, err := parseArtifactRanges(q["where"])
-	if err != nil {
-		errJSON(w, 400, err.Error())
-		return
-	}
-	count, err := ts.t.ArtifactEntityCount(r.Context(), f, ranges)
-	if err != nil {
-		readFailed(w)
-		return
-	}
-	n := min(count, 5000)
-	sample, _, err := ts.t.ArtifactEntitiesPage(r.Context(), f, ranges, "sample_hash", false, nil, n)
-	if err != nil {
-		readFailed(w)
-		return
-	}
-	rows := make([]map[string]any, 0, len(sample))
-	for _, x := range sample {
-		m := map[string]any{}
-		for _, field := range fields {
-			switch {
-			case field == "content_bytes":
-				n, available, e := ts.t.ArtifactContentBytes(x.Hash)
-				if e != nil {
-					readFailed(w)
-					return
-				}
-				if available {
-					m[field] = n
-				} else {
-					m[field] = nil
-				}
-			case strings.HasPrefix(field, "score:"):
-				scores, e := ts.t.ArtifactVersionScores(r.Context(), x.Hash)
-				if e != nil {
-					readFailed(w)
-					return
-				}
-				if score, ok := scores[strings.TrimPrefix(field, "score:")]; ok {
-					m[field] = score["score"]
-				} else {
-					m[field] = nil
-				}
-			default:
-				m[field] = artifactMeasure(x, field)
-			}
-		}
-		rows = append(rows, map[string]any{"id": map[string]any{"repo_id": x.RepoID, "path": x.Path}, "m": m, "l": map[string]any{"repo_id": x.RepoID, "kind": keys.Kind(x.Path)}})
-	}
-	marginals := map[string]any{}
-	eligible := map[string]int{}
-	missing := map[string]any{}
-	for _, field := range fields {
-		m, e := ts.t.ArtifactAggregate(r.Context(), f, ranges, "histogram", field)
-		if e != nil {
-			readFailed(w)
-			return
-		}
-		marginals[field] = m["bins"]
-		eligible[field] = m["eligible_n"].(int)
-		if m["missing_by_reason"] != nil {
-			missing[field] = m["missing_by_reason"]
-		}
-	}
-	writeJSON(w, 200, map[string]any{"grain": "artifact", "mode": "scatter", "fields": fields, "rows": rows, "sampled": count > len(sample), "sample_rule": "lowest SHA-256 of repo_id and path", "population_n": count, "returned_n": len(rows), "marginals": marginals, "population": map[string]any{"grain": "artifact", "unit": "repo_id,path", "scope_n": count, "cohort_n": count, "eligible_n": eligible, "returned_n": len(rows), "missing_by_reason": missing}, "sample_limit": 5000})
-}
-
 func artifactMeasure(x store.ArtifactEntity, name string) float64 {
 	switch name {
 	case "first_ts":
@@ -322,8 +45,12 @@ func artifactMeasure(x store.ArtifactEntity, name string) float64 {
 func parseArtifactRanges(values []string) ([]store.SessionRange, error) {
 	out := make([]store.SessionRange, 0, len(values))
 	for _, raw := range values {
-		measure, bounds, ok := strings.Cut(raw, ":")
-		if !ok || !store.ArtifactSortMeasure(measure) {
+		i := strings.LastIndex(raw, ":")
+		measure, bounds, ok := "", "", i >= 0
+		if ok {
+			measure, bounds = raw[:i], raw[i+1:]
+		}
+		if !ok || !artifactNumericField(measure) {
 			return nil, fmt.Errorf("unsupported artifact predicate measure %s", measure)
 		}
 		loText, hiText, ok := strings.Cut(bounds, "..")
@@ -639,7 +366,11 @@ func (s *Server) analyticsSessionAggregate(w http.ResponseWriter, r *http.Reques
 func parseSessionRanges(values []string) ([]store.SessionRange, error) {
 	out := make([]store.SessionRange, 0, len(values))
 	for _, raw := range values {
-		measure, bounds, ok := strings.Cut(raw, ":")
+		i := strings.LastIndex(raw, ":")
+		measure, bounds, ok := "", "", i >= 0
+		if ok {
+			measure, bounds = raw[:i], raw[i+1:]
+		}
 		if !ok || !store.SessionSortMeasure(measure) {
 			return nil, fmt.Errorf("unsupported session predicate measure %s", measure)
 		}
