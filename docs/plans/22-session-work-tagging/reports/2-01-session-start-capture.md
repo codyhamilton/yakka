@@ -1,5 +1,5 @@
-status: closed
-reason: Phase 2 implementation and fake-backed checks pass; four live harness probes remain gated for Cody.
+status: unsuccessful
+reason: Implementation and fake-backed checks pass, but Phase 2 cannot close until the four harness probes pass or Cody records a per-harness limit or approved contingency.
 
 # Phase 2 — Session-start capture
 
