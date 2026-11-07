@@ -343,7 +343,14 @@ func (s *Server) analyticsSessionScatter(w http.ResponseWriter, r *http.Request,
 				break
 			}
 		}
-		if len(bins) > 0 && noCalls > 0 {
+		if noCalls > 0 {
+			if len(bins) == 0 {
+				// Distribution has no row when the population has no model calls;
+				// represent the no-call sessions in the zero-value marginal bin.
+				bins = append(bins, store.DistributionBin{Lo: 0})
+			}
+			// The first distribution bin is the zero-value bin for the supported
+			// non-negative session usage and cost measures.
 			bins[0].N += noCalls
 		}
 		marginals[f] = bins

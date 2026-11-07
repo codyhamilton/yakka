@@ -3,6 +3,7 @@ package serve
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -236,6 +237,58 @@ func TestAnalyticsSessionTimeEntitiesAndExclusions(t *testing.T) {
 	code, body := aget(t, s, "/v1/analytics/entities?grain=activity&"+win)
 	if code != 400 || body["error"] != "grain must be session or time" {
 		t.Fatalf("later grain status=%d body=%v", code, body)
+	}
+}
+
+func TestAnalyticsSessionScatterDeterministicSampleHasWholePopulationMarginals(t *testing.T) {
+	s, ts := queryTenant(t)
+	const population = 5005
+	now := float64(time.Now().UTC().Unix())
+	facts := make([]store.FactRow, 0, population)
+	for i := 0; i < population; i++ {
+		conv := fmt.Sprintf("scatter-%05d", i)
+		raw, err := json.Marshal(map[string]any{"type": "commit", "conversation_id": conv, "harness": "h", "repo_id": "r", "event": "commit", "ts": now})
+		if err != nil {
+			t.Fatal(err)
+		}
+		rh, err := keys.RowHash(raw)
+		if err != nil {
+			t.Fatal(err)
+		}
+		facts = append(facts, store.FactRow{Type: "commit", ConversationID: conv, Harness: "h", RepoID: "r", Event: "commit", TS: now, RowHash: rh, Raw: raw})
+	}
+	if _, err := ts.t.Append(context.Background(), facts); err != nil {
+		t.Fatal(err)
+	}
+	url := "/v1/analytics/entities?grain=session&mode=scatter&field=tokens_in&field=tokens_out&field=cost_usd&all=1"
+	first := aok(t, s, url)
+	second := aok(t, s, url)
+	rows := rowsOf(first, "rows")
+	if first["sampled"] != true || first["population_n"] != float64(population) || first["returned_n"] != float64(5000) || len(rows) != 5000 {
+		t.Fatalf("scatter sample metadata: sampled=%v population=%v returned=%v rows=%d", first["sampled"], first["population_n"], first["returned_n"], len(rows))
+	}
+	if !reflect.DeepEqual(rows, rowsOf(second, "rows")) {
+		t.Fatal("identical scatter requests returned different deterministic samples")
+	}
+	marginals := first["marginals"].(map[string]any)
+	for _, field := range []string{"tokens_in", "tokens_out", "cost_usd"} {
+		bins, ok := marginals[field].([]any)
+		if !ok {
+			t.Fatalf("marginal %s has unexpected shape: %T", field, marginals[field])
+		}
+		total := 0.0
+		for _, raw := range bins {
+			total += raw.(map[string]any)["n"].(float64)
+		}
+		if total != population {
+			t.Errorf("marginal %s counts sampled rows, got total %v want whole population %d", field, total, population)
+		}
+	}
+	coverage := first["population"].(map[string]any)
+	eligible := coverage["eligible_n"].(map[string]any)
+	missing := coverage["missing_by_reason"].(map[string]any)
+	if eligible["cost_usd"] != float64(population) || missing["unpriced_cost"] != float64(0) {
+		t.Fatalf("no-call zero costs must remain eligible: eligible=%v missing=%v", eligible, missing)
 	}
 }
 
