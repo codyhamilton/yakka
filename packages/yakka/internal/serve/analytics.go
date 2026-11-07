@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"math"
 	"net/http"
 	"net/url"
 	"sort"
@@ -17,9 +18,16 @@ import (
 // shared filter, calls one store query and shapes the JSON; tenant auth is the same as /v1/artifacts.
 
 const (
-	maxBuckets   = 400
+	// maxBuckets remains for the benchmark's historical search helper. Request
+	// handlers do not use it as a window or resolution cap.
+	maxBuckets   = int(^uint(0) >> 1)
 	defaultLimit = 100
 	maxLimit     = 500
+)
+
+var (
+	minAnalyticsTime = time.Unix(0, math.MinInt64).UTC()
+	maxAnalyticsTime = time.Unix(0, math.MaxInt64).UTC()
 )
 
 // exploreCap is the most rows /explore returns. A variable so the test can lower it.
@@ -27,6 +35,14 @@ var exploreCap = 20000
 
 func errJSON(w http.ResponseWriter, code int, msg string) {
 	writeJSON(w, code, map[string]string{"error": msg})
+}
+
+func errCodeJSON(w http.ResponseWriter, status int, code, msg string, extra map[string]any) {
+	out := map[string]any{"error": msg, "code": code}
+	for k, v := range extra {
+		out[k] = v
+	}
+	writeJSON(w, status, out)
 }
 
 func readFailed(w http.ResponseWriter) { errJSON(w, 500, "read failed") }
@@ -128,7 +144,7 @@ func parseFilter(w http.ResponseWriter, r *http.Request, o filterOpts) (store.An
 		}
 	}
 	if q.Get("all") == "1" {
-		from, hasFrom = time.Unix(0, 0), true
+		from, hasFrom = minAnalyticsTime, true
 		if !hasTo {
 			to = time.Now().UTC()
 		}
@@ -151,8 +167,10 @@ func parseFilter(w http.ResponseWriter, r *http.Request, o filterOpts) (store.An
 		errJSON(w, 400, "from is after to")
 		return f, false
 	}
-	if !o.query && tooWide(from, to, o.weeks) {
-		errJSON(w, 400, "range too wide")
+	if from.Before(minAnalyticsTime) || from.After(maxAnalyticsTime) || to.Before(minAnalyticsTime) || to.After(maxAnalyticsTime) {
+		errCodeJSON(w, 400, "time_out_of_range", "time is outside the nanosecond-representable range", map[string]any{
+			"min": minAnalyticsTime.Format(time.RFC3339Nano), "max": maxAnalyticsTime.Format(time.RFC3339Nano),
+		})
 		return f, false
 	}
 	f = store.AnalyticsFilter{From: from.UTC(), To: to.UTC(), Repos: q["repo_id"], Harnesses: q["harness"], Kinds: q["kind"], Plans: q["plan"],

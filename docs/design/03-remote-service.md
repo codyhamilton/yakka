@@ -130,6 +130,17 @@ Outside `/v1`, a binary with the site embedded serves it at `/`. The production 
 embed the site, so those paths are `analytics bundle not embedded`. Browsers follow the CORS rules
 in [design 7](07-analytics-site.md#browser-access). `/v1` paths are never HTML.
 
+### Analytics ranges and output budgets
+
+Analytics time windows are inclusive RFC3339 intervals and have no product reporting-window maximum.
+`all=1` starts early enough to include pre-epoch ledger facts. The retained representability boundary is
+the signed `UnixNano` interval, 1677-09-21T00:12:43.145224192Z through
+2262-04-11T23:47:16.854775807Z; a request outside it returns `time_out_of_range`. Time series may use
+`bucket=auto`, which preserves the requested dates while selecting calendar resolution. Explicit output
+budgets return machine-readable `too_many_cells` or `too_many_series` errors with suggestions instead of
+silently dropping the newest buckets. The complete range, resolution, paging and runtime contract is
+maintained in [Plan 20, section 17.1](../plans/20-analytics-reset/CONTRACTS.md#171-range-resolution-and-budgets).
+
 ### Ingest
 
 Request: `{"facts": [fact, …]}`, each fact one design 1 envelope (`hook_event`,

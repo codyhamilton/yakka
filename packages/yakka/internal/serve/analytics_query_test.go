@@ -123,7 +123,7 @@ func equalStrs(a, b []string) bool {
 }
 
 func TestAnalyticsQuery(t *testing.T) {
-	s, _ := queryFixture(t)
+	s, ts := queryFixture(t)
 	A := "/v1/analytics/query?"
 	rows := func(u string) []fx { return rowsOf(aok(t, s, A+u), "rows") }
 
@@ -202,8 +202,36 @@ func TestAnalyticsQuery(t *testing.T) {
 	t.Run("cap", func(t *testing.T) {
 		from := time.Now().UTC().AddDate(0, 0, -31).Format(time.RFC3339)
 		to := time.Now().UTC().Format(time.RFC3339)
-		aerr(t, s, A+"measure=hook_events&dim=harness&bucket=hour&from="+from+"&to="+to, 400, "range too wide")
+		if code, body := aget(t, s, A+"measure=hook_events&dim=harness&bucket=hour&from="+from+"&to="+to); code != 200 {
+			t.Fatalf("31-day hourly request: status=%d body=%v", code, body)
+		}
 		aok(t, s, A+"measure=hook_events&dim=harness&bucket=day&from="+from+"&to="+to)
+	})
+
+	t.Run("auto_and_explicit_cell_budget", func(t *testing.T) {
+		qadd(t, ts, store.FactRow{Type: "hook_event", ConversationID: "mid", Harness: "claude", RepoID: "r1", Event: "PreToolUse", Tool: "Read", NormEvent: "tool_use",
+			TS: float64(time.Date(2026, 3, 11, 12, 0, 0, 0, time.UTC).Unix())}, nil)
+		from, to := "2020-01-01T00:00:00Z", "2030-01-01T00:00:00Z"
+		m := aok(t, s, A+"measure=hook_events&dim=harness&bucket=auto&from="+from+"&to="+to)
+		if m["bucket"] != "day" || m["requested_bucket"] != "auto" || m["coarsened"] != true {
+			t.Fatalf("auto resolution metadata: %v", m)
+		}
+		multi := aok(t, s, A+"measure=hook_events&dim=harness&dim=tool&bucket=auto&from=1700-01-01T00:00:00Z&to=2200-01-01T00:00:00Z")
+		if multi["bucket"] != "month" || len(rowsOf(multi, "rows")) == 0 {
+			t.Fatalf("multi-century, two-dimension fixture: %v", multi)
+		}
+		win := multi["window"].(map[string]any)["requested"].(map[string]any)
+		if win["from"] != "1700-01-01T00:00:00Z" || win["to"] != "2200-01-01T00:00:00Z" {
+			t.Fatalf("auto clipped requested dates: %v", win)
+		}
+		code, body := aget(t, s, A+"measure=hook_events&dim=harness&bucket=day&max_cells=1&from="+from+"&to="+to)
+		if code != 400 || body["code"] != "too_many_series" || body["suggested_top"] == nil || body["max_cells"] != float64(1) {
+			t.Fatalf("explicit over-budget request: status=%d body=%v", code, body)
+		}
+		code, body = aget(t, s, A+"measure=hook_events&bucket=day&max_cells=1&from=2026-03-10T00:00:00Z&to=2026-03-11T23:59:59Z")
+		if code != 400 || body["code"] != "too_many_cells" || body["suggested_bucket"] != "week" {
+			t.Fatalf("explicit cell overflow: status=%d body=%v", code, body)
+		}
 	})
 }
 
@@ -230,6 +258,37 @@ func TestAnalyticsQueryPartial(t *testing.T) {
 	}
 	if _, ok := m["partial"]; ok {
 		t.Fatalf("partial present after compaction: %v", m)
+	}
+}
+
+func TestAnalyticsQueryAcceptsWideWindowAndRejectsOutOfNanosecondBounds(t *testing.T) {
+	s, ts := queryTenant(t)
+	qadd(t, ts, store.FactRow{Type: "commit", ConversationID: "old", Harness: "claude", RepoID: "r1", Event: "commit",
+		TS: float64(time.Date(1900, 1, 1, 0, 0, 0, 0, time.UTC).Unix())}, nil)
+	wide := "/v1/analytics/query?measure=commits&bucket=day&from=1900-01-01T00:00:00Z&to=1910-01-01T00:00:00Z"
+	if code, body := aget(t, s, wide); code != 200 {
+		t.Fatalf("ten-year window: status=%d body=%v", code, body)
+	}
+	all := aok(t, s, "/v1/analytics/query?measure=commits&bucket=none&all=1")
+	if rows := rowsOf(all, "rows"); len(rows) != 1 || rows[0]["v"] != 1.0 {
+		t.Fatalf("all history including pre-epoch data: %v", rows)
+	}
+	for _, bound := range []string{
+		"from=1677-09-21T00:12:43.145224191Z&to=1677-09-21T00:12:43.145224192Z",
+		"from=2262-04-11T23:47:16.854775807Z&to=2262-04-11T23:47:16.854775808Z",
+	} {
+		code, body := aget(t, s, "/v1/analytics/query?measure=commits&bucket=none&"+bound)
+		if code != 400 || body["code"] != "time_out_of_range" {
+			t.Errorf("out-of-range %s: status=%d body=%v", bound, code, body)
+		}
+	}
+	for _, bound := range []string{
+		"from=1677-09-21T00:12:43.145224192Z&to=1677-09-21T00:12:43.145224192Z",
+		"from=2262-04-11T23:47:16.854775807Z&to=2262-04-11T23:47:16.854775807Z",
+	} {
+		if code, body := aget(t, s, "/v1/analytics/query?measure=commits&bucket=none&"+bound); code != 200 {
+			t.Errorf("inclusive boundary %s: status=%d body=%v", bound, code, body)
+		}
 	}
 }
 

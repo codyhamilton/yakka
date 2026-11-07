@@ -1,6 +1,7 @@
 package serve
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strconv"
@@ -54,12 +55,16 @@ func (s *Server) analyticsQuery(w http.ResponseWriter, r *http.Request, _ string
 		return
 	}
 	bucket := q.Get("bucket")
+	requestedBucket := bucket
 	if bucket == "" {
 		bucket = "none"
+		requestedBucket = "none"
 	}
 	if !queryBuckets[bucket] {
-		errJSON(w, 400, "unknown bucket "+bucket)
-		return
+		if bucket != "auto" {
+			errJSON(w, 400, "unknown bucket "+bucket)
+			return
+		}
 	}
 	top := 20
 	if v := q.Get("top"); v != "" {
@@ -74,13 +79,21 @@ func (s *Server) analyticsQuery(w http.ResponseWriter, r *http.Request, _ string
 		}
 		top = n
 	}
+	cellBudget := 20000
+	if v := q.Get("max_cells"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 1 {
+			errJSON(w, 400, "max_cells must be a positive integer")
+			return
+		}
+		cellBudget = min(n, cellBudget)
+	}
 	f, ok := parseFilter(w, r, filterOpts{query: true})
 	if !ok {
 		return
 	}
-	if bucket != "none" && bucketSpan(f.From, f.To, bucket, f.TZ) > maxBuckets {
-		errJSON(w, 400, "range too wide")
-		return
+	if bucket == "auto" {
+		bucket = resolveAutoBucket(f.From, f.To, f.TZ, cellBudget)
 	}
 	res, err := ts.t.Query(r.Context(), f, store.QueryParams{Measure: measure, Dims: dims, Bucket: bucket, Top: top})
 	if err != nil {
@@ -94,6 +107,15 @@ func (s *Server) analyticsQuery(w http.ResponseWriter, r *http.Request, _ string
 		}
 		return
 	}
+	if res.Truncated || len(res.Rows) > cellBudget {
+		next, step := nextBucket(bucket)
+		if bucket == "none" || distinctSeries(res.Rows) > cellBudget {
+			errCodeJSON(w, 400, "too_many_series", "query exceeds the series budget", map[string]any{"max_cells": cellBudget, "suggested_top": max(1, top/2)})
+		} else {
+			errCodeJSON(w, 400, "too_many_cells", "query exceeds the cell budget", map[string]any{"max_cells": cellBudget, "suggested_bucket": next, "suggested_bucket_step": step})
+		}
+		return
+	}
 	rows := make([]map[string]any, 0, len(res.Rows))
 	for _, row := range res.Rows {
 		m := map[string]any{"k": nz(row.K), "v": row.V}
@@ -102,7 +124,11 @@ func (s *Server) analyticsQuery(w http.ResponseWriter, r *http.Request, _ string
 		}
 		rows = append(rows, m)
 	}
-	out := map[string]any{"measure": res.Measure, "bucket": res.Bucket, "dims": nz(res.Dims), "rows": rows}
+	out := map[string]any{"measure": res.Measure, "bucket": res.Bucket, "requested_bucket": requestedBucket,
+		"bucket_step": 1, "coarsened": requestedBucket == "auto" && res.Bucket != "hour",
+		"cells": len(rows), "max_cells": cellBudget, "dims": nz(res.Dims), "rows": rows,
+		"window": map[string]any{"requested": map[string]string{"from": f.From.Format(time.RFC3339Nano), "to": f.To.Format(time.RFC3339Nano)},
+			"effective": map[string]string{"from": f.From.Format(time.RFC3339Nano), "to": f.To.Format(time.RFC3339Nano)}, "clipped": false}}
 	if len(res.Ignored) > 0 {
 		out["ignored_filters"] = res.Ignored
 	}
@@ -115,7 +141,42 @@ func (s *Server) analyticsQuery(w http.ResponseWriter, r *http.Request, _ string
 	writeJSON(w, 200, out)
 }
 
-// bucketSpan counts the buckets a window touches for a unit; the caller caps it at maxBuckets.
+func distinctSeries(rows []store.QueryRow) int {
+	seen := make(map[string]struct{}, len(rows))
+	for _, row := range rows {
+		key, _ := json.Marshal(row.K)
+		seen[string(key)] = struct{}{}
+	}
+	return len(seen)
+}
+
+func resolveAutoBucket(from, to time.Time, loc *time.Location, budget int) string {
+	for _, bucket := range []string{"hour", "day", "week", "month"} {
+		if bucketSpan(from, to, bucket, loc) <= budget {
+			return bucket
+		}
+	}
+	// Year and multi-year calendar grouping is added with the storage planner.
+	return "month"
+}
+
+func nextBucket(bucket string) (string, int) {
+	switch bucket {
+	case "hour":
+		return "day", 1
+	case "day":
+		return "week", 1
+	case "week":
+		return "month", 1
+	case "month":
+		return "year", 1
+	default:
+		return "none", 1
+	}
+}
+
+// bucketSpan counts calendar buckets using civil and Unix arithmetic so multi-century
+// intervals do not overflow time.Duration.
 // Bucket boundaries follow the filter's location so the count matches the t the store emits.
 func bucketSpan(from, to time.Time, bucket string, loc *time.Location) int {
 	if loc == nil {
@@ -124,21 +185,23 @@ func bucketSpan(from, to time.Time, bucket string, loc *time.Location) int {
 	a, b := from.In(loc), to.In(loc)
 	switch bucket {
 	case "hour":
-		return int(b.Sub(a).Hours()) + 1
+		return int((b.Unix()-a.Unix())/3600) + 1
 	case "day":
-		ad := time.Date(a.Year(), a.Month(), a.Day(), 0, 0, 0, 0, loc)
-		bd := time.Date(b.Year(), b.Month(), b.Day(), 0, 0, 0, 0, loc)
-		return int(bd.Sub(ad).Hours()/24) + 1
+		return civilDayOrdinal(b) - civilDayOrdinal(a) + 1
 	case "week":
-		ad := mondayOf(a, loc)
-		bd := mondayOf(b, loc)
-		return int(bd.Sub(ad).Hours()/24)/7 + 1
+		return (civilDayOrdinal(mondayOf(b, loc))-civilDayOrdinal(mondayOf(a, loc)))/7 + 1
 	case "month":
 		am := time.Date(a.Year(), a.Month(), 1, 0, 0, 0, 0, loc)
 		bm := time.Date(b.Year(), b.Month(), 1, 0, 0, 0, 0, loc)
 		return (bm.Year()-am.Year())*12 + int(bm.Month()-am.Month()) + 1
+	case "year":
+		return b.Year() - a.Year() + 1
 	}
 	return 0
+}
+
+func civilDayOrdinal(t time.Time) int {
+	return int(time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, time.UTC).Unix() / 86400)
 }
 
 func mondayOf(t time.Time, loc *time.Location) time.Time {

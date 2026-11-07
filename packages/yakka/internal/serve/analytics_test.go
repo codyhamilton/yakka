@@ -242,9 +242,9 @@ func TestAnalyticsOutcome(t *testing.T) {
 		aerr(t, s, A+"scores?kind=design&kind=brief", 400, "kind required")
 		aerr(t, s, A+"scores?kind=nope", 400, "kind must be design, brief or report")
 		wide := "from=2025-01-01T00:00:00Z&to=2026-02-05T00:00:00Z" // 401 days inclusive
-		aerr(t, s, A+"summary?"+wide, 400, "range too wide")
-		aerr(t, s, A+"series?metric=commits&bucket=day&"+wide, 400, "range too wide")
-		aerr(t, s, A+"executions?"+wide, 400, "range too wide")
+		aok(t, s, A+"summary?"+wide)
+		aok(t, s, A+"series?metric=commits&bucket=day&"+wide)
+		aok(t, s, A+"executions?"+wide)
 		if m := aok(t, s, A+"series?metric=commits&bucket=week&"+wide); m["bucket"] != "week" {
 			t.Errorf("week series: %v", m)
 		}
