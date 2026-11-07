@@ -1,3 +1,10 @@
+Run: Codex execute skill, run ID 22-p5-2026-11-07
+Started: 2026-11-07 10:59:45 UTC
+Branch: feat/22-session-work-tagging
+
+Brief: `5-01-deterministic-backfill.md` committed as `4105c24`; `artifact_feedback` delivered, screen pass by jev-1.13.0 (version 1).
+Baseline: `cd plugins/yakka/client && python3 -m unittest test_facts` passed (14 tests).
+
 Run: Codex execute skill, run ID 22-p3-2026-11-07
 Started: 2026-11-07 10:41:49 UTC
 Branch: feat/22-session-work-tagging
@@ -76,3 +83,40 @@ Phase 3's fake-backed query implementation is verified. No live classification, 
 - Cody: verify Phase 3 real-data item 4 in an authorized environment. Message-time versus import-time timestamps for each harness, Phase 2 session cost, and subagent and Cursor counts remain unverified.
 - Cody/CHM: after CHM's change lands, verify Phase 3 item 5 with one `harness pick` build launch per harness, accepted `source=env` action rows, and an `action_plan` cost query.
 - The unrelated layout-test failure noted in the design remains unreproduced and uninvestigated; do not chase it unless it blocks later Plan 22 work.
+
+Run: Codex execute skill, run ID 22-p5-2026-11-07
+Started: 2026-11-07 10:59:45 UTC
+Branch: feat/22-session-work-tagging
+
+## Phase 5 — Back-fill pass 1: deterministic extraction
+
+### Unit outcome — `5-01-deterministic-backfill.md`
+
+Implemented an explicit-root, offline back-fill tool for Claude JSONL, Codex rollout JSONL, OpenCode session/message/part JSON, and Cursor agent transcript JSONL. It emits complete, partial, unresolved, and excluded labels; extracts plan/phase/issue/PR evidence; joins nested queue logs; writes scrubbed local label files; reports coverage and masked gold-set agreement; and optionally writes complete labels through the client queue writer. The Yakka writer creates tag-only events with an empty payload and a conversation id at the envelope level; its stable content-derived event id makes repeated writes idempotent. `Build` emits source, method, confidence and scrubbed evidence in the resulting `session_action` fact. No network call is present in the tool.
+
+Brief `5-01-deterministic-backfill.md` was committed first as `4105c24`, then its documentation path was corrected against the repository (`docs/design/02-edge-capture.md`) in `a86c83e`. `artifact_feedback`: amended brief delivered, screen pass by jev-1.13.0, version 2.
+
+Evidence:
+
+- Synthetic tool tests: `python3 -m unittest discover -s tools/session_backfill/tests -v` passed (6), covering all four store shapes, nested queue logs, masked gold scoring (1/1), the CLI dry-run output, secret scrubbing, exclusion, and repeatable local enqueue.
+- Client tests: `cd plugins/yakka/client && python3 -m unittest test_facts` passed (15), including tag-only parse/build and preservation of method, confidence and evidence.
+- `python3 -m py_compile tools/session_backfill/backfill.py plugins/yakka/client/yakka.py` and `git diff --check` passed.
+- A read-only local full-store dry run completed. It found 3,582 sessions: Claude 1,230 (1,148 partial, 82 unresolved), Codex 1,930 (1,378 partial, 552 unresolved), Cursor 409 (78 partial, 331 unresolved), OpenCode 13 (13 unresolved). It found zero complete labels, zero gold matches (reported agreement 0/0), and zero Flash exclusions. The design inventory estimates ~6,463 sessions and 890 Flash runs. Metadata-only inspection found 1,154 nested queue logs but no session ID fields in them, so this environment cannot establish the gold set or reach the 95% bar. No facts were enqueued, no drain/ingest or egress call was made, and no human review was performed. The temporary label file was cleaned up.
+
+Departure: the brief initially referred to a nonexistent `docs/design/02-client-and-hooks.md`; it was amended to the existing `docs/design/02-edge-capture.md` and its second artifact feedback passed. No other scope departure.
+
+Known problem and carried work:
+
+- Cody: reconcile the intended codyh-ubuntu store inventory and the queue-log-to-transcript join; rerun the dry run and establish the 95% masked gold agreement and actual per-store counts before relying on the labels.
+- Cody: after reviewing dry-run output, authorize the real local queue enqueue and network drain/ingest check; itemize any secret-scan refusals and compare projected counts. No such call was made in this phase.
+- Preserve the unrelated layout-test failure documented by the user/design; it remains unreproduced and uninvestigated and was not chased.
+
+### Phase verification
+
+The command-line dry-run entry point was exercised on the local four-store roots and produced an observable per-store report without touching the queue or network. Its result did not meet the design's intended inventory or gold-coverage outcome: all 3,582 observed sessions were partial or unresolved, no gold session was linked, and the expected Flash exclusions were absent. Synthetic end-to-end CLI and queue tests prove the designed behavior against fixtures, including idempotent action creation and parse/build into a single `session_action` fact. The real enqueue/drain check is held for Cody as it entails network egress.
+
+### Carried
+
+- Cody: confirm the codyh-ubuntu data roots and add/approve a deterministic queue-log-to-session association supported by those logs; rerun the dry run and verify the Phase 5 95% gold agreement and planned Flash exclusions.
+- Cody: authorize a later real enqueue/drain verification; compare projected rows to emitted actions and itemize secret-scan refusals.
+- The unrelated layout-test failure documented in the design remains unreproduced and uninvestigated; do not chase it unless it blocks later Plan 22 work.

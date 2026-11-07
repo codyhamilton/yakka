@@ -42,6 +42,10 @@ The queue is transit, not storage: a file is deleted once the remote accepts it.
   first character boundary at or beyond byte 257. They do no vocabulary or semantic validation;
   the drain emits the regular `hook_event` plus a `session_action` fact. A tag-only
   `yakka.session_action` queue file emits only that fact.
+- The back-fill writer in `plugins/yakka/client/yakka.py` writes a tag-only envelope with an empty
+  payload, top-level `conversation_id`, `source`, `method`, `confidence`, `evidence` and raw action
+  strings. Its content-derived event filename makes an identical enqueue repeatable; changed label
+  content gets a distinct fact id. It only writes under the Yakka queue and never sends a request.
 - Never snapshots a file and never fails: exit 0 always.
 
 The environment values are set by `harness pick` on the launched process (or manually for an

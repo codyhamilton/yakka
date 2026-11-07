@@ -312,6 +312,39 @@ class TestBadFiles(unittest.TestCase):
 
 
 class TestSessionActions(unittest.TestCase):
+    def test_backfill_enqueue_writer_is_idempotent_and_builds_one_action(self) -> None:
+        with tempfile.TemporaryDirectory() as queue:
+            first = yakka.EnqueueSessionAction(
+                "session-1",
+                {"kind": "build", "subject_type": "plan", "subject_id": "owner/repo:plan/22-demo"},
+                source="backfill",
+                method="deterministic",
+                confidence=0.8,
+                evidence="plan file",
+                dir_path=queue,
+            )
+            second = yakka.EnqueueSessionAction(
+                "session-1",
+                {"kind": "build", "subject_type": "plan", "subject_id": "owner/repo:plan/22-demo"},
+                source="backfill",
+                method="deterministic",
+                confidence=0.8,
+                evidence="plan file",
+                dir_path=queue,
+            )
+            self.assertEqual(first, second)
+            self.assertEqual(len([n for n in os.listdir(queue) if n.endswith(".evt")]), 1)
+            with open(first, "rb") as queued:
+                raw = queued.read()
+            facts = _decode(yakka.Build(None, [yakka.File(Name=os.path.basename(first), Data=raw)])[0])
+            self.assertEqual(len(facts), 1)
+            self.assertEqual(facts[0]["type"], "session_action")
+            self.assertEqual(facts[0]["conversation_id"], "session-1")
+            self.assertEqual(facts[0]["source"], "backfill")
+            self.assertEqual(facts[0]["method"], "deterministic")
+            self.assertEqual(facts[0]["confidence"], 0.8)
+            self.assertEqual(facts[0]["evidence"], "plan file")
+
     def test_session_action_envelope_fixtures(self) -> None:
         for fixture in _load_fixtures("session_action_envelopes.json"):
             data = (json.dumps(fixture["envelope"], separators=(",", ":")) + "\n"
