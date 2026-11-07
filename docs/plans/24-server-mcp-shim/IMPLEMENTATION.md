@@ -57,3 +57,9 @@ The characterization corpus was committed first at `8f91f4b`; the single-unit br
 
 1. The committed populated-search corpus sample carries the Python fixture's hard-coded rank `-1.5`; use same-store REST parity for future real-rank evidence, as recorded in `testdata/mcp-golden/README.md`.
 2. The unrelated pre-existing layout test failure remains uninvestigated and unchanged; do not chase it in this plan.
+
+## Phase 3 — `artifact_feedback` on the server
+
+Run identity: Codex (GPT-6), API session (ID unavailable), started 2026-11-07T12:51:07Z; branch `feat/24-server-mcp-shim`. Invoked for Phase 3 only; stop before review, terminal review and close-out.
+
+Status: in progress. The one-unit brief `briefs/phase3-01-artifact-feedback.md` is committed before implementation. The 7 Nov v2 enqueue amendment is explicitly outside this phase; Phase 3 implements the read-only v1 behavior only.
