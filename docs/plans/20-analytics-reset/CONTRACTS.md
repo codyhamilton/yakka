@@ -9,8 +9,9 @@ UI may rely on; it says nothing about the old UX, layout, components or chart ch
 **Basis.** Every server fact below was read from the Go and Python source at master `b2094eb`
 (files named per section); no test was run for this file and no production ledger or credential was
 read. Where `docs/design/07-analytics-site.md` and the code differ, this file follows the code and says
-so. Statements labelled **Current** describe master; statements labelled **Target** are what DESIGN.md
-changes, in the phase named; nothing labelled Target exists yet. At close-out this file is promoted
+so. Statements labelled **Current** describe master. Statements labelled **Target** define what
+DESIGN.md changes in the named phase; implementation progress is recorded in the plan's phase reports.
+At close-out this file is promoted
 into `docs/design/07-analytics-site.md`.
 
 ## Contents
@@ -552,8 +553,8 @@ Secrets (not in the repo): `GITHUB_OAUTH_CLIENT_ID`, `GITHUB_OAUTH_CLIENT_SECRET
 
 ### 11.3 Go tests that pin the contract
 
-- `internal/serve/site_test.go`: `TestSitePlaceholderMode`, `TestSiteMissingIndexIsNotEmbedded`, `TestSiteEmbeddedPlaceholder` (uses the real embedded placeholder), `TestSiteBuiltMode` (keyed and local; uses `_app/immutable/x.js`, `_app/version.json`, `p.wasm` in a `fstest.MapFS`), `TestSiteLocalGuardStillWraps`. They
-  fix everything in 10.1. `TestSiteBuiltMode` hard-codes the old SvelteKit `_app/immutable/` paths; it and `site.go` change together to the generic cache rules in 10.1 (Phase 1), plus a test that the embedded CSP and framing headers equal `web/_headers`.
+- `internal/serve/site_test.go`: `TestSitePlaceholderMode`, `TestSiteMissingIndexIsNotEmbedded`, `TestSiteEmbeddedPlaceholder` (uses the real embedded placeholder), `TestSiteBuiltMode` (keyed and local; uses a versioned `vendor/` asset, ordinary JS/JSON assets and WASM in a `fstest.MapFS`), `TestSiteHandlerDirectCallbackFallback`, `TestSiteLocalGuardStillWraps`. They
+  fix everything in 10.1. `TestSiteBuiltMode` covers generic cache rules, ETag revalidation and security headers equal to `web/_headers`; the direct callback fallback is tested at `siteHandler` level. The full server mux currently registers `/oauth/callback` before the site handler in local mode too, so that route-level integration remains for Phase 2.
 - `internal/serve/analytics_pageset_test.go` (see 12), `analytics_bench_test.go` and the per-route tests (`analytics_test.go`, `analytics_query_test.go`, `analytics_conversation_test.go`, `analytics_executions_test.go`, `analytics_distribution_test.go`, `analytics_score_series_test.go`) pin section 7.
 - Tests never need Node: they use the placeholder or an in-memory FS.
 

@@ -2,10 +2,13 @@ package serve
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"embed"
+	"fmt"
 	"io/fs"
 	"net/http"
 	"path"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -17,6 +20,13 @@ import (
 var siteEmbed embed.FS
 
 const siteMarker = "yakka-analytics-placeholder"
+
+const (
+	siteCSP          = "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self' https: http://localhost:* http://127.0.0.1:*; img-src 'self' data:; frame-ancestors 'none'; base-uri 'none'; object-src 'none'"
+	siteFrameOptions = "DENY"
+)
+
+var versionedVendorPath = regexp.MustCompile(`^vendor/[^/]+-[0-9]+(?:\.[0-9]+)*(?:[-+][A-Za-z0-9.-]+)?/`)
 
 // siteFS is the site root. Tests replace it with an fstest.MapFS.
 var siteFS fs.FS = func() fs.FS {
@@ -41,6 +51,7 @@ func siteHandler(fsys fs.FS) http.HandlerFunc {
 			writeJSON(w, 404, map[string]string{"error": "analytics bundle not embedded"})
 			return
 		}
+		setSiteSecurityHeaders(w.Header())
 		if r.Method != http.MethodGet && r.Method != http.MethodHead {
 			w.Header().Set("Allow", "GET, HEAD")
 			writeJSON(w, 405, map[string]string{"error": "method not allowed"})
@@ -50,8 +61,16 @@ func siteHandler(fsys fs.FS) http.HandlerFunc {
 		if name != "" && name != "index.html" {
 			if fi, err := fs.Stat(fsys, name); err == nil && fi.Mode().IsRegular() {
 				if data, err := fs.ReadFile(fsys, name); err == nil {
-					if strings.HasPrefix(name, "_app/immutable/") {
+					if versionedVendorPath.MatchString(name) {
 						w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+					} else {
+						etag := fmt.Sprintf(`"%x"`, sha256.Sum256(data))
+						w.Header().Set("Cache-Control", "no-cache")
+						w.Header().Set("ETag", etag)
+						if etagMatches(r.Header.Get("If-None-Match"), etag) {
+							w.WriteHeader(http.StatusNotModified)
+							return
+						}
 					}
 					http.ServeContent(w, r, name, fi.ModTime(), bytes.NewReader(data))
 					return
@@ -63,4 +82,21 @@ func siteHandler(fsys fs.FS) http.HandlerFunc {
 		h.Set("Cache-Control", "no-cache")
 		http.ServeContent(w, r, "index.html", time.Time{}, bytes.NewReader(index))
 	}
+}
+
+func setSiteSecurityHeaders(h http.Header) {
+	h.Set("Content-Security-Policy", siteCSP)
+	h.Set("X-Frame-Options", siteFrameOptions)
+	h.Set("X-Content-Type-Options", "nosniff")
+	h.Set("Referrer-Policy", "strict-origin-when-cross-origin")
+}
+
+func etagMatches(header, etag string) bool {
+	for _, candidate := range strings.Split(header, ",") {
+		candidate = strings.TrimSpace(candidate)
+		if candidate == "*" || strings.TrimPrefix(candidate, "W/") == etag {
+			return true
+		}
+	}
+	return false
 }

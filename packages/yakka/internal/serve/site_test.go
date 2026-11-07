@@ -3,6 +3,9 @@ package serve
 import (
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -17,10 +20,11 @@ func placeholderFS() fstest.MapFS {
 
 func builtFS() fstest.MapFS {
 	return fstest.MapFS{
-		"index.html":          {Data: []byte(builtIndex)},
-		"_app/immutable/x.js": {Data: []byte("export {}")},
-		"_app/version.json":   {Data: []byte(`{"version":"1"}`)},
-		"p.wasm":              {Data: []byte("\x00asm")},
+		"index.html":                       {Data: []byte(builtIndex)},
+		"vendor/uplot-1.6.32/uPlot.esm.js": {Data: []byte("export {}")},
+		"js/app.js":                        {Data: []byte("import './core.js'")},
+		"js/version.json":                  {Data: []byte(`{"version":"1"}`)},
+		"p.wasm":                           {Data: []byte("\x00asm")},
 	}
 }
 
@@ -85,19 +89,29 @@ func TestSiteEmbeddedPlaceholder(t *testing.T) {
 func TestSiteBuiltMode(t *testing.T) {
 	for _, keyed := range []bool{false, true} {
 		h := siteServer(t, builtFS(), keyed)
-		for _, p := range []string{"/", "/index.html", "/quality", "/quality/", "/_app", "/_app/immutable/"} {
+		for _, p := range []string{"/", "/index.html", "/quality", "/quality/", "/device", "/vendor", "/vendor/uplot-1.6.32/"} {
 			w := siteReq(h, "GET", p)
 			if w.Code != 200 || w.Body.String() != builtIndex || w.Header().Get("Content-Type") != "text/html; charset=utf-8" || w.Header().Get("Cache-Control") != "no-cache" {
 				t.Fatalf("%s: %d %q %q %q", p, w.Code, w.Body.String(), w.Header().Get("Content-Type"), w.Header().Get("Cache-Control"))
 			}
+			assertSiteSecurityHeaders(t, w.Header())
 		}
-		w := siteReq(h, "GET", "/_app/immutable/x.js")
+		w := siteReq(h, "GET", "/vendor/uplot-1.6.32/uPlot.esm.js")
 		if ct := w.Header().Get("Content-Type"); w.Code != 200 || !strings.Contains(ct, "javascript") || w.Header().Get("Cache-Control") != "public, max-age=31536000, immutable" {
 			t.Fatalf("js: %d %q %q", w.Code, ct, w.Header().Get("Cache-Control"))
 		}
-		w = siteReq(h, "GET", "/_app/version.json")
-		if w.Code != 200 || w.Header().Get("Cache-Control") != "" || w.Body.String() != `{"version":"1"}` {
-			t.Fatalf("version: %d %q", w.Code, w.Header().Get("Cache-Control"))
+		assertSiteSecurityHeaders(t, w.Header())
+		w = siteReq(h, "GET", "/js/version.json")
+		if w.Code != 200 || w.Header().Get("Cache-Control") != "no-cache" || w.Header().Get("ETag") == "" || w.Body.String() != `{"version":"1"}` {
+			t.Fatalf("version: %d %q %q", w.Code, w.Header().Get("Cache-Control"), w.Header().Get("ETag"))
+		}
+		assertSiteSecurityHeaders(t, w.Header())
+		revalidated := httptest.NewRequest("GET", "http://127.0.0.1:8770/js/version.json", nil)
+		revalidated.Header.Set("If-None-Match", w.Header().Get("ETag"))
+		revalidatedW := httptest.NewRecorder()
+		h.ServeHTTP(revalidatedW, revalidated)
+		if revalidatedW.Code != http.StatusNotModified || revalidatedW.Body.Len() != 0 || revalidatedW.Header().Get("ETag") != w.Header().Get("ETag") {
+			t.Fatalf("ETag revalidation: %d %q %q", revalidatedW.Code, revalidatedW.Header().Get("ETag"), revalidatedW.Body.String())
 		}
 		if w = siteReq(h, "GET", "/p.wasm"); w.Header().Get("Content-Type") != "application/wasm" || w.Code != 200 {
 			t.Fatalf("wasm: %d %q", w.Code, w.Header().Get("Content-Type"))
@@ -111,6 +125,37 @@ func TestSiteBuiltMode(t *testing.T) {
 		}
 		if w = siteReq(h, "HEAD", "/"); w.Code != 200 || w.Body.Len() != 0 {
 			t.Fatalf("HEAD: %d %q", w.Code, w.Body.String())
+		}
+	}
+}
+
+func TestSiteHandlerDirectCallbackFallback(t *testing.T) {
+	w := siteReq(siteHandler(builtFS()), "GET", "/oauth/callback")
+	if w.Code != http.StatusOK || w.Body.String() != builtIndex || w.Header().Get("Cache-Control") != "no-cache" {
+		t.Fatalf("callback fallback: %d %q %q", w.Code, w.Body.String(), w.Header().Get("Cache-Control"))
+	}
+}
+
+func assertSiteSecurityHeaders(t *testing.T, got http.Header) {
+	t.Helper()
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("runtime.Caller failed")
+	}
+	data, err := os.ReadFile(filepath.Join(filepath.Dir(file), "../../../yakka-analytics/web/_headers"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{}
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if key, value, found := strings.Cut(line, ":"); found {
+			want[http.CanonicalHeaderKey(strings.TrimSpace(key))] = strings.TrimSpace(value)
+		}
+	}
+	for _, key := range []string{"Content-Security-Policy", "X-Frame-Options", "X-Content-Type-Options", "Referrer-Policy"} {
+		if got.Get(key) != want[key] {
+			t.Errorf("%s = %q, web/_headers has %q", key, got.Get(key), want[key])
 		}
 	}
 }
