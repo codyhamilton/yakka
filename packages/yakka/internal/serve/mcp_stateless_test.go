@@ -48,8 +48,11 @@ func statelessServer(t *testing.T) *Server {
 func TestMCPStatelessCorpus(t *testing.T) {
 	var golden statelessGolden
 	raw, err := os.ReadFile("testdata/mcp-golden/stateless-tools.json")
-	if err != nil || json.Unmarshal(raw, &golden) != nil {
+	if err != nil {
 		t.Fatalf("read golden corpus: %v", err)
+	}
+	if err := json.Unmarshal(raw, &golden); err != nil {
+		t.Fatalf("decode golden corpus: %v", err)
 	}
 	s := statelessServer(t)
 	h := s.Handler()
