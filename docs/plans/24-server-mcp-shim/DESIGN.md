@@ -590,6 +590,27 @@ Order and count fixed at sign-off. Phases 2 and 3 can be built in either order a
 - Approach: known (harness behaviour in clause 8 is observed, not designed)
 - Depends on: Phases 1, 2 and 3
 
+#### Units
+
+| Unit | Brief | Depends on | Runs alongside |
+|---|---|---|---|
+| `phase4-01-transport` | `briefs/phase4-01-transport.md` | none | none |
+| `phase4-02-readers-and-enqueue` | `briefs/phase4-02-readers-and-enqueue.md` | `phase4-01-transport` | none |
+| `phase4-03-conformance-and-guard` | `briefs/phase4-03-conformance-and-guard.md` | `phase4-02-readers-and-enqueue` | `phase4-04-docs-and-release` |
+| `phase4-04-docs-and-release` | `briefs/phase4-04-docs-and-release.md` | `phase4-02-readers-and-enqueue` | `phase4-03-conformance-and-guard` |
+
+The `yakka.py` units are sequential because they share the replaced `# --- mcp ---` section. The last two units own disjoint paths and can run together after the shim implementation is committed. Phase 4 uses the v2 enqueue addendum above as binding; that does not expand the approved effect beyond the single declared action.
+
+#### Carried from Phase 3
+
+1. The v2 `enqueue_file_snapshot` compatibility and directive delta is absorbed by `phase4-02-readers-and-enqueue`; Phase 3 remains the read-only v1 server behavior.
+2. The missing deterministic `LatestScores` failure fixture is bounced as a Phase 3 evidence limitation. Phase 4 must preserve the existing `baselines unavailable` fallback and its ordinary formatting coverage; it must not change server baseline behavior to manufacture the failure fixture.
+3. The unrelated pre-existing layout test failure is absorbed as a recorded limitation in the Phase 4 implementation report. Do not run or investigate that layout test as part of this plan.
+
+#### Verdict
+
+Proceed with four units. Units 1 and 2 run in order; after unit 2, the conformance/guard unit and docs/release unit may run in parallel. Orchestration needs no input outside the briefs. Harness observations in outcome clause 8 remain non-gating and must be recorded as observed or unavailable; the layout failure remains out of scope.
+
 ## Provenance Notes
 
 - **Why one endpoint and a registry, not three REST-shaped handlers.** The three plans add tools at a steady rate (Plan 21 changes one, Plan 22 adds two, Plan 23 adds one). A registry entry is a declaration plus a handler; the protocol, scope, budget and trust rules are written once, and the issue's "tools/list through yakka mcp matches the server" is true by construction because the shim does not author it.
