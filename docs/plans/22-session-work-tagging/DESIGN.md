@@ -518,6 +518,9 @@ Units:
 
 ### Phase 3 — Cost by work
 
+- Units:
+  - `3-01-cost-by-work-query` — brief `docs/plans/22-session-work-tagging/briefs/3-01-cost-by-work-query.md`; depends on Phases 1 and 2; runs alongside nothing. The usage aggregation and HTTP query contract are one unit because their dimensions, filters, measure validation, top-N folding, and reconciliation tests share the same query behavior.
+
 - Outcome: On a seeded tenant holding one plan across phases 1–3 with kinds build, review and fix, one session with two actions switching at a known timestamp, one untagged session, one session whose only action was rejected, and one session of an unpriced harness:
   1. `/v1/analytics/query` with `dims=[action_plan, action_phase, action_kind]` returns buckets whose `cost_usd` sums, to the cent, to that plan's total computed independently from per-conversation costs; the mid-session session splits at its boundary by call timestamp.
   2. `(untagged)` and `(rejected)` are present with no filter set, survive top-N folding, and reconcile with the plan's buckets to the unfiltered total; with `action_plan` set to the plan they are absent and the buckets sum to the plan's total; a session with a rejected action between two accepted ones keeps that time in the earlier accepted action; the unpriced harness shows `unpriced_calls`, not $0; `sessions` counts distinct conversations per bucket.
