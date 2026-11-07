@@ -166,3 +166,11 @@ Carried
 
 - `/schema` reports null pricing, catalogue, and tool-kind revision identifiers with reasons because stable local IDs do not exist; populate them only when a source is added to the existing contract. gate: provide stable local revision identifiers for pricing, catalogue, and tool-kind if non-null revision values are required.
 - Session aggregate dimensions remain unsupported; `/schema` explicitly advertises none, and requests for `dim` return a named error. The signed Phase 4 outcome is satisfied by the implemented scalar aggregate modes; any future grouped session aggregate capability must be reconciled against the existing schema contract before being offered.
+
+## Phase 5 — Artifact entities, scores by lens, content
+
+Tool: Codex execute skill
+Run ID: feat/20-analytics-reset phase 5 execution
+Start time: 2026-11-08T07:51+10:00
+
+Refinement commit: `d23bf4693bab93a79e32096cb830fbd301037341`; three sequential units. `artifact_feedback` on the briefs returned `not delivered` because the service had no version and nothing queued. Proceed verdict; no contract gaps identified.
