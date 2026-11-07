@@ -860,6 +860,55 @@ func TestAnalyticsExploreKeysetWatermark(t *testing.T) {
 	}
 }
 
+func TestAnalyticsExploreKeysetTraversesBeyondTwentyThousand(t *testing.T) {
+	tn := openT(t, Options{})
+	ctx := context.Background()
+	const population = 20005
+	base := ad(10, 1, 0, 0)
+	tx, err := tn.rdb.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ins, err := tx.PrepareContext(ctx, `INSERT INTO facts(type,row_hash,conversation_id,harness,event,ts,received_at,repo_id,path,content_hash,raw,kind)
+		VALUES('hook_event',?,'c','h','event',?,?, '','','',x'','')`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < population; i++ {
+		if _, err := ins.ExecContext(ctx, fmt.Sprintf("%064x", i+1), float64(base.Unix()), int64(i+1)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := ins.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+
+	f := AnalyticsFilter{From: base.Add(-time.Minute), To: base.Add(time.Minute)}
+	first, more, cursor, err := tn.ExplorePage(ctx, f, nil, 20000)
+	if err != nil || !more || len(first) != 20000 || cursor == nil {
+		t.Fatalf("first page: rows=%d more=%v cursor=%+v err=%v", len(first), more, cursor, err)
+	}
+	second, more, next, err := tn.ExplorePage(ctx, f, cursor, 20000)
+	if err != nil || more || next != nil || len(second) != population-20000 {
+		t.Fatalf("second page: rows=%d more=%v cursor=%+v err=%v", len(second), more, next, err)
+	}
+	seen := make(map[string]bool, population)
+	for _, page := range [][]ExploreRow{first, second} {
+		for _, row := range page {
+			if seen[row.PageKey] {
+				t.Fatalf("duplicate explore key %s", row.PageKey)
+			}
+			seen[row.PageKey] = true
+		}
+	}
+	if len(seen) != population {
+		t.Fatalf("traversed %d distinct keys, want %d", len(seen), population)
+	}
+}
+
 func TestAnalyticsExploreUsageRow(t *testing.T) {
 	tn := usageFixture(t)
 	rows, trunc, err := tn.Explore(context.Background(), usageFilter(), 100)

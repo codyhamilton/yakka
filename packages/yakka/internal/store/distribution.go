@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"math"
 	"sort"
 )
@@ -141,32 +142,50 @@ func (t *Tenant) Distribution(ctx context.Context, f AnalyticsFilter, p Distribu
 	if err := rows.Err(); err != nil {
 		return DistributionResult{}, err
 	}
-	binRows, err := t.rdb.QueryContext(ctx, `SELECT k,value,priced FROM dist_samples`)
+	binRows, err := t.rdb.QueryContext(ctx, `WITH top_keys AS (
+		SELECT k FROM dist_samples GROUP BY k ORDER BY sum(priced) DESC,k ASC LIMIT ?
+	), counts AS (
+		SELECT d.k,`+distributionBinIndexSQL(p.Measure)+` AS bin_index,count(*) AS n
+		FROM dist_samples d JOIN top_keys USING(k) WHERE d.priced=1 GROUP BY d.k,bin_index
+	) SELECT k,bin_index,n FROM counts ORDER BY k,bin_index`, top)
 	if err != nil {
 		return DistributionResult{}, err
 	}
 	defer binRows.Close()
-	byKey := map[string]*distGroup{}
+	byKey := map[string][]DistributionBin{}
 	for _, r := range res.Rows {
-		byKey[r.K] = &distGroup{key: r.K, bins: r.Bins}
+		byKey[r.K] = r.Bins
 	}
 	for binRows.Next() {
 		var k string
-		var v float64
-		var priced int
-		if err := binRows.Scan(&k, &v, &priced); err != nil {
+		var index, count int
+		if err := binRows.Scan(&k, &index, &count); err != nil {
 			return DistributionResult{}, err
 		}
-		if priced == 1 {
-			if g := byKey[k]; g != nil {
-				assignBin(&g.bins, p.Measure, v)
-			}
+		if bins := byKey[k]; bins != nil && index >= 0 && index < len(bins) {
+			bins[index].N = count
 		}
 	}
 	for i := range res.Rows {
-		res.Rows[i].Bins = binCounts(p.Measure, byKey[res.Rows[i].K].bins)
+		res.Rows[i].Bins = binCounts(p.Measure, byKey[res.Rows[i].K])
 	}
 	return res, nil
+}
+
+func distributionBinIndexSQL(measure string) string {
+	if measure == "cost_usd" {
+		query := "CASE WHEN value=0 THEN 0 WHEN value>0 AND value<0.0001 THEN 1 WHEN value>=100 THEN 8"
+		for i := -4; i <= 1; i++ {
+			lo, hi := math.Pow(10, float64(i)), math.Pow(10, float64(i+1))
+			query += fmt.Sprintf(" WHEN value>=%g AND value<%g THEN %d", lo, hi, i+6)
+		}
+		return query + " ELSE 8 END"
+	}
+	query := "CASE WHEN value=0 OR (value>0 AND value<1) THEN 0 WHEN value>=1048576 THEN 21"
+	for i := 0; i < 20; i++ {
+		query += fmt.Sprintf(" WHEN value>=%d AND value<%d THEN %d", 1<<i, 1<<(i+1), i+1)
+	}
+	return query + " ELSE 21 END"
 }
 
 func distributionValueSQL(measure string) string {

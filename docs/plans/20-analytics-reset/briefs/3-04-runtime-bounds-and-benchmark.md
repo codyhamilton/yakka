@@ -1,8 +1,8 @@
 # Brief: 3-04 — Runtime bounds and benchmark
 
 Consumer: Plan 20 Phase 3 server worker.
-Owned paths: `packages/yakka/internal/serve/analytics.go`, `packages/yakka/internal/serve/analytics_test.go`, `packages/yakka/internal/serve/analytics_bench_test.go`, `packages/yakka/internal/store/analytics_test.go`, plus any new focused test file under `packages/yakka/internal/serve/` or `store/`. Touch nothing else.
-Commits: Leave changes in the working tree.
+Owned paths: `packages/yakka/internal/serve/{analytics.go,analytics_query.go,analytics_score_series.go,serve.go,analytics_test.go,analytics_query_test.go,analytics_bench_test.go,analytics_runtime_test.go}`, `packages/yakka/internal/store/{analytics.go,analytics_test.go}`, plus any new focused test file under `packages/yakka/internal/serve/` or `store/`. The handler and store paths are included to integrate the already-designed `/explore` cursor/watermark, auto-resolution, deadline and route-wide coverage contracts; they add no new route, grain, join or capability. Touch nothing else.
+Commits: Include the implementation and report in a plain-summary unit commit; phase owner closes the phase record separately.
 Report: before committing, write `docs/plans/20-analytics-reset/reports/3-04-runtime-bounds-and-benchmark.md` (a handoff; rubric in `packages/yakka/catalogue/checks/execution-report.json`) and include it in the phase commit.
 Depends on: 3-01 Range resolution and budget responses; 3-02 Bounded aggregate storage reads; 3-03 Paged reads and honest coverage.
 Runs alongside: nothing.

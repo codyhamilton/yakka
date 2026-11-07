@@ -1,8 +1,10 @@
 # Plan 20 implementation
 
 Tool: Codex execute skill
-Run ID: feat/20-analytics-reset phase 1 execution
-Start time: 2026-11-08 04:48 Australia/Brisbane (2026-11-07 18:48 UTC)
+Run ID: feat/20-analytics-reset phase 3 execution
+Start time: 2026-11-08 09:10 Australia/Brisbane (2026-11-07 23:10 UTC)
+
+Previous run: feat/20-analytics-reset phase 1 execution, started 2026-11-08 04:48 Australia/Brisbane (2026-11-07 18:48 UTC).
 
 ## Phase 1 — Reset and shell
 
@@ -75,3 +77,49 @@ Carried
 - Playwright browser acceptance for the complete identity flow; runner/browser unavailable in this worktree.
 - Verify that external Pages automation accepts `./web` as its output directory (Phase 13).
 - Reuse the 32,767-hash fixture once per test setup; its generation and verification take about 187 seconds (Phase 3).
+
+## Phase 3 — Bounded range reads
+
+Refinement commit: `d46453e883a962681e5349286c4d96c3b689b651`; four sequential units. The 32,767-hash fixture reuse was assigned to 3-02. Identity browser acceptance and the external Pages output check were bounced as unrelated to Phase 3. Before closing, runner `artifact_feedback` on all four briefs and reports returned delivered / screen pass (`jev-1.13.0`), with no flagged checks.
+
+### `3-01-range-resolution.md`
+
+- Outcome: committed as `95e8c13`; removed shared width rejection, accepted `all=1` from the signed nanosecond minimum, added explicit time-bound errors, and added `/query` auto-range metadata and cell/series budget errors.
+- Surfaces: `packages/yakka/internal/serve/analytics.go`, `analytics_query.go`, their focused tests, `CONTRACTS.md`, and `docs/design/03-remote-service.md`.
+- Deviations and carried work: route-side only; year and multi-year grouping/auto retry and pre-slice cell planning remain for 3-02. Full serve tests identify two stale expectations outside this unit's ownership: `TestDistributionRangeTooWide` and `TestScoreSeriesRangeTooWide` still require legacy 400s.
+- Verification: focused `GOMAXPROCS=3 GOMEMLIMIT=8GiB go test -p=3 ./internal/serve -run 'TestAnalytics(Query|Schema|Outcome)' -count=1` passed; full serve suite failed only those two stale expectations. `git diff --check` passed. Before/after regression evidence and the candidate comparison are in `reports/3-01-range-resolution.md`.
+
+### `3-02-bounded-aggregation.md`
+
+- Outcome: committed as `f415d72`; usage, distribution and score-series scanned-row aggregation now runs in SQLite, including exact percentile/rank logic and a 32,767-hash score-series join. Internal year and multi-year bucket expressions were added without changing the legacy public bucket list.
+- Surfaces: owned aggregate store paths (`usage.go`, `query.go`, `distribution.go`, `score_series.go`, and rollup files/tests).
+- Deviations and carried work: no heap-growth measurement was recorded; the SQL shape removes input-row collections but allocation independence still needs direct evidence. Serve integration must connect auto retry to internal year buckets and executable suggestions. The two stale serve assertions remain to update in the serving unit. The 14-turn budget was exceeded.
+- Verification: `GOMAXPROCS=3 GOMEMLIMIT=8GiB go test -p=3 ./internal/store -count=1` passed, including 32,767 distinct scored hashes; focused store checks and `git diff --check` passed. Full report and candidate comparison: `reports/3-02-bounded-aggregation.md`.
+
+### `3-03-paged-reads-and-coverage.md`
+
+- Outcome: committed as `b49316f`; `/series` uses the requested IANA timezone for daily and Monday-start weekly buckets, conversation usage events expose pricing, and conversation/distribution/score-series report compaction coverage. The two stale wide-window expectations now accept successful responses.
+- Surfaces: owned conversation/distribution/score-series handlers, store conversation/analytics paths and corresponding tests.
+- Deviations and carried work at unit landing: `/explore` keyset traversal with receive watermark, explore-event `priced`, and route-wide partial metadata were left for 3-04 because the shared handler was outside this brief's owned paths. Unit 3-04 completed those items; the final 20,005-row traversal proof is recorded in `reports/3-04-runner-note.md`.
+- Verification: before, the two stale wide-window tests failed with 400-vs-200. After, `GOMAXPROCS=3 GOMEMLIMIT=8GiB go test -p=3 ./internal/store ./internal/serve -count=1` passed; `git diff --check` passed.
+
+### `3-04-runtime-bounds-and-benchmark.md`
+
+- Outcome: committed as `492fc80`; added a one-second measured query deadline, driver cancellation and reader-release behavior, a four-request tenant heavy-read bound, `/explore` keyset traversal with first-page watermarks and `priced`, auto year-step retries, executable overflow suggestions, and route-wide partial reasons. The fixture benchmark now covers all-time and auto.
+- Surfaces: `serve/{analytics.go,analytics_query.go,analytics_score_series.go,serve.go}` and focused analytics tests/benchmark; `store/{analytics.go,analytics_test.go}` for keyset page/watermark queries.
+- Deviations and carried work: the brief's original path list omitted handler and store paths needed by its fixed outcome; it has been amended to record the clarified implementation ownership. Usage/distribution allocation comparisons were added in the runner follow-up; ScoreSeries has no cross-size allocation comparison. The optional real-corpus benchmark needs owner-provided data.
+- Verification: `GOMAXPROCS=3 GOMEMLIMIT=8GiB go test -p=3 ./internal/store ./internal/serve -count=1` passed; cancellation/deadline and heavy-read concurrency tests passed; fixture benchmark completed 2,647 cases (max observed p95 4.4 ms, all-time/auto max p95 4.1 ms) against the 500 ms target; `git diff --check` passed. Full evidence/candidate comparison is in `reports/3-04-runtime-bounds-and-benchmark.md`.
+
+### Phase 3 verification and closure
+
+- Entry point → action → result: `/v1/analytics/query` accepts all-history and ten-year ranges without changing requested bounds, coarsens the calendar resolution under cell pressure, and returns a documented budget error rather than clipped rows. `/v1/analytics/explore` pages a 20,005-row equal-time fixture in 20,000 + 5 rows with distinct keys and no omissions; route-level tests confirm cursor round-trips. Timezone, pricing and partial-coverage fields match fixtures. Runtime tests observe query deadline interruption, reader reuse, no partial response and tenant concurrency rejection.
+- Independent integrated verification: `GOMAXPROCS=3 GOMEMLIMIT=8GiB go test -p=3 ./internal/store ./internal/serve -count=1` passed after the histogram and 20,005-row cursor follow-ups (store 7.349s; serve 24.905s). Allocation-growth tests passed for usage and distribution at 16× input rows. `git diff --check` passed.
+
+Runner note: the first allocation-growth check found distribution histogram binning scanned every SQLite sample into Go. A follow-up change moved bin counts into SQL and added 16x input-size allocation comparisons for usage and distribution (128 vs. 2,048 rows); both passed. ScoreSeries retains only result buckets and its 32,767-hash regression passes, but a cross-size Go allocation comparison is not recorded. See `reports/3-04-runner-note.md`.
+
+Carried
+
+- Usage and distribution allocation comparisons passed at a 16× scanned-row increase (usage 3,288 → 3,288 bytes; distribution 21,360 → 21,856 bytes). ScoreSeries succeeds with 32,767 distinct hashes and retains only bounded result buckets, but no cross-size allocation comparison was recorded; the peak-retention claim for that path remains based on its streaming SQL-temp-table implementation shape.
+- Run the analytics benchmark against an owner-provided real ledger via `YAKKA_BENCH_DIR` for additional corpus evidence.
+- Playwright browser acceptance for Phase 2 identity flows remains outstanding (carried from Phase 2; not a Phase 3 blocker).
+- Verify the external Pages automation accepts `./web` as its output directory (release readiness).
