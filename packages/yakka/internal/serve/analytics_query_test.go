@@ -91,7 +91,7 @@ func TestAnalyticsSchema(t *testing.T) {
 	if features["artifact_content"] != true {
 		t.Errorf("artifact content capability not advertised: %v", features)
 	}
-	for _, name := range []string{"entities_plan", "entities_execution", "activity", "cohort", "actions", "reviews"} {
+	for _, name := range []string{"activity", "cohort", "actions", "reviews"} {
 		if _, ok := features[name]; ok {
 			t.Errorf("later phase feature advertised: %s", name)
 		}
@@ -269,7 +269,7 @@ func TestAnalyticsSessionTimeEntitiesAndExclusions(t *testing.T) {
 		t.Fatalf("exclude not applied: %v", filtered)
 	}
 	code, body := aget(t, s, "/v1/analytics/entities?grain=activity&"+win)
-	if code != 400 || body["error"] != "grain must be session or time" {
+	if code != 400 || body["error"] != "grain must be session, artifact, plan, execution or time" {
 		t.Fatalf("later grain status=%d body=%v", code, body)
 	}
 }

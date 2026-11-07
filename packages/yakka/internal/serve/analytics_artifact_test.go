@@ -273,7 +273,7 @@ func TestArtifactSchemaBandsAndWriterMeasures(t *testing.T) {
 	if features["entities_artifact"] != true || features["artifact_content"] != true {
 		t.Errorf("artifact features=%v", features)
 	}
-	for _, name := range []string{"entities_plan", "entities_execution", "cohort", "activity", "actions", "reviews"} {
+	for _, name := range []string{"cohort", "activity", "actions", "reviews"} {
 		if _, ok := features[name]; ok {
 			t.Errorf("unserved feature %s", name)
 		}

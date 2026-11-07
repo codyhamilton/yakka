@@ -22,10 +22,14 @@ func (s *Server) analyticsEntities(w http.ResponseWriter, r *http.Request, _ str
 		s.analyticsSessionEntities(w, r, ts)
 	case "artifact":
 		s.analyticsArtifactEntities(w, r, ts)
+	case "plan":
+		s.analyticsPlanEntities(w, r, ts)
+	case "execution":
+		s.analyticsExecutionEntities(w, r, ts)
 	case "time":
 		s.analyticsTimeEntities(w, r, ts)
 	default:
-		errJSON(w, 400, "grain must be session or time")
+		errJSON(w, 400, "grain must be session, artifact, plan, execution or time")
 	}
 }
 
@@ -88,6 +92,10 @@ func parseArtifactRanges(values []string) ([]store.SessionRange, error) {
 
 func (s *Server) analyticsEntity(w http.ResponseWriter, r *http.Request, _ string, ts *tenantState) {
 	q := r.URL.Query()
+	if q.Get("grain") == "plan" {
+		s.analyticsPlanDetail(w, r, ts)
+		return
+	}
 	if q.Get("grain") != "artifact" {
 		errJSON(w, 400, "grain must be artifact")
 		return
@@ -178,6 +186,228 @@ func (s *Server) analyticsEntity(w http.ResponseWriter, r *http.Request, _ strin
 		next = (cursor{Route: "entity:artifact", Filter: cursorFilter, Key: []string{strconv.FormatInt(last.ReceivedAt, 10), last.Hash}}).encode()
 	}
 	writeJSON(w, 200, map[string]any{"grain": "artifact", "id": map[string]any{"repo_id": repo, "path": path}, "versions": a.Versions, "latest": map[string]any{"content_hash": a.Latest.ContentHash, "received_at": a.Latest.ReceivedAt, "writing_session": latestWriter, "writing_session_label": "earliest observed writing session for this version", "writing_session_is_captured_provenance": true}, "collection": "versions", "rows": versions, "next": next, "population": map[string]any{"grain": "artifact_version", "unit": "repo_id,path,content_hash", "scope_n": a.Versions, "cohort_n": a.Versions, "eligible_n": a.Versions, "returned_n": len(versions), "missing_by_reason": map[string]int{}}})
+}
+
+func (s *Server) analyticsPlanEntities(w http.ResponseWriter, r *http.Request, ts *tenantState) {
+	q := r.URL.Query()
+	sortSpec := q.Get("sort")
+	if sortSpec == "" {
+		sortSpec = "last_ts:desc"
+	}
+	p := strings.Split(sortSpec, ":")
+	if len(p) != 2 || (p[1] != "asc" && p[1] != "desc") {
+		errJSON(w, 400, "sort must be <measure>:asc|desc")
+		return
+	}
+	limit, cur, ok := pageParams(w, r)
+	if !ok {
+		return
+	}
+	f, ok := parseFilter(w, r, filterOpts{route: "entities:plan", cur: cur})
+	if !ok {
+		return
+	}
+	if cur != nil && (cur.Route != "entities:plan" || cur.Filter != canonFilter(q)) {
+		errJSON(w, 400, "cursor mismatch")
+		return
+	}
+	var sc *store.PlanCursor
+	if cur != nil && len(cur.Key) == 2 {
+		sc = &store.PlanCursor{TS: cur.TS, RepoID: cur.Key[0], Plan: cur.Key[1]}
+	}
+	page, more, err := ts.t.PlanEntitiesPage(r.Context(), f, p[0], p[1] == "desc", sc, limit)
+	if err != nil {
+		errJSON(w, 400, "unsupported plan sort "+p[0])
+		return
+	}
+	n, err := ts.t.PlanEntityCount(r.Context(), f)
+	if err != nil {
+		readFailed(w)
+		return
+	}
+	rows := make([]map[string]any, 0, len(page))
+	for _, x := range page {
+		execN := x.ExecutionsComplete + x.ExecutionsUnreported + x.ExecutionsStarted
+		cost, unpriced, calls, costErr := ts.t.PlanAssociatedCost(r.Context(), f, x.RepoID, x.Plan)
+		if costErr != nil {
+			readFailed(w)
+			return
+		}
+		var share any
+		if execN > 0 {
+			share = float64(x.ExecutionsComplete) / float64(execN)
+		}
+		m := map[string]any{"artifacts": x.Artifacts, "versions": x.Versions, "sessions": x.Sessions, "shared_sessions": x.SharedSessions, "associated_cost_usd": cost, "unpriced_calls": unpriced, "executions_complete": x.ExecutionsComplete, "executions_unreported": x.ExecutionsUnreported, "executions_started": x.ExecutionsStarted, "complete_share": share, "first_ts": x.FirstTS, "last_ts": x.LastTS, "span_days": (x.LastTS - x.FirstTS) / 86400}
+		flags := map[string]any{}
+		if calls == 0 {
+			m["associated_cost_usd"] = float64(0)
+		} else if unpriced > 0 {
+			flags["associated_cost_lower_bound"] = true
+			if unpriced == calls {
+				m["associated_cost_usd"] = nil
+				flags["associated_cost_null_reason"] = "all_unpriced"
+			}
+		}
+		if execN == 0 {
+			flags["complete_share_null_reason"] = "no_executions"
+		}
+		rows = append(rows, map[string]any{"id": map[string]any{"repo_id": x.RepoID, "plan": x.Plan}, "m": m, "l": map[string]any{"repo_id": x.RepoID}, "flags": flags})
+	}
+	out := map[string]any{"grain": "plan", "rows": rows, "sort": sortSpec, "population": map[string]any{"grain": "plan", "unit": "repo_id,plan", "scope_n": n, "cohort_n": n, "eligible_n": n, "returned_n": len(rows), "missing_by_reason": map[string]int{}}}
+	if more && len(page) > 0 {
+		last := page[len(page)-1]
+		out["next"] = (cursor{Route: "entities:plan", Filter: canonFilter(q), From: f.From.UnixNano(), To: f.To.UnixNano(), TS: planMeasure(last, p[0]), Key: []string{last.RepoID, last.Plan}}).encode()
+	}
+	writeJSON(w, 200, out)
+}
+
+func planMeasure(x store.PlanEntity, name string) float64 {
+	switch name {
+	case "first_ts":
+		return x.FirstTS
+	case "artifacts":
+		return float64(x.Artifacts)
+	case "versions":
+		return float64(x.Versions)
+	case "sessions":
+		return float64(x.Sessions)
+	case "shared_sessions":
+		return float64(x.SharedSessions)
+	case "executions_complete":
+		return float64(x.ExecutionsComplete)
+	case "executions_unreported":
+		return float64(x.ExecutionsUnreported)
+	case "executions_started":
+		return float64(x.ExecutionsStarted)
+	case "span_days":
+		return (x.LastTS - x.FirstTS) / 86400
+	default:
+		return x.LastTS
+	}
+}
+
+func (s *Server) analyticsExecutionEntities(w http.ResponseWriter, r *http.Request, ts *tenantState) {
+	q := r.URL.Query()
+	limit, cur, ok := pageParams(w, r)
+	if !ok {
+		return
+	}
+	f, ok := parseFilter(w, r, filterOpts{route: "entities:execution", cur: cur})
+	if !ok {
+		return
+	}
+	if cur != nil && (cur.Route != "entities:execution" || cur.Filter != canonFilter(q)) {
+		errJSON(w, 400, "cursor mismatch")
+		return
+	}
+	var ec *store.ExecCursor
+	if cur != nil && len(cur.Key) >= 3 {
+		ec = &store.ExecCursor{TS: cur.TS, Key: cur.Key}
+	}
+	page, counts, more, err := ts.t.ExecutionsPage(r.Context(), f, nil, ec, limit)
+	if err != nil {
+		readFailed(w)
+		return
+	}
+	rows := make([]map[string]any, 0, len(page))
+	for _, x := range page {
+		sf := f
+		sf.ConversationIDs = []string{x.ConversationID}
+		sessions, _, sessionErr := ts.t.SessionEntitiesPage(r.Context(), sf, "last_ts", true, nil, 1)
+		if sessionErr != nil {
+			readFailed(w)
+			return
+		}
+		m := map[string]any{"ts": x.TS, "session_cost_usd": float64(0)}
+		flags := map[string]any{}
+		if len(sessions) > 0 {
+			cost := sessions[0].Measures["cost_usd"]
+			calls, unpriced := sessions[0].Measures["model_calls"], sessions[0].Measures["unpriced_calls"]
+			if calls > 0 && calls == unpriced {
+				m["session_cost_usd"] = nil
+				flags["session_cost_null_reason"] = "all_unpriced"
+			} else {
+				m["session_cost_usd"] = cost
+				if unpriced > 0 {
+					flags["session_cost_lower_bound"] = true
+				}
+			}
+		}
+		rows = append(rows, map[string]any{"id": map[string]any{"repo_id": x.RepoID, "conversation_id": x.ConversationID, "brief_path": x.BriefPath}, "m": m, "l": map[string]any{"shape": x.Shape, "plan": x.Plan, "repo_id": x.RepoID, "harness": x.Harness}, "flags": flags})
+	}
+	n := counts["complete"] + counts["unreported"] + counts["started"]
+	out := map[string]any{"grain": "execution", "rows": rows, "population": map[string]any{"grain": "execution", "unit": "repo_id,conversation_id,brief_path", "scope_n": n, "cohort_n": n, "eligible_n": n, "returned_n": len(rows), "missing_by_reason": map[string]int{}}}
+	if more && len(page) > 0 {
+		last := page[len(page)-1]
+		out["next"] = (cursor{Route: "entities:execution", Filter: canonFilter(q), From: f.From.UnixNano(), To: f.To.UnixNano(), TS: last.TS, Key: []string{last.ConversationID, last.BriefPath, last.RepoID}}).encode()
+	}
+	writeJSON(w, 200, out)
+}
+
+func (s *Server) analyticsPlanDetail(w http.ResponseWriter, r *http.Request, ts *tenantState) {
+	q := r.URL.Query()
+	repo, plan := q.Get("repo_id"), q.Get("plan")
+	if repo == "" || plan == "" {
+		errJSON(w, 400, "repo_id and plan required")
+		return
+	}
+	collection := q.Get("collection")
+	if collection == "" {
+		collection = "artifacts"
+	}
+	if collection != "artifacts" && collection != "executions" && collection != "sessions" && collection != "events" {
+		errJSON(w, 400, "unsupported plan collection")
+		return
+	}
+	limit, cur, ok := pageParams(w, r)
+	if !ok {
+		return
+	}
+	cf := canonFilter(q) + "|plan=" + repo + ":" + plan + "|collection=" + collection
+	after := ""
+	var tsAfter float64
+	if cur != nil {
+		if cur.Route != "entity:plan:"+collection || cur.Filter != cf {
+			errJSON(w, 400, "cursor mismatch")
+			return
+		}
+		after = firstKey(cur.Key)
+		if collection == "events" && len(cur.Key) > 1 {
+			after = cur.Key[0] + "|" + cur.Key[1]
+		}
+		tsAfter = cur.TS
+	}
+	f, ok := parseFilter(w, r, filterOpts{route: "entity:plan:" + collection, cur: cur})
+	if !ok {
+		return
+	}
+	page, more, err := ts.t.PlanDetailPage(r.Context(), f, repo, plan, collection, after, tsAfter, limit)
+	if err != nil {
+		readFailed(w)
+		return
+	}
+	rows := make([]map[string]any, 0, len(page))
+	for _, x := range page {
+		rows = append(rows, map[string]any{"repo_id": x.RepoID, "plan": x.Plan, "path": x.Path, "conversation_id": x.ConversationID, "event": x.Event, "event_type": x.Type, "ts": x.TS})
+	}
+	pop, err := ts.t.PlanDetailCount(r.Context(), f, repo, plan, collection)
+	if err != nil {
+		readFailed(w)
+		return
+	}
+	out := map[string]any{"grain": "plan", "id": map[string]any{"repo_id": repo, "plan": plan}, "collection": collection, "rows": rows, "population": map[string]any{"grain": "plan_" + collection, "unit": collection, "scope_n": pop, "cohort_n": pop, "eligible_n": pop, "returned_n": len(rows), "missing_by_reason": map[string]int{}}}
+	if more && len(page) > 0 {
+		last := page[len(page)-1]
+		key := []string{last.Path}
+		if collection == "sessions" {
+			key = []string{last.ConversationID}
+		}
+		if collection == "events" {
+			key = []string{last.Type, strconv.FormatInt(last.RowID, 10)}
+		}
+		out["next"] = (cursor{Route: "entity:plan:" + collection, Filter: cf, TS: last.TS, Key: key}).encode()
+	}
+	writeJSON(w, 200, out)
 }
 
 func (s *Server) analyticsSessionEntities(w http.ResponseWriter, r *http.Request, ts *tenantState) {
