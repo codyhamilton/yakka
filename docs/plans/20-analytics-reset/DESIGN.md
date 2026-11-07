@@ -476,6 +476,14 @@ The count/order is fixed at this headless checkpoint: 13 outcome phases. Phase 1
 - Approach: open (generating the deterministic multi-year fixture ledger through the store with bodies and scores).
 - Depends on: nothing.
 
+**Units**
+
+| Unit | Brief | Depends on | May run alongside |
+|---|---|---|---|
+| Deterministic fixture ledger | [1-01-fixture-ledger](briefs/1-01-fixture-ledger.md) | Nothing | Framework-free shell |
+| Framework-free shell | [1-02-framework-free-shell](briefs/1-02-framework-free-shell.md) | Nothing | Deterministic fixture ledger |
+| Release and embedded serving | [1-03-release-and-serving](briefs/1-03-release-and-serving.md) | Deterministic fixture ledger; Framework-free shell | Nothing |
+
 ### Phase 2 — Identity flows
 
 - Outcome: On the Pages-faithful identity rig, a signed-out deep link signs in through the callback and returns to its safe original path; a denied/failed/redirected callback stays with its error. Device approval preserves and normalises the code, presents the host, approves or denies with exactly the current server fields and shows failures verbatim. Profile tenant/token operations, no-tenant recovery, bearer Settings and sign-out follow the preserved contract. The one-time issued token is absent from storage/URLs/reload; credential and secret checks pass.
