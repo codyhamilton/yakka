@@ -3,7 +3,9 @@ package serve
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -17,7 +19,13 @@ func (s *Server) analyticsSchema(w http.ResponseWriter, r *http.Request, _ strin
 	for _, m := range store.Measures() {
 		measures = append(measures, map[string]any{"name": m.Name, "unit": m.Unit, "dims": m.Dims})
 	}
-	writeJSON(w, 200, map[string]any{"measures": measures, "buckets": store.Buckets})
+	writeJSON(w, 200, map[string]any{
+		"measures": measures, "buckets": store.Buckets,
+		"resolutions": map[string]any{"auto": true, "year": true, "multi_year_steps": []int{2, 5, 10, 20, 50, 100, 200, 500, 1000}},
+		"budgets": map[string]any{"max_cells": 20000, "deadline_s": analyticsDeadline.Seconds(), "top_max": maxLimit,
+			"page_max": maxLimit, "explore_page_max": exploreCap, "heavy_read_concurrency": analyticsHeavyConcurrency,
+			"time_range": map[string]string{"min": minAnalyticsTime.Format(time.RFC3339Nano), "max": maxAnalyticsTime.Format(time.RFC3339Nano)}},
+	})
 }
 
 var queryBuckets = func() map[string]bool {
@@ -27,6 +35,8 @@ var queryBuckets = func() map[string]bool {
 	}
 	return m
 }()
+
+var privateYearBucket = regexp.MustCompile(`^year:(2|5|10|20|50|100|200|500|1000)$`)
 
 func knownMeasure(name string) bool {
 	for _, m := range store.Measures() {
@@ -60,7 +70,7 @@ func (s *Server) analyticsQuery(w http.ResponseWriter, r *http.Request, _ string
 		bucket = "none"
 		requestedBucket = "none"
 	}
-	if !queryBuckets[bucket] {
+	if !queryBuckets[bucket] && bucket != "year" && !privateYearBucket.MatchString(bucket) {
 		if bucket != "auto" {
 			errJSON(w, 400, "unknown bucket "+bucket)
 			return
@@ -92,10 +102,23 @@ func (s *Server) analyticsQuery(w http.ResponseWriter, r *http.Request, _ string
 	if !ok {
 		return
 	}
-	if bucket == "auto" {
+	auto := bucket == "auto"
+	if auto {
 		bucket = resolveAutoBucket(f.From, f.To, f.TZ, cellBudget)
 	}
-	res, err := ts.t.Query(r.Context(), f, store.QueryParams{Measure: measure, Dims: dims, Bucket: bucket, Top: top})
+	var res store.QueryResult
+	var err error
+	for {
+		res, err = ts.t.Query(r.Context(), f, store.QueryParams{Measure: measure, Dims: dims, Bucket: bucket, Top: top})
+		if err != nil || !auto || (!res.Truncated && len(res.Rows) <= cellBudget) || distinctSeries(res.Rows) > cellBudget {
+			break
+		}
+		next, _ := nextBucket(bucket)
+		if next == "none" {
+			break
+		}
+		bucket = next
+	}
 	if err != nil {
 		switch {
 		case errors.Is(err, store.ErrUnsupported):
@@ -124,17 +147,16 @@ func (s *Server) analyticsQuery(w http.ResponseWriter, r *http.Request, _ string
 		}
 		rows = append(rows, m)
 	}
+	step := bucketStep(bucket)
 	out := map[string]any{"measure": res.Measure, "bucket": res.Bucket, "requested_bucket": requestedBucket,
-		"bucket_step": 1, "coarsened": requestedBucket == "auto" && res.Bucket != "hour",
+		"bucket_step": step, "coarsened": requestedBucket == "auto" && res.Bucket != "hour",
 		"cells": len(rows), "max_cells": cellBudget, "dims": nz(res.Dims), "rows": rows,
 		"window": map[string]any{"requested": map[string]string{"from": f.From.Format(time.RFC3339Nano), "to": f.To.Format(time.RFC3339Nano)},
 			"effective": map[string]string{"from": f.From.Format(time.RFC3339Nano), "to": f.To.Format(time.RFC3339Nano)}, "clipped": false}}
 	if len(res.Ignored) > 0 {
 		out["ignored_filters"] = res.Ignored
 	}
-	if ts.t.CompactionState() != "complete" {
-		out["partial"] = true
-	}
+	addAnalyticsPartial(out, ts)
 	if res.Truncated {
 		out["truncated"] = true
 	}
@@ -156,8 +178,16 @@ func resolveAutoBucket(from, to time.Time, loc *time.Location, budget int) strin
 			return bucket
 		}
 	}
-	// Year and multi-year calendar grouping is added with the storage planner.
-	return "month"
+	if bucketSpan(from, to, "year", loc) <= budget {
+		return "year"
+	}
+	for _, step := range []int{2, 5, 10, 20, 50, 100, 200, 500, 1000} {
+		bucket := fmt.Sprintf("year:%d", step)
+		if bucketSpan(from, to, bucket, loc) <= budget {
+			return bucket
+		}
+	}
+	return "year:1000"
 }
 
 func nextBucket(bucket string) (string, int) {
@@ -170,9 +200,26 @@ func nextBucket(bucket string) (string, int) {
 		return "month", 1
 	case "month":
 		return "year", 1
+	case "year":
+		return "year:2", 2
 	default:
+		if n := bucketStep(bucket); n >= 2 && n < 1000 {
+			for _, step := range []int{2, 5, 10, 20, 50, 100, 200, 500, 1000} {
+				if step > n {
+					return fmt.Sprintf("year:%d", step), step
+				}
+			}
+		}
 		return "none", 1
 	}
+}
+
+func bucketStep(bucket string) int {
+	if strings.HasPrefix(bucket, "year:") {
+		n, _ := strconv.Atoi(strings.TrimPrefix(bucket, "year:"))
+		return n
+	}
+	return 1
 }
 
 // bucketSpan counts calendar buckets using civil and Unix arithmetic so multi-century
@@ -196,6 +243,10 @@ func bucketSpan(from, to time.Time, bucket string, loc *time.Location) int {
 		return (bm.Year()-am.Year())*12 + int(bm.Month()-am.Month()) + 1
 	case "year":
 		return b.Year() - a.Year() + 1
+	default:
+		if n := bucketStep(bucket); n >= 2 {
+			return b.Year()/n - a.Year()/n + 1
+		}
 	}
 	return 0
 }

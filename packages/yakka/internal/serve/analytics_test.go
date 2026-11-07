@@ -478,12 +478,18 @@ func TestAnalyticsOutcome(t *testing.T) {
 			var ks []string
 			for k, v := range r {
 				ks = append(ks, k)
-				if _, ok := v.(string); !ok {
+				if k == "priced" {
+					if _, ok := v.(bool); !ok {
+						t.Fatalf("priced not boolean: %v", v)
+					}
+				} else if _, ok := v.(string); !ok {
 					t.Fatalf("%s not a string: %v", k, v)
 				}
 			}
 			sort.Strings(ks)
-			if !reflect.DeepEqual(ks, cols) {
+			withPriced := append(append([]string(nil), cols...), "priced")
+			sort.Strings(withPriced)
+			if !reflect.DeepEqual(ks, cols) && !reflect.DeepEqual(ks, withPriced) {
 				t.Fatalf("columns %v", ks)
 			}
 		}
@@ -513,6 +519,15 @@ func TestAnalyticsOutcome(t *testing.T) {
 		c := aok(t, s, A+"explore?"+win)
 		if len(rowsOf(c, "rows")) != 5 || c["truncated"] != true {
 			t.Errorf("capped: %d %v", len(rowsOf(c, "rows")), c["truncated"])
+		}
+		seen := append([]map[string]any(nil), rowsOf(c, "rows")...)
+		for c["next"] != nil {
+			next := url.QueryEscape(c["next"].(string))
+			c = aok(t, s, A+"explore?"+win+"&cursor="+next)
+			seen = append(seen, rowsOf(c, "rows")...)
+		}
+		if len(seen) != 16 {
+			t.Fatalf("paged explore rows %d, want 16", len(seen))
 		}
 		exploreCap = 16
 		c = aok(t, s, A+"explore?"+win)

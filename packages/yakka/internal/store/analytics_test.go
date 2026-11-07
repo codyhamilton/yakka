@@ -815,6 +815,51 @@ func TestAnalyticsExploreCap(t *testing.T) {
 	}
 }
 
+func TestAnalyticsExploreKeysetWatermark(t *testing.T) {
+	tn := openT(t, Options{})
+	ctx := context.Background()
+	base := ad(10, 1, 0, 0)
+	addFacts(t, tn,
+		afx{typ: "hook_event", conv: "c", harness: "h", event: "one", ts: base},
+		afx{typ: "hook_event", conv: "c", harness: "h", event: "two", ts: base},
+		afx{typ: "hook_event", conv: "c", harness: "h", event: "three", ts: base.Add(-time.Second)},
+	)
+	mustExec(t, tn, `INSERT INTO rejections (stage,fact_type,conversation_id,path,content_hash,pattern,reason,at) VALUES (?,?,?,?,?,?,?,?)`,
+		"precheck", "artifact_version", "c", "rejected", "", "p", "r", base.UnixNano())
+	f := AnalyticsFilter{From: base.Add(-time.Minute), To: base.Add(time.Minute)}
+	first, more, cursor, err := tn.ExplorePage(ctx, f, nil, 2)
+	if err != nil || !more || cursor == nil {
+		t.Fatalf("first page: n=%d more=%v cursor=%+v err=%v", len(first), more, cursor, err)
+	}
+	// A late row inside the requested event-time range is beyond the receive watermark.
+	addFacts(t, tn, afx{typ: "hook_event", conv: "c", harness: "h", event: "late", ts: base.Add(-2 * time.Second)})
+	all := append([]ExploreRow(nil), first...)
+	for more {
+		var next *ExploreCursor
+		var page []ExploreRow
+		page, more, next, err = tn.ExplorePage(ctx, f, cursor, 2)
+		if err != nil {
+			t.Fatal(err)
+		}
+		all = append(all, page...)
+		cursor = next
+	}
+	if len(all) != 4 {
+		t.Fatalf("traversal returned %d rows, want original 4", len(all))
+	}
+	seen := map[string]bool{}
+	for _, row := range all {
+		key := row.Type + "/" + row.Event + "/" + row.Path
+		if seen[key] {
+			t.Fatalf("duplicate row %q", key)
+		}
+		seen[key] = true
+	}
+	if !seen["rejection//rejected"] || seen["hook_event/late/"] {
+		t.Fatalf("unexpected traversal population: %v", seen)
+	}
+}
+
 func TestAnalyticsExploreUsageRow(t *testing.T) {
 	tn := usageFixture(t)
 	rows, trunc, err := tn.Explore(context.Background(), usageFilter(), 100)

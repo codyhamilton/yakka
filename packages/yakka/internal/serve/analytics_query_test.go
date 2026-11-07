@@ -3,6 +3,7 @@ package serve
 import (
 	"context"
 	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -74,6 +75,11 @@ func TestAnalyticsSchema(t *testing.T) {
 	m := aok(t, s, "/v1/analytics/schema")
 	if got := strs(m["buckets"]); !equalStrs(got, []string{"none", "hour", "day", "week", "month"}) {
 		t.Errorf("buckets = %v", got)
+	}
+	budgets := m["budgets"].(map[string]any)
+	if budgets["deadline_s"] != analyticsDeadline.Seconds() || budgets["max_cells"] != float64(20000) ||
+		budgets["heavy_read_concurrency"] != float64(analyticsHeavyConcurrency) {
+		t.Errorf("budget metadata: %v", budgets)
 	}
 	// The design's measure × dimension matrix, verbatim; every measure also takes hour_of_day, weekday.
 	design := []struct {
@@ -216,8 +222,8 @@ func TestAnalyticsQuery(t *testing.T) {
 		if m["bucket"] != "day" || m["requested_bucket"] != "auto" || m["coarsened"] != true {
 			t.Fatalf("auto resolution metadata: %v", m)
 		}
-		multi := aok(t, s, A+"measure=hook_events&dim=harness&dim=tool&bucket=auto&from=1700-01-01T00:00:00Z&to=2200-01-01T00:00:00Z")
-		if multi["bucket"] != "month" || len(rowsOf(multi, "rows")) == 0 {
+		multi := aok(t, s, A+"measure=hook_events&dim=harness&dim=tool&bucket=auto&max_cells=100&from=1700-01-01T00:00:00Z&to=2200-01-01T00:00:00Z")
+		if multi["bucket"] != "year:10" || multi["bucket_step"] != float64(10) || len(rowsOf(multi, "rows")) == 0 {
 			t.Fatalf("multi-century, two-dimension fixture: %v", multi)
 		}
 		win := multi["window"].(map[string]any)["requested"].(map[string]any)
@@ -245,14 +251,19 @@ func TestAnalyticsQueryPartial(t *testing.T) {
 	if err := ts.t.SetMeta(context.Background(), "compaction", "required"); err != nil {
 		t.Fatal(err)
 	}
-	code, m := aget(t, s, u)
-	if code != 200 || m["partial"] != true {
-		t.Fatalf("uncompacted: %d %v", code, m)
+	routes := []string{u, "/v1/analytics/facets", "/v1/analytics/summary", "/v1/analytics/series?metric=hook_events&bucket=day",
+		"/v1/analytics/scores?kind=design", "/v1/analytics/executions", "/v1/analytics/conversations", "/v1/analytics/explore",
+		"/v1/analytics/distribution?measure=cost_usd", "/v1/analytics/score-series?kind=design&bucket=day", "/v1/analytics/conversation?id=c"}
+	for _, route := range routes {
+		code, m := aget(t, s, route)
+		if code != 200 || m["partial"] != true || !reflect.DeepEqual(strs(m["partial_reasons"]), []string{"compaction_incomplete"}) {
+			t.Fatalf("uncompacted route %s: %d %v", route, code, m)
+		}
 	}
 	if err := ts.t.SetMeta(context.Background(), "compaction", "complete"); err != nil {
 		t.Fatal(err)
 	}
-	code, m = aget(t, s, u)
+	code, m := aget(t, s, u)
 	if code != 200 {
 		t.Fatalf("compacted: %d %v", code, m)
 	}
@@ -289,6 +300,24 @@ func TestAnalyticsQueryAcceptsWideWindowAndRejectsOutOfNanosecondBounds(t *testi
 		if code, body := aget(t, s, "/v1/analytics/query?measure=commits&bucket=none&"+bound); code != 200 {
 			t.Errorf("inclusive boundary %s: status=%d body=%v", bound, code, body)
 		}
+	}
+}
+
+func TestAnalyticsQueryMonthSuggestionIsExecutable(t *testing.T) {
+	s, ts := queryTenant(t)
+	for i, month := range []time.Month{time.January, time.February, time.March} {
+		at := time.Date(2025, month, 10, 0, 0, 0, 0, time.UTC)
+		qadd(t, ts, store.FactRow{Type: "hook_event", ConversationID: "c", Harness: "h", Event: "PostToolUse", NormEvent: "tool_post",
+			TS: float64(at.Unix()) + float64(i)}, nil)
+	}
+	win := "from=2025-01-01T00:00:00Z&to=2025-03-31T23:59:59Z&max_cells=1"
+	code, body := aget(t, s, "/v1/analytics/query?measure=hook_events&bucket=month&"+win)
+	if code != 400 || body["code"] != "too_many_cells" || body["suggested_bucket"] != "year" || body["suggested_bucket_step"] != float64(1) {
+		t.Fatalf("month overflow suggestion: status=%d body=%v", code, body)
+	}
+	got := aok(t, s, "/v1/analytics/query?measure=hook_events&bucket=year&"+win)
+	if len(rowsOf(got, "rows")) != 1 || got["bucket"] != "year" {
+		t.Fatalf("suggestion did not execute: %v", got)
 	}
 }
 

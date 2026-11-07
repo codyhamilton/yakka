@@ -1,8 +1,11 @@
 package serve
 
 import (
+	"bytes"
+	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"net/http"
@@ -30,6 +33,69 @@ var (
 	maxAnalyticsTime = time.Unix(0, math.MaxInt64).UTC()
 )
 
+const analyticsHeavyConcurrency = 4
+
+// The local fixture's slowest route p95 is below 5 ms; 1 s leaves substantial tail room while
+// remaining twice the unchanged 500 ms p95 contract. The fixture result is recorded in the report.
+var analyticsDeadline = time.Second
+
+type analyticsBuffer struct {
+	header http.Header
+	status int
+	body   bytes.Buffer
+}
+
+func newAnalyticsBuffer() *analyticsBuffer     { return &analyticsBuffer{header: make(http.Header)} }
+func (b *analyticsBuffer) Header() http.Header { return b.header }
+func (b *analyticsBuffer) WriteHeader(status int) {
+	if b.status == 0 {
+		b.status = status
+	}
+}
+func (b *analyticsBuffer) Write(p []byte) (int, error) {
+	if b.status == 0 {
+		b.status = http.StatusOK
+	}
+	return b.body.Write(p)
+}
+
+func serveBoundedAnalytics(w http.ResponseWriter, r *http.Request, name string, ts *tenantState, h tenantHandler) {
+	select {
+	case ts.analyticsSlots <- struct{}{}:
+		defer func() { <-ts.analyticsSlots }()
+	default:
+		w.Header().Set("Retry-After", "1")
+		errCodeJSON(w, http.StatusServiceUnavailable, "busy", "analytics read concurrency limit reached", map[string]any{"retry": map[string]any{"after_s": 1}})
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), analyticsDeadline)
+	b := newAnalyticsBuffer()
+	h(b, r.WithContext(ctx), name, ts)
+	expired := errors.Is(ctx.Err(), context.DeadlineExceeded)
+	canceled := r.Context().Err() != nil
+	cancel()
+	if canceled {
+		return
+	}
+	if expired {
+		errCodeJSON(w, http.StatusServiceUnavailable, "query_timeout", "analytics query deadline exceeded", map[string]any{
+			"retry": map[string]any{"after_s": 1, "suggested_action": "narrow_window_or_coarsen_bucket"},
+		})
+		return
+	}
+	for k, values := range b.header {
+		for _, v := range values {
+			w.Header().Add(k, v)
+		}
+	}
+	status := b.status
+	if status == 0 {
+		status = http.StatusOK
+	}
+	w.WriteHeader(status)
+	_, _ = w.Write(b.body.Bytes())
+}
+
 // exploreCap is the most rows /explore returns. A variable so the test can lower it.
 var exploreCap = 20000
 
@@ -50,12 +116,15 @@ func readFailed(w http.ResponseWriter) { errJSON(w, 500, "read failed") }
 // cursor is the opaque paging token: the route and filter it was issued for, the first page's
 // resolved window, and the sort key of the last row returned.
 type cursor struct {
-	Route  string   `json:"r"`
-	Filter string   `json:"f"`
-	From   int64    `json:"from"`
-	To     int64    `json:"to"`
-	TS     float64  `json:"ts"`
-	Key    []string `json:"k"`
+	Route              string   `json:"r"`
+	Filter             string   `json:"f"`
+	From               int64    `json:"from"`
+	To                 int64    `json:"to"`
+	TS                 float64  `json:"ts"`
+	NS                 int64    `json:"ns,omitempty"`
+	Key                []string `json:"k"`
+	FactWatermark      int64    `json:"fw,omitempty"`
+	RejectionWatermark int64    `json:"rw,omitempty"`
 }
 
 func (c cursor) encode() string {
@@ -262,9 +331,11 @@ func (s *Server) analyticsFacets(w http.ResponseWriter, r *http.Request, _ strin
 	for _, c := range s.catalogChecks(kindOrder...) {
 		checks = append(checks, map[string]string{"kind": c.Kind, "name": c.Name})
 	}
-	writeJSON(w, 200, map[string]any{"repos": nz(fc.Repos), "harnesses": nz(fc.Harnesses), "kinds": nz(fc.Kinds),
+	out := map[string]any{"repos": nz(fc.Repos), "harnesses": nz(fc.Harnesses), "kinds": nz(fc.Kinds),
 		"plans": nz(fc.Plans), "events": nz(fc.Events), "models": nz(fc.Models), "norm_events": nz(fc.NormEvents),
-		"tools": tools, "checks": checks})
+		"tools": tools, "checks": checks}
+	addAnalyticsPartial(out, ts)
+	writeJSON(w, 200, out)
 }
 
 func (s *Server) analyticsSummary(w http.ResponseWriter, r *http.Request, _ string, ts *tenantState) {
@@ -277,7 +348,7 @@ func (s *Server) analyticsSummary(w http.ResponseWriter, r *http.Request, _ stri
 		readFailed(w)
 		return
 	}
-	writeJSON(w, 200, map[string]any{"from": f.From.Format(time.RFC3339), "to": f.To.Format(time.RFC3339),
+	out := map[string]any{"from": f.From.Format(time.RFC3339), "to": f.To.Format(time.RFC3339),
 		"conversations": sm.Conversations, "hook_events": sm.HookEvents, "artifact_versions": sm.ArtifactVersions,
 		"distinct_content": sm.DistinctContent,
 		"by_kind":          counts(sm.ByKind, "design", "brief", "report", "other"),
@@ -287,7 +358,9 @@ func (s *Server) analyticsSummary(w http.ResponseWriter, r *http.Request, _ stri
 		"screens":          counts(sm.Screens, "pass", "unscreened"),
 		"model_calls":      sm.ModelCalls, "unpriced_calls": sm.UnpricedCalls, "cost_usd": sm.CostUSD,
 		"tokens_in": sm.TokensIn, "tokens_out": sm.TokensOut, "tokens_cache_read": sm.TokensCacheRead,
-		"tokens_cache_write": sm.TokensCacheWrite, "tokens_reasoning": sm.TokensReasoning})
+		"tokens_cache_write": sm.TokensCacheWrite, "tokens_reasoning": sm.TokensReasoning}
+	addAnalyticsPartial(out, ts)
+	writeJSON(w, 200, out)
 }
 
 var seriesGroups = map[string][]string{
@@ -358,7 +431,9 @@ func (s *Server) analyticsSeries(w http.ResponseWriter, r *http.Request, _ strin
 	if list == nil {
 		list = []*entry{}
 	}
-	writeJSON(w, 200, map[string]any{"bucket": bucket, "series": list})
+	out := map[string]any{"bucket": bucket, "series": list}
+	addAnalyticsPartial(out, ts)
+	writeJSON(w, 200, out)
 }
 
 func (s *Server) analyticsScores(w http.ResponseWriter, r *http.Request, _ string, ts *tenantState) {
@@ -381,7 +456,9 @@ func (s *Server) analyticsScores(w http.ResponseWriter, r *http.Request, _ strin
 			"p25": round3(percentile(v, .25)), "median": round3(percentile(v, .5)),
 			"p75": round3(percentile(v, .75)), "max": round3(percentile(v, 1))})
 	}
-	writeJSON(w, 200, map[string]any{"kind": kind, "checks": out})
+	resp := map[string]any{"kind": kind, "checks": out}
+	addAnalyticsPartial(resp, ts)
+	writeJSON(w, 200, resp)
 }
 
 func parseExecShapes(w http.ResponseWriter, q url.Values) ([]string, bool) {
@@ -466,6 +543,7 @@ func (s *Server) analyticsExecutions(w http.ResponseWriter, r *http.Request, _ s
 		resp["next"] = cursor{Route: "executions", Filter: canonFilter(r.URL.Query()), From: f.From.UnixNano(), To: f.To.UnixNano(),
 			TS: last.TS, Key: []string{last.ConversationID, last.BriefPath, last.RepoID}}.encode()
 	}
+	addAnalyticsPartial(resp, ts)
 	writeJSON(w, 200, resp)
 }
 
@@ -516,15 +594,32 @@ func (s *Server) analyticsConversations(w http.ResponseWriter, r *http.Request, 
 		resp["next"] = cursor{Route: "conversations", Filter: canonFilter(r.URL.Query()), From: f.From.UnixNano(), To: f.To.UnixNano(),
 			TS: last.LastTS, Key: []string{last.ConversationID}}.encode()
 	}
+	addAnalyticsPartial(resp, ts)
 	writeJSON(w, 200, resp)
 }
 
 func (s *Server) analyticsExplore(w http.ResponseWriter, r *http.Request, _ string, ts *tenantState) {
-	f, ok := parseFilter(w, r, filterOpts{})
+	limit, cur, ok := pageParams(w, r)
 	if !ok {
 		return
 	}
-	rows, truncated, err := ts.t.Explore(r.Context(), f, exploreCap)
+	if limit > exploreCap {
+		limit = exploreCap
+	}
+	f, ok := parseFilter(w, r, filterOpts{route: "explore", cur: cur})
+	if !ok {
+		return
+	}
+	var ec *store.ExploreCursor
+	if cur != nil {
+		if len(cur.Key) != 2 {
+			errJSON(w, 400, "cursor mismatch")
+			return
+		}
+		ec = &store.ExploreCursor{TS: cur.TS, NS: cur.NS, Type: cur.Key[0], Key: cur.Key[1],
+			FactWatermark: cur.FactWatermark, RejectionWatermark: cur.RejectionWatermark}
+	}
+	rows, more, next, err := ts.t.ExplorePage(r.Context(), f, ec, limit)
 	if err != nil {
 		readFailed(w)
 		return
@@ -547,11 +642,23 @@ func (s *Server) analyticsExplore(w http.ResponseWriter, r *http.Request, _ stri
 		ScreenVerdict  string   `json:"screen_verdict"`
 		RejectionStage string   `json:"rejection_stage"`
 		CostUSD        *float64 `json:"cost_usd,omitempty"`
+		Priced         *bool    `json:"priced,omitempty"`
 	}
 	out := make([]row, 0, len(rows))
 	for _, x := range rows {
+		var priced *bool
+		if x.Type == "hook_event" && x.NormEvent == "usage" {
+			p := x.Priced
+			priced = &p
+		}
 		out = append(out, row{x.Type, rfc(x.TS), x.Harness, x.RepoID, x.Plan, x.Kind, x.Event, x.Tool,
-			x.NormEvent, x.Model, x.Path, x.ConversationID, x.Source, x.SHA, x.ScreenVerdict, x.RejectionStage, x.CostUSD})
+			x.NormEvent, x.Model, x.Path, x.ConversationID, x.Source, x.SHA, x.ScreenVerdict, x.RejectionStage, x.CostUSD, priced})
 	}
-	writeJSON(w, 200, map[string]any{"rows": out, "truncated": truncated})
+	resp := map[string]any{"rows": out, "truncated": more}
+	if more && next != nil {
+		resp["next"] = cursor{Route: "explore", Filter: canonFilter(r.URL.Query()), From: f.From.UnixNano(), To: f.To.UnixNano(),
+			TS: next.TS, NS: next.NS, Key: []string{next.Type, next.Key}, FactWatermark: next.FactWatermark, RejectionWatermark: next.RejectionWatermark}.encode()
+	}
+	addAnalyticsPartial(resp, ts)
+	writeJSON(w, 200, resp)
 }

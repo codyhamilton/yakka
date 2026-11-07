@@ -14,6 +14,7 @@ import (
 	"math"
 	"path"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -130,7 +131,20 @@ type ExploreRow struct {
 	Harness, RepoID, Plan, Kind, Event, Tool, NormEvent, Model, Path, ConversationID, Source, SHA, ScreenVerdict, RejectionStage string
 	CostUSD                                                                                                                      *float64
 	Priced                                                                                                                       bool
+	PageKey                                                                                                                      string
+	PageNanos                                                                                                                    int64
+	PageType                                                                                                                     string
 }
+
+// ExploreCursor binds a traversal to the populations present on its first page.
+type ExploreCursor struct {
+	TS                 float64
+	NS                 int64
+	Type, Key          string
+	FactWatermark      int64
+	RejectionWatermark int64
+}
+
 func inList(expr string, vals []string, args *[]any) string {
 	if len(vals) == 0 {
 		return ""
@@ -974,25 +988,63 @@ func exploreFactsQuery(where string) string {
 // facts precede rejections). It fetches at most limit+1 from each side, merging them in Go with the
 // same tie rule, and reports whether more than limit matched.
 func (t *Tenant) Explore(ctx context.Context, f AnalyticsFilter, limit int) ([]ExploreRow, bool, error) {
+	rows, more, _, err := t.ExplorePage(ctx, f, nil, limit)
+	return rows, more, err
+}
+
+// ExplorePage traverses facts and rejections by (ts desc, source type asc, source key asc).
+// The first page captures independent receive bounds so later pages cannot grow with late input.
+func (t *Tenant) ExplorePage(ctx context.Context, f AnalyticsFilter, cur *ExploreCursor, limit int) ([]ExploreRow, bool, *ExploreCursor, error) {
+	if limit < 1 {
+		return nil, false, nil, fmt.Errorf("explore limit must be positive")
+	}
+	if cur == nil {
+		cur = &ExploreCursor{}
+		if err := t.rdb.QueryRowContext(ctx, `SELECT COALESCE(MAX(received_at),0) FROM facts`).Scan(&cur.FactWatermark); err != nil {
+			return nil, false, nil, err
+		}
+		if err := t.rdb.QueryRowContext(ctx, `SELECT COALESCE(MAX(id),0) FROM rejections`).Scan(&cur.RejectionWatermark); err != nil {
+			return nil, false, nil, err
+		}
+	} else {
+		copy := *cur
+		cur = &copy
+	}
 	fw, fargs := f.factWhere()
 	rw, rargs := f.rejWhere()
 
-	frows, err := t.rdb.QueryContext(ctx, exploreFactsQuery(fw), append(fargs, limit+1)...)
+	fq := `SELECT type, ts, harness, repo_id, plan, kind, event,
+		CASE WHEN type='hook_event' THEN tool ELSE '' END AS tool,
+		norm_event, model, path, conversation_id, source, sha, content_hash,
+		tok_in, tok_out, tok_cache_read, tok_cache_write, tok_reasoning, cost_reported, row_hash
+	FROM facts WHERE ` + fw + ` AND received_at <= ?`
+	fargs = append(fargs, cur.FactWatermark)
+	if cur.Type != "" {
+		if cur.Type == "fact" {
+			fq += ` AND (ts < ? OR (ts = ? AND row_hash > ?))`
+			fargs = append(fargs, cur.TS, cur.TS, cur.Key)
+		} else {
+			fq += ` AND ts < ?`
+			fargs = append(fargs, cur.TS)
+		}
+	}
+	fq += ` ORDER BY ts DESC, row_hash ASC LIMIT ?`
+	frows, err := t.rdb.QueryContext(ctx, fq, append(fargs, limit+1)...)
 	if err != nil {
-		return nil, false, err
+		return nil, false, nil, err
 	}
 	defer frows.Close()
 	var facts []ExploreRow
 	var hashes []string
 	for frows.Next() {
 		var r ExploreRow
-		var contentHash string
+		var contentHash, rowHash string
 		var tokIn, tokOut, tokCR, tokCW, tokReas int64
 		var cost sql.NullFloat64
 		if err := frows.Scan(&r.Type, &r.TS, &r.Harness, &r.RepoID, &r.Plan, &r.Kind, &r.Event, &r.Tool,
 			&r.NormEvent, &r.Model, &r.Path, &r.ConversationID, &r.Source, &r.SHA, &contentHash,
-			&tokIn, &tokOut, &tokCR, &tokCW, &tokReas, &cost); err != nil {
-			return nil, false, err
+			&tokIn, &tokOut, &tokCR, &tokCW, &tokReas, &cost, &rowHash); err != nil {
+			return nil, false, nil, err
 		}
 		if r.Type == "hook_event" && r.NormEvent == "usage" {
 			var reported *float64
@@ -1006,31 +1058,51 @@ func (t *Tenant) Explore(ctx context.Context, f AnalyticsFilter, limit int) ([]E
 		}
 		facts = append(facts, r)
 		hashes = append(hashes, contentHash)
+		r.PageKey = rowHash
+		r.PageType = "fact"
+		facts[len(facts)-1] = r
 	}
 	if err := frows.Err(); err != nil {
-		return nil, false, err
+		return nil, false, nil, err
 	}
 
-	rrows, err := t.rdb.QueryContext(ctx, `
-		SELECT at, wf_plan(path), wf_kind(path), path, conversation_id, stage
-		FROM rejections WHERE `+rw+`
-		ORDER BY at DESC, id ASC LIMIT ?`, append(rargs, limit+1)...)
+	rq := `SELECT at, wf_plan(path), wf_kind(path), path, conversation_id, stage, id
+		FROM rejections WHERE ` + rw + ` AND id <= ?`
+	rargs = append(rargs, cur.RejectionWatermark)
+	if cur.Type != "" {
+		if cur.Type == "rejection" {
+			id, _ := strconv.ParseInt(cur.Key, 10, 64)
+			rq += ` AND (at < ? OR (at = ? AND id > ?))`
+			rargs = append(rargs, cur.NS, cur.NS, id)
+		} else if cur.Type == "fact" {
+			rq += ` AND at <= ?`
+			rargs = append(rargs, cur.NS)
+		} else {
+			rq += ` AND at < ?`
+			rargs = append(rargs, int64(cur.TS*1e9))
+		}
+	}
+	rq += ` ORDER BY at DESC, id ASC LIMIT ?`
+	rrows, err := t.rdb.QueryContext(ctx, rq, append(rargs, limit+1)...)
 	if err != nil {
-		return nil, false, err
+		return nil, false, nil, err
 	}
 	defer rrows.Close()
 	var rejs []ExploreRow
 	for rrows.Next() {
-		var at int64
+		var at, id int64
 		r := ExploreRow{Type: "rejection"}
-		if err := rrows.Scan(&at, &r.Plan, &r.Kind, &r.Path, &r.ConversationID, &r.RejectionStage); err != nil {
-			return nil, false, err
+		if err := rrows.Scan(&at, &r.Plan, &r.Kind, &r.Path, &r.ConversationID, &r.RejectionStage, &id); err != nil {
+			return nil, false, nil, err
 		}
 		r.TS = float64(at) / 1e9
+		r.PageKey = strconv.FormatInt(id, 10)
+		r.PageNanos = at
+		r.PageType = "rejection"
 		rejs = append(rejs, r)
 	}
 	if err := rrows.Err(); err != nil {
-		return nil, false, err
+		return nil, false, nil, err
 	}
 
 	page := make([]ExploreRow, 0, limit+1)
@@ -1048,13 +1120,23 @@ func (t *Tenant) Explore(ctx context.Context, f AnalyticsFilter, limit int) ([]E
 		}
 	}
 	if err := t.fillVerdicts(ctx, pageHashes, page); err != nil {
-		return nil, false, err
+		return nil, false, nil, err
 	}
 	truncated := len(page) > limit
 	if truncated {
 		page = page[:limit]
 	}
-	return page, truncated, nil
+	if truncated {
+		last := page[len(page)-1]
+		ns := last.PageNanos
+		if last.PageType == "fact" {
+			ns = int64(math.Round(last.TS * 1e9))
+		}
+		cur.TS, cur.NS, cur.Type, cur.Key = last.TS, ns, last.PageType, last.PageKey
+	} else {
+		cur = nil
+	}
+	return page, truncated, cur, nil
 }
 
 // fillVerdicts sets each page row's ScreenVerdict to the latest screen (by id) for its content
