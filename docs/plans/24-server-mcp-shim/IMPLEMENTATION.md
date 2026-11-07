@@ -32,4 +32,3 @@ The first worker pass was incomplete and left an uncommitted draft. Per execute 
 ### Phase 1 — Carried
 
 1. The unrelated pre-existing layout test failure identified by the user was not encountered or investigated, and was not changed. Keep it out of Phase 1 follow-up unless independently in scope.
-
