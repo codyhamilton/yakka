@@ -15,6 +15,11 @@ similar work exists.
 
 ## Shape
 
+> **Proposed by [plan 24](../plans/24-server-mcp-shim/DESIGN.md), not built.** Today this document describes the shim as the
+> owner of the three tools. Plan 24 moves every tool, its wording and its state logic to a `POST /v1/mcp` endpoint on the
+> server; the shim then only adds the bearer and reader-collected local context (`_local`) and relays replies. Until that
+> plan's Phase 4 closes, the text below is what runs.
+
 `python3 plugins/yakka/client/yakka.py mcp` is a stdio MCP server, spawned by each harness,
 reading the client config (design 2). It forwards to the service's advisory reads and adds local
 queue state. Every tool is read-only.
@@ -29,6 +34,10 @@ Nothing else is exposed. Maintainer operations (defining checks, rescoring, rati
 only.
 
 ## `artifact_feedback`
+
+> **Proposed by [plan 24](../plans/24-server-mcp-shim/DESIGN.md), not built:** the states and wording below are decided on the server from reader-collected context
+> (file metadata and hash, repository identity, queue and drain facts). The shim no longer kicks the drain; hooks own that.
+> The only intended differences are listed in the plan's parity table.
 
 The shim resolves `path` against the working directory, reads the file, and hashes it. Then, in
 order:
@@ -71,6 +80,10 @@ interquartile range per check for the same kind. A check below the lower quartil
 the current skills, ratings are comparative: the outlier is the signal, not the number.
 
 ## Unreachable service
+
+> **Proposed by [plan 24](../plans/24-server-mcp-shim/DESIGN.md), not built:** the shim no longer answers from local state when the service is down. A configured
+> remote that cannot be reached is the shim's own `unreachable` error (naming the host, the count of local writes still
+> queued, and the fix); an unresolved login is `bad config`. Neither falls back to local mode or to a local answer.
 
 The shim never fails a tool call because the service is down. It answers with what it knows locally
 (queued, rejected) and says the service is unreachable. A missing config says so and names the
