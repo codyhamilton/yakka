@@ -16,3 +16,11 @@ Refinement commit: `d570de6` (`docs: refine Plan 20 Phase 1 briefs`). It records
 - Deviations and carried items: Playwright-core is unavailable, so its Chromium acceptance remains outstanding. The worker left `wrangler.toml` unchanged per the brief although DESIGN/CONTRACTS specify `./web`; the release/serving unit must resolve this. Release embedding and headers remain unverified.
 - `artifact_feedback`: delivered, screen pass (`jev-1.13.0`).
 - gate: provide Playwright-core in the phase test environment and run the Chromium shell harness.
+
+### `1-01-fixture-ledger.md`
+
+- Outcome: committed as `2b4d2c3a7a0c3690982e7131d9fae7fbe2744ee2`; added the non-shipping deterministic ledger generator and manifest covering the populations, relations, chronology and resource boundaries in the brief.
+- Surfaces: `packages/yakka/internal/analyticsfixture/`.
+- Verification: `GOMEMLIMIT=8GiB go test ./internal/analyticsfixture -count=1 -v` passed; generated-ledger assertions cover exact manifest counts, timestamp bounds, shared bodies, scorer-specific scores, session repo cardinalities, three execution shapes, rejection stages and the unpriced tail. Candidate comparison selected batch append: same 5,015-event oracle, 196 ms versus 11.855 s for single-row append.
+- Deviations and carried items: none. The 32,767-hash fixture takes about 187 seconds to generate and verify; later tests should construct it once per setup and reuse it.
+- `artifact_feedback`: delivered, screen pass (`jev-1.13.0`).
