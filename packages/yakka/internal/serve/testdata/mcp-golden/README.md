@@ -8,9 +8,17 @@ captured by running `yakka mcp` through the fixtures in
 
 The empty-result cases use those same MCP fixtures with the fixture response
 changed to the service's existing empty states (`loaded: false` / no hits).
-The file keeps client-side config and transport failure strings out of the Go
-golden contract; they remain owned by the shim and are documented separately
-when relevant.
+The old client generated these failure strings outside the tools, so they are
+not server-tool wording: `client config at <path> is unusable: <error>`,
+`service unreachable at <endpoint>`, `service refused the request (HTTP
+<code>) at <endpoint>`, and `service at <endpoint> returned an unreadable
+answer`. The config and transport failures remain owned by the shim.
+
+The populated `search_artifacts` sample uses the fixture's fixed rank `-1.5`.
+That value is a stub response, not a stable store result. The Go conformance
+test verifies populated formatting against `/v1/search` from the same tenant
+store, including its store-computed rank; it does not treat the stub rank as a
+store parity requirement.
 
 Each call records only the observable tool result: `content[0].text` and
 `isError`. Argument cases include every distinct validation branch for these
