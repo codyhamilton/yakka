@@ -9,11 +9,14 @@ class ClientConfigTestCase(unittest.TestCase):
     def setUp(self) -> None:
         self._env_save = {
             k: os.environ.pop(k, None)
-            for k in ("YAKKA_ENDPOINT", "YAKKA_KEY", "YAKKA_CLIENT_CONFIG")
+            for k in ("YAKKA_ENDPOINT", "YAKKA_KEY", "YAKKA_CLIENT_CONFIG",
+                      "YAKKA_ACTION_KIND", "YAKKA_ACTION_SUBJECT_TYPE",
+                      "YAKKA_ACTION_SUBJECT_ID", "YAKKA_ACTION_PHASE",
+                      "YAKKA_ACTION_REPO", "YAKKA_ACTION_PR")
         }
 
     def tearDown(self) -> None:
-        for k in ("YAKKA_ENDPOINT", "YAKKA_KEY", "YAKKA_CLIENT_CONFIG"):
+        for k in self._env_save:
             os.environ.pop(k, None)
         for k, v in self._env_save.items():
             if v is not None:
@@ -94,6 +97,20 @@ class TestPartialEnv(ClientConfigTestCase):
         os.environ["YAKKA_ENDPOINT"] = "http://only-endpoint.example"
         with self.assertRaises(yakka.ErrPartialEnv):
             yakka.Load()
+
+
+class TestActionEnvIsolation(ClientConfigTestCase):
+    def test_action_vars_do_not_affect_client_config(self) -> None:
+        os.environ.update({
+            "YAKKA_ACTION_KIND": "build", "YAKKA_ACTION_SUBJECT_TYPE": "plan",
+            "YAKKA_ACTION_SUBJECT_ID": "owner/repo:plan/example",
+        })
+        os.environ["YAKKA_CLIENT_CONFIG"] = os.path.join(
+            tempfile.mkdtemp(), "missing.toml"
+        )
+        cfg = yakka.Load()
+        self.assertTrue(cfg.Local)
+        self.assertEqual(cfg.Endpoint, yakka.LocalEndpoint)
 
 
 class TestMalformed(ClientConfigTestCase):

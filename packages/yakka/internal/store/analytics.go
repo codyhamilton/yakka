@@ -212,8 +212,8 @@ func (t *Tenant) Facets(ctx context.Context, f AnalyticsFilter) (Facets, error) 
 		}
 		if *d.dst, err = t.strings(ctx, `SELECT value FROM (
 			SELECT value FROM facets_hourly WHERE dim=? AND hour > ? AND hour < ?`+rollupExtra+`
-			UNION SELECT `+d.expr+` FROM facts WHERE ts >= ? AND ts < ?`+extra+`
-			UNION SELECT `+d.expr+` FROM facts WHERE ts >= ? AND ts <= ?`+extra+`
+			UNION SELECT `+d.expr+` FROM facts WHERE type!='session_action' AND ts >= ? AND ts < ?`+extra+`
+			UNION SELECT `+d.expr+` FROM facts WHERE type!='session_action' AND ts >= ? AND ts <= ?`+extra+`
 		) ORDER BY value`, d.dim, hF, hT, from, hF+3600, hT, to); err != nil {
 			return out, err
 		}
@@ -251,6 +251,7 @@ func (t *Tenant) Facets(ctx context.Context, f AnalyticsFilter) (Facets, error) 
 // facts alone. It is exact for any filter and is the fallback for filtered or single-hour windows.
 func (t *Tenant) facetsBase(ctx context.Context, f AnalyticsFilter) (Facets, error) {
 	w, args := f.factWhere()
+	w += " AND type!='session_action'"
 	var out Facets
 	var err error
 	for _, d := range []struct {
@@ -321,8 +322,8 @@ func (t *Tenant) Summary(ctx context.Context, f AnalyticsFilter) (Summary, error
 		}
 		if err := t.rdb.QueryRowContext(ctx, `SELECT count(DISTINCT conversation_id) FROM (
 			SELECT conversation_id FROM conversations_hourly WHERE hour > ? AND hour < ?
-			UNION ALL SELECT conversation_id FROM facts WHERE ts >= ? AND ts < ?
-			UNION ALL SELECT conversation_id FROM facts WHERE ts >= ? AND ts <= ?)`,
+			UNION ALL SELECT conversation_id FROM facts WHERE type!='session_action' AND ts >= ? AND ts < ?
+			UNION ALL SELECT conversation_id FROM facts WHERE type!='session_action' AND ts >= ? AND ts <= ?)`,
 			hF, hT, from, hF+3600, hT, to).Scan(&s.Conversations); err != nil {
 			return s, err
 		}
@@ -336,7 +337,7 @@ func (t *Tenant) Summary(ctx context.Context, f AnalyticsFilter) (Summary, error
 			return s, err
 		}
 	} else {
-		if err := t.rdb.QueryRowContext(ctx, `SELECT count(DISTINCT conversation_id),
+		if err := t.rdb.QueryRowContext(ctx, `SELECT count(DISTINCT CASE WHEN type!='session_action' THEN conversation_id END),
 			COALESCE(SUM(type='hook_event'),0), COALESCE(SUM(type='artifact_version'),0),
 			count(DISTINCT CASE WHEN type='artifact_version' THEN content_hash END), COALESCE(SUM(type='commit'),0)
 			FROM facts WHERE `+w, args...).Scan(&s.Conversations, &s.HookEvents, &s.ArtifactVersions, &s.DistinctContent, &s.Commits); err != nil {

@@ -311,6 +311,96 @@ class TestBadFiles(unittest.TestCase):
             self.assertEqual(o.Reasons[0], want[i])
 
 
+class TestSessionActions(unittest.TestCase):
+    def test_backfill_enqueue_writer_is_idempotent_and_builds_one_action(self) -> None:
+        with tempfile.TemporaryDirectory() as queue:
+            first = yakka.EnqueueSessionAction(
+                "session-1",
+                {"kind": "build", "subject_type": "plan", "subject_id": "owner/repo:plan/22-demo"},
+                source="backfill",
+                method="deterministic",
+                confidence=0.8,
+                evidence="plan file",
+                dir_path=queue,
+            )
+            second = yakka.EnqueueSessionAction(
+                "session-1",
+                {"kind": "build", "subject_type": "plan", "subject_id": "owner/repo:plan/22-demo"},
+                source="backfill",
+                method="deterministic",
+                confidence=0.8,
+                evidence="plan file",
+                dir_path=queue,
+            )
+            self.assertEqual(first, second)
+            self.assertEqual(len([n for n in os.listdir(queue) if n.endswith(".evt")]), 1)
+            with open(first, "rb") as queued:
+                raw = queued.read()
+            facts = _decode(yakka.Build(None, [yakka.File(Name=os.path.basename(first), Data=raw)])[0])
+            self.assertEqual(len(facts), 1)
+            self.assertEqual(facts[0]["type"], "session_action")
+            self.assertEqual(facts[0]["conversation_id"], "session-1")
+            self.assertEqual(facts[0]["source"], "backfill")
+            self.assertEqual(facts[0]["method"], "deterministic")
+            self.assertEqual(facts[0]["confidence"], 0.8)
+            self.assertEqual(facts[0]["evidence"], "plan file")
+
+    def test_session_action_envelope_fixtures(self) -> None:
+        for fixture in _load_fixtures("session_action_envelopes.json"):
+            data = (json.dumps(fixture["envelope"], separators=(",", ":")) + "\n"
+                    + json.dumps(fixture["payload"], separators=(",", ":"))).encode()
+            name = fixture.get("file", fixture["name"])
+            facts = _decode(yakka.Build(None, [yakka.File(Name=name, Data=data)])[0])
+            self.assertEqual([fact["type"] for fact in facts], fixture["types"])
+            if "action" in fixture:
+                self.assertEqual(facts[-1]["action"], fixture["action"])
+            if "source" in fixture:
+                self.assertEqual(facts[-1]["source"], fixture["source"])
+
+    def test_start_action_is_added_without_changing_hook_fact(self) -> None:
+        data = (b'{"ts":1700000000,"harness":"codex","event":"SessionStart",'
+                b'"action":{"kind":"buidl","phase":"x","pr":7}}\n'
+                b'{"session_id":"s1","cwd":"/missing"}')
+        facts = _decode(yakka.Build(None, [yakka.File(Name="s1-start", Data=data)])[0])
+        self.assertEqual([f["type"] for f in facts], ["hook_event", "session_action"])
+        self.assertEqual(facts[0]["payload"]["session_id"], "s1")
+        self.assertEqual(facts[1]["source"], "env")
+        self.assertEqual(facts[1]["action"], {"kind": "buidl", "phase": "x", "pr": "7"})
+
+    def test_non_string_values_and_tag_only_queue(self) -> None:
+        data = (b'{"ts":1700000000,"harness":"claude","event":"yakka.session_action",'
+                b'"source":"backfill","action":{"kind":false,"phase":null}}\n{}')
+        facts = _decode(yakka.Build(None, [yakka.File(Name="conv-1700000000.1-4-2.evt", Data=data)])[0])
+        self.assertEqual(len(facts), 1)
+        self.assertEqual(facts[0]["type"], "session_action")
+        self.assertEqual(facts[0]["conversation_id"], "conv")
+        self.assertEqual(facts[0]["action"], {"kind": "False", "phase": "None"})
+        self.assertEqual(facts[0]["source"], "backfill")
+
+    def test_no_action_keeps_legacy_fact_shape(self) -> None:
+        facts = _decode(yakka.Build(None, [_queue_file("n", "codex", {
+            "hook_event_name": "SessionStart", "session_id": "s-no-action"
+        })])[0])
+        self.assertEqual(len(facts), 1)
+        self.assertEqual(facts[0]["type"], "hook_event")
+
+    def test_malformed_action_shapes_and_invalid_utf8_do_not_break_capture(self) -> None:
+        bad_shape = yakka.File(Name="bad-shape", Data=(
+            b'{"ts":1,"harness":"claude","event":"SessionStart","action":[]}'
+            b'\n{"session_id":"s-shape"}'
+        ))
+        replacement = yakka.File(Name="replacement", Data=(
+            b'{"ts":1,"harness":"claude","event":"SessionStart",'
+            b'"action":{"kind":"b\xffuild"}}\n{"session_id":"s-utf8"}'
+        ))
+        shape_facts, replacement_facts = [
+            _decode(out) for out in yakka.Build(None, [bad_shape, replacement])
+        ]
+        self.assertEqual([fact["type"] for fact in shape_facts], ["hook_event"])
+        self.assertEqual([fact["type"] for fact in replacement_facts], ["hook_event", "session_action"])
+        self.assertEqual(replacement_facts[-1]["action"]["kind"], "b�uild")
+
+
 class TestCommitFixtures(unittest.TestCase):
     def test_commit_fixtures(self) -> None:
         rdir, sha, repo_id = _new_repo()

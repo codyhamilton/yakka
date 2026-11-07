@@ -234,7 +234,7 @@ Reconciled headlessly with Plan 24 (Assumptions 36-39); no decision of Cody's wa
 ### Assumption 8
 
 - Question: Do the harnesses actually pass the launching process's environment to their session-start hook, and does the hook fire at all in headless mode?
-- Answer chosen: Assume yes for Claude Code and OpenCode (in-process plugin); treat Codex and Cursor as unverified. Phase 2 starts by probing all four headlessly, separating two failures: the env is not forwarded, or the hook does not fire (Codex hooks need a trust review in `/hooks` that a headless `codex exec` may skip). If a harness fails, Phase 2 records which failure and does not close for that harness until Cody chooses between a contingency channel (a launcher-written file with the same six keys, added to this contract by amendment before CHM builds it) and a documented limit. Phase 2's approach is flagged open for that reason.
+- Answer chosen: Runtime behavior is unverified for all four harnesses until a safe headless probe observes both hook/plugin execution and exported-variable visibility. Phase 2 may record a documented limit instead of making a runtime support claim when such a probe cannot be safely run; this does not approve a contingency channel. Codex may additionally require a trust review in `/hooks`, which headless `codex exec` can skip. Phase 2's approach is flagged open for that reason.
 - Rationale: Recon found no repo doc, test or fixture showing any harness forwarding the user's environment to hooks (the tests inject it by hand). This is the single largest risk to the issue's done-when, and a file channel cannot help where the hook never fires.
 - If wrong: Phase 2 grows by one channel per failing harness, and CHM must also write the file. The env table is unaffected for harnesses that pass.
 
@@ -457,7 +457,7 @@ Reconciled headlessly with Plan 24 (Assumptions 36-39); no decision of Cody's wa
 
 ## Open Questions
 
-- **Env inheritance (blocks Phase 2 closing):** do the Codex (`codex exec`, with its hook trust review) and Cursor (`cursor-agent -p`) session-start hooks run headlessly and see the launching environment? Phase 2's first step answers it; if not, Cody chooses a contingency channel (with CHM work to feed it) or a documented limit per harness.
+- **Env inheritance (runtime limit until verified):** do the Claude Code, Codex (`codex exec`, with its hook trust review), OpenCode and Cursor (`cursor-agent -p`) session-start hooks/plugins run headlessly and see the launching environment? Phase 2 records a documented limit for each harness whose behavior cannot be safely probed; CHM must not rely on that harness's launch-time tag until a safe probe records the observation. A contingency channel requires a separate design amendment.
 - **Plan id (blocks CHM's launcher mapping, not the server):** what does `harness pick` hold for a plan, an entry name or a number? If numbers, the two plans numbered 13 show that one repo can collide, and a resolver is needed.
 - **Subagent cost (settled in Phase 3):** does subagent usage carry the parent `conversation_id`?
 - **Cursor per-session cost (settled in Phase 3):** does the server hold per-session tokens for Cursor, or are those calls unpriced? This bounds what "cost by plan" can say for Cursor sessions.
@@ -501,6 +501,10 @@ Order and count fixed at sign-off. Phases 1–4 build the live path; 5–7 the b
 
 ### Phase 2 — Session-start capture on all four harnesses  *(earliest phase the harness side can verify against)*
 
+Units:
+
+- `2-01-session-start-capture.md` — all session-start capture surfaces, queue parsing/fact building, fixtures and version/docs updates; depends on Phase 1; runs alongside nothing.
+
 - Outcome: First, a probe table records for each of Claude Code, Codex, OpenCode and Cursor, launched headlessly, whether its session-start hook or plugin runs and whether it sees an exported variable, with the command used. Then, against a server built from Phase 1, for each harness launched headlessly (`claude -p`, `codex exec`, `opencode run`, `cursor-agent -p`):
   1. With all six `YAKKA_ACTION_*` set to a valid build action, after drain `GET /v1/actions?conversation_id=<the session>` returns that exact action with `source=env`, `status=accepted`, and the session's other facts are present.
   2. With none set, the session's facts are present and no action row exists.
@@ -513,6 +517,9 @@ Order and count fixed at sign-off. Phases 1–4 build the live path; 5–7 the b
 - Depends on: Phase 1 (not the MCP shim issue; it uses no MCP)
 
 ### Phase 3 — Cost by work
+
+- Units:
+  - `3-01-cost-by-work-query` — brief `docs/plans/22-session-work-tagging/briefs/3-01-cost-by-work-query.md`; depends on Phases 1 and 2; runs alongside nothing. The usage aggregation and HTTP query contract are one unit because their dimensions, filters, measure validation, top-N folding, and reconciliation tests share the same query behavior.
 
 - Outcome: On a seeded tenant holding one plan across phases 1–3 with kinds build, review and fix, one session with two actions switching at a known timestamp, one untagged session, one session whose only action was rejected, and one session of an unpriced harness:
   1. `/v1/analytics/query` with `dims=[action_plan, action_phase, action_kind]` returns buckets whose `cost_usd` sums, to the cent, to that plan's total computed independently from per-conversation costs; the mid-session session splits at its boundary by call timestamp.

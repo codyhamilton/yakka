@@ -92,6 +92,43 @@ class UnsetBin(KickBase):
         self.assertEqual(set(env), {"ts", "harness", "event"})
         self.assertEqual(body, payload)
 
+    def test_action_is_session_start_only_json_safe_and_byte_guarded(self):
+        value = ('a' * 256) + 'é' + ('x' * 10000) + '"\\\n'
+        r = run_spool(
+            '{"session_id":"action-session"}', event="SessionStart",
+            YAKKA_ACTION_KIND='build"\\\n', YAKKA_ACTION_SUBJECT_ID=value,
+            YAKKA_QUEUE=self.q, YAKKA_HOOKLOG_KICK="0", HOME=self.home,
+            path=self.path,
+        )
+        self.assertEqual(r.returncode, 0)
+        file = evts(self.q)[0]
+        head, body = file.read_text(encoding="utf-8").split("\n", 1)
+        env = json.loads(head)
+        self.assertEqual(env["action"]["kind"], 'build"\\')
+        self.assertEqual(len(env["action"]["subject_id"].encode()), 258)
+        self.assertTrue(env["action"]["subject_id"].endswith("é"))
+        self.assertEqual(body, '{"session_id":"action-session"}')
+
+        for size in (256, 257):
+            boundary_queue = os.path.join(self.d, f"boundary-{size}")
+            result = run_spool(
+                '{"session_id":"boundary"}', event="SessionStart",
+                YAKKA_ACTION_SUBJECT_ID="x" * size, YAKKA_QUEUE=boundary_queue,
+                YAKKA_HOOKLOG_KICK="0", HOME=self.home, path=self.path,
+            )
+            self.assertEqual(result.returncode, 0)
+            boundary = json.loads(evts(boundary_queue)[0].read_text().split("\n", 1)[0])
+            self.assertEqual(len(boundary["action"]["subject_id"].encode()), size)
+
+        other = run_spool(
+            '{"session_id":"later"}', event="Stop", YAKKA_ACTION_KIND="build",
+            YAKKA_QUEUE=os.path.join(self.d, "other"), YAKKA_HOOKLOG_KICK="0",
+            HOME=self.home, path=self.path,
+        )
+        self.assertEqual(other.returncode, 0)
+        env_line = evts(os.path.join(self.d, "other"))[0].read_text().split("\n", 1)[0]
+        self.assertNotIn("action", json.loads(env_line))
+
 
 class YakkaBin(KickBase):
     def setUp(self):

@@ -1,5 +1,11 @@
 # Changelog
 
+## 3.5.0 — 2026-11-07 — session work tags
+
+- Claude Code, Codex, OpenCode and Cursor capture non-empty `YAKKA_ACTION_*` values at session
+  start into the local queue. Values remain unvalidated until the server projects the action fact.
+- Bump the independently versioned OpenCode hooks package to 0.2.2.
+
 ## 3.4.0 — 2026-10-30 — token lifetime and name
 
 - Tokens have a name and are issued for a lifetime chosen from a dropdown (1 day, 1 week, 1 month, 3 months, 6 months, 1 year; default 3 months) instead of a date. The server computes the expiry and rejects `expires_at`.

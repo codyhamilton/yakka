@@ -491,6 +491,11 @@ class _Parsed:
     conv: str = ""
     harness: str = ""
     event: str = ""
+    action: Optional[dict[str, str]] = None
+    action_source: str = "env"
+    action_method: Any = None
+    action_confidence: Any = None
+    action_evidence: Any = None
     ts: Any = 0
     base: str = ""
     refs: List["_Ref"] = field(default_factory=list)
@@ -562,9 +567,10 @@ def Build(ctx: Any, files: List[File]) -> List[Output]:
                 "ts": p.ts,
             }
 
-        hv = common("hook_event")
-        hv["payload"] = _redact_payload(p.payload)
-        add(hv)
+        if p.event != "yakka.session_action":
+            hv = common("hook_event")
+            hv["payload"] = _redact_payload(p.payload)
+            add(hv)
         seen: set[str] = set()
         for r in p.refs:
             if last[r.key] != i or r.key in seen:
@@ -585,6 +591,18 @@ def Build(ctx: Any, files: List[File]) -> List[Output]:
             v["source"] = "worktree"
             add(v)
         _build_commits(ctx, p, commits, common, add, o)
+        if p.action is not None:
+            action = common("session_action")
+            action.pop("event", None)
+            action["source"] = p.action_source
+            action["action"] = p.action
+            if p.action_method is not None:
+                action["method"] = p.action_method
+            if p.action_confidence is not None:
+                action["confidence"] = p.action_confidence
+            if p.action_evidence is not None:
+                action["evidence"] = p.action_evidence
+            add(action)
         out.append(o)
     return out
 
@@ -597,7 +615,7 @@ def _parse_file(f: File) -> _Parsed:
     line, rest = f.Data.split(b"\n", 1) if b"\n" in f.Data else (f.Data, b"")
     try:
         env = json.loads(
-            line.decode("utf-8"),
+            line.decode("utf-8", errors="replace"),
             parse_float=lambda s: _Number(s),
         )
     except (json.JSONDecodeError, UnicodeDecodeError):
@@ -608,7 +626,7 @@ def _parse_file(f: File) -> _Parsed:
         return p
     try:
         payload = json.loads(
-            rest.decode("utf-8"),
+            rest.decode("utf-8", errors="replace"),
             parse_float=lambda s: _Number(s),
         )
     except (json.JSONDecodeError, UnicodeDecodeError):
@@ -622,15 +640,36 @@ def _parse_file(f: File) -> _Parsed:
     p.ts = env.get("ts", 0)
     if p.ts == "":
         p.ts = 0
+    p.event = env.get("event", "")
+    if p.event == "yakka.session_action":
+        # Back-fill/review queue envelopes may carry their conversation id at
+        # the envelope level because their payload is intentionally empty.
+        env_conv = env.get("conversation_id")
+        if isinstance(env_conv, str) and env_conv:
+            p.conv = env_conv
+    raw_action = env.get("action")
+    if isinstance(raw_action, dict):
+        p.action = {
+            str(k): v if isinstance(v, str) else str(v)
+            for k, v in raw_action.items()
+        }
+    if p.event == "yakka.session_action":
+        p.action_source = str(env.get("source", "env"))
+        p.action_method = env.get("method")
+        p.action_confidence = env.get("confidence")
+        p.action_evidence = env.get("evidence")
     for key in ("session_id", "conversation_id", "sessionID"):
         s = payload.get(key)
         if isinstance(s, str) and s:
             p.conv = s
             break
+    if not p.conv and p.event == "yakka.session_action":
+        match = re.match(r"^(.*)-\d+(?:\.\d+)?-\d+-\d+(?:\.evt)?$", f.Name)
+        if match:
+            p.conv = match.group(1)
     if not p.conv:
         p.reasons = ["invalid: no conversation id"]
         return p
-    p.event = env.get("event", "")
     if not p.event:
         hen = payload.get("hook_event_name")
         if isinstance(hen, str):
@@ -644,6 +683,12 @@ def _parse_file(f: File) -> _Parsed:
             first = roots[0]
             if isinstance(first, str):
                 p.base = first
+    if p.event == "yakka.session_action":
+        if p.action is None:
+            p.reasons = ["invalid: no action object"]
+            return p
+        p.bad = False
+        return p
     p.bad = False
     return p
 
@@ -1344,6 +1389,76 @@ def QueueDir() -> str:
     if d:
         return d
     return os.path.join(_home(), ".local", "share", "yakka", "queue")
+
+
+def EnqueueSessionAction(
+    conversation_id: str,
+    action: dict[str, str],
+    *,
+    source: str = "backfill",
+    method: str = "deterministic",
+    confidence: float = 1.0,
+    evidence: str = "",
+    dir_path: Optional[str] = None,
+) -> str:
+    """Write a tag-only queue event; never validates values or contacts a server.
+
+    The content-derived file name makes repeated enqueues idempotent while
+    allowing a changed label/evidence to produce a distinct fact.
+    """
+    if not isinstance(conversation_id, str) or not conversation_id:
+        raise ValueError("conversation_id is required")
+    if not isinstance(action, dict):
+        raise ValueError("action must be an object")
+    envelope = {
+        "ts": time.time(),
+        "harness": "unknown",
+        "event": "yakka.session_action",
+        "conversation_id": conversation_id,
+        "source": source,
+        "action": {str(k): str(v) for k, v in action.items()},
+        "method": method,
+        "confidence": confidence,
+        "evidence": evidence,
+    }
+    # A stable event id is important: queue retries and later reruns must not
+    # create another projection for the same label.
+    identity = json.dumps(
+        {k: v for k, v in envelope.items() if k != "ts"},
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    event_id = hashlib.sha256(identity).hexdigest()
+    filename = f"session-action-{event_id}.evt"
+    directory = dir_path or QueueDir()
+    err = EnsureDirs(directory)
+    if err is not None:
+        raise err
+    path = os.path.join(directory, filename)
+    data = (json.dumps(envelope, ensure_ascii=False, separators=(",", ":")) + "\n{}\n").encode("utf-8")
+    temp = os.path.join(directory, "tmp", filename + "." + str(os.getpid()) + ".tmp")
+    try:
+        fd = os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(fd, "wb") as f:
+            f.write(data)
+            f.flush()
+            os.fsync(f.fileno())
+        try:
+            os.link(temp, path)
+        except FileExistsError:
+            pass
+        finally:
+            os.unlink(temp)
+    except FileExistsError:
+        # A same-process retry may have left its private temp file behind.
+        try:
+            os.unlink(temp)
+        except OSError:
+            pass
+        if not os.path.exists(path):
+            raise
+    return path
 
 
 def EnsureDirs(dir_path: str) -> Optional[OSError]:

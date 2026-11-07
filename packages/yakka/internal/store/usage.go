@@ -40,6 +40,8 @@ type usageRow struct {
 	ts                                                       float64
 	tokIn, tokOut, tokCacheRead, tokCacheWrite, tokReasoning int64
 	costReported                                             *float64
+	actionKind, actionPlan, actionPhase, actionSubject       string
+	actionPR, actionSource, actionBucket                     string
 }
 
 func (r usageRow) dim(d string) string {
@@ -52,6 +54,18 @@ func (r usageRow) dim(d string) string {
 		return r.model
 	case "conversation_id":
 		return r.convID
+	case "action_kind":
+		return r.actionKind
+	case "action_plan":
+		return r.actionPlan
+	case "action_phase":
+		return r.actionPhase
+	case "action_subject":
+		return r.actionSubject
+	case "action_pr":
+		return r.actionPR
+	case "action_source":
+		return r.actionSource
 	}
 	return ""
 }
@@ -83,6 +97,8 @@ func usageValue(measure string, r usageRow) float64 {
 			return 0
 		}
 		return 1
+	case "sessions":
+		return 1
 	}
 	return 0
 }
@@ -111,6 +127,9 @@ func usageQueryImpl(ctx context.Context, t *Tenant, f AnalyticsFilter, p QueryPa
 			return QueryResult{}, fmt.Errorf("unsupported dimension %s for %s: %w", d, p.Measure, ErrUnsupported)
 		}
 	}
+	if p.hasActionFilters() && !isActionMeasure(p.Measure) {
+		return QueryResult{}, fmt.Errorf("action filters unsupported for %s: %w", p.Measure, ErrUnsupported)
+	}
 	top := p.Top
 	if top <= 0 {
 		top = 20
@@ -125,6 +144,12 @@ func usageQueryImpl(ctx context.Context, t *Tenant, f AnalyticsFilter, p QueryPa
 	if err != nil {
 		return QueryResult{}, err
 	}
+	if hasActionDim(p.Dims) || p.hasActionFilters() {
+		if err := t.attachUsageActions(ctx, rows); err != nil {
+			return QueryResult{}, err
+		}
+		rows = filterUsageActions(rows, p)
+	}
 	val := func(r usageRow) float64 { return usageValue(p.Measure, r) }
 
 	tops := map[string][]string{}
@@ -133,8 +158,22 @@ func usageQueryImpl(ctx context.Context, t *Tenant, f AnalyticsFilter, p QueryPa
 			continue
 		}
 		totals := map[string]float64{}
-		for _, r := range rows {
-			totals[r.dim(d)] += val(r)
+		if p.Measure == "sessions" {
+			sets := map[string]map[string]bool{}
+			for _, r := range rows {
+				k := r.dim(d)
+				if sets[k] == nil {
+					sets[k] = map[string]bool{}
+				}
+				sets[k][r.convID] = true
+			}
+			for k, s := range sets {
+				totals[k] = float64(len(s))
+			}
+		} else {
+			for _, r := range rows {
+				totals[r.dim(d)] += val(r)
+			}
 		}
 		tops[d] = rankKeys(totals, top)
 	}
@@ -144,9 +183,10 @@ func usageQueryImpl(ctx context.Context, t *Tenant, f AnalyticsFilter, p QueryPa
 		loc = time.UTC
 	}
 	type usageGroup struct {
-		t string
-		k []string
-		v float64
+		t             string
+		k             []string
+		v             float64
+		conversations map[string]bool
 	}
 	groups := map[string]*usageGroup{}
 	var order []string
@@ -159,7 +199,11 @@ func usageQueryImpl(ctx context.Context, t *Tenant, f AnalyticsFilter, p QueryPa
 			case "weekday":
 				kv[i] = localKey(usageHourKey(r.ts), loc, "weekday")
 			default:
-				kv[i] = foldUsageDim(r.dim(d), tops[d])
+				if isActionDim(d) {
+					kv[i] = foldActionDim(r.dim(d), tops[d])
+				} else {
+					kv[i] = foldUsageDim(r.dim(d), tops[d])
+				}
 			}
 		}
 		tv := usageBucketKey(r.ts, loc, bucket)
@@ -167,14 +211,24 @@ func usageQueryImpl(ctx context.Context, t *Tenant, f AnalyticsFilter, p QueryPa
 		g := groups[gk]
 		if g == nil {
 			g = &usageGroup{t: tv, k: kv}
+			if p.Measure == "sessions" {
+				g.conversations = map[string]bool{}
+			}
 			groups[gk] = g
 			order = append(order, gk)
 		}
-		g.v += val(r)
+		if p.Measure == "sessions" {
+			g.conversations[r.convID] = true
+		} else {
+			g.v += val(r)
+		}
 	}
 	out := make([]QueryRow, 0, len(order))
 	for _, gk := range order {
 		g := groups[gk]
+		if p.Measure == "sessions" {
+			g.v = float64(len(g.conversations))
+		}
 		out = append(out, QueryRow{T: g.t, K: g.k, V: g.v})
 	}
 	sortRows(out)
@@ -184,6 +238,157 @@ func usageQueryImpl(ctx context.Context, t *Tenant, f AnalyticsFilter, p QueryPa
 	}
 	res.Rows = out
 	return res, nil
+}
+
+func isActionMeasure(measure string) bool {
+	return usageMeasures[measure]
+}
+
+type usageAction struct {
+	kind, subjectType, subjectID, phase, pr, source string
+	start, end                                      *float64
+	accepted, effective                             bool
+}
+
+func (a usageAction) contains(ts float64) bool {
+	return a.accepted && a.effective && (a.start == nil || ts >= *a.start) && (a.end == nil || ts < *a.end)
+}
+
+func (t *Tenant) attachUsageActions(ctx context.Context, rows []usageRow) error {
+	convs := map[string]bool{}
+	for _, r := range rows {
+		convs[r.convID] = true
+	}
+	if len(convs) == 0 {
+		return nil
+	}
+	ids := make([]string, 0, len(convs))
+	for id := range convs {
+		ids = append(ids, id)
+	}
+	actionsByConv := map[string][]usageAction{}
+	for start := 0; start < len(ids); start += 400 {
+		end := start + 400
+		if end > len(ids) {
+			end = len(ids)
+		}
+		chunk := ids[start:end]
+		q := `SELECT conversation_id,source,status,kind,subject_type,subject_id,phase,pr,segment_start,segment_end,effective FROM session_actions WHERE conversation_id IN (` + strings.TrimRight(strings.Repeat("?,", len(chunk)), ",") + `)`
+		args := make([]any, len(chunk))
+		for i, id := range chunk {
+			args[i] = id
+		}
+		got, err := t.rdb.QueryContext(ctx, q, args...)
+		if err != nil {
+			return err
+		}
+		for got.Next() {
+			var conv, source, status, kind, typ, subject, phase, pr string
+			var startAt, endAt sql.NullFloat64
+			var effective int
+			if err := got.Scan(&conv, &source, &status, &kind, &typ, &subject, &phase, &pr, &startAt, &endAt, &effective); err != nil {
+				got.Close()
+				return err
+			}
+			a := usageAction{kind: kind, subjectType: typ, subjectID: subject, phase: phase, pr: pr, source: source, accepted: status == "accepted", effective: effective != 0}
+			if startAt.Valid {
+				v := startAt.Float64
+				a.start = &v
+			}
+			if endAt.Valid {
+				v := endAt.Float64
+				a.end = &v
+			}
+			actionsByConv[conv] = append(actionsByConv[conv], a)
+		}
+		if err := got.Err(); err != nil {
+			got.Close()
+			return err
+		}
+		got.Close()
+	}
+	for i := range rows {
+		acts := actionsByConv[rows[i].convID]
+		accepted, rejected := false, false
+		var active *usageAction
+		for j := range acts {
+			a := &acts[j]
+			if a.accepted {
+				accepted = true
+			} else {
+				rejected = true
+			}
+			if a.contains(rows[i].ts) {
+				active = a
+				break
+			}
+		}
+		if active == nil {
+			bucket := "(untagged)"
+			if !accepted && rejected {
+				bucket = "(rejected)"
+			}
+			rows[i].actionBucket = bucket
+			rows[i].actionKind, rows[i].actionPlan, rows[i].actionPhase = bucket, bucket, bucket
+			rows[i].actionSubject, rows[i].actionPR, rows[i].actionSource = bucket, bucket, bucket
+			continue
+		}
+		rows[i].actionBucket = "tagged"
+		rows[i].actionKind = noneValue(active.kind)
+		rows[i].actionPlan = "(none)"
+		if active.subjectType == "plan" {
+			if marker := strings.LastIndex(active.subjectID, ":plan/"); marker >= 0 {
+				rows[i].actionPlan = noneValue(active.subjectID[marker+len(":plan/"):])
+			}
+		}
+		rows[i].actionPhase = noneValue(active.phase)
+		rows[i].actionSubject = noneValue(active.subjectID)
+		rows[i].actionPR = noneValue(active.pr)
+		rows[i].actionSource = noneValue(active.source)
+	}
+	return nil
+}
+
+func noneValue(v string) string {
+	if v == "" {
+		return "(none)"
+	}
+	return v
+}
+
+func filterUsageActions(rows []usageRow, p QueryParams) []usageRow {
+	if !p.hasActionFilters() {
+		return rows
+	}
+	match := func(values []string, value string) bool {
+		if len(values) == 0 {
+			return true
+		}
+		for _, v := range values {
+			if v == value {
+				return true
+			}
+		}
+		return false
+	}
+	out := rows[:0]
+	for _, r := range rows {
+		if r.actionBucket != "tagged" {
+			continue
+		}
+		if !match(p.ActionKinds, r.actionKind) || !match(p.ActionPlans, r.actionPlan) || !match(p.ActionPhases, r.actionPhase) || !match(p.ActionSubjects, r.actionSubject) || !match(p.ActionPRs, r.actionPR) || !match(p.ActionSources, r.actionSource) {
+			continue
+		}
+		out = append(out, r)
+	}
+	return out
+}
+
+func foldActionDim(value string, keys []string) string {
+	if value == "(untagged)" || value == "(rejected)" {
+		return value
+	}
+	return foldUsageDim(value, keys)
 }
 
 func (t *Tenant) usageKeptRows(ctx context.Context, f AnalyticsFilter) ([]usageRow, error) {

@@ -1,0 +1,33 @@
+{
+  "fixtures": [
+    {
+      "name": "session-start-action",
+      "envelope": {"ts": 1700000000, "harness": "claude", "event": "SessionStart", "action": {"kind": "buidl", "subject_type": "plan", "subject_id": "owner/repo:plan/example"}},
+      "payload": {"session_id": "fixture-start", "cwd": "/missing"},
+      "types": ["hook_event", "session_action"],
+      "action": {"kind": "buidl", "subject_type": "plan", "subject_id": "owner/repo:plan/example"}
+    },
+    {
+      "name": "session-start-no-action",
+      "envelope": {"ts": 1700000000, "harness": "cursor", "event": "sessionStart"},
+      "payload": {"session_id": "fixture-plain"},
+      "types": ["hook_event"]
+    },
+    {
+      "name": "malformed-action-value",
+      "envelope": {"ts": 1700000000, "harness": "codex", "event": "SessionStart", "action": {"kind": false, "phase": null}},
+      "payload": {"session_id": "fixture-malformed"},
+      "types": ["hook_event", "session_action"],
+      "action": {"kind": "False", "phase": "None"}
+    },
+    {
+      "name": "tag-only",
+      "envelope": {"ts": 1700000000, "harness": "opencode", "event": "yakka.session_action", "source": "backfill", "action": {"kind": "build"}},
+      "payload": {},
+      "file": "fixture-tag-1700000000.1-7-3.evt",
+      "types": ["session_action"],
+      "action": {"kind": "build"},
+      "source": "backfill"
+    }
+  ]
+}

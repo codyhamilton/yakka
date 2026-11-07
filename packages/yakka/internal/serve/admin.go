@@ -100,6 +100,7 @@ type adminTenant struct {
 	Screens    store.ScreenSummary    `json:"screens"`
 	Failures   []store.RejectionEntry `json:"failures"`
 	Rescore    RescoreView            `json:"rescore"`
+	Actions    map[string]int         `json:"actions"`
 	Error      string                 `json:"error,omitempty"`
 }
 
@@ -146,6 +147,9 @@ func (s *Server) adminTenantStatus(ctx context.Context, id string) adminTenant {
 		errs = append(errs, err)
 	}
 	if out.Failures, err = t.RecentRejections(ctx, "screen", adminFailureRows); err != nil {
+		errs = append(errs, err)
+	}
+	if out.Actions, err = t.ActionStatus(ctx); err != nil {
 		errs = append(errs, err)
 	}
 	if err := errors.Join(errs...); err != nil {

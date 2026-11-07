@@ -119,10 +119,13 @@ needs no scorer, and waits for the linked dataset.
 
 ## Ingest contract
 
-Envelope types accepted by the remote: `hook_event`, `artifact_version`, `commit`.
+Envelope types accepted by the remote: `hook_event`, `artifact_version`, `commit`, and
+`session_action`. A session action is structurally validated on ingest and projected
+asynchronously; action value validation belongs to that projection, so malformed values are
+recorded as rejected action rows rather than returned as ingest errors.
 
 - Idempotent by row hash; at-least-once delivery.
-- No session or lifecycle state on the server.
+- No client session lifecycle state on the server; `session_action` facts are explicit work labels, not session-control events.
 - An execution report is an `artifact_version` whose kind is inferred from its path.
 - Artifact kind (design, brief, report) is inferred from path convention, not declared by the agent.
 
