@@ -2,7 +2,7 @@
 
 Verdict: **PASS**
 
-Reviewed SHA: `a1c52a5` (after path typo fix in `DESIGN.md`; prior tip `a1c52a5` unchanged except that line).
+Reviewed SHA: `27ccbff`.
 
 Plan sufficiency: the design is enough to derive intent, phase outcomes, ledger blast radius, security/disclosure posture, and downstream execute/refine briefs. Seven phases each carry provable outcomes; #177 dependency is scoped to Phase 5 only via the REST shim.
 
