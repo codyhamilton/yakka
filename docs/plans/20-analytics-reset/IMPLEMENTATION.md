@@ -46,3 +46,12 @@ Carried
 - Verify the external Pages automation accepts `./web` as its output directory.
 - Phase 2 reconcile the local full-server `/oauth/callback` route collision while preserving the remote API callback.
 - Reuse the 32,767-hash fixture once per test setup; its generation and verification take about 187 seconds.
+
+## Phase 2 — Identity flows
+
+Tool: Codex execute skill
+Run ID: feat/20-analytics-reset phase 2 execution
+Start time: 2026-11-08 05:42 Australia/Brisbane (2026-11-07 19:42 UTC)
+
+Inline refinement: Phase 2 is one unit. The brief `2-01-identity-flows.md` is committed before implementation and covers the session gate, account routes, device login, credential handling and local/remote OAuth callback routing under CONTRACTS.md. The Phase 1 carried callback collision is included in the route seam. `artifact_feedback` pending for the brief.
+`artifact_feedback` on the inline brief returned `not delivered`: the service has no version and nothing is queued, even after retrying with an absolute path. Recorded; proceed with local contract verification.
