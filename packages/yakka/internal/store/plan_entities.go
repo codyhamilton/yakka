@@ -16,6 +16,7 @@ type PlanEntity struct {
 	UnpricedCalls                                               int
 	ArtifactsByKind                                             map[string]int
 	DesignScores                                                map[string]float64
+	SortValue                                                   *float64
 }
 
 // PlanAssociatedCost applies the existing deduplicated usage and pricing functions to each
@@ -49,6 +50,47 @@ func (t *Tenant) PlanAssociatedCost(ctx context.Context, f AnalyticsFilter, repo
 type PlanCursor struct {
 	TS           float64
 	RepoID, Plan string
+	Null         bool
+}
+
+// planSortExpression returns only fixed SQL fragments. Dynamic names remain bound parameters.
+func planSortExpression(sortBy string) (string, []any, bool) {
+	cols := map[string]string{"first_ts": "p.first_ts", "last_ts": "p.last_ts", "artifacts": "p.artifacts", "versions": "p.versions", "sessions": "p.sessions", "shared_sessions": "COALESCE(sh.shared_sessions,0)", "executions_complete": "COALESCE(e.executions_complete,0)", "executions_unreported": "COALESCE(e.executions_unreported,0)", "executions_started": "COALESCE(e.executions_started,0)", "span_days": "(p.last_ts-p.first_ts)/86400.0"}
+	if col := cols[sortBy]; col != "" {
+		return col, nil, false
+	}
+	if strings.HasPrefix(sortBy, "artifacts:") {
+		kind := strings.TrimPrefix(sortBy, "artifacts:")
+		if kind == "" || strings.Contains(kind, ":") {
+			return "", nil, false
+		}
+		return `(SELECT COUNT(DISTINCT k.path) FROM facts k WHERE k.type='artifact_version' AND k.repo_id=p.repo_id AND k.plan=p.plan AND k.kind=? AND __PLAN_SORT_WINDOW__)`, []any{kind}, true
+	}
+	if strings.HasPrefix(sortBy, "design_score:") {
+		check := strings.TrimPrefix(sortBy, "design_score:")
+		if check == "" || strings.Contains(check, ":") {
+			return "", nil, false
+		}
+		return `(SELECT s.result FROM facts d JOIN scores s ON s.content_hash=d.content_hash WHERE d.type='artifact_version' AND d.repo_id=p.repo_id AND d.plan=p.plan AND d.kind='design' AND d.rowid=(SELECT x.rowid FROM facts x WHERE x.type='artifact_version' AND x.repo_id=d.repo_id AND x.path=d.path ORDER BY x.received_at DESC,x.rowid DESC LIMIT 1) AND s.check_name=? AND s.id=(SELECT z.id FROM scores z WHERE z.content_hash=s.content_hash AND z.check_name=s.check_name ORDER BY z.id DESC LIMIT 1) ORDER BY s.id DESC LIMIT 1)`, []any{check}, false
+	}
+	switch sortBy {
+	case "associated_cost_usd":
+		cost := `wf_usage_cost(u.harness,u.model,u.tok_in,u.tok_out,u.tok_cache_read,u.tok_cache_write,u.tok_reasoning,u.cost_reported)`
+		priced := `wf_usage_priced(u.harness,u.model,u.tok_in,u.tok_out,u.tok_cache_read,u.tok_cache_write,u.tok_reasoning,u.cost_reported)`
+		assoc := `EXISTS(SELECT 1 FROM facts a WHERE a.type='artifact_version' AND a.repo_id=p.repo_id AND a.plan=p.plan AND a.conversation_id=u.conversation_id)`
+		return `(SELECT CASE WHEN COUNT(*)=0 THEN 0 WHEN SUM(1-` + priced + `)=COUNT(*) THEN NULL ELSE SUM(` + cost + `) END FROM kept u WHERE ` + assoc + `)`, nil, false
+	case "unpriced_calls":
+		priced := `wf_usage_priced(u.harness,u.model,u.tok_in,u.tok_out,u.tok_cache_read,u.tok_cache_write,u.tok_reasoning,u.cost_reported)`
+		return `(SELECT COALESCE(SUM(1-` + priced + `),0) FROM kept u WHERE EXISTS(SELECT 1 FROM facts a WHERE a.type='artifact_version' AND a.repo_id=p.repo_id AND a.plan=p.plan AND a.conversation_id=u.conversation_id))`, nil, false
+	case "complete_share":
+		return `1.0*COALESCE(e.executions_complete,0)/NULLIF(COALESCE(e.executions_complete,0)+COALESCE(e.executions_unreported,0)+COALESCE(e.executions_started,0),0)`, nil, false
+	}
+	return "", nil, false
+}
+
+func wArgsForSort(f AnalyticsFilter) []any {
+	_, args := f.factWhere()
+	return args
 }
 
 // EntitySnapshot identifies the fact and derived-score state observed by a paged traversal.
@@ -74,32 +116,47 @@ func (t *Tenant) PlanExecutionSnapshot(ctx context.Context) (EntitySnapshot, err
 // PlanEntitiesPage lists plans established by in-window artifact facts. Session and execution
 // association is deliberately derived from captured artifact and brief facts only.
 func (t *Tenant) PlanEntitiesPage(ctx context.Context, f AnalyticsFilter, sortBy string, desc bool, cur *PlanCursor, limit int) ([]PlanEntity, bool, error) {
-	cols := map[string]string{"first_ts": "first_ts", "last_ts": "last_ts", "artifacts": "artifacts", "versions": "versions", "sessions": "sessions", "shared_sessions": "shared_sessions", "executions_complete": "executions_complete", "executions_unreported": "executions_unreported", "executions_started": "executions_started", "span_days": "(last_ts-first_ts)/86400.0"}
-	col := cols[sortBy]
+	col, sortArgs, dynamic := planSortExpression(sortBy)
 	if col == "" {
 		return nil, false, fmt.Errorf("unsupported plan sort")
 	}
 	w, args := f.factWhere()
-	q := `WITH selected AS (SELECT repo_id,plan,path,content_hash,conversation_id,ts FROM facts WHERE type='artifact_version' AND plan<>'' AND ` + w + `), plans AS (
+	usageFilter := f
+	usageFilter.Plans = nil
+	usageQ, usageArgs := usageRowsWhere(usageFilter)
+	usageCTE := strings.TrimPrefix(usageQ, "WITH ")
+	col = strings.ReplaceAll(col, "__PLAN_SORT_WINDOW__", w)
+	wArgs := append([]any{}, args...)
+	q := `WITH ` + usageCTE + `, selected AS (SELECT repo_id,plan,path,content_hash,conversation_id,ts FROM facts WHERE type='artifact_version' AND plan<>'' AND ` + w + `), plans AS (
 	 SELECT repo_id,plan,COUNT(DISTINCT path) artifacts,COUNT(DISTINCT content_hash) versions,COUNT(DISTINCT conversation_id) sessions,MIN(ts) first_ts,MAX(ts) last_ts FROM selected GROUP BY repo_id,plan
 	), shared AS (SELECT s.repo_id,s.plan,COUNT(DISTINCT s.conversation_id) shared_sessions FROM selected s WHERE (SELECT COUNT(DISTINCT f2.plan) FROM facts f2 WHERE f2.type='artifact_version' AND f2.conversation_id=s.conversation_id AND f2.plan<>'')>1 GROUP BY s.repo_id,s.plan), execs AS (
 	 SELECT repo_id,plan,SUM(shape='complete') executions_complete,SUM(shape='unreported') executions_unreported,SUM(shape='started') executions_started FROM (
 	 SELECT b.repo_id,b.plan,b.conversation_id,b.path,` + execShapeSQL + ` shape FROM (SELECT repo_id,plan,conversation_id,path,harness,ts,ROW_NUMBER() OVER(PARTITION BY repo_id,conversation_id,path ORDER BY ts,rowid) rn FROM facts WHERE type='artifact_version' AND kind='brief' AND ` + w + `) b WHERE rn=1) GROUP BY repo_id,plan
-	) SELECT p.repo_id,p.plan,p.artifacts,p.versions,p.sessions,COALESCE(sh.shared_sessions,0),COALESCE(e.executions_complete,0),COALESCE(e.executions_unreported,0),COALESCE(e.executions_started,0),p.first_ts,p.last_ts FROM plans p LEFT JOIN shared sh USING(repo_id,plan) LEFT JOIN execs e USING(repo_id,plan)`
-	args = append(args, args...)
+	), computed AS (SELECT p.repo_id,p.plan,p.artifacts,p.versions,p.sessions,COALESCE(sh.shared_sessions,0) shared_sessions,COALESCE(e.executions_complete,0) executions_complete,COALESCE(e.executions_unreported,0) executions_unreported,COALESCE(e.executions_started,0) executions_started,p.first_ts,p.last_ts,CAST((` + col + `) AS REAL) AS sort_value FROM plans p LEFT JOIN shared sh USING(repo_id,plan) LEFT JOIN execs e USING(repo_id,plan)) SELECT * FROM computed`
+	args = append(append([]any{}, usageArgs...), args...)
+	args = append(args, wArgs...)
+	args = append(args, sortArgs...)
+	if dynamic {
+		args = append(args, wArgsForSort(f)...)
+	}
 	if cur != nil {
 		op := "<"
 		if !desc {
 			op = ">"
 		}
-		q += fmt.Sprintf(" WHERE (%s %s ? OR (%s=? AND (p.repo_id>? OR (p.repo_id=? AND p.plan>?))))", col, op, col)
-		args = append(args, cur.TS, cur.TS, cur.RepoID, cur.RepoID, cur.Plan)
+		if cur.Null {
+			q += ` WHERE sort_value IS NULL AND (repo_id>? OR (repo_id=? AND plan>?))`
+			args = append(args, cur.RepoID, cur.RepoID, cur.Plan)
+		} else {
+			q += fmt.Sprintf(" WHERE (sort_value %s ? OR sort_value IS NULL OR (sort_value=? AND (repo_id>? OR (repo_id=? AND plan>?))))", op)
+			args = append(args, cur.TS, cur.TS, cur.RepoID, cur.RepoID, cur.Plan)
+		}
 	}
 	dir := "ASC"
 	if desc {
 		dir = "DESC"
 	}
-	q += fmt.Sprintf(" ORDER BY %s %s,p.repo_id ASC,p.plan ASC LIMIT ?", col, dir)
+	q += fmt.Sprintf(" ORDER BY sort_value IS NULL ASC,sort_value %s,repo_id ASC,plan ASC LIMIT ?", dir)
 	args = append(args, limit+1)
 	rows, err := t.rdb.QueryContext(ctx, q, args...)
 	if err != nil {
@@ -109,8 +166,13 @@ func (t *Tenant) PlanEntitiesPage(ctx context.Context, f AnalyticsFilter, sortBy
 	out := []PlanEntity{}
 	for rows.Next() {
 		var x PlanEntity
-		if err := rows.Scan(&x.RepoID, &x.Plan, &x.Artifacts, &x.Versions, &x.Sessions, &x.SharedSessions, &x.ExecutionsComplete, &x.ExecutionsUnreported, &x.ExecutionsStarted, &x.FirstTS, &x.LastTS); err != nil {
+		var sortValue sql.NullFloat64
+		if err := rows.Scan(&x.RepoID, &x.Plan, &x.Artifacts, &x.Versions, &x.Sessions, &x.SharedSessions, &x.ExecutionsComplete, &x.ExecutionsUnreported, &x.ExecutionsStarted, &x.FirstTS, &x.LastTS, &sortValue); err != nil {
 			return nil, false, err
+		}
+		if sortValue.Valid {
+			v := sortValue.Float64
+			x.SortValue = &v
 		}
 		out = append(out, x)
 	}

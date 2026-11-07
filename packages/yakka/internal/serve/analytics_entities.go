@@ -199,10 +199,37 @@ func (s *Server) analyticsPlanEntities(w http.ResponseWriter, r *http.Request, t
 	if sortSpec == "" {
 		sortSpec = "last_ts:desc"
 	}
-	p := strings.Split(sortSpec, ":")
-	if len(p) != 2 || (p[1] != "asc" && p[1] != "desc") {
+	sep := strings.LastIndexByte(sortSpec, ':')
+	if sep < 0 {
 		errJSON(w, 400, "sort must be <measure>:asc|desc")
 		return
+	}
+	p := []string{sortSpec[:sep], sortSpec[sep+1:]}
+	if p[0] == "" || (p[1] != "asc" && p[1] != "desc") {
+		errJSON(w, 400, "sort must be <measure>:asc|desc")
+		return
+	}
+	if strings.HasPrefix(p[0], "artifacts:") || strings.HasPrefix(p[0], "design_score:") {
+		checks, checkErr := s.artifactChecks(r.Context(), ts.t)
+		if checkErr != nil {
+			readFailed(w)
+			return
+		}
+		valid := false
+		if strings.HasPrefix(p[0], "artifacts:") {
+			kind := strings.TrimPrefix(p[0], "artifacts:")
+			_, valid = checks[kind]
+			valid = valid || kind == "design" || kind == "brief" || kind == "report"
+		} else {
+			check := strings.TrimPrefix(p[0], "design_score:")
+			for _, name := range checks["design"] {
+				valid = valid || name == check
+			}
+		}
+		if !valid {
+			errJSON(w, 400, "unsupported plan sort "+p[0])
+			return
+		}
 	}
 	limit, cur, ok := pageParams(w, r)
 	if !ok {
@@ -221,8 +248,8 @@ func (s *Server) analyticsPlanEntities(w http.ResponseWriter, r *http.Request, t
 		return
 	}
 	var sc *store.PlanCursor
-	if cur != nil && len(cur.Key) == 2 {
-		sc = &store.PlanCursor{TS: cur.TS, RepoID: cur.Key[0], Plan: cur.Key[1]}
+	if cur != nil && (len(cur.Key) == 2 || len(cur.Key) == 3) {
+		sc = &store.PlanCursor{TS: cur.TS, RepoID: cur.Key[0], Plan: cur.Key[1], Null: len(cur.Key) == 3 && cur.Key[2] == "null"}
 	}
 	page, more, err := ts.t.PlanEntitiesPage(r.Context(), f, p[0], p[1] == "desc", sc, limit)
 	if err != nil {
@@ -288,7 +315,12 @@ func (s *Server) analyticsPlanEntities(w http.ResponseWriter, r *http.Request, t
 	out := map[string]any{"grain": "plan", "rows": rows, "sort": sortSpec, "population": map[string]any{"grain": "plan", "unit": "repo_id,plan", "scope_n": n, "cohort_n": n, "eligible_n": n, "returned_n": len(rows), "missing_by_reason": map[string]int{}}}
 	if more && len(page) > 0 {
 		last := page[len(page)-1]
-		out["next"] = (cursor{Route: "entities:plan", Filter: canonFilter(q), From: f.From.UnixNano(), To: f.To.UnixNano(), TS: planMeasure(last, p[0]), Key: []string{last.RepoID, last.Plan}, FactWatermark: snapshot.FactWatermark, FactRowID: snapshot.FactRowID, Revision: snapshot.Revision}).encode()
+		ts := planMeasure(last, p[0])
+		key := []string{last.RepoID, last.Plan}
+		if last.SortValue == nil {
+			key = append(key, "null")
+		}
+		out["next"] = (cursor{Route: "entities:plan", Filter: canonFilter(q), From: f.From.UnixNano(), To: f.To.UnixNano(), TS: ts, Key: key, FactWatermark: snapshot.FactWatermark, FactRowID: snapshot.FactRowID, Revision: snapshot.Revision}).encode()
 	}
 	writeJSON(w, 200, out)
 }
@@ -331,6 +363,9 @@ func dominantModelLens(counts map[string]int, total int) string {
 }
 
 func planMeasure(x store.PlanEntity, name string) float64 {
+	if x.SortValue != nil {
+		return *x.SortValue
+	}
 	switch name {
 	case "first_ts":
 		return x.FirstTS

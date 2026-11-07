@@ -98,6 +98,16 @@ func TestAnalyticsPlanExecutionSchemaMatchesImplementedMeasuresAndOrders(t *test
 	if execution["order"] == nil || plan["sort"] == nil {
 		t.Fatalf("plan/execution order declarations missing: %v", grains)
 	}
+	planSort := plan["sort"].([]any)
+	for _, want := range []string{"artifacts:<kind>", "design_score:<check>", "associated_cost_usd", "unpriced_calls", "complete_share"} {
+		found := false
+		for _, got := range planSort {
+			found = found || got == want
+		}
+		if !found {
+			t.Errorf("plan schema lacks sort %q: %v", want, planSort)
+		}
+	}
 	if _, ok := features["cohort"]; ok {
 		t.Fatalf("design-only cohort feature advertised: %v", features)
 	}
@@ -120,6 +130,56 @@ func TestAnalyticsPlanSortAndCursorSnapshot(t *testing.T) {
 	code, stale := aget(t, s, base+"&limit=1&cursor="+url.QueryEscape(cursor))
 	if code != 409 {
 		t.Fatalf("changed receive watermark continuation status=%d body=%v", code, stale)
+	}
+}
+
+func TestAnalyticsPlanDerivedSortMeasures(t *testing.T) {
+	s, ts := queryTenant(t)
+	now := time.Now().UTC().Truncate(time.Second)
+	for _, item := range []struct {
+		plan, path string
+		score      float64
+	}{{"a", "DESIGN.md", .4}, {"b", "DESIGN.md", .8}, {"b", "briefs/x.md", 0}, {"c", "DESIGN.md", 0}} {
+		hash := keys.ContentHash([]byte(item.plan + item.path))
+		qadd(t, ts, store.FactRow{Type: "artifact_version", ConversationID: item.plan + item.path, Harness: "h", RepoID: "repo", Path: "docs/plans/" + item.plan + "/" + item.path, ContentHash: hash, TS: float64(now.Unix())}, nil)
+		if item.path == "DESIGN.md" && item.plan != "c" {
+			if err := ts.t.AppendScores(t.Context(), hash, []store.Score{{Check: "clarity", Result: item.score, Scorer: "fixture"}}); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	base := "/v1/analytics/entities?grain=plan&from=" + url.QueryEscape(now.Add(-time.Hour).Format(time.RFC3339)) + "&to=" + url.QueryEscape(now.Add(time.Hour).Format(time.RFC3339)) + "&limit=1"
+	for _, measure := range []string{"artifacts:design", "design_score:clarity", "associated_cost_usd", "unpriced_calls", "complete_share"} {
+		for _, direction := range []string{"asc", "desc"} {
+			baseURL := base + "&sort=" + url.QueryEscape(measure+":"+direction)
+			page := aok(t, s, baseURL)
+			seen := []string{}
+			for {
+				for _, row := range rowsOf(page, "rows") {
+					seen = append(seen, row["id"].(map[string]any)["plan"].(string))
+				}
+				next, ok := page["next"].(string)
+				if !ok {
+					break
+				}
+				page = aok(t, s, baseURL+"&cursor="+url.QueryEscape(next))
+			}
+			if len(seen) != 3 || seen[0] == seen[1] || seen[1] == seen[2] || seen[0] == seen[2] {
+				t.Errorf("sort %s:%s continuation has gaps or duplicates: %v", measure, direction, seen)
+			}
+			if measure == "design_score:clarity" {
+				want := []string{"a", "b", "c"}
+				if direction == "desc" {
+					want = []string{"b", "a", "c"}
+				}
+				for i := range want {
+					if seen[i] != want[i] {
+						t.Errorf("nullable score sort %s order=%v, want %v", direction, seen, want)
+						break
+					}
+				}
+			}
+		}
 	}
 }
 
