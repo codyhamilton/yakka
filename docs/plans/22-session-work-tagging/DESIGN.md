@@ -501,6 +501,10 @@ Order and count fixed at sign-off. Phases 1–4 build the live path; 5–7 the b
 
 ### Phase 2 — Session-start capture on all four harnesses  *(earliest phase the harness side can verify against)*
 
+Units:
+
+- `2-01-session-start-capture.md` — all session-start capture surfaces, queue parsing/fact building, fixtures and version/docs updates; depends on Phase 1; runs alongside nothing.
+
 - Outcome: First, a probe table records for each of Claude Code, Codex, OpenCode and Cursor, launched headlessly, whether its session-start hook or plugin runs and whether it sees an exported variable, with the command used. Then, against a server built from Phase 1, for each harness launched headlessly (`claude -p`, `codex exec`, `opencode run`, `cursor-agent -p`):
   1. With all six `YAKKA_ACTION_*` set to a valid build action, after drain `GET /v1/actions?conversation_id=<the session>` returns that exact action with `source=env`, `status=accepted`, and the session's other facts are present.
   2. With none set, the session's facts are present and no action row exists.
