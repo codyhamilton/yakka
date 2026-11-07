@@ -174,3 +174,10 @@ Run ID: feat/20-analytics-reset phase 5 execution
 Start time: 2026-11-08T07:51+10:00
 
 Refinement commit: `d23bf4693bab93a79e32096cb830fbd301037341`; three sequential units. `artifact_feedback` on the briefs returned `not delivered` because the service had no version and nothing queued. Proceed verdict; no contract gaps identified.
+
+### `5-01-artifact-entities.md`
+
+- Outcome: closed after retry. `e3b48c8` added artifact identity/history and writing-session attribution; `f2a497d` amended the brief with uncovered signed requirements; `108d37e` added aggregate dimensions, bounded Boolean predicates, score/content numeric filters, nullable cursor paging, typed whole-population coverage and cell budget enforcement. `/entity` registration uses the already specified Phase 5 route. `/schema` capability remains unpublished until score/content integration is complete.
+- Surfaces: `packages/yakka/internal/{serve,store}/` artifact entity paths and tests; Phase 5 brief and report.
+- Deviations and carried: `bucket` on artifact aggregate is rejected and unadvertised because the design does not assign a version timestamp to a file spanning buckets; cohorts remain Phase 6. Aggregate exact sorting/statistics materializes enriched rows under the existing deadline, with no invented population truncation. 5-02 owns score-name catalogue validation, scorer/band lenses, baseline semantics, writing-session measures, and derived harness/model filters.
+- Verification: `GOMEMLIMIT=8GiB GOMAXPROCS=3 go test -p=3 ./internal/store ./internal/serve -count=1` passed (store 7.470s; serve 25.989s); `GOMEMLIMIT=8GiB GOMAXPROCS=3 go test -p=3 ./internal/serve -run TestArtifact -count=1` passed. `artifact_feedback` on the amended brief and report returned delivered / screen pass (`jev-1.13.0`).
