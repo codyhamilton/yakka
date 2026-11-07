@@ -34,6 +34,7 @@ SAFE_SESSION_RE = re.compile(r"^[A-Za-z0-9._:-]{1,200}$")
 
 @dataclass
 class Session:
+    # Empty when a Codex rollout has no usable transcript identity.
     session_id: str
     store: str
     path: str
@@ -89,11 +90,13 @@ def read_session(path: Path, store: str, session_id: str | None = None, related_
             objects.extend(_read_objects(related_raw))
         except OSError:
             continue
-    if not objects:
+    if not objects and store != "codex":
         return None
     if store == "codex":
         # Rollout filenames identify timestamped files; usage facts use the
-        # thread ID recorded in the first session_meta payload.
+        # thread ID recorded in session_meta. Never use a filename (or a
+        # caller's filename-derived ID) when that identity is unavailable.
+        session_id = ""
         for obj in objects:
             if not isinstance(obj, dict) or obj.get("type") != "session_meta":
                 continue
@@ -101,11 +104,15 @@ def read_session(path: Path, store: str, session_id: str | None = None, related_
             if not isinstance(payload, dict):
                 continue
             meta = payload.get("meta")
-            if not isinstance(meta, dict):
-                meta = payload
-            transcript_id = meta.get("id")
-            if isinstance(transcript_id, str) and SAFE_SESSION_RE.fullmatch(transcript_id):
-                session_id = transcript_id
+            candidates = [payload.get("id")]
+            if isinstance(meta, dict):
+                candidates.append(meta.get("id"))
+            session_id = next(
+                (candidate for candidate in candidates
+                 if isinstance(candidate, str) and SAFE_SESSION_RE.fullmatch(candidate)),
+                "",
+            )
+            if session_id:
                 break
     strings: list[str] = []
     keys: dict[str, list[str]] = {}
@@ -118,7 +125,7 @@ def read_session(path: Path, store: str, session_id: str | None = None, related_
     for value in strings:
         if re.search(r"(?:^|[/\\])docs[/\\]plans[/\\][^\s\"']+", value, re.I):
             files.extend(re.findall(r"(?:[A-Za-z0-9._-]+[/\\])*docs[/\\]plans[/\\][A-Za-z0-9._/-]+", value, re.I))
-    sid = session_id or path.stem
+    sid = session_id if store == "codex" else session_id or path.stem
     if store == "cursor" and path.parent.name == sid:
         sid = path.parent.name
     return Session(sid, store, str(path), text[:256_000], cwd, branch, sorted(set(files)))
@@ -252,6 +259,12 @@ def _scrub_evidence(text: str, limit: int = 300) -> str:
 
 
 def label_session(session: Session, repo: str = "", queue_truth: dict[str, dict[str, str]] | None = None) -> Label:
+    if not session.session_id:
+        # Keep identity failures visible without creating a label that a later
+        # pass could complete and attach to an invented conversation ID.
+        return Label("", session.store, "unresolved",
+                     evidence="missing or invalid session_meta conversation ID",
+                     source_file=session.path)
     truth = (queue_truth or {}).get(session.session_id, {})
     haystack = "\n".join((session.text[:200_000], session.cwd, session.branch, *session.files))
     plans = [m.group(1).lower() for m in PLAN_RE.finditer(haystack)]
@@ -333,7 +346,7 @@ def write_labels(path: Path, labels: list[Label]) -> None:
 def enqueue(labels: Iterable[Label], queue_dir: str | None = None) -> int:
     count = 0
     for label in labels:
-        if label.status != "complete":
+        if label.status != "complete" or not label.session_id:
             continue
         yakka.EnqueueSessionAction(
             conversation_id=label.session_id,

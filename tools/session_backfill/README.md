@@ -6,6 +6,12 @@ agent transcript JSONL files. It also reads queue logs from an explicit `--queue
 The first pass uses deterministic path, prompt, cwd and branch evidence; it never classifies a kind.
 A kind is filled only when a matched queue log supplies it.
 
+Codex conversation IDs come from the transcript's `session_meta.payload.id` (or
+`payload.meta.id` for wrapped metadata), never the rollout filename. A rollout
+with missing or invalid metadata stays in the label file as `unresolved` with an
+empty `session_id` and its transcript path in `source_file`; it cannot be enqueued
+until its identity is recovered.
+
 Run a dry report and write a local label file:
 
 ```sh

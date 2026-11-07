@@ -20,6 +20,7 @@ from backfill import (
     summarize,
     write_labels,
     main,
+    yakka,
 )
 
 
@@ -43,11 +44,13 @@ class BackfillTests(unittest.TestCase):
                     part.parent.mkdir(parents=True, exist_ok=True)
                     message.write_text(json.dumps({"id": "m1", "sessionID": "o3", "role": "user"}))
                     part.write_text(json.dumps({"messageID": "m1", "text": "docs/plans/22-demo"}))
+                elif store == "codex":
+                    path.write_text(json.dumps({"type": "session_meta", "payload": {"id": "c2", "cwd": "/repo"}}) + "\n")
                 else:
                     path.write_text(json.dumps({"session_id": path.stem, "cwd": "/repo", "text": "docs/plans/22-demo"}) + "\n")
             sessions = list(discover(roots))
             self.assertEqual({s.store for s in sessions}, set(roots))
-            self.assertEqual({s.session_id for s in sessions}, {"c1", "rollout-c2", "o3", "c4"})
+            self.assertEqual({s.session_id for s in sessions}, {"c1", "c2", "o3", "c4"})
             self.assertIn("docs/plans/22-demo", next(s.text for s in sessions if s.store == "opencode"))
 
     def test_codex_backfill_uses_transcript_thread_id_for_queued_fact(self):
@@ -64,11 +67,90 @@ class BackfillTests(unittest.TestCase):
             session = next(iter(discover({"codex": root / "codex"})))
             self.assertEqual(session.session_id, transcript_id)
             label = label_session(session, "owner/repo", {transcript_id: {"plan": "22-session-work-tagging", "phase": "5", "kind": "build"}})
-            label.status = "complete"
+            self.assertEqual(label.status, "complete")
             queue = root / "queue"
             self.assertEqual(enqueue([label], str(queue)), 1)
             envelope = json.loads(next(queue.glob("*.evt")).read_text().splitlines()[0])
             self.assertEqual(envelope["conversation_id"], transcript_id)
+            event = next(queue.glob("*.evt"))
+            built = yakka.Build(None, [yakka.File(Name=event.name, Data=event.read_bytes())])[0]
+            self.assertEqual(built.Reasons, [])
+            self.assertEqual(len(built.Facts), 1)
+            fact = json.loads(built.Facts[0])
+            self.assertEqual(fact["type"], "session_action")
+            self.assertEqual(fact["conversation_id"], transcript_id)
+
+    def test_codex_metadata_ids_override_filename_and_other_record_ids(self):
+        transcript_id = "019b7c53-ec1d-7a10-8b9d-53e1c4f0c421"
+        payloads = [
+            {"id": transcript_id},
+            {"meta": {"id": transcript_id}},
+            {"id": transcript_id, "meta": {"cwd": "/repo"}},
+            {"id": transcript_id, "meta": {"id": "unrelated-nested-id"}},
+        ]
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "rollout-unrelated-filename.jsonl"
+            for payload in payloads:
+                with self.subTest(payload=payload):
+                    path.write_text("\n".join(json.dumps(row) for row in [
+                        {"type": "response_item", "id": "message-id", "payload": {"id": "tool-id"}},
+                        {"type": "session_meta", "payload": None},
+                        {"type": "session_meta", "payload": payload},
+                    ]) + "\n")
+                    session = read_session(path, "codex", "caller-filename-stem")
+                    self.assertEqual(session.session_id, transcript_id)
+
+    def test_codex_missing_or_invalid_identity_stays_inspectable_without_enqueue(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            store = root / "codex"
+            store.mkdir()
+            path = store / "rollout-unresolved.jsonl"
+            logs = root / "logs"
+            logs.mkdir()
+            # Even log truth matching the filename must not turn it into a
+            # conversation ID when no usable transcript identity was found.
+            (logs / "par-22-demo-5-codex-1.log").write_text('session_id="rollout-unresolved"\naction=build\n')
+            for payload in (None, {}, {"id": ""}, {"id": 123}, {"id": "bad/id"}, {"meta": {"id": ""}}):
+                with self.subTest(payload=payload):
+                    rows = [{"type": "response_item", "payload": {"id": "message-id", "text": "docs/plans/22-demo phase 5"}}]
+                    if payload is not None:
+                        rows.insert(0, {"type": "session_meta", "payload": payload})
+                    path.write_text("\n".join(json.dumps(row) for row in rows) + "\n")
+                    labels = root / "labels.jsonl"
+                    queue = root / "queue"
+                    output = io.StringIO()
+                    with contextlib.redirect_stdout(output):
+                        result = main(["--root", f"codex={store}", "--repo", "owner/repo",
+                                       "--queue-logs", str(logs), "--labels", str(labels),
+                                       "--enqueue", "--queue-dir", str(queue)])
+                    self.assertEqual(result, 0)
+                    summary = json.loads(output.getvalue())
+                    self.assertEqual(summary["sessions"], 1)
+                    self.assertEqual(summary["stores"]["codex"]["unresolved"], 1)
+                    self.assertEqual(summary["emitted"], 0)
+                    label = json.loads(labels.read_text())
+                    self.assertEqual(label["session_id"], "")
+                    self.assertEqual(label["source_file"], str(path))
+                    self.assertIn("session_meta", label["evidence"])
+                    self.assertEqual(list(queue.glob("*.evt")), [])
+
+    def test_codex_unparseable_rollout_is_unresolved(self):
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "rollout-unreadable-metadata.jsonl"
+            for raw in ("", "not json\n", '{"type":"session_meta","payload":'):
+                with self.subTest(raw=raw):
+                    path.write_text(raw)
+                    sessions = list(discover({"codex": Path(td)}))
+                    self.assertEqual(len(sessions), 1)
+                    label = label_session(sessions[0], "owner/repo")
+                    self.assertEqual(label.status, "unresolved")
+                    self.assertEqual(label.session_id, "")
+                    self.assertEqual(label.source_file, str(path))
+                    # A later pass accidentally marking it complete must still
+                    # never enqueue an action without a recovered identity.
+                    label.status = "complete"
+                    self.assertEqual(enqueue([label], str(Path(td) / "queue")), 0)
 
     def test_queue_log_matching_and_masked_gold_agreement(self):
         with tempfile.TemporaryDirectory() as td:

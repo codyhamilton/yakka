@@ -121,3 +121,11 @@ The command-line dry-run entry point was exercised on the local four-store roots
 - Cody: confirm the codyh-ubuntu data roots and add/approve a deterministic queue-log-to-session association supported by those logs; rerun the dry run and verify the Phase 5 95% gold agreement and planned Flash exclusions.
 - Cody: authorize a later real enqueue/drain verification; compare projected rows to emitted actions and itemize secret-scan refusals.
 - The unrelated layout-test failure documented in the design remains unreproduced and uninvestigated; do not chase it unless it blocks later Plan 22 work.
+
+### Phase 5 review escalation — Codex conversation identity
+
+Completed the remaining blocking identity fix after `2f09bbc`. Codex labels use only the transcript's `session_meta` ID; absent or invalid identity remains inspectable as unresolved and cannot enqueue under a rollout filename. Direct payload IDs take precedence over wrapped metadata. The regression now verifies the canonical ID through the queue and fact builder, and missing/invalid/unparseable cases cannot emit actions. Report: `reports/5-02-review-escalation.md`.
+
+Verification: 10 synthetic backfill tests and all 15 client fact tests passed, with the latter using cached Go 1.27.1 and disabled module/checksum network access. Python compilation and `git diff --check` passed. New regressions first reproduced seven failing subcases against the previous fix. No real classification, egress, production-store read, drain, or human review occurred; remote artifact feedback was omitted under the no-egress gate.
+
+Carried: the non-blocking count-only snapshot issue #190 is unchanged. The documented unrelated layout failure was not rerun or investigated. Existing operational gates remain: Cody must authorize the codyh-ubuntu four-store dry run and any real enqueue/drain verification. This escalation closes the blocking review finding only and does not close another phase.
