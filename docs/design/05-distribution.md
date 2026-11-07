@@ -51,8 +51,9 @@ for the plugin to presume one, and local mode needs no generated state:
   whether or not the GitHub OAuth env vars are set (they are ignored). Setting `YAKKA_SERVE_KEYS`
   to anything but empty makes the process exit before it listens. How loopback serve is kept running
   is the user's choice.
-- With no `~/.config/yakka/client.toml`, the drain and the shim use `http://127.0.0.1:8770`
-  with no key.
+- To use that local server, explicitly set `mode = "local"` in
+  `~/.config/yakka/client.toml` (or `YAKKA_MODE=local` in the process environment). With no config,
+  the client reports that it is not logged in and explains how to choose local or log in remotely.
 - A non-loopback bind with `GITHUB_OAUTH_CLIENT_ID`, `GITHUB_OAUTH_CLIENT_SECRET`, and
   `YAKKA_PUBLIC_URL` set is a remote collector. `YAKKA_SERVE_KEYS` is not a credential there:
   any non-empty value makes the process exit before it listens, on loopback or not. The collector
