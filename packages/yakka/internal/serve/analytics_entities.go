@@ -190,6 +190,11 @@ func (s *Server) analyticsEntity(w http.ResponseWriter, r *http.Request, _ strin
 
 func (s *Server) analyticsPlanEntities(w http.ResponseWriter, r *http.Request, ts *tenantState) {
 	q := r.URL.Query()
+	snapshot, err := ts.t.PlanExecutionSnapshot(r.Context())
+	if err != nil {
+		readFailed(w)
+		return
+	}
 	sortSpec := q.Get("sort")
 	if sortSpec == "" {
 		sortSpec = "last_ts:desc"
@@ -209,6 +214,10 @@ func (s *Server) analyticsPlanEntities(w http.ResponseWriter, r *http.Request, t
 	}
 	if cur != nil && (cur.Route != "entities:plan" || cur.Filter != canonFilter(q)) {
 		errJSON(w, 400, "cursor mismatch")
+		return
+	}
+	if cur != nil && !sameEntitySnapshot(cur, snapshot) {
+		staleEntityCursor(w)
 		return
 	}
 	var sc *store.PlanCursor
@@ -268,16 +277,28 @@ func (s *Server) analyticsPlanEntities(w http.ResponseWriter, r *http.Request, t
 		}
 		lenses := map[string]any{"repo_id": x.RepoID, "harness": modeLens(harnesses), "session_model": dominantModelLens(models, len(ids))}
 		m["artifacts_by_kind"] = x.ArtifactsByKind
-		for kind, n := range x.ArtifactsByKind { m["artifacts:"+kind] = n }
-		for check, score := range x.DesignScores { m["design_score:"+check] = score }
+		for kind, n := range x.ArtifactsByKind {
+			m["artifacts:"+kind] = n
+		}
+		for check, score := range x.DesignScores {
+			m["design_score:"+check] = score
+		}
 		rows = append(rows, map[string]any{"id": map[string]any{"repo_id": x.RepoID, "plan": x.Plan}, "m": m, "l": lenses, "flags": flags})
 	}
 	out := map[string]any{"grain": "plan", "rows": rows, "sort": sortSpec, "population": map[string]any{"grain": "plan", "unit": "repo_id,plan", "scope_n": n, "cohort_n": n, "eligible_n": n, "returned_n": len(rows), "missing_by_reason": map[string]int{}}}
 	if more && len(page) > 0 {
 		last := page[len(page)-1]
-		out["next"] = (cursor{Route: "entities:plan", Filter: canonFilter(q), From: f.From.UnixNano(), To: f.To.UnixNano(), TS: planMeasure(last, p[0]), Key: []string{last.RepoID, last.Plan}}).encode()
+		out["next"] = (cursor{Route: "entities:plan", Filter: canonFilter(q), From: f.From.UnixNano(), To: f.To.UnixNano(), TS: planMeasure(last, p[0]), Key: []string{last.RepoID, last.Plan}, FactWatermark: snapshot.FactWatermark, FactRowID: snapshot.FactRowID, Revision: snapshot.Revision}).encode()
 	}
 	writeJSON(w, 200, out)
+}
+
+func sameEntitySnapshot(cur *cursor, snapshot store.EntitySnapshot) bool {
+	return cur.FactWatermark == snapshot.FactWatermark && cur.FactRowID == snapshot.FactRowID && cur.Revision == snapshot.Revision
+}
+
+func staleEntityCursor(w http.ResponseWriter) {
+	errCodeJSON(w, http.StatusConflict, "cursor_stale", "analytics data changed during pagination; restart from the first page", map[string]any{"restart": true})
 }
 
 func modeLens(counts map[string]int) string {
@@ -336,6 +357,11 @@ func planMeasure(x store.PlanEntity, name string) float64 {
 
 func (s *Server) analyticsExecutionEntities(w http.ResponseWriter, r *http.Request, ts *tenantState) {
 	q := r.URL.Query()
+	snapshot, err := ts.t.PlanExecutionSnapshot(r.Context())
+	if err != nil {
+		readFailed(w)
+		return
+	}
 	limit, cur, ok := pageParams(w, r)
 	if !ok {
 		return
@@ -346,6 +372,10 @@ func (s *Server) analyticsExecutionEntities(w http.ResponseWriter, r *http.Reque
 	}
 	if cur != nil && (cur.Route != "entities:execution" || cur.Filter != canonFilter(q)) {
 		errJSON(w, 400, "cursor mismatch")
+		return
+	}
+	if cur != nil && !sameEntitySnapshot(cur, snapshot) {
+		staleEntityCursor(w)
 		return
 	}
 	var ec *store.ExecCursor
@@ -387,21 +417,31 @@ func (s *Server) analyticsExecutionEntities(w http.ResponseWriter, r *http.Reque
 			return
 		}
 		scores, scoreErr := ts.t.ExecutionScores(r.Context(), x.RepoID, x.Plan, x.ConversationID, x.BriefPath)
-		if scoreErr != nil { readFailed(w); return }
-		for name, score := range scores { m[name] = score }
+		if scoreErr != nil {
+			readFailed(w)
+			return
+		}
+		for name, score := range scores {
+			m[name] = score
+		}
 		rows = append(rows, map[string]any{"id": map[string]any{"repo_id": x.RepoID, "conversation_id": x.ConversationID, "brief_path": x.BriefPath}, "m": m, "l": map[string]any{"shape": x.Shape, "plan": x.Plan, "repo_id": x.RepoID, "harness": x.Harness, "session_model": prov[x.ConversationID].Model}, "flags": flags})
 	}
 	n := counts["complete"] + counts["unreported"] + counts["started"]
 	out := map[string]any{"grain": "execution", "rows": rows, "population": map[string]any{"grain": "execution", "unit": "repo_id,conversation_id,brief_path", "scope_n": n, "cohort_n": n, "eligible_n": n, "returned_n": len(rows), "missing_by_reason": map[string]int{}}}
 	if more && len(page) > 0 {
 		last := page[len(page)-1]
-		out["next"] = (cursor{Route: "entities:execution", Filter: canonFilter(q), From: f.From.UnixNano(), To: f.To.UnixNano(), TS: last.TS, Key: []string{last.ConversationID, last.BriefPath, last.RepoID}}).encode()
+		out["next"] = (cursor{Route: "entities:execution", Filter: canonFilter(q), From: f.From.UnixNano(), To: f.To.UnixNano(), TS: last.TS, Key: []string{last.ConversationID, last.BriefPath, last.RepoID}, FactWatermark: snapshot.FactWatermark, FactRowID: snapshot.FactRowID, Revision: snapshot.Revision}).encode()
 	}
 	writeJSON(w, 200, out)
 }
 
 func (s *Server) analyticsPlanDetail(w http.ResponseWriter, r *http.Request, ts *tenantState) {
 	q := r.URL.Query()
+	snapshot, err := ts.t.PlanExecutionSnapshot(r.Context())
+	if err != nil {
+		readFailed(w)
+		return
+	}
 	repo, plan := q.Get("repo_id"), q.Get("plan")
 	if repo == "" || plan == "" {
 		errJSON(w, 400, "repo_id and plan required")
@@ -427,13 +467,26 @@ func (s *Server) analyticsPlanDetail(w http.ResponseWriter, r *http.Request, ts 
 			errJSON(w, 400, "cursor mismatch")
 			return
 		}
+		if !sameEntitySnapshot(cur, snapshot) {
+			staleEntityCursor(w)
+			return
+		}
 		after = firstKey(cur.Key)
 		if collection == "events" && len(cur.Key) > 1 {
 			after = cur.Key[0] + "|" + cur.Key[1]
 		}
+		if collection == "executions" && len(cur.Key) > 1 {
+			after = cur.Key[0] + "|" + cur.Key[1]
+		}
 		tsAfter = cur.TS
 	}
-	f, ok := parseFilter(w, r, filterOpts{route: "entity:plan:" + collection, cur: cur})
+	filterCursor := cur
+	if cur != nil {
+		copy := *cur
+		copy.Filter = canonFilter(q)
+		filterCursor = &copy
+	}
+	f, ok := parseFilter(w, r, filterOpts{route: "entity:plan:" + collection, cur: filterCursor})
 	if !ok {
 		return
 	}
@@ -460,8 +513,10 @@ func (s *Server) analyticsPlanDetail(w http.ResponseWriter, r *http.Request, ts 
 		}
 		if collection == "events" {
 			key = []string{last.Type, strconv.FormatInt(last.RowID, 10)}
+		} else if collection == "executions" {
+			key = []string{last.ConversationID, last.Path}
 		}
-		out["next"] = (cursor{Route: "entity:plan:" + collection, Filter: cf, TS: last.TS, Key: key}).encode()
+		out["next"] = (cursor{Route: "entity:plan:" + collection, Filter: cf, From: f.From.UnixNano(), To: f.To.UnixNano(), TS: last.TS, Key: key, FactWatermark: snapshot.FactWatermark, FactRowID: snapshot.FactRowID, Revision: snapshot.Revision}).encode()
 	}
 	writeJSON(w, 200, out)
 }

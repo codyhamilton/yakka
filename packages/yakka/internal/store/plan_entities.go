@@ -51,6 +51,26 @@ type PlanCursor struct {
 	RepoID, Plan string
 }
 
+// EntitySnapshot identifies the fact and derived-score state observed by a paged traversal.
+// Fact rowid supplements received_at because receive timestamps can tie.
+type EntitySnapshot struct {
+	FactWatermark int64
+	FactRowID     int64
+	Revision      int64
+}
+
+func (t *Tenant) PlanExecutionSnapshot(ctx context.Context) (EntitySnapshot, error) {
+	var s EntitySnapshot
+	err := t.rdb.QueryRowContext(ctx, `SELECT
+		(SELECT COALESCE(MAX(received_at),0) FROM facts),
+		(SELECT COALESCE(MAX(rowid),0) FROM facts),
+		MAX(revision) FROM (
+			SELECT COALESCE(MAX(id),0) revision FROM scores
+			UNION ALL SELECT COALESCE(MAX(id),0) FROM screens
+		)`).Scan(&s.FactWatermark, &s.FactRowID, &s.Revision)
+	return s, err
+}
+
 // PlanEntitiesPage lists plans established by in-window artifact facts. Session and execution
 // association is deliberately derived from captured artifact and brief facts only.
 func (t *Tenant) PlanEntitiesPage(ctx context.Context, f AnalyticsFilter, sortBy string, desc bool, cur *PlanCursor, limit int) ([]PlanEntity, bool, error) {
@@ -185,10 +205,23 @@ func (t *Tenant) ExecutionScores(ctx context.Context, repo, plan, conversation, 
 		AND f.rowid=(SELECT x.rowid FROM facts x WHERE x.type='artifact_version' AND x.repo_id=f.repo_id AND x.path=f.path ORDER BY x.received_at DESC,x.rowid DESC LIMIT 1)
 		AND s.id=(SELECT z.id FROM scores z WHERE z.content_hash=f.content_hash AND z.check_name=s.check_name ORDER BY z.id DESC LIMIT 1)`, repo, plan, conversation,
 		briefPath, reportPath)
-	if err != nil { return nil,err }
+	if err != nil {
+		return nil, err
+	}
 	defer rows.Close()
 	out := map[string]float64{}
-	for rows.Next() { var kind, check string; var score float64; if err := rows.Scan(&kind,&check,&score); err != nil { return nil,err }; prefix := "brief_score:"; if kind == "report" { prefix="report_score:" }; out[prefix+check]=score }
+	for rows.Next() {
+		var kind, check string
+		var score float64
+		if err := rows.Scan(&kind, &check, &score); err != nil {
+			return nil, err
+		}
+		prefix := "brief_score:"
+		if kind == "report" {
+			prefix = "report_score:"
+		}
+		out[prefix+check] = score
+	}
 	return out, rows.Err()
 }
 
@@ -207,7 +240,11 @@ type PlanDetailRow struct {
 
 func (t *Tenant) PlanDetailCount(ctx context.Context, f AnalyticsFilter, repo, plan, collection string) (int, error) {
 	w, args := f.factWhere()
-	args = append(args, repo, plan)
+	if collection == "events" {
+		args = append(args, repo, repo, plan)
+	} else {
+		args = append(args, repo, plan)
+	}
 	var q string
 	switch collection {
 	case "artifacts":
@@ -218,7 +255,6 @@ func (t *Tenant) PlanDetailCount(ctx context.Context, f AnalyticsFilter, repo, p
 		q = `SELECT COUNT(*) FROM (SELECT repo_id,conversation_id,path FROM facts WHERE type='artifact_version' AND kind='brief' AND ` + w + ` AND repo_id=? AND plan=? GROUP BY repo_id,conversation_id,path)`
 	case "events":
 		q = `SELECT COUNT(*) FROM facts WHERE ` + w + ` AND repo_id=? AND conversation_id IN (SELECT DISTINCT conversation_id FROM facts a WHERE a.type='artifact_version' AND a.repo_id=? AND a.plan=?)`
-		args = append(args, repo, plan)
 	default:
 		return 0, fmt.Errorf("unsupported plan collection")
 	}
@@ -231,7 +267,11 @@ func (t *Tenant) PlanDetailCount(ctx context.Context, f AnalyticsFilter, repo, p
 // filters in f apply to the window facts; session association uses lifetime plan artifacts.
 func (t *Tenant) PlanDetailPage(ctx context.Context, f AnalyticsFilter, repo, plan, collection string, after string, afterTS float64, limit int) ([]PlanDetailRow, bool, error) {
 	w, args := f.factWhere()
-	args = append(args, repo, plan)
+	if collection == "events" {
+		args = append(args, repo, repo, plan)
+	} else {
+		args = append(args, repo, plan)
+	}
 	var q string
 	switch collection {
 	case "artifacts":
@@ -242,7 +282,6 @@ func (t *Tenant) PlanDetailPage(ctx context.Context, f AnalyticsFilter, repo, pl
 		q = `SELECT repo_id,plan,path,conversation_id,'','brief',MIN(ts) FROM facts WHERE type='artifact_version' AND kind='brief' AND ` + w + ` AND repo_id=? AND plan=? GROUP BY repo_id,plan,path,conversation_id`
 	case "events":
 		q = `SELECT repo_id,plan,path,conversation_id,event,type,ts,rowid FROM facts WHERE ` + w + ` AND repo_id=? AND conversation_id IN (SELECT DISTINCT conversation_id FROM facts a WHERE a.type='artifact_version' AND a.repo_id=? AND a.plan=?)`
-		args = append(args, repo, plan)
 	default:
 		return nil, false, fmt.Errorf("unsupported plan collection")
 	}
@@ -256,7 +295,9 @@ func (t *Tenant) PlanDetailPage(ctx context.Context, f AnalyticsFilter, repo, pl
 		case "sessions":
 			q += ` HAVING s.conversation_id>?`
 		case "executions":
-			q += ` HAVING path>?`
+			conversation, path, _ := strings.Cut(after, "|")
+			q += ` HAVING (MIN(ts)<? OR (MIN(ts)=? AND (conversation_id>? OR (conversation_id=? AND path>?))))`
+			args = append(args, afterTS, afterTS, conversation, conversation, path)
 		case "events":
 			q += ` AND (ts<? OR (ts=? AND (type>? OR (type=? AND rowid>?))))`
 		}
@@ -271,7 +312,7 @@ func (t *Tenant) PlanDetailPage(ctx context.Context, f AnalyticsFilter, repo, pl
 		var rowID int64
 		_, _ = fmt.Sscan(rawID, &rowID)
 		args = append(args, afterTS, afterTS, typ, typ, rowID)
-	} else if after != "" {
+	} else if after != "" && collection != "executions" {
 		args = append(args, after)
 	}
 	q += ` LIMIT ?`

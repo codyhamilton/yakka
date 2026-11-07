@@ -126,6 +126,8 @@ type cursor struct {
 	Key                []string `json:"k"`
 	FactWatermark      int64    `json:"fw,omitempty"`
 	RejectionWatermark int64    `json:"rw,omitempty"`
+	FactRowID          int64    `json:"fi,omitempty"`
+	Revision           int64    `json:"rev,omitempty"`
 }
 
 func (c cursor) encode() string {
