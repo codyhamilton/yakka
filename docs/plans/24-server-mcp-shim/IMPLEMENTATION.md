@@ -94,6 +94,8 @@ Status: closed, 2026-11-07 (closing commit carries `Workflow-Phase: 24-server-mc
 
 ## Phase 4 — The thin shim, its readers, and the guard
 
+Refinement: four briefs were committed before implementation. Artifact feedback on each brief returned `not delivered` because the service had no version and nothing was queued; no ratings were available. The briefs were amended twice after implementation surfaced the missing spool acknowledgment surface and the repository's actual installed script path; both amendments were committed before the affected unit finished.
+
 ### Unit `phase4-01-transport`
 
 Status: done with concerns; committed as `eba14b3`. Report artifact feedback returned delivered, screen pass. The amended Phase 4 brief was committed before dispatch.
@@ -137,3 +139,16 @@ Status: done with concerns; committed as `41f672b`. Report artifact feedback ret
 - Agent: harness did not expose turn/context counts.
 
 - Checks: `python3 -m unittest test_mcp test_mcp_guard` passed 10 tests; focused Go MCP tests passed; `py_compile` and `git diff --check` passed. The unrelated layout test was not run or investigated.
+
+### Phase 4 verification
+
+- Entry point → action → result: started the built Go product server on a temporary loopback port with temporary data and queue directories; sent `initialize`, `tools/list` and all calls from both committed Phase 2–3 golden corpora through the Python shim. For each of the 23 requests, captured the exact shim-forwarded body, made a direct authenticated `POST /v1/mcp` with that same body, and compared the raw replies. All 23 matched byte-for-byte. This verifies the live v1 server/shim relay and actual reader injection for the committed corpus arguments.
+- Unit evidence: the 10 Python relay/guard tests, Go MCP conformance tests, Python compilation and global `git diff --check` all passed. The reader unit's bounded enqueue fake-server round trip and >50-entry queue coverage smoke passed as recorded above. All four unit reports returned delivered, screen pass.
+- Result: the shim relays server-owned protocol and corpus replies unchanged, injects the local readers used by those calls, handles transport/cancellation and queue-action checks, and has a passing static guard. The live product server has the v1 read-only declaration; its v2 action advertisement/directive is not implemented in the earlier server phase, so the bounded v2 action remains proven by the compatible fake-server smoke only. Run the v2 server-side extension against a new exact SHA before Plan 21 P3 depends on it. Claude Code, Codex and Cursor harness observations were unavailable and are non-gating under the design.
+
+### Phase 4 — Carried
+
+1. The deterministic `LatestScores` failure fixture remains unavailable; preserve the existing `baselines unavailable` fallback and ordinary baseline formatting coverage without changing server behavior to manufacture the failure.
+2. The approved v2 `enqueue_file_snapshot` shim path was smoke-tested with a compatible fake server; the current product server remains v1. Verify the server's v2 capability/declaration/directive extension against a new exact SHA before Plan 21 P3 relies on it.
+3. Claude Code, Codex and Cursor `_meta` visibility and failed-`initialize` observations were unavailable; they are non-gating observations, not implementation claims.
+4. The unrelated pre-existing layout test failure remains uninvestigated and unchanged; do not chase it in this plan.
