@@ -155,6 +155,17 @@ The drain never starts or manages the quality service, local or remote (principl
 
 ## MCP shim
 
+> **Proposed bounded extension, authorized 7 Nov 2026; implementation requires separate verification.**
+> [Plan 24's declaration v2 addendum](../plans/24-server-mcp-shim/DESIGN.md#authorized-amendment-bounded-enqueue-declaration-v2)
+> permits only one server-declared `enqueue_file_snapshot` for the call's already-resolved reviewed file,
+> followed by one continuation with effect facts and refreshed declared context. The server owns need
+> and final wording; the shim owns the fixed primitive and safety guards. Capability/version mismatch
+> stays visibly unsupported/not-delivered. The entry contains pointer metadata only, with the existing
+> spool format, locks and kick policy. The normal Python drain alone reads, scans and uploads content;
+> no MCP direct upload or content scan is added. The spool's ordinary kick may start that drain after
+> the bounded enqueue; no shim-owned launcher is restored. This is the sole exception to the v1
+> auth/context-only boundary, not a statement that the extension has been built or deployed.
+
 > **Proposed by [plan 24](../plans/24-server-mcp-shim/DESIGN.md), not built.** The shim becomes a thin wrapper: it forwards
 > `initialize`, `tools/list` and `tools/call` to the server's `POST /v1/mcp`, adds the bearer from the shared login, and fills
 > `_local` from a fixed table of read-only readers the server's tool declaration names. "Queue awareness" below moves to the

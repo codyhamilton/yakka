@@ -32,6 +32,264 @@ Invocation brief (headless design run, harness pick `design --headless --issue c
 
 Also from the brief, paraphrased (not verbatim): Plan 21's amended design extends the shim with a server-requested `enqueue_file_snapshot` side effect (its open question 6). The brief marks that an unapproved product decision and says the issue's rule (auth and context only) wins. This design builds the read-only context foundation with no effects, names the extension decision precisely, and says what the dependent Plan 21 phase does without it.
 
+## Authorized amendment: bounded enqueue, declaration v2
+
+Approval supplied for this headless amendment: **7 Nov 2026, 7:22 PM AEST**. The question was
+“May the shim queue the specific reviewed file when the server requests it?” The answer, verbatim:
+
+> Allow the bounded queue action
+
+This approval amends only the auth/context-only restriction for one server-declared,
+call-bound `enqueue_file_snapshot` action. The original Intent above is preserved. The v1
+foundation below remains the base contract; this addendum takes precedence only for the
+explicit v2 deltas below. It is a separately versioned extension, with the same four phases,
+not a new phase or a general local-effects framework. Approval is design authorization, not
+evidence that the extension is implemented, verified, released or deployed.
+
+### Ground and amendment boundary
+
+On 7 Nov 2026, canonical `git@github.com:codyhamilton/yakka.git` master was inspected and
+fetched through ordinary Git as `e178ab458633d007244c8cfb22f99c91df9e9402`, including
+Plan 24's design merge `f5a9f9e` and Plan 21's reconciliation merge `e178ab4`. The preserved
+four-file draft was hash-verified and applied unchanged first, then reconciled in a new isolated
+documentation worktree based on that SHA. No surrounding canonical-master delta was present.
+At that basis the Python client still owns the MCP tools and the server route table has no
+`/v1/mcp`. The Problem and original foundation sections below retain their historical Ground.
+
+Read-only build-reference inspection found Plan 24 at `e178ab458633d007244c8cfb22f99c91df9e9402`,
+Plan 22 at `84ffbd0e2eefda5595cb46d39e8d3aa235732e6d`, and Plan 21 at
+`32f3dbe3a3b4c971e5a7cb4b02a7a5dad114993a`. Plan 21's implementation record now describes
+P1 and P2 closures; they remain historical and are not reopened. These are dated local branch
+observations, not reviews of PRs 181, 184 or 185, implementation correctness judgments, or
+extension verification. Existing outcomes, units, implementation records and reviews on those
+branches are left intact. Executor integration must re-read its then-current boundary and verify
+the v2 extension against a new exact SHA. Existing `REVIEW.md` files are historical evidence,
+not an adversarial pass on this amendment.
+
+Ground was delegated to supported clean Luna recon contexts. Haiku is not offered by this Codex
+subagent facility; no Claude session was launched or quota cap bypassed.
+
+### Contract: declaration and capability negotiation (Plan 24 P1)
+
+Declaration v1 continues to reject nonempty `local_actions` and has no directives. V2 adds exactly
+one allowed declaration shape alongside the existing `context`, `scope`, `timeout_s` and `rev`:
+
+```json
+{"v":2,"local_actions":[{"action":"enqueue_file_snapshot","v":1,"path_from":"resolved_path"}]}
+```
+
+The example omits the unchanged fields. `rev` covers the complete canonical declaration,
+including `local_actions`. Registration rejects any other action, action version, binding,
+duplicate action or multiple actions; the action requires declared `resolved_path`, `file`,
+`git`, `queue` and `drain` readers, with `queue` v2 as specified below. No command, executable, queue directory, payload template,
+destination URL or alternative path can be declared. The registry provides the generic seam;
+Plan 21 P3 owns adding this declaration to `artifact_feedback` and deciding when it is needed.
+All other tools, including Plan 22/23 tools, retain their own declarations and permissions.
+
+For the effect-capable variant, `queue` reader v2 retains the v1 diagnostic samples (at most
+50 pending and 50 rejected entries) and adds `coverage`:
+`{complete, pending_covering, rejected_covering, oldest_covering_age_s}`. Counts and oldest age
+are computed over the complete matching set for the pinned repository/path and the current
+`file.mtime`, not the truncated sample. This reader requires preceding `resolved_path`, `git`
+and `file` facts and uses the same containment, matching and mtime rules as Plan 21. It obeys
+the existing reader deadline and output budget: if it cannot establish complete coverage,
+including because a potentially matching entry cannot be read, it returns
+`_failed:{code:"incomplete_queue"}`. This required-reader failure prevents a directive or
+enqueue; omission/truncation is never evidence of absence. V1 readers/tools remain unchanged;
+an effect-capable shim must implement queue v2 and the registry fixture must declare it.
+
+The shim advertises `Yakka-Context: 2` and
+`Yakka-Local-Actions: enqueue_file_snapshot/1`. The server advertises the matching action under
+`initialize.result._meta["yakka/local-actions"]` as
+`{"v":1,"actions":[{"action":"enqueue_file_snapshot","v":1}]}`. This is additive to MCP
+capabilities; the existing tools capability is unchanged. Headers are sent on each request;
+the stateless server does not depend on remembering initialization. Both the declaration version
+and the explicit action capability must match before a directive is permitted. The shim checks
+the server advertisement (fetching `initialize` internally if necessary) and pins it with the
+declaration before acting. Capability headers are client support claims, never identity or
+tenant authority.
+
+For an old shim, an absent action header, or an unsupported version, the server retains the v1
+read-only feedback variant and its declaration, with explicit server wording `not delivered` or
+`stale` plus `enqueue unsupported` when enqueue would be needed. It never sends that caller a
+directive, claims it queued anything, or hides the delivery failure. Other tools continue to work.
+The server may omit a future tool that has no compatible variant, as in the base negotiation rule.
+A new shim with an old server uses v1 when available; a server without `/v1/mcp` produces the
+existing `server unsupported` error. A declaration/action/version mismatch is `unsupported`,
+with no effect. No compatibility path posts content directly or silently substitutes local mode.
+
+### Contract: one directive round and result facts (Plan 24 P1/P4)
+
+The initial call carries shim-generated `_local._call` (a fresh opaque call token), `_v:2`,
+`_rev` and the declared reader facts. Agent-supplied `_local`, call tokens and effect facts are
+overwritten; no agent argument or prose is interpreted as an action. After authentication,
+scope, revision, argument validation and required-reader gates, the server may return the
+reserved JSON-RPC error `-32011`, with data:
+
+```json
+{"code":"local_action_required","v":1,"call":"<echo _call>","rev":"<pinned rev>","action_id":"<opaque>","action":"enqueue_file_snapshot","action_v":1,"path":"<exact resolved_path.path>"}
+```
+
+This is control data, never an agent-facing tool answer. Its human-readable message is ignored
+by the shim and never relayed. The shim accepts exactly one directive bound to the same call,
+tool, descriptor, capability, action version and original resolved file. It does not accept an
+action embedded in an ordinary result, another JSON-RPC error, unsolicited message or prose.
+It runs the bounded primitive at most once, re-reads all declared local context, then forwards
+the original arguments and request id once more with the same call token and revision and:
+
+```json
+{"effects":[{"action":"enqueue_file_snapshot","v":1,"action_id":"<same>","ok":true,"outcome":"enqueued","error":null}]}
+```
+
+`effects` lives inside shim-owned `_local`, is a result of the primitive, not a reader or an
+agent permission. Outcomes are `enqueued`, `covered`, `failed`, `unknown`; `ok` is true only
+for the first two. Failure codes are `capture_off`, `spool_dropped`, `yakka_bin_set`,
+`unsupported`, `path_changed`, `queue_unavailable`, `queue_rejected`, `stale_declaration`, `effect_unknown`.
+The codes are facts; all delivery state, explanations and fixes remain on the server.
+Malformed, undeclared or unknown actions are never executed; where the envelope is safely
+bound, the single continuation carries `unsupported`. An unbound/malformed envelope, descriptor
+change, path substitution or a second directive terminates with the shim's bounded `bad directive`
+error. It never starts another directive round. A descriptor change after enqueue does not undo
+the entry and must say the local effect may have happened. The initial `-32010` refresh/retry
+remains allowed once only before any directive; it does not reset the one-effect allowance.
+
+The final normal server reply is relayed unchanged. Plan 21 P3 interprets refreshed delivery
+hash, queue coverage, rejection and effect facts: `delivered` requires the service's hash to
+match; `queued` requires a current covering entry; an enqueue acknowledgment alone proves neither.
+If the drain has taken the entry but delivery is not yet visible, the answer is `not delivered`
+or `stale`, explains that enqueue was acknowledged but delivery is unconfirmed, and asks for a
+repeat read. Reader failures remain `local context unavailable`, never a clean delivery state.
+All round trips and the effect share the call's bounded deadline; no background tool job or
+new polling loop is introduced. Cancellation prevents an action not yet started; after action
+start it can leave an entry and cannot roll it back.
+
+Transport retry never re-executes the action. Before action start the existing safe read retry
+rules apply. After start, only the continuation carrying the same result facts can be retried,
+without another enqueue; if final transport fails the shim returns its transport error with
+`local_effect_outcome` (`enqueued`, `covered`, `failed` or `unknown`) and no false tool state.
+An interrupted spool acknowledgment is `unknown`, even if an entry may exist. Do not repeat
+the primitive, overwrite/delete an entry or treat absence after a drain as proof of failure.
+An explicit later feedback call re-reads service/hash/mtime/queue evidence and exposes any
+unconfirmed delivery; a restart provides no exactly-once guarantee and must not silently replay
+an abandoned directive. There is no new persistent retry ledger. Metadata-identical facts still
+dedupe at normal ingest under Plan 21's row-hash contract.
+
+### Contract: bounded local primitive and pointer freshness (Plan 24 P4)
+
+The shim implements one generic action, without tool names or feedback wording. Its only target
+is the regular file already resolved, contained in the call's Git worktree, hashed and identified
+by the initial readers. It pins canonical realpath, worktree/repository identity and local file
+identity (device/inode, size, mtime and hash). Immediately before enqueue it rechecks containment,
+identity and generation; swapping a path, changing a symlink, replacing a file or changing the
+generation fails `path_changed` without enqueue. A directive path must equal the original
+`resolved_path.path` exactly; the canonical realpath is a separate local identity guard and is
+not substituted into the v1 reader's normalized-path output. Alternative spellings supplied by
+the server grant no capability, even when they resolve to the same inode. Unusable
+initial paths, failed readers and files outside the worktree grant no action capability. Local
+guards are safety checks, not tool argument/state logic.
+
+The primitive checks complete current queue coverage again to suppress a concurrent/repeated enqueue for
+the same file generation. A newly covering rejection prevents append with `queue_rejected`;
+an incomplete scan fails `queue_unavailable`, never an append based on the diagnostic sample.
+Coverage uses Plan 21's repository/path matching and entry mtime at or
+after file mtime; unchanged service hash avoids a directive in the first place. Concurrent calls
+for the same target must serialize this check-and-append with bounded local coordination;
+the drain's lifetime `.drain.lock` and spool kick locks retain their existing meanings. No queue
+entry is overwritten, consumed or deleted by the shim. A legitimate later rewrite can enqueue
+one new pointer; mtime coverage is a heuristic, not a promise to preserve identical-timestamp edits.
+The next feedback call compares the current content hash, so a mismatch remains visibly stale
+or not delivered rather than being called delivered.
+
+The enqueue uses the installed plugin's fixed `spool.sh` entry point with fixed arguments and
+pointer metadata on stdin, never server-supplied command strings, shell evaluation or a path to
+an executable. It writes only the existing queue form: `umask 077`, temporary file then atomic
+rename, envelope plus pointer payload (`artifact_snapshot`, repo/cwd/path and conversation
+metadata as Plan 21 defines). No content is copied to a queue packet or MCP body. The opt-in
+`YAKKA_SPOOL_PRINT=1` acknowledgment prints only the successful entry name to the private caller;
+hook stdout stays unchanged. A mere zero exit is not success: no acknowledgment is `spool_dropped`
+or `unknown` if the write's outcome cannot be determined. Acknowledgment is never agent wording.
+`YAKKA_HOOKLOG` off gives `capture_off` with no write. A set `YAKKA_BIN` gives `yakka_bin_set`
+before enqueue, preventing this path from starting an unknown external drain implementation.
+Queue configuration comes only from the existing local configuration, never the directive.
+
+There is no shim-owned drain launcher. On a successful spool, the existing spool kick rules
+apply, including `YAKKA_HOOKLOG_KICK=0`, `.drain.lock` and existing kick fallback. Thus the bounded
+action may indirectly start the normal Python drain through the spool; it does not invent a
+second kick policy. Suppressing the kick leaves the pointer queued, reported with drain liveness.
+The Python drain alone reads content with its hash, scans/withholds it, and posts `/v1/ingest`.
+The MCP handler never scans content, ingests, wakes the scoring worker or writes the service.
+The service's own ordinary ingest checks remain unchanged. No secret values, payloads, bearer
+keys, effect arguments or absolute paths are added to logs.
+
+Despite the name `enqueue_file_snapshot`, this is a pointer, preserving Plan 21's semantics.
+A file changed after the final guard and before drain consumption can deliver the newer bytes;
+a vanished or ineligible file can be rejected by the drain. Neither enqueue nor `queued` claims
+that exact bytes have been captured or scanned. Feedback re-hashes the current file on each call
+and reports delivery/rejection for that generation; no snapshot-content upload is added to the
+shim to close this race.
+
+### Authorization, service scope and permissions
+
+`artifact_feedback` retains scope `read`, `readOnlyHint:true` and `idempotentHint:true` as already
+decided in Plan 21. Those describe its service behavior: no service write, ingest or worker wake.
+They do not grant local filesystem permission. The explicit local-action declaration and the
+bounded approval above authorize the queue effect; tool descriptions must disclose it so a
+harness can apply its local-effect permission policy. A read token can obtain feedback and,
+with local permission, cause the bounded enqueue; that token still cannot authorize drain ingest.
+An ingest auth failure leaves ordinary queued/retry evidence and ultimately the existing age-based
+`not delivered`/`stale` diagnosis. No token scope, tenant isolation, shared login or auth fallback
+changes. `_local`/`effects` remain untrusted claims to the server, never authorization.
+
+### Exact handoff deltas within the fixed four phases
+
+These are acceptance addenda for the Executor to fold at a phase boundary. They do not reopen
+a closed phase, add a fifth phase, create task briefs, or assert that an earlier tested SHA
+covers the extension. If an affected phase has already closed/merged when this is adopted,
+record extension verification against a new exact SHA without changing the historical closure.
+
+| Phase | Outcome/acceptance delta: entry → action → observable result | Surfaces | Approach/dependencies |
+|---|---|---|---|
+| P1 endpoint/registry | `initialize`/`tools/list` → negotiate action and declaration versions → only compatible v2 clients receive the exact bounded declaration. Clauses (1),(2),(5),(8): add capability advertisement, queue v2 complete-coverage contract, revised rev/carrier and one-round control envelope; replace blanket action refusal only for this exact v2 action; malformed/unknown declarations fail. Auth/tenant/log/budget clauses remain. | `internal/serve/mcp*.go`, reader/declaration conformance fixture `testdata/mcp-readers.json`, registry fixtures; proposed route contract notes | Known, still no dependency. |
+| P2 stateless tools | Existing direct calls → compare original corpus → identical definitions/results, no actions or effect facts needed. No acceptance delta. | Existing server reads/store and golden corpus, unchanged | Known, still P1. |
+| P3 base feedback migration | V1 direct feedback calls → compare base parity corpus → existing states and no service writes. No base acceptance delta; this phase does not acquire Plan 21's enqueue state machine. | Existing feedback handler and parity fixtures, unchanged for the foundation | Known, still P1. Plan 21 P3 owns its subsequent directive decisions/state wording. |
+| P4 shim | Compatible fake server's declared action → one guarded enqueue and continuation → one pointer, refreshed facts, only final server wording. Extend clauses (1),(2),(3),(5),(7),(9) for v2 relay, action error facts, no directive leakage, spoof/path/symlink/identity/descriptor rejection, concurrent coverage, complete-coverage/rejection summaries beyond 50 entries and incomplete-scan refusal, timeout/retry/unknown outcome, old/new compatibility and static argv guard. Replace “spool byte-identical/no processes except git” only for the fixed spool invocation/acknowledgment and its existing kick. V1 remains effect-free. | `yakka.py` shim/action primitive, queue v2 reader and tests/guard, `spool.sh` opt-in acknowledgment, registry conformance fixtures, docs 02/04; plugin version change belongs to future implementation | Known, still P1/P2/P3. No dependency on Plan 21 handler implementation for generic conformance proof. |
+| Plan 21 P3 (separate plan, unchanged seven-phase count) | Missing current service hash with no covering/rejected pointer → server requests approved action → pointer queued before Stop, repeat adds none, normal drain later delivers or exposes rejection/failure. Part 2 selects A, and includes the v2 adversarial/compatibility cases above. | Plan 21 feedback handler/declaration, sweep/drain/path matching, integration evidence | Open as before; P21 P1 plus P24 P1/P3/P4 and verified v2 extension. |
+
+P24 P1/P4 generic conformance and P21 P3 end-to-end behavior are separate acceptance obligations.
+No extension build or implementation tests run as part of this design amendment.
+
+### Headless amendment ledger
+
+- Question: Is a local queue write now permitted? Answer: only the quoted bounded approval,
+  selecting Plan 21 alternative A. Rationale: explicit user decision at the stated time. If the
+  approval is construed differently, return to design; never infer arbitrary local effects.
+- Question: What changes in a built/closed foundation? Answer: acceptance deltas are separately
+  verified at the Executor's boundary; base closure remains historical. Rationale: ongoing PRs
+  can move beyond these dated observations. If the Executor's base differs, reconcile the
+  extension with its current surfaces without rewriting prior closure evidence.
+- Question: How do retries and old clients behave? Answer: explicit support negotiation, one
+  action per call, unknown-outcome visibility and no automatic action replay. Rationale: no
+  existing durable exactly-once queue receipt contract. If stronger guarantees are required,
+  that is a new design decision, not an invented local effects ledger.
+- Question: What does freshness mean? Answer: a guarded pointer to the reviewed file, current
+  bytes at drain time, current hash at feedback time. Rationale: preserves Plan 21's queue
+  semantics. If exact-byte capture is required, stop at design; this approval does not grant it.
+- Question: Does publication release any operational gate? Answer: no. No queue operations,
+  implementation, retirement, deletion, secrets/config changes, build/review/merge, release,
+  deployment or Plan 25 work is authorized by this amendment run. Existing Plan 21 gates remain.
+
+### Adversarial rationale
+
+A supported clean-context Codex design reviewer challenged the four preserved draft documents;
+its runtime model ID was not exposed, so this is not represented as a Haiku or Sonnet pass.
+Its four findings led to explicit queue v2 complete-set coverage and incomplete-scan refusal,
+separate wire-path equality and canonical identity guards, removal of Plan 21's unconditional
+queued-on-enqueue promise, and the 300-second age diagnosis regardless of drain liveness.
+The amended phase deltas include the resulting conformance obligations. This records a design
+challenge and corrections, not implementation review, test evidence, a reused historical
+`REVIEW.md` verdict. Canonical-master reconciliation is recorded separately above; that does not
+turn this prior draft review into a fresh review of the final tracked files.
+
 ## Problem
 
 All MCP behaviour lives in the client. `plugins/yakka/client/yakka.py` `# --- mcp ---` (lines 1840-2513) holds the protocol (`_mcp_handle`, 2400), the three tool definitions (`_MCP_TOOL_LIST`, 2350-2389), the `instructions` text (1845-1849), argument validation, every result string, and the whole `artifact_feedback` state machine (1967-2200) beside its local reads. The server has no MCP code at all (`grep -i mcp internal/serve` is empty); its routes are REST (`serve.go:485-529`). A Go twin of the shim and of the feedback states exists in `packages/yakka/internal/mcp` (`feedback.go:151-334`), unregistered and slated for deletion by #178.
@@ -147,7 +405,7 @@ Nothing changes for REST callers, the drain, the spool, the hooks or the plugin'
 
 Headless: none were taken interactively. Decisions carried in from the issue (all "Direction from Cody (2 Nov)", the rule): the shim only injects auth and local context; all tools and logic live on the server; the declaration of which context to inject is the server's; the drain stays separate with the same login; the shim never falls back from a configured remote to local; #178 is separate. Decided by this design, with the choice and its reversal cost in the ledger: the wire form, the declaration carrier, the closed error and failure vocabularies, scope and Origin handling, budgets, readers, who kicks the drain, the phase cut.
 
-**Not decided here, deliberately:** whether the shim may run any server-requested local effect. See Open Questions 1.
+**Now decided narrowly by the appended 7 Nov approval:** the v2 addendum permits only one server-declared reviewed-file-bound enqueue. The base v1 decision and every other local effect restriction remain. See resolved Open Question 1 and the amendment ledger.
 
 ## Assumption Ledger
 
@@ -180,6 +438,9 @@ Headless: none were taken interactively. Decisions carried in from the issue (al
 - If wrong: a tool that wants to proceed without a reader marks it `required:false` and handles `Failure`; only the registry default changes.
 
 ### Assumption 5
+
+The following records the v1 foundation decision. The 7 Nov bounded approval now authorizes only
+the v2 exception in the addendum; it does not retroactively change v1 acceptance evidence.
 
 - Question: Does the foundation include any shim-run effect (drain kick, `enqueue_file_snapshot`)?
 - Answer chosen: No. The declaration v1 has no `local_actions` (the registry refuses one), the shim never interprets a reply, and the existing drain kick is dropped. Hooks own the kick because they already start a drain on every spooled event.
@@ -286,7 +547,12 @@ Headless: none were taken interactively. Decisions carried in from the issue (al
 
 ## Open Questions
 
-1. **The one local-effect extension (blocks Plan 21 Phase 3's first outcome clause only).** Plan 21's amended design has the server ask the shim to run `enqueue_file_snapshot`, the shim queue the file and kick the drain, and the call return `queued` at once. Cody's 2 Nov 11:18 PM direction ("...It can push to the queue for it to be drained as normal, and if it's already on the queue or the shim queues, it can return early...") decided the feedback tool's behaviour; whether the *shim* may run a server-requested local action is Plan 21's own open question 6 and is not confirmed, and #177's rule says auth and local context only. This design therefore builds none of it. The question for Cody: may the shim run a named, server-declared, path-bound local action (the mechanism in Plan 21 ledger 22: declared `local_actions`, a directive reply, a fixed action table, one extra forward), widening the rule from "auth and context" to "auth, context and one server-requested effect"? If **yes**: a separate change adds declaration v2 and the action table on top of this foundation, #177's body is amended, and Plan 21 P3 proceeds as written. If **no**: Plan 21 P3 takes ledger 22's fallback (the server answers `not delivered`, "the file is not on the queue; touch it with a write tool or wait for Stop") or a hook-only alternative Plan 21 would amend, and loses the case of a Bash-heredoc write before Stop. Either way this design is unchanged, and Plan 21 P1, P2 and P4-P7 do not depend on the answer.
+1. **Resolved by the 7 Nov 2026, 7:22 PM AEST approval:** one server-declared, reviewed-file-bound
+   `enqueue_file_snapshot` is authorized by the v2 addendum above. No general local effect is
+   permitted. Plan 21 P3 Part 2 selects A and still requires the extension's implementation and
+   verification; P1/P2 remain independent, P4 is independent of the effect, P5 retains its own
+   dependencies, and P6/P7 transitively require P3 closure. Nothing is unblocked by choice alone.
+
 2. Do Claude Code, Codex and Cursor tolerate `_meta["yakka/tool"]` in `tools/list` without sending it to the model, and what does each do after a failed `initialize`? Measured in Phase 4; blocks nothing earlier. Fallback in Assumptions 2 and 6.
 3. Does the Fly proxy idle timeout (not set in `fly.toml`; community reports of roughly 60 s are unverified), the Cloudflare edge in front of `api.yakka.build` (`yakka.py:1150`; its proxy read timeout is not in the repo and not verified here), or any harness's MCP tool timeout cut a call over a minute? Blocks only Plan 23's smoke evidence. The route and shim support `timeout_s` up to 300 s, which may exceed what the edge allows; the shim maps an intermediary's `504`/`524` to `timeout`, and the SSE or async fallbacks are Assumption 1's.
 4. Does Codex (and Claude Code) expose the project directory to a stdio MCP server? Plan 21's open question 1. `project_dir` returns `null` until answered; `bases:["cwd"]` is today's behaviour; nothing here waits on it.
@@ -327,7 +593,7 @@ Order and count fixed at sign-off. Phases 2 and 3 can be built in either order a
 ## Provenance Notes
 
 - **Why one endpoint and a registry, not three REST-shaped handlers.** The three plans add tools at a steady rate (Plan 21 changes one, Plan 22 adds two, Plan 23 adds one). A registry entry is a declaration plus a handler; the protocol, scope, budget and trust rules are written once, and the issue's "tools/list through yakka mcp matches the server" is true by construction because the shim does not author it.
-- **Why the registry refuses `local_actions` rather than ignoring it.** An ignored key would let Plan 21's effect arrive as "plumbing" with no decision. A refusal is a visible gate that the extension decision (Open Question 1) must open deliberately, with `v: 2`.
+- **Why the v1 registry refuses `local_actions` rather than ignoring it.** An ignored key would let Plan 21's effect arrive as "plumbing" with no decision. A refusal is a visible gate that the extension decision (Open Question 1) must open deliberately, with `v: 2`.
 - **Why `_local` lives in `arguments`.** The agent controls `arguments`, so spoofing happens there and the overwrite belongs there; a side channel (`params._meta`) would be safer from the model but is not what Plans 21 and 23 already cite, and the server does not trust either place.
 - **Why the registry enforces required readers.** Plan 21's no-false-clean rule is easy to break in one handler and hard to audit across several; one check before the handler turns it into a property of the registry.
 - **Why the stale-declaration retry exists.** Without `_rev` a shim holding a declaration cache from before a server deploy injects the old reader list; the registry then sees a missing required reader and fails every call until the harness restarts the shim. One `-32010`, one `tools/list` refresh and one retry is the smallest mechanism that closes that.
@@ -335,5 +601,5 @@ Order and count fixed at sign-off. Phases 2 and 3 can be built in either order a
 - **Rejected: porting the Go shim.** #178 deletes it; its feedback logic is consulted, not depended on.
 - **Rejected: letting a declaration carry a command, path or URL for the shim to run.** The server is remote, shared and a single point of compromise for every logged-in machine; the reader table is the capability allowlist, and it can only grow by shipping a plugin.
 - **Rejected: client-side argument validation or schema checks "for speed".** The server validates; the shim has no schema. An invalid call costs one round trip.
-- **What a build must not infer from this document:** that effects are approved, that `project_dir` is available on any harness, that a deployment or secret exists, or that any behaviour here is deployed. Nothing here is.
+- **What a build must not infer from this document:** that effects beyond the explicitly approved v2 bounded enqueue are approved, that `project_dir` is available on any harness, that a deployment or secret exists, or that any behaviour here is deployed. Nothing here is.
 - **Recon limits.** Facts come from reading code and a Haiku recon pass, not from running it. Not read: `test_drain.py`, `test_login.py`, `test_status.py`, the hooks' producer details beyond `spool.sh`'s kick, the Go `internal/mcp` tests. Fly's proxy timeout is not in the repo.

@@ -15,6 +15,19 @@ similar work exists.
 
 ## Shape
 
+> **Proposed bounded extension, authorized 7 Nov 2026; implementation requires separate verification.**
+> [Plan 24's v2 addendum](../plans/24-server-mcp-shim/DESIGN.md#authorized-amendment-bounded-enqueue-declaration-v2)
+> and [Plan 21's reconciliation](../plans/21-feedback-delivery/DESIGN.md#bounded-action-approval-and-amendment-basis)
+> permit the server to request one guarded pointer enqueue for the specific reviewed file. Only
+> the final server answer reaches the agent after refreshed context. `readOnlyHint:true` and read
+> scope describe service reads; the explicit local-action declaration and bounded approval separately
+> govern the local queue effect and must be disclosed to the harness. Enqueue acknowledgment is not
+> proof of queued/delivered: those require current covering queue evidence/matching service hash.
+> Unsupported versions, unknown effect outcomes and failures stay visible. No MCP file content,
+> direct post, secret scan, worker wake, arbitrary commands/paths or queue deletion is authorized.
+> Pointer freshness and the spool's normal Python-drain kick follow Plan 24; this note claims no
+> implementation or deployment and preserves the historical v1 proposal below.
+
 > **Proposed by [plan 24](../plans/24-server-mcp-shim/DESIGN.md), not built.** Today this document describes the shim as the
 > owner of the three tools. Plan 24 moves every tool, its wording and its state logic to a `POST /v1/mcp` endpoint on the
 > server; the shim then only adds the bearer and reader-collected local context (`_local`) and relays replies. Until that
