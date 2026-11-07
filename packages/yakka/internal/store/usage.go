@@ -160,12 +160,6 @@ func usageQueryImpl(ctx context.Context, t *Tenant, f AnalyticsFilter, p QueryPa
 	if _, ok := multiYearStep(bucket); ok {
 		validBucket = true
 	}
-	if bucket == "year" {
-		validBucket = true
-	}
-	if _, ok := multiYearStep(bucket); ok {
-		validBucket = true
-	}
 	if !validBucket {
 		return QueryResult{}, fmt.Errorf("unknown bucket %q", p.Bucket)
 	}
