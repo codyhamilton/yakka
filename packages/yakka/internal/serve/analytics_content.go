@@ -50,12 +50,12 @@ func (s *Server) analyticsContent(w http.ResponseWriter, r *http.Request, _ stri
 		contentUnavailable(w, "pending")
 		return
 	}
+	if state.ScreenStage || state.ScreenVerdict != "" && state.ScreenVerdict != "pass" && state.ScreenVerdict != "unscreened" {
+		contentUnavailable(w, "removed_by_screen")
+		return
+	}
 	if !state.BlobExists {
-		if state.ScreenStage || (state.ScreenVerdict != "" && state.ScreenVerdict != "pass" && state.ScreenVerdict != "unscreened") {
-			contentUnavailable(w, "removed_by_screen")
-		} else {
-			contentUnavailable(w, "not_stored")
-		}
+		contentUnavailable(w, "not_stored")
 		return
 	}
 	body, size, err := ts.t.ReadBlobBounded(r.Context(), hash, analyticsContentLimit)

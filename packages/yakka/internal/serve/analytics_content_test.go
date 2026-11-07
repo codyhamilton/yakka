@@ -83,6 +83,15 @@ func TestAnalyticsContentExactIdentityAndStates(t *testing.T) {
 		t.Fatalf("unscreened state: %d %v", unscreened.Code, unscreened.Header())
 	}
 
+	rejectedPath := "docs/plans/p/reports/rejected.md"
+	rejectedHash := contentFixture(t, a, "repo", rejectedPath, "screen rejected", "fail")
+	rejected := contentRequest(t, s.Handler(), "ka", "repo", rejectedPath, rejectedHash)
+	var rejectedBody map[string]any
+	_ = json.Unmarshal(rejected.Body.Bytes(), &rejectedBody)
+	if rejected.Code != 404 || rejectedBody["reason"] != "removed_by_screen" || strings.Contains(rejected.Body.String(), "screen rejected") {
+		t.Fatalf("rejected state: %d %s", rejected.Code, rejected.Body.String())
+	}
+
 	pendingHash := contentFixture(t, a, "repo", "docs/plans/p/briefs/b.md", "pending", "pending")
 	pending := contentRequest(t, s.Handler(), "ka", "repo", "docs/plans/p/briefs/b.md", pendingHash)
 	var pendingBody map[string]any
