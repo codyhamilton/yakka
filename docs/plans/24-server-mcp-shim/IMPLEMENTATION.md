@@ -104,3 +104,14 @@ Status: done with concerns; committed as `eba14b3`. Report artifact feedback ret
 - Agent: harness did not expose turn/context counts.
 
 - Checks: focused relay probe passed 5 cases; `py_compile`, static scan of the MCP section, and `git diff --check` passed. The test-suite incompatibility is carried to the conformance unit.
+
+### Unit `phase4-02-readers-and-enqueue`
+
+Status: done with concerns; committed as `b81e77f`. Report artifact feedback returned delivered, screen pass. The brief was amended and committed to authorize only the required opt-in spool acknowledgment at the installed path `plugins/yakka/script/spool.sh`; the repository's installed script path differed from the design's stale path.
+
+- Built: added declared local readers, secret-key scrubbing, queue reader v2 complete-coverage facts, and the single capability/call/path-bound enqueue directive and continuation. The action revalidates identity and hash, serializes check-and-append, and uses the fixed spool entry point with pointer metadata. The spool acknowledgment is opt-in and leaves hook stdout unchanged by default.
+- Surfaces: `plugins/yakka/client/yakka.py`, `plugins/yakka/script/spool.sh`, `packages/yakka/internal/serve/testdata/mcp-readers.json`, and `reports/phase4-02-readers-and-enqueue.md`.
+- Deviations/concerns: focused smoke covered successful reads and directive flow, including >50-entry coverage, but did not cover reader failure boundaries, cancellation/deadline, restart retry or concurrent same-target behavior. The legacy `test_mcp` suite fails because it calls removed `_mcp_handle` and expects local MCP behavior; Phase 4-03 owns replacement conformance coverage.
+- Agent: harness did not expose turn/context counts.
+
+- Checks: `py_compile`, `bash -n plugins/yakka/script/spool.sh`, `git diff --check`, Go MCP registry conformance, reader smoke, and fake-server directive round-trip passed. No layout test was run or investigated.
