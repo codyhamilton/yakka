@@ -358,6 +358,16 @@ func (d measureDef) applyFilters(f AnalyticsFilter) (AnalyticsFilter, []string) 
 	f2.Models = keepFilter(f.Models, applied["model"], "model", &ignored)
 	f2.Sources = keepFilter(f.Sources, applied["source"], "source", &ignored)
 	f2.ConversationIDs = keepFilter(f.ConversationIDs, applied["conversation_id"], "conversation_id", &ignored)
+	if len(f.Excludes) > 0 {
+		f2.Excludes = make(map[string][]string, len(f.Excludes))
+		for dim, values := range f.Excludes {
+			if applied[dim] || (dim == "stage" && d.table == "rejections") {
+				f2.Excludes[dim] = values
+			} else {
+				ignored = append(ignored, dim)
+			}
+		}
+	}
 	sort.Strings(ignored)
 	return f2, ignored
 }

@@ -254,6 +254,23 @@ read: `/v1/analytics/executions` computes it per brief from `facts` at request t
 ([design 7](07-analytics-site.md#routes), following design 1). Any other derived view belongs to
 design 4 and the lab.
 
+### Analytics capability discovery and session entities
+
+`GET /v1/analytics/schema` is the analytics capability inventory. The measure matrix and legacy
+bucket vocabulary remain stable; additive metadata publishes the active budgets, time resolutions,
+supported grains, lens provenance and tenant coverage. The server advertises only capabilities it
+serves. Phase 4 exposes session and time entities through
+`GET /v1/analytics/entities?grain=session|time`; later artifact, plan, execution, content, activity,
+cohort and review capabilities remain absent until their phases are implemented.
+
+Session rows are keyed by `conversation_id`. Measures use the requested event-time window, while
+`session_repo`, `session_model`, and harness provenance are derived over the session lifetime so a
+window change does not reassign provenance. Repository provenance uses artifact and commit facts,
+model provenance uses deduplicated usage calls with an 80 percent dominance threshold, and harness
+provenance is the lexical-tie-broken mode. Shared `exclude=<dimension>:<value>` filters are applied
+by the store before aggregation. Details and the exact response contract are maintained in
+Plan 20's `CONTRACTS.md` sections 7 and 17.2–17.3.
+
 ### Behind an interface
 
 `Store` exposes appending facts and the reads the API needs. SQLite is its only implementation.

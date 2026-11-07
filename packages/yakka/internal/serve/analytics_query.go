@@ -14,17 +14,36 @@ import (
 )
 
 // The measure × dimension matrix and the bucket units, served verbatim (DESIGN.md plan 12).
-func (s *Server) analyticsSchema(w http.ResponseWriter, r *http.Request, _ string, _ *tenantState) {
+func (s *Server) analyticsSchema(w http.ResponseWriter, r *http.Request, _ string, ts *tenantState) {
 	measures := []map[string]any{}
 	for _, m := range store.Measures() {
 		measures = append(measures, map[string]any{"name": m.Name, "unit": m.Unit, "dims": m.Dims})
+	}
+	coverage, err := ts.t.AnalyticsCoverage(r.Context())
+	if err != nil {
+		readFailed(w)
+		return
+	}
+	coverage["compaction"] = ts.t.CompactionState()
+	coverage["screen_gaps"] = ts.gaps.Load()
+	coverage["scorer_configured"] = s.screen != nil
+	grains := map[string]any{
+		"time":    map[string]any{"identity": []string{"t", "tz"}, "modes": []string{"aggregate"}, "measures": measures, "time_basis": "facts.ts; rejections.at", "null_rules": map[string]string{"cost_usd": "priced calls only; absent calls are zero", "session_repo": "unsupported for rejections"}},
+		"session": map[string]any{"identity": []string{"conversation_id"}, "modes": []string{"list", "scatter"}, "measures": []string{"hook_events", "artifact_versions", "commits", "distinct_content", "model_calls", "unpriced_calls", "cost_usd", "tokens_in", "tokens_out", "tokens_cache_read", "tokens_cache_write", "tokens_reasoning", "first_ts", "last_ts", "duration_s"}, "scatter_fields": []string{"cost_usd", "tokens_in", "tokens_out", "tokens_cache_read", "tokens_cache_write", "tokens_reasoning"}, "time_basis": "in-window facts.ts; provenance is lifetime-derived", "cost_null_rules": map[string]any{"no_calls": 0, "all_unpriced": nil, "partial": "priced lower bound"}, "session_model": map[string]any{"threshold": 0.8, "mixed": "(mixed)", "none": "(none)", "unknown": "unknown"}, "session_repo": map[string]any{"single": "repo_id", "multi": "(multi)", "none": "(none)"}},
+	}
+	lenses := map[string]any{
+		"session_repo":  map[string]any{"grain": "session", "cardinality": "single-valued", "values": []string{"(multi)", "(none)"}},
+		"session_model": map[string]any{"grain": "session", "cardinality": "single-valued", "values": []string{"(mixed)", "(none)", "unknown"}},
+		"harness":       map[string]any{"grain": "session", "cardinality": "mode", "tie": "lexicographically smallest", "observed_values": true},
 	}
 	writeJSON(w, 200, map[string]any{
 		"measures": measures, "buckets": store.Buckets,
 		"resolutions": map[string]any{"auto": true, "year": true, "multi_year_steps": []int{2, 5, 10, 20, 50, 100, 200, 500, 1000}},
 		"budgets": map[string]any{"max_cells": 20000, "deadline_s": analyticsDeadline.Seconds(), "top_max": maxLimit,
-			"page_max": maxLimit, "explore_page_max": exploreCap, "heavy_read_concurrency": analyticsHeavyConcurrency,
+			"page_max": maxLimit, "scatter_points": 5000, "content_bytes": 16 * 1024 * 1024, "explore_page_max": exploreCap, "heavy_read_concurrency": analyticsHeavyConcurrency,
 			"time_range": map[string]string{"min": minAnalyticsTime.Format(time.RFC3339Nano), "max": maxAnalyticsTime.Format(time.RFC3339Nano)}},
+		"grains": grains, "lenses": lenses, "coverage": coverage,
+		"features": map[string]bool{"bucket_auto": true, "entities_session": true, "entities_time": true, "exclude": true},
 	})
 }
 

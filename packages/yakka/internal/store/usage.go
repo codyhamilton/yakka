@@ -2,8 +2,10 @@ package store
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
 	"database/sql/driver"
+	"encoding/hex"
 	"fmt"
 	"modernc.org/sqlite"
 	"time"
@@ -12,6 +14,11 @@ import (
 // init registers the usage-measure executor 3-04 left nil.
 func init() {
 	usageQuery = usageQueryImpl
+	sqlite.RegisterDeterministicScalarFunction("wf_session_hash", 1, func(_ *sqlite.FunctionContext, a []driver.Value) (driver.Value, error) {
+		v, _ := a[0].(string)
+		h := sha256.Sum256([]byte(v))
+		return hex.EncodeToString(h[:]), nil
+	})
 	sqlite.RegisterDeterministicScalarFunction("wf_usage_cost", 8, func(_ *sqlite.FunctionContext, a []driver.Value) (driver.Value, error) {
 		str := func(i int) string { v, _ := a[i].(string); return v }
 		integer := func(i int) int64 {

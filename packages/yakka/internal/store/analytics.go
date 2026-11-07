@@ -72,6 +72,7 @@ type AnalyticsFilter struct {
 	NormEvents, Events             []string
 	Tools, Models, Sources         []string
 	ConversationIDs                []string
+	Excludes                       map[string][]string
 	TZ                             *time.Location // nil means UTC
 }
 
@@ -110,7 +111,17 @@ type ConvRow struct {
 	HookEvents, ArtifactVersions, Commits int
 	ModelCalls, UnpricedCalls             int
 	TokensIn, TokensOut                   int
+	TokensCacheRead, TokensCacheWrite     int
+	TokensReasoning, DistinctContent      int
 	CostUSD                               float64
+}
+
+// SessionProvenance contains lifetime-derived lenses. Windowed measures remain in ConvRow.
+type SessionProvenance struct {
+	Repo, RepoAttribution, Model, Harness string
+	Repos, Harnesses                      []string
+	ModelShares                           map[string]float64
+	HarnessMixed                          bool
 }
 
 // ExecCursor is the keyset position in the executions order (ts desc, conversation_id, path, repo_id).
@@ -171,6 +182,15 @@ func (f AnalyticsFilter) factWhere() (string, []any) {
 	w += inList("model", f.Models, &args)
 	w += inList("source", f.Sources, &args)
 	w += inList("conversation_id", f.ConversationIDs, &args)
+	for dim, values := range f.Excludes {
+		col := map[string]string{"repo_id": "repo_id", "harness": "harness", "kind": "kind", "plan": "plan", "norm_event": "norm_event", "event": "event", "tool": "tool", "model": "model", "source": "source", "conversation_id": "conversation_id"}[dim]
+		if col != "" && len(values) > 0 {
+			for _, v := range values {
+				args = append(args, v)
+			}
+			w += " AND " + col + " NOT IN (?" + strings.Repeat(",?", len(values)-1) + ")"
+		}
+	}
 	return w, args
 }
 
@@ -183,6 +203,12 @@ func (f AnalyticsFilter) rejWhere() (string, []any) {
 	w += inList("''", f.Harnesses, &args)
 	w += inList("wf_kind(path)", f.Kinds, &args)
 	w += inList("wf_plan(path)", f.Plans, &args)
+	if values := f.Excludes["stage"]; len(values) > 0 {
+		for _, v := range values {
+			args = append(args, v)
+		}
+		w += " AND stage NOT IN (?" + strings.Repeat(",?", len(values)-1) + ")"
+	}
 	return w, args
 }
 
@@ -816,6 +842,7 @@ func (t *Tenant) ConversationsPage(ctx context.Context, f AnalyticsFilter, cur *
 		SUM(CASE WHEN type='hook_event' THEN 1 ELSE 0 END),
 		SUM(CASE WHEN type='artifact_version' THEN 1 ELSE 0 END),
 		SUM(CASE WHEN type='commit' THEN 1 ELSE 0 END),
+		COUNT(DISTINCT CASE WHEN type='artifact_version' THEN content_hash END),
 		group_concat(DISTINCT repo_id),
 		group_concat(DISTINCT CASE WHEN kind <> '' THEN kind END)
 	FROM facts WHERE ` + w + ` GROUP BY conversation_id`
@@ -835,7 +862,7 @@ func (t *Tenant) ConversationsPage(ctx context.Context, f AnalyticsFilter, cur *
 	for rows.Next() {
 		var r ConvRow
 		var repos, kinds sql.NullString
-		if err := rows.Scan(&r.ConversationID, &r.FirstTS, &r.LastTS, &r.HookEvents, &r.ArtifactVersions, &r.Commits, &repos, &kinds); err != nil {
+		if err := rows.Scan(&r.ConversationID, &r.FirstTS, &r.LastTS, &r.HookEvents, &r.ArtifactVersions, &r.Commits, &r.DistinctContent, &repos, &kinds); err != nil {
 			return nil, false, err
 		}
 		r.Repos = splitConcat(repos)
@@ -932,10 +959,10 @@ func (t *Tenant) fillConvUsage(ctx context.Context, f AnalyticsFilter, out []Con
 		return err
 	}
 	type acc struct {
-		modelCalls, unpriced int
-		tokensIn, tokensOut  int64
-		cost                 float64
-		models               map[string]int
+		modelCalls, unpriced                                                    int
+		tokensIn, tokensOut, tokensCacheRead, tokensCacheWrite, tokensReasoning int64
+		cost                                                                    float64
+		models                                                                  map[string]int
 	}
 	m := map[string]*acc{}
 	for _, r := range kept {
@@ -947,6 +974,9 @@ func (t *Tenant) fillConvUsage(ctx context.Context, f AnalyticsFilter, out []Con
 		a.modelCalls++
 		a.tokensIn += r.tokIn
 		a.tokensOut += r.tokOut
+		a.tokensCacheRead += r.tokCacheRead
+		a.tokensCacheWrite += r.tokCacheWrite
+		a.tokensReasoning += r.tokReasoning
 		usd, priced := Cost(r.harness, r.model, r.tokens(), r.costReported)
 		a.cost += usd
 		if !priced {
@@ -967,6 +997,9 @@ func (t *Tenant) fillConvUsage(ctx context.Context, f AnalyticsFilter, out []Con
 		out[i].CostUSD = roundCost(a.cost)
 		out[i].TokensIn = int(a.tokensIn)
 		out[i].TokensOut = int(a.tokensOut)
+		out[i].TokensCacheRead = int(a.tokensCacheRead)
+		out[i].TokensCacheWrite = int(a.tokensCacheWrite)
+		out[i].TokensReasoning = int(a.tokensReasoning)
 	}
 	return nil
 }

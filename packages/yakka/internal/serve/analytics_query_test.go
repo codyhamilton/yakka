@@ -81,6 +81,23 @@ func TestAnalyticsSchema(t *testing.T) {
 		budgets["heavy_read_concurrency"] != float64(analyticsHeavyConcurrency) {
 		t.Errorf("budget metadata: %v", budgets)
 	}
+	features := m["features"].(map[string]any)
+	for _, name := range []string{"bucket_auto", "entities_session", "entities_time", "exclude"} {
+		if features[name] != true {
+			t.Errorf("missing Phase 4 feature %s: %v", name, features)
+		}
+	}
+	for _, name := range []string{"entities_artifact", "entities_plan", "entities_execution", "scores_by_lens", "artifact_content", "activity", "cohort", "actions", "reviews"} {
+		if _, ok := features[name]; ok {
+			t.Errorf("later phase feature advertised: %s", name)
+		}
+	}
+	if _, ok := m["grains"].(map[string]any)["session"]; !ok {
+		t.Error("session grain missing")
+	}
+	if _, ok := m["grains"].(map[string]any)["time"]; !ok {
+		t.Error("time grain missing")
+	}
 	// The design's measure × dimension matrix, verbatim; every measure also takes hour_of_day, weekday.
 	design := []struct {
 		name, unit string
@@ -113,6 +130,55 @@ func TestAnalyticsSchema(t *testing.T) {
 		if g := strs(got[i]["dims"]); !equalStrs(g, want) {
 			t.Errorf("%s dims = %v, want %v", d.name, g, want)
 		}
+	}
+}
+
+func TestAnalyticsSessionTimeEntitiesAndExclusions(t *testing.T) {
+	s, ts := queryTenant(t)
+	win := "from=2026-11-08T00:00:00Z&to=2026-11-08T23:59:59Z"
+	qadd(t, ts, store.FactRow{Type: "commit", ConversationID: "session-a", Harness: "alpha", RepoID: "repo-a", Event: "commit", TS: float64(time.Date(2026, 11, 8, 2, 0, 0, 0, time.UTC).Unix())}, nil)
+	qadd(t, ts, store.FactRow{Type: "artifact_version", ConversationID: "session-a", Harness: "beta", RepoID: "repo-b", Path: "docs/plans/x/DESIGN.md", ContentHash: keys.ContentHash([]byte("x")), TS: float64(time.Date(2026, 11, 7, 2, 0, 0, 0, time.UTC).Unix())}, nil)
+	qadd(t, ts, store.FactRow{Type: "hook_event", ConversationID: "session-a", Harness: "alpha", NormEvent: "usage", Model: "", TokIn: 3, TS: float64(time.Date(2026, 11, 8, 3, 0, 0, 0, time.UTC).Unix())}, nil)
+	qadd(t, ts, store.FactRow{Type: "hook_event", ConversationID: "session-b", Harness: "", Event: "tool", NormEvent: "tool_use", TS: float64(time.Date(2026, 11, 8, 4, 0, 0, 0, time.UTC).Unix())}, nil)
+	page := aok(t, s, "/v1/analytics/entities?grain=session&"+win)
+	rows := rowsOf(page, "rows")
+	if len(rows) != 2 {
+		t.Fatalf("session rows=%v", rows)
+	}
+	var found map[string]any
+	for _, r := range rows {
+		if r["id"] == "session-a" {
+			found = r
+		}
+	}
+	if found == nil {
+		t.Fatalf("session-a absent: %v", rows)
+	}
+	l := found["l"].(map[string]any)
+	if l["session_repo"] != "(multi)" || l["session_model"] != "unknown" || l["harness"] != "alpha" {
+		t.Fatalf("lenses=%v", l)
+	}
+	if found["flags"].(map[string]any)["cost_lower_bound"] != true {
+		t.Fatalf("cost flags=%v", found["flags"])
+	}
+	timeRows := aok(t, s, "/v1/analytics/entities?grain=time&field=commits&field=hook_events&bucket=day&"+win)
+	if timeRows["grain"] != "time" || len(rowsOf(timeRows, "rows")) != 1 {
+		t.Fatalf("time grid=%v", timeRows)
+	}
+	for _, r := range rowsOf(timeRows, "rows") {
+		m := r["m"].(map[string]any)
+		if m["commits"] != 1.0 || m["hook_events"] != 2.0 {
+			t.Fatalf("time measures=%v", m)
+		}
+	}
+	filtered := aok(t, s, "/v1/analytics/query?measure=commits&bucket=none&"+win+"&exclude=repo_id:repo-a")
+	filteredRows := rowsOf(filtered, "rows")
+	if len(filteredRows) != 1 || filteredRows[0]["v"] != 0.0 {
+		t.Fatalf("exclude not applied: %v", filtered)
+	}
+	code, body := aget(t, s, "/v1/analytics/entities?grain=activity&"+win)
+	if code != 400 || body["error"] != "grain must be session or time" {
+		t.Fatalf("later grain status=%d body=%v", code, body)
 	}
 }
 

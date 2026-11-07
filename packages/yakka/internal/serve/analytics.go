@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/codyhamilton/yakka/packages/yakka/internal/store"
@@ -149,7 +150,7 @@ func canonFilter(q url.Values) string {
 	out := url.Values{}
 	for _, k := range []string{"from", "to", "repo_id", "harness", "kind", "plan",
 		"norm_event", "event", "tool", "model", "source", "conversation_id", "tz", "all",
-		"shape", "bucket"} {
+		"shape", "bucket", "exclude", "sort", "mode", "grain", "field", "fields", "stat"} {
 		if v, ok := q[k]; ok {
 			c := append([]string(nil), v...)
 			sort.Strings(c)
@@ -242,8 +243,19 @@ func parseFilter(w http.ResponseWriter, r *http.Request, o filterOpts) (store.An
 		})
 		return f, false
 	}
+	excludes := map[string][]string{}
+	allowedExclude := map[string]bool{"repo_id": true, "harness": true, "kind": true, "plan": true, "norm_event": true, "event": true, "tool": true, "model": true, "source": true, "conversation_id": true, "stage": true}
+	for _, item := range q["exclude"] {
+		dim, value, ok := strings.Cut(item, ":")
+		if !ok || !allowedExclude[dim] || value == "" {
+			errJSON(w, 400, "exclude must be <dimension>:<value>")
+			return f, false
+		}
+		excludes[dim] = append(excludes[dim], value)
+	}
 	f = store.AnalyticsFilter{From: from.UTC(), To: to.UTC(), Repos: q["repo_id"], Harnesses: q["harness"], Kinds: q["kind"], Plans: q["plan"],
 		NormEvents: q["norm_event"], Events: q["event"], Tools: q["tool"], Models: q["model"], Sources: q["source"], ConversationIDs: q["conversation_id"], TZ: loc}
+	f.Excludes = excludes
 	if o.scoresKind && len(f.Kinds) != 1 {
 		errJSON(w, 400, "kind required")
 		return f, false

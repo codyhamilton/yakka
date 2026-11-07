@@ -504,6 +504,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/v1/analytics/conversation", s.method(http.MethodGet, s.auth(s.analyticsConversation)))
 	mux.HandleFunc("/v1/analytics/explore", s.method(http.MethodGet, s.auth(s.analyticsExplore)))
 	mux.HandleFunc("/v1/analytics/schema", s.method(http.MethodGet, s.auth(s.analyticsSchema)))
+	mux.HandleFunc("/v1/analytics/entities", s.method(http.MethodGet, s.auth(s.analyticsEntities)))
 	mux.HandleFunc("/v1/analytics/query", s.method(http.MethodGet, s.auth(s.analyticsQuery)))
 	mux.HandleFunc("/v1/analytics/distribution", s.method(http.MethodGet, s.auth(s.analyticsDistribution)))
 	mux.HandleFunc("/v1/analytics/score-series", s.method(http.MethodGet, s.auth(s.analyticsScoreSeries)))
