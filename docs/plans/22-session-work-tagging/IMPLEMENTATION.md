@@ -129,3 +129,20 @@ Completed the remaining blocking identity fix after `2f09bbc`. Codex labels use 
 Verification: 10 synthetic backfill tests and all 15 client fact tests passed, with the latter using cached Go 1.27.1 and disabled module/checksum network access. Python compilation and `git diff --check` passed. New regressions first reproduced seven failing subcases against the previous fix. No real classification, egress, production-store read, drain, or human review occurred; remote artifact feedback was omitted under the no-egress gate.
 
 Carried: the non-blocking count-only snapshot issue #190 is unchanged. The documented unrelated layout failure was not rerun or investigated. Existing operational gates remain: Cody must authorize the codyh-ubuntu four-store dry run and any real enqueue/drain verification. This escalation closes the blocking review finding only and does not close another phase.
+
+### Live dry run — `5-03-live-dry-run.md`
+
+Ran the back-fill tool in dry-run mode (no `--enqueue`) over the four real stores on codyh-ubuntu, under Cody's 8 Nov 2026 label-only authorisation. Nothing was enqueued, drained, ingested, classified or sent over the network, and `~/.local/share/workflow/queue` was not read or moved. Exit 0, empty stderr.
+
+Counts (run 2, 3,623 sessions, every session has one label row): Claude 1,239 (1,156 partial, 83 unresolved), Codex 1,962 (1,409 partial, 553 unresolved), Cursor 409 (78 partial, 331 unresolved), OpenCode 13 (13 unresolved). Complete 0, excluded 0. Partial labels: 2,043 with subject and phase (0.65), 600 with subject only (0.55); method `deterministic` throughout. Unreadable transcripts 1; duplicate conversation IDs 10.
+
+Two mechanical fixes, committed separately as `44a743a`, with tests: unreadable transcripts were dropped silently and are now unresolved rows; a conversation ID appearing in two transcript files could enqueue twice and now enqueues at most once. Back-fill tests pass 12 (two new, both failing on the previous code); client `test_facts` passes 15.
+
+Not measured or not met:
+
+- Gold agreement is 0/0. The queue logs carry no usable session join (one real ID in 1,158 logs, absent from the store).
+- Server overlap is not measured: it needs a `GET /v1/actions` snapshot, which this no-egress step did not make.
+- Flash exclusion is 0. The exclusion is gated to OpenCode, which has none; the predicate matches 1,058 sessions across Claude, Codex and Cursor against the design's 890. Cody to decide the gate and the count.
+- Claude discovery includes its subagent transcripts (about 361) while Cursor excludes its own (619). Open design question.
+
+Phase 5 stays open. Carried: Cody to choose the queue-log-to-session join and the Flash rule, decide the subagent treatment, and separately authorise the real enqueue and drain check. The unrelated layout-test failure was not run in this step and was not chased.
