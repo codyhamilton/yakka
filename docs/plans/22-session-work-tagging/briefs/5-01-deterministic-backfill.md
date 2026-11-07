@@ -1,7 +1,7 @@
 # Brief: 5-01 — deterministic back-fill
 
 Consumer: Plan 22 Phase 6 classifier and Phase 7 review tool maintainers.
-Owned paths: `tools/session_backfill/`, `plugins/yakka/client/yakka.py`, `plugins/yakka/client/test_facts.py`, `docs/design/02-client-and-hooks.md`. Touch nothing else except this plan's brief, report, and implementation record.
+Owned paths: `tools/session_backfill/`, `plugins/yakka/client/yakka.py`, `plugins/yakka/client/test_facts.py`, `docs/design/02-edge-capture.md`. Touch nothing else except this plan's brief, report, and implementation record.
 Commits: Commit to the current branch when done evidence passes, with a plain-summary title.
 Report: before committing, write `docs/plans/22-session-work-tagging/reports/5-01-deterministic-backfill.md` (a handoff; rubric in `packages/yakka/catalogue/checks/execution-report.json`) and include it in the commit.
 Depends on: Phases 1 and 2.
@@ -14,7 +14,7 @@ Budget: 14 files to read, about 760 lines to change, 30 tool turns. Past the bud
 2. `docs/plans/22-session-work-tagging/IMPLEMENTATION.md` — Phase 1–3 outcomes and carried items.
 3. `plugins/yakka/client/yakka.py` — queue parser, fact builder, and enqueue conventions.
 4. `tools/transcript/parsers/` and `tools/transcript/lib/paths.py` — existing transcript store formats and path conventions.
-5. `docs/design/02-client-and-hooks.md` — client queue documentation.
+5. `docs/design/02-edge-capture.md` — client queue documentation.
 
 ## Goal
 
@@ -28,7 +28,7 @@ Cody's execution gate: use only synthetic fixtures and fake clients in this work
 
 ## Changes
 
-Add the bounded tool beside `tools/transcript/`: parsers for the four stores, queue-log reader, deterministic subject/phase extraction, secret-scrubbed evidence, label-file persistence, dry-run summaries, and idempotent run/enqueue behavior. Add the smallest queue-file writer to `yakka.py` for tag-only `yakka.session_action` envelopes, with unit tests. Update client queue documentation. Use synthetic fixtures only; never make network calls.
+Add the bounded tool beside `tools/transcript/`: parsers for the four stores, queue-log reader, deterministic subject/phase extraction, secret-scrubbed evidence, label-file persistence, dry-run summaries, and idempotent run/enqueue behavior. Add the smallest queue-file writer to `yakka.py` for tag-only `yakka.session_action` envelopes, with unit tests. Update client queue documentation in the existing `docs/design/02-edge-capture.md` file. Use synthetic fixtures only; never make network calls.
 
 ### Keep untouched
 
