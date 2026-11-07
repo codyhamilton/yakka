@@ -132,3 +132,15 @@ inline and not by a separate cheap-tier agent. The live closure is gated and was
 - Gates for Cody (egress or production): the live `scoring:` line on the deployed service; turning
   scoring on (scorer key and `YAKKA_CHECKS_DIR`, ledger 28); the admin rescore of the budget file
   (admin browser session, ledger 21); a live agent session showing `delivered` with the line.
+
+## Phase 5 — Codex calls feedback
+
+Run (phase 5): tool Claude Code, model claude-haiku-5-5, session `d8c704b9-3979-404e-832b-9859a89ad6f1`, started 2026-11-08T01:55:28+10:00. Run for Plan 21 phase 5 only; no review, terminal review or close-out.
+
+Approach: the design marks this phase `open`, and the invoker's brief sets it as one unit. Read as the invoker's instruction to refine it: the code outcome is settled against the code in `briefs/phase5-codex-feedback.md`, built and tested against fakes, and the live Codex call and the live harness environment check are gated.
+
+Single unit, so the brief is authored inline (`briefs/phase5-codex-feedback.md`) and committed before the build. No worker is dispatched; the build is inline because the change is one server declaration, one handler branch, their tests, one shim test, and the docs.
+
+### Brief `phase5-codex-feedback.md`
+
+Status: in progress.
