@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"fmt"
 	"math"
 	"testing"
 	"time"
@@ -30,6 +31,49 @@ func scoreSeriesFixture(t *testing.T) (*Tenant, AnalyticsFilter) {
 	mustExec(t, tn, `INSERT INTO scores (content_hash,check_name,result,scorer,at) VALUES (?,?,?,?,?)`,
 		hx("other"), "d.x", 1.0, "s", 1)
 	return tn, AnalyticsFilter{From: ad(10, 1, 0, 0), To: ad(10, 3, 12, 0)}
+}
+
+func TestScoreSeriesOverSQLiteBindLimit(t *testing.T) {
+	tn := openT(t, Options{})
+	tx, err := tn.rdb.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	fi, err := tx.Prepare(`INSERT INTO facts(type,row_hash,conversation_id,harness,event,ts,received_at,repo_id,path,content_hash,raw,kind) VALUES('artifact_version',?,'c','h','artifact',?,?, 'r','docs/plans/p/DESIGN.md',?,x'', 'design')`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	si, err := tx.Prepare(`INSERT INTO scores(content_hash,check_name,result,scorer,at) VALUES(?,'d.x',?,'test',1)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const population = 32767
+	for i := 0; i < population; i++ {
+		hash := fmt.Sprintf("%064x", i+1)
+		if _, err := fi.Exec(hash, float64(ad(10, 1, 0, 0).Unix()), int64(1), hash); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := si.Exec(hash, float64(i%1000)/1000); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := fi.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := si.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	got, err := tn.ScoreSeries(context.Background(), AnalyticsFilter{From: ad(10, 1, 0, 0), To: ad(10, 2, 0, 0)}, "design", "day")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].Name != "d.x" || len(got[0].Points) != 1 || got[0].Points[0].N != population {
+		t.Fatalf("unexpected series population: %#v", got)
+	}
 }
 
 func TestScoreSeriesLatestInBucket(t *testing.T) {
