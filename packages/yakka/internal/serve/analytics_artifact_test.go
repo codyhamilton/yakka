@@ -3,6 +3,7 @@ package serve
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/url"
 	"testing"
 	"time"
@@ -170,5 +171,173 @@ func TestArtifactPopulationCancellation(t *testing.T) {
 	_, err := artifactPopulation(ctx, ts.t, store.AnalyticsFilter{From: time.Unix(0, 0), To: time.Now()})
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancelled scan: %v", err)
+	}
+}
+
+func TestArtifactSchemaBandsAndWriterMeasures(t *testing.T) {
+	s, ts := queryTenant(t)
+	at := time.Date(2026, 11, 8, 1, 0, 0, 0, time.UTC)
+	// Five distinct contents give exact p25=.25 and p75=.75; another path
+	// sharing the low hash must not move either boundary.
+	for i, value := range []float64{0, .25, .5, .75, 1} {
+		repo := fmt.Sprintf("r%d", i)
+		hash := keys.ContentHash([]byte(repo))
+		qadd(t, ts, store.FactRow{Type: "artifact_version", ConversationID: repo, Harness: "h", RepoID: repo, Path: "docs/plans/p/DESIGN.md", ContentHash: hash, TS: float64(at.Unix())}, fx{"content_hash": hash})
+		if err := ts.t.AppendScores(t.Context(), hash, []store.Score{{Check: "quality", Result: value, Scorer: "current"}, {Check: "other", Result: value, Scorer: "other-scorer"}}); err != nil {
+			t.Fatal(err)
+		}
+		if i == 0 {
+			qadd(t, ts, store.FactRow{Type: "artifact_version", ConversationID: repo, Harness: "h", RepoID: "duplicate", Path: "docs/plans/p/DESIGN.md", ContentHash: hash, TS: float64(at.Unix())}, fx{"content_hash": hash})
+		}
+	}
+	// A sixth current-scorer observation will replace the .5 removed by the
+	// rescore below, keeping the current baseline quartiles exactly .25/.75.
+	extraHash := keys.ContentHash([]byte("extra"))
+	qadd(t, ts, store.FactRow{Type: "artifact_version", ConversationID: "extra", RepoID: "extra", Path: "docs/plans/p/DESIGN.md", ContentHash: extraHash, TS: float64(at.Unix())}, fx{"content_hash": extraHash})
+	if err := ts.t.AppendScores(t.Context(), extraHash, []store.Score{{Check: "quality", Result: .5, Scorer: "current"}}); err != nil {
+		t.Fatal(err)
+	}
+	// The original score on r2 must not survive the latest scorer selection.
+	hash := keys.ContentHash([]byte("r2"))
+	if err := ts.t.AppendScores(t.Context(), hash, []store.Score{{Check: "quality", Result: .5, Scorer: "new"}}); err != nil {
+		t.Fatal(err)
+	}
+	hash = keys.ContentHash([]byte("unscored"))
+	qadd(t, ts, store.FactRow{Type: "artifact_version", ConversationID: "unscored", RepoID: "unscored", Path: "docs/plans/p/DESIGN.md", ContentHash: hash, TS: float64(at.Unix())}, fx{"content_hash": hash})
+	// Unrecognised artifact kinds have no comparative baseline, even if scored.
+	hash = keys.ContentHash([]byte("unknown-kind"))
+	qadd(t, ts, store.FactRow{Type: "artifact_version", ConversationID: "unknown", RepoID: "unknown", Path: "README.md", ContentHash: hash, TS: float64(at.Unix())}, fx{"content_hash": hash})
+	if err := ts.t.AppendScores(t.Context(), hash, []store.Score{{Check: "quality", Result: .5, Scorer: "current"}}); err != nil {
+		t.Fatal(err)
+	}
+	// r0: no calls; r1: all unpriced; r2: partial; r3: priced calls outside
+	// the board window. Usage facts have no repo, and remain joined by session.
+	cost := 2.0
+	usage := func(id string, delta time.Duration, reported *float64) {
+		qadd(t, ts, store.FactRow{Type: "hook_event", ConversationID: id, Harness: "h", NormEvent: "usage", Model: "unpriced-model", TokIn: 10, TokOut: 20, TokCacheRead: 30, TokCacheWrite: 40, TokReasoning: 50, CostReported: reported, TS: float64(at.Add(delta).Unix())}, fx{"tag": fmt.Sprintf("%s-%v-%v", id, delta, reported)})
+	}
+	usage("r1", 0, nil)
+	usage("r2", 0, &cost)
+	usage("r2", time.Minute, nil)
+	usage("r3", -2*time.Hour, &cost)
+	base := "/v1/analytics/entities?grain=artifact&check=quality&from=" + url.QueryEscape(at.Add(-time.Hour).Format(time.RFC3339)) + "&to=" + url.QueryEscape(at.Add(time.Hour).Format(time.RFC3339))
+	out := aok(t, s, base+"&fields=score:quality,writing_session_cost_usd,writing_session_model_calls")
+	rows := map[string]map[string]any{}
+	for _, row := range rowsOf(out, "rows") {
+		rows[row["id"].(map[string]any)["repo_id"].(string)] = row
+	}
+	for repo, band := range map[string]string{"r0": "low", "r1": "mid", "r2": "mid", "r3": "mid", "r4": "high", "unscored": "unscored", "unknown": "baseline_unavailable"} {
+		if rows[repo]["l"].(map[string]any)["band:quality"] != band {
+			t.Errorf("%s band=%v, want %s", repo, rows[repo], band)
+		}
+	}
+	if rows["r2"]["m"].(map[string]any)["score_scorer:other"] != "other-scorer" {
+		t.Errorf("per-check scorer lost: %v", rows["r2"])
+	}
+	if rows["r2"]["l"].(map[string]any)["scorer"] != "new" {
+		t.Errorf("latest scorer: %v", rows["r2"])
+	}
+	for repo, want := range map[string]any{"r0": float64(0), "r1": nil, "r2": cost, "r3": float64(0)} {
+		m := rows[repo]["m"].(map[string]any)
+		if m["writing_session_cost_usd"] != want {
+			t.Errorf("%s cost=%v want %v", repo, m, want)
+		}
+	}
+	partial := rows["r2"]
+	m := partial["m"].(map[string]any)
+	for field, want := range map[string]float64{"model_calls": 2, "tokens_in": 20, "tokens_out": 40, "tokens_cache_read": 60, "tokens_cache_write": 80, "tokens_reasoning": 100, "hook_events": 2} {
+		if m["writing_session_"+field] != want {
+			t.Errorf("writer %s=%v want %v", field, m, want)
+		}
+	}
+	if partial["flags"].(map[string]any)["writing_session_cost_lower_bound"] != true {
+		t.Errorf("partial flags=%v", partial)
+	}
+	if rows["r1"]["flags"].(map[string]any)["null_reasons"].(map[string]any)["writing_session_cost_usd"] != "all_unpriced" {
+		t.Errorf("unpriced null reason=%v", rows["r1"])
+	}
+	coverage := out["populations"].(map[string]any)["writing_session_cost_usd"].(map[string]any)
+	if coverage["lower_bound_n"] != float64(1) || coverage["unpriced_n"] != float64(2) || coverage["missing_by_reason"].(map[string]any)["all_unpriced"] != float64(1) {
+		t.Errorf("cost coverage=%v", coverage)
+	}
+	scatter := aok(t, s, base+"&mode=scatter&fields=writing_session_cost_usd,versions")
+	if scatter["population"].(map[string]any)["missing_by_reason"].(map[string]any)["all_unpriced"] != float64(1) {
+		t.Errorf("scatter pricing=%v", scatter)
+	}
+	aggregate := aok(t, s, base+"&mode=aggregate&stat=percentiles&field=writing_session_cost_usd")
+	if aggregate["eligible_n"] != float64(len(rows)-1) || aggregate["lower_bound_n"] != float64(1) || aggregate["cost_lower_bound"] != true {
+		t.Errorf("aggregate pricing=%v", aggregate)
+	}
+	schema := aok(t, s, "/v1/analytics/schema")
+	features := schema["features"].(map[string]any)
+	if features["entities_artifact"] != true || features["artifact_content"] != true {
+		t.Errorf("artifact features=%v", features)
+	}
+	for _, name := range []string{"entities_plan", "entities_execution", "cohort", "activity", "actions", "reviews"} {
+		if _, ok := features[name]; ok {
+			t.Errorf("unserved feature %s", name)
+		}
+	}
+	grain := schema["grains"].(map[string]any)["artifact"].(map[string]any)
+	if grain["bucket_grouping"] != false {
+		t.Errorf("artifact buckets advertised: %v", grain)
+	}
+}
+
+func TestArtifactWriterLensesAfterLifetimeSelection(t *testing.T) {
+	s, ts := queryTenant(t)
+	at := time.Date(2026, 11, 8, 1, 0, 0, 0, time.UTC)
+	hash := keys.ContentHash([]byte("stable"))
+	path := "docs/plans/p/DESIGN.md"
+	// The in-window re-save was emitted by another session/harness. Lifetime
+	// version provenance still belongs to writer, whose harness mode is derived
+	// from all its facts and whose model is only present on usage rows.
+	qadd(t, ts, store.FactRow{Type: "artifact_version", ConversationID: "writer", Harness: "transient", RepoID: "r", Path: path, ContentHash: hash, TS: float64(at.Add(-2 * time.Hour).Unix())}, fx{"content_hash": hash})
+	qadd(t, ts, store.FactRow{Type: "artifact_version", ConversationID: "resaver", Harness: "resaver", RepoID: "r", Path: path, ContentHash: hash, TS: float64(at.Unix())}, fx{"content_hash": hash})
+	for i := 0; i < 2; i++ {
+		qadd(t, ts, store.FactRow{Type: "hook_event", ConversationID: "writer", Harness: "dominant", NormEvent: "usage", Model: "writer-model", TS: float64(at.Add(time.Duration(i) * time.Minute).Unix())}, fx{"n": i})
+	}
+	base := "/v1/analytics/entities?grain=artifact&from=" + url.QueryEscape(at.Add(-time.Hour).Format(time.RFC3339)) + "&to=" + url.QueryEscape(at.Add(time.Hour).Format(time.RFC3339))
+	for _, filter := range []string{"&harness=dominant", "&model=writer-model", "&exclude=harness:resaver", "&exclude=model:other"} {
+		out := aok(t, s, base+filter)
+		rows := rowsOf(out, "rows")
+		if len(rows) != 1 || rows[0]["l"].(map[string]any)["writing_session"] != "writer" || rows[0]["m"].(map[string]any)["versions"] != float64(1) {
+			t.Fatalf("%s rows=%v", filter, out)
+		}
+	}
+	for _, filter := range []string{"&harness=resaver", "&model=other", "&exclude=harness:dominant", "&exclude=model:writer-model"} {
+		if out := aok(t, s, base+filter); len(rowsOf(out, "rows")) != 0 {
+			t.Fatalf("%s rows=%v", filter, out)
+		}
+	}
+}
+
+func TestArtifactBandPrecisionAndSupportedOperations(t *testing.T) {
+	baseline := []float64{.1, .2504, .2504, .8, .9}
+	score := func(value float64) map[string]any { return map[string]any{"score": value} }
+	for value, want := range map[float64]string{.2503: "low", .2504: "mid", .8: "mid", .8001: "high"} {
+		if got := artifactScoreBand(score(value), baseline); got != want {
+			t.Errorf("%v: %s, want %s", value, got, want)
+		}
+	}
+	s, ts := queryTenant(t)
+	hash := keys.ContentHash([]byte("supported"))
+	qadd(t, ts, store.FactRow{Type: "artifact_version", ConversationID: "s", RepoID: "r", Path: "docs/plans/p/DESIGN.md", ContentHash: hash, TS: float64(time.Now().Unix())}, fx{"content_hash": hash})
+	if err := ts.t.AppendScores(t.Context(), hash, []store.Score{{Check: "quality", Result: .5, Scorer: "v1"}}); err != nil {
+		t.Fatal(err)
+	}
+	base := "/v1/analytics/entities?grain=artifact&all=1"
+	for _, query := range []string{"&fields=score:invented", "&where=score:invented:0..1", "&sort=score:invented:asc", "&mode=aggregate&stat=sum&field=writing_session_cost_usd", "&mode=aggregate&stat=count&dim=scorer", "&mode=aggregate&stat=count&dim=band:quality", "&bucket=day", "&predicate=" + url.QueryEscape(`{"in":{"lens":"band:invented","values":["low"]}}`), "&predicate=" + url.QueryEscape(`{"in":{"lens":"scorer","values":["v1"]}}`)} {
+		if code, out := aget(t, s, base+query); code != 400 {
+			t.Errorf("accepted %s: %d %v", query, code, out)
+		}
+	}
+	out := aok(t, s, base+"&check=quality&mode=aggregate&stat=count&dim=scorer&dim=band:quality")
+	if len(rowsOf(out, "groups")) != 1 {
+		t.Errorf("score groups=%v", out)
+	}
+	out = aok(t, s, base+"&check=quality&scorer=old")
+	if len(rowsOf(out, "rows")) != 0 {
+		t.Errorf("revived score=%v", out)
 	}
 }

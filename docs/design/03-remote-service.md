@@ -254,18 +254,36 @@ read: `/v1/analytics/executions` computes it per brief from `facts` at request t
 ([design 7](07-analytics-site.md#routes), following design 1). Any other derived view belongs to
 design 4 and the lab.
 
-### Analytics capability discovery and session entities
+### Analytics capability discovery and entities
 
 `GET /v1/analytics/schema` is the analytics capability inventory. The measure matrix and legacy
 bucket vocabulary remain stable; additive metadata publishes the active budgets, time resolutions,
 supported grains, lens provenance and tenant coverage. The server advertises only capabilities it
 serves. Phase 4 exposes session and time entities through
-`GET /v1/analytics/entities?grain=session|time`; Plan 20 Phase 5 exposes artifact and plan entities
+`GET /v1/analytics/entities?grain=session|time`; Plan 20 Phase 5 exposes artifact entities
 and bounded artifact content through `GET /v1/analytics/content?repo_id=&path=&hash=`. Content reads
 require the exact tenant-local version identity, return complete bytes only after SHA-256 checking,
 and distinguish screened-pass from explicit unscreened content in `X-Yakka-Screen-Verdict`. Later
-execution, activity,
-cohort and review capabilities remain absent until their phases are implemented.
+plan, execution, activity, cohort, action and review capabilities remain absent until their phases
+are implemented.
+
+Artifact rows use `(repo_id,path)` identities, with in-window membership and lifetime latest
+versions selected by receive time. Their schema entry lists the implemented measures, per-kind
+checks, single-valued lenses, modes, statistics, limits and the bounded versions collection.
+Scorer and `band:<check>` lenses require a selected check. Bands compare the selected version's
+latest score with the all-time distinct-content baseline for its kind, check and that score's
+scorer; values below p25 are low, values above p75 are high, and both boundaries belong to mid.
+Unscored and baseline-unavailable states remain separate. Per-check scorer metadata remains
+independent. Rubric revisions were not captured, so scorer equality does not establish unchanged
+rubrics. Artifact bucket grouping remains unsupported and unadvertised because no file timestamp
+assignment is defined for versions spanning buckets.
+
+Selected-version writing-session measures count only session facts inside the requested window;
+artifact repo/kind/path filters do not remove the joined session's calls. No calls means zero cost,
+all unpriced calls mean null cost, and partial pricing carries a lower-bound flag and unpriced
+call count. These measures may overlap across files and are not offered as additive sums.
+Harness and session-model filters run after lifetime writer selection, so filtering cannot reassign
+captured provenance. Content access remains an independently advertised capability.
 
 Session rows are keyed by `conversation_id`. Measures use the requested event-time window, while
 `session_repo`, `session_model`, and harness provenance are derived over the session lifetime so a

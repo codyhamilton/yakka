@@ -29,14 +29,14 @@ func (x artifactPopulationRow) json() map[string]any {
 	return map[string]any{"id": map[string]string{"repo_id": x.entity.RepoID, "path": x.entity.Path}, "m": x.measures, "l": x.lenses, "flags": x.flags}
 }
 func artifactNumericField(name string) bool {
-	return store.ArtifactSortMeasure(name) || name == "content_bytes" || strings.HasPrefix(name, "score:") && len(strings.TrimPrefix(name, "score:")) > 0
+	return store.ArtifactSortMeasure(name) || artifactWriterMeasure(name) || name == "content_bytes" || strings.HasPrefix(name, "score:") && len(strings.TrimPrefix(name, "score:")) > 0
 }
 func artifactLens(name string) bool {
 	switch name {
-	case "id", "repo_id", "kind", "plan", "source", "screen_verdict", "harness", "session_model":
+	case "id", "repo_id", "kind", "plan", "source", "screen_verdict", "harness", "session_model", "scorer":
 		return true
 	}
-	return false
+	return strings.HasPrefix(name, "band:") && len(strings.TrimPrefix(name, "band:")) > 0
 }
 func artifactNumber(x artifactPopulationRow, name string) (float64, bool) {
 	switch v := x.measures[name].(type) {
@@ -50,6 +50,9 @@ func artifactNumber(x artifactPopulationRow, name string) (float64, bool) {
 	return 0, false
 }
 func artifactMissing(field string) string {
+	if field == "writing_session_cost_usd" {
+		return "all_unpriced"
+	}
 	if field == "content_bytes" {
 		return "content_unavailable"
 	}
@@ -63,9 +66,21 @@ func artifactTypedPopulation(scope, eligible, returned int, missing map[string]i
 // Membership is selected before lifetime version enrichment and entity predicates.
 func artifactPopulation(ctx context.Context, t *store.Tenant, f store.AnalyticsFilter) ([]artifactPopulationRow, error) {
 	out := []artifactPopulationRow{}
+	baselines := map[string]artifactBaselines{}
+	// Session lenses cannot change file membership or lifetime writer selection.
+	memberFilter := f
+	memberFilter.Harnesses = nil
+	memberFilter.Models = nil
+	memberFilter.Excludes = map[string][]string{}
+	for dim, values := range f.Excludes {
+		if dim != "harness" && dim != "model" {
+			memberFilter.Excludes[dim] = values
+		}
+	}
+
 	var cur *store.ArtifactCursor
 	for {
-		page, more, err := t.ArtifactEntitiesPage(ctx, f, nil, "last_ts", true, cur, 500)
+		page, more, err := t.ArtifactEntitiesPage(ctx, memberFilter, nil, "last_ts", true, cur, 500)
 		if err != nil {
 			return nil, err
 		}
@@ -74,6 +89,10 @@ func artifactPopulation(ctx context.Context, t *store.Tenant, f store.AnalyticsF
 			ids = append(ids, x.ConversationID)
 		}
 		prov, err := t.SessionProvenanceFor(ctx, ids)
+		if err != nil {
+			return nil, err
+		}
+		writers, err := t.WritingSessionMeasuresFor(ctx, ids, f.From, f.To)
 		if err != nil {
 			return nil, err
 		}
@@ -86,8 +105,30 @@ func artifactPopulation(ctx context.Context, t *store.Tenant, f store.AnalyticsF
 			if kind != "" {
 				plan = strings.Split(strings.ReplaceAll(x.Path, "\\", "/"), "/")[2]
 			}
+			if _, ok := baselines[kind]; !ok {
+				b, err := loadArtifactBaselines(ctx, t, kind)
+				if err != nil {
+					return nil, err
+				}
+				baselines[kind] = b
+			}
 			p := prov[x.ConversationID]
+			if len(f.Harnesses) > 0 && !containsValue(f.Harnesses, p.Harness) || len(f.Models) > 0 && !containsValue(f.Models, p.Model) || containsValue(f.Excludes["harness"], p.Harness) || containsValue(f.Excludes["model"], p.Model) {
+				continue
+			}
 			row := artifactPopulationRow{entity: x, measures: map[string]any{"versions": x.Versions, "distinct_writing_sessions": x.WritingSessions, "first_ts": x.FirstTS, "last_ts": x.LastTS, "latest_version_ts": x.LatestTS}, lenses: map[string]any{"repo_id": x.RepoID, "kind": kind, "plan": plan, "source": x.Source, "writing_session": x.ConversationID, "harness": p.Harness, "session_model": p.Model}, flags: map[string]any{"writing_session_label": "earliest observed writing session for this version", "writing_session_is_captured_provenance": true, "latest_version_outside_window": x.LatestTS < float64(f.From.UnixNano())/1e9 || x.LatestTS > float64(f.To.UnixNano())/1e9}}
+
+			writer := writers[x.ConversationID]
+			for _, name := range artifactWriterMeasures {
+				row.measures[name] = writer[strings.TrimPrefix(name, "writing_session_")]
+			}
+			row.flags["writing_session_unpriced_calls"] = writer["unpriced_calls"]
+			row.flags["writing_session_cost_lower_bound"] = writer["unpriced_calls"] > 0
+			row.flags["writing_session_time_basis"] = "facts.ts inside the current window"
+			if writer["model_calls"] > 0 && writer["model_calls"] == writer["unpriced_calls"] {
+				row.measures["writing_session_cost_usd"] = nil
+				row.flags["null_reasons"] = map[string]string{"writing_session_cost_usd": "all_unpriced"}
+			}
 			n, available, err := t.ArtifactContentBytes(x.Hash)
 			if err != nil {
 				return nil, err
@@ -105,6 +146,7 @@ func artifactPopulation(ctx context.Context, t *store.Tenant, f store.AnalyticsF
 			for check, v := range scores {
 				row.measures["score:"+check] = v["score"]
 				row.measures["score_scorer:"+check] = v["scorer"]
+				row.lenses["band:"+check] = artifactScoreBand(v, baselines[kind][check][v["scorer"].(string)])
 			}
 			screen, err := t.ArtifactScreen(ctx, x.Hash)
 			if err != nil {
@@ -132,7 +174,17 @@ func artifactDecode(raw json.RawMessage, v any) error {
 	d.DisallowUnknownFields()
 	return d.Decode(v)
 }
-func parseArtifactPredicate(raw json.RawMessage, depth int, leaves *int) (artifactPredicate, error) {
+func parseArtifactPredicate(raw json.RawMessage, depth int, leaves *int, allowed ...map[string]bool) (artifactPredicate, error) {
+	validField := func(name string) bool { return artifactNumericField(name) && (len(allowed) == 0 || allowed[0][name]) }
+	validLens := func(name string) bool {
+		if !artifactLens(name) {
+			return false
+		}
+		if name == "scorer" || strings.HasPrefix(name, "band:") {
+			return len(allowed) == 0 || allowed[0]["lens:"+name]
+		}
+		return true
+	}
 	if depth > 8 {
 		return nil, fmt.Errorf("predicate exceeds depth budget")
 	}
@@ -149,7 +201,7 @@ func parseArtifactPredicate(raw json.RawMessage, depth int, leaves *int) (artifa
 			}
 			ps := []artifactPredicate{}
 			for _, child := range children {
-				p, e := parseArtifactPredicate(child, depth+1, leaves)
+				p, e := parseArtifactPredicate(child, depth+1, leaves, allowed...)
 				if e != nil {
 					return nil, e
 				}
@@ -164,7 +216,7 @@ func parseArtifactPredicate(raw json.RawMessage, depth int, leaves *int) (artifa
 				return op == "and"
 			}, nil
 		case "not":
-			p, e := parseArtifactPredicate(body, depth+1, leaves)
+			p, e := parseArtifactPredicate(body, depth+1, leaves, allowed...)
 			if e != nil {
 				return nil, e
 			}
@@ -181,7 +233,7 @@ func parseArtifactPredicate(raw json.RawMessage, depth int, leaves *int) (artifa
 				Lo      *float64 `json:"lo"`
 				Hi      *float64 `json:"hi"`
 			}
-			if err := artifactDecode(body, &v); err != nil || !artifactNumericField(v.Measure) || v.Lo != nil && v.Hi != nil && *v.Lo > *v.Hi {
+			if err := artifactDecode(body, &v); err != nil || !validField(v.Measure) || v.Lo != nil && v.Hi != nil && *v.Lo > *v.Hi {
 				return nil, fmt.Errorf("invalid artifact range")
 			}
 			return func(x artifactPopulationRow) bool {
@@ -192,7 +244,7 @@ func parseArtifactPredicate(raw json.RawMessage, depth int, leaves *int) (artifa
 			var v struct {
 				Measure string `json:"measure"`
 			}
-			if err := artifactDecode(body, &v); err != nil || !artifactNumericField(v.Measure) {
+			if err := artifactDecode(body, &v); err != nil || !validField(v.Measure) {
 				return nil, fmt.Errorf("invalid artifact null predicate")
 			}
 			return func(x artifactPopulationRow) bool { _, ok := artifactNumber(x, v.Measure); return !ok }, nil
@@ -201,7 +253,7 @@ func parseArtifactPredicate(raw json.RawMessage, depth int, leaves *int) (artifa
 				Lens   string   `json:"lens"`
 				Values []string `json:"values"`
 			}
-			if err := artifactDecode(body, &v); err != nil || !artifactLens(v.Lens) || len(v.Values) > 64 {
+			if err := artifactDecode(body, &v); err != nil || !validLens(v.Lens) || len(v.Values) > 64 {
 				return nil, fmt.Errorf("invalid artifact lens predicate")
 			}
 			return func(x artifactPopulationRow) bool {
@@ -283,15 +335,41 @@ func (s *Server) analyticsArtifactEntities(w http.ResponseWriter, r *http.Reques
 	if !ok {
 		return
 	}
+
+	checks, err := s.artifactChecks(r.Context(), ts.t)
+	if err != nil {
+		readFailed(w)
+		return
+	}
+	allowed := artifactAllowedFields(checks)
+	selectedCheck := q.Get("check")
+	if selectedCheck != "" {
+		allowed["lens:scorer"] = true
+		allowed["lens:band:"+selectedCheck] = true
+	}
+	if q.Has("scorer") && selectedCheck == "" {
+		errJSON(w, 400, "artifact scorer requires a selected check")
+		return
+	}
+	if selectedCheck != "" && !allowed["score:"+selectedCheck] {
+		errJSON(w, 400, "unsupported artifact check")
+		return
+	}
 	ranges, err := parseArtifactRanges(q["where"])
 	if err != nil {
 		errJSON(w, 400, err.Error())
 		return
 	}
+	for _, v := range ranges {
+		if !allowed[v.Measure] {
+			errJSON(w, 400, "unsupported artifact predicate measure")
+			return
+		}
+	}
 	var predicate artifactPredicate
 	if raw := q.Get("predicate"); raw != "" {
 		leaves := 0
-		predicate, err = parseArtifactPredicate(json.RawMessage(raw), 1, &leaves)
+		predicate, err = parseArtifactPredicate(json.RawMessage(raw), 1, &leaves, allowed)
 		if err != nil {
 			errCodeJSON(w, 400, "predicate_too_complex", err.Error(), nil)
 			return
@@ -306,7 +384,7 @@ func (s *Server) analyticsArtifactEntities(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	for _, field := range fields {
-		if !artifactNumericField(field) {
+		if !allowed[field] {
 			errJSON(w, 400, "unsupported artifact field "+field)
 			return
 		}
@@ -317,7 +395,7 @@ func (s *Server) analyticsArtifactEntities(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	for i, dim := range dims {
-		if !artifactLens(dim) || dim == "id" || i > 0 && dims[0] == dim {
+		if !artifactLens(dim) || dim == "id" || i > 0 && dims[0] == dim || dim == "scorer" && selectedCheck == "" || strings.HasPrefix(dim, "band:") && (!allowed["score:"+strings.TrimPrefix(dim, "band:")] || selectedCheck != strings.TrimPrefix(dim, "band:")) {
 			errJSON(w, 400, "unsupported artifact dimension "+dim)
 			return
 		}
@@ -331,10 +409,21 @@ func (s *Server) analyticsArtifactEntities(w http.ResponseWriter, r *http.Reques
 		readFailed(w)
 		return
 	}
+
+	for i := range rows {
+		if selectedCheck != "" {
+			scorer, scored := rows[i].measures["score_scorer:"+selectedCheck]
+			rows[i].lenses["scorer"] = scorer
+			if !scored {
+				rows[i].lenses["scorer"] = "unscored"
+				rows[i].lenses["band:"+selectedCheck] = "unscored"
+			}
+		}
+	}
 	scope := len(rows)
 	selected := rows[:0]
 	for _, x := range rows {
-		keep := true
+		keep := q.Get("scorer") == "" || x.lenses["scorer"] == q.Get("scorer")
 		for _, v := range ranges {
 			n, valid := artifactNumber(x, v.Measure)
 			if !valid || v.Lo != nil && n < *v.Lo || v.Hi != nil && n > *v.Hi {
@@ -378,6 +467,11 @@ func (s *Server) analyticsArtifactEntities(w http.ResponseWriter, r *http.Reques
 			}
 		}
 		populations[field] = artifactTypedPopulation(scope, eligible, 0, map[string]int{artifactMissing(field): len(rows) - eligible})
+		if field == "writing_session_cost_usd" {
+			for key, value := range artifactWriterCostCoverage(rows) {
+				populations[field].(map[string]any)[key] = value
+			}
+		}
 	}
 	out := map[string]any{"grain": "artifact", "mode": mode, "population": artifactTypedPopulation(scope, len(rows), 0, map[string]int{}), "populations": populations, "partial": ts.t.CompactionState() != "complete"}
 	switch mode {
@@ -387,11 +481,11 @@ func (s *Server) analyticsArtifactEntities(w http.ResponseWriter, r *http.Reques
 			stat = "count"
 		}
 		field := q.Get("field")
-		if stat != "count" && stat != "sum" && stat != "percentiles" && stat != "histogram" || stat != "count" && !artifactNumericField(field) || stat == "count" && field != "" {
+		if stat != "count" && stat != "sum" && stat != "percentiles" && stat != "histogram" || stat != "count" && !allowed[field] || stat == "count" && field != "" {
 			errJSON(w, 400, "unsupported artifact aggregate operation")
 			return
 		}
-		if stat == "sum" && (field == "first_ts" || field == "last_ts" || strings.HasPrefix(field, "score:")) {
+		if stat == "sum" && (!artifactAdditiveField(field)) {
 			errJSON(w, 400, "field is not additive")
 			return
 		}
@@ -509,7 +603,7 @@ func (s *Server) analyticsArtifactEntities(w http.ResponseWriter, r *http.Reques
 			sortSpec = "last_ts:desc"
 		}
 		i := strings.LastIndex(sortSpec, ":")
-		if i < 0 || !artifactNumericField(sortSpec[:i]) || (sortSpec[i+1:] != "asc" && sortSpec[i+1:] != "desc") {
+		if i < 0 || !allowed[sortSpec[:i]] || (sortSpec[i+1:] != "asc" && sortSpec[i+1:] != "desc") {
 			errJSON(w, 400, "unsupported artifact sort")
 			return
 		}
@@ -579,6 +673,11 @@ func artifactStatistics(rows []artifactPopulationRow, stat, field string) map[st
 	sort.Float64s(values)
 	n := len(values)
 	out := map[string]any{"stat": stat, "field": field, "eligible_n": n, "missing_by_reason": map[string]int{}}
+	if field == "writing_session_cost_usd" {
+		for key, value := range artifactWriterCostCoverage(rows) {
+			out[key] = value
+		}
+	}
 	if n < len(rows) {
 		out["missing_by_reason"] = map[string]int{artifactMissing(field): len(rows) - n}
 	}
@@ -625,3 +724,21 @@ func artifactStatistics(rows []artifactPopulationRow, stat, field string) map[st
 }
 
 func timeFromCursor(ns int64) string { return time.Unix(0, ns).UTC().Format(time.RFC3339Nano) }
+
+// Coverage is file-weighted like the containing population, including when a
+// captured session is associated with several files.
+func artifactWriterCostCoverage(rows []artifactPopulationRow) map[string]any {
+	lower, unpriced, calls := 0, 0, 0.0
+	for _, row := range rows {
+		if row.flags["writing_session_cost_lower_bound"] == true {
+			unpriced++
+			if _, ok := artifactNumber(row, "writing_session_cost_usd"); ok {
+				lower++
+			}
+		}
+		if n, ok := row.flags["writing_session_unpriced_calls"].(float64); ok {
+			calls += n
+		}
+	}
+	return map[string]any{"lower_bound_n": lower, "unpriced_n": unpriced, "unpriced_calls": calls, "cost_lower_bound": unpriced > 0}
+}

@@ -35,9 +35,15 @@ func (s *Server) analyticsSchema(w http.ResponseWriter, r *http.Request, _ strin
 	}
 	coverage["revisions"] = map[string]any{"pricing": nil, "catalogue": nil, "tool_kind": nil}
 	coverage["revision_gaps"] = map[string]string{"pricing": "embedded pricing table exposes source and fetched date but no revision identifier", "catalogue": "active catalogue is loaded as check data but has no stable revision identifier in serving configuration", "tool_kind": "tool-kind mapping is compiled from source and has no published revision identifier"}
+	artifactChecks, err := s.artifactChecks(r.Context(), ts.t)
+	if err != nil {
+		readFailed(w)
+		return
+	}
 	grains := map[string]any{
-		"time":    map[string]any{"identity": []string{"t", "tz"}, "modes": []string{"aggregate"}, "measures": measures, "time_basis": "facts.ts; rejections.at", "null_rules": map[string]string{"cost_usd": "priced calls only; absent calls are zero", "session_repo": "unsupported for rejections"}},
-		"session": map[string]any{"identity": []string{"conversation_id"}, "modes": []string{"list", "scatter", "aggregate"}, "aggregate_stats": []string{"count", "sum", "percentiles", "histogram"}, "aggregate_fields": []string{"hook_events", "artifact_versions", "commits", "distinct_content", "model_calls", "unpriced_calls", "cost_usd", "tokens_in", "tokens_out", "tokens_cache_read", "tokens_cache_write", "tokens_reasoning", "first_ts", "last_ts", "duration_s"}, "aggregate_dimensions": []string{}, "measures": []string{"hook_events", "artifact_versions", "commits", "distinct_content", "model_calls", "unpriced_calls", "cost_usd", "tokens_in", "tokens_out", "tokens_cache_read", "tokens_cache_write", "tokens_reasoning", "first_ts", "last_ts", "duration_s"}, "scatter_fields": []string{"cost_usd", "tokens_in", "tokens_out", "tokens_cache_read", "tokens_cache_write", "tokens_reasoning"}, "time_basis": "in-window facts.ts; provenance is lifetime-derived", "cost_null_rules": map[string]any{"no_calls": 0, "all_unpriced": nil, "partial": "priced lower bound"}, "session_model": map[string]any{"threshold": 0.8, "mixed": "(mixed)", "none": "(none)", "unknown": "unknown"}, "session_repo": map[string]any{"single": "repo_id", "multi": "(multi)", "none": "(none)"}},
+		"artifact": artifactGrainSchema(artifactChecks),
+		"time":     map[string]any{"identity": []string{"t", "tz"}, "modes": []string{"aggregate"}, "measures": measures, "time_basis": "facts.ts; rejections.at", "null_rules": map[string]string{"cost_usd": "priced calls only; absent calls are zero", "session_repo": "unsupported for rejections"}},
+		"session":  map[string]any{"identity": []string{"conversation_id"}, "modes": []string{"list", "scatter", "aggregate"}, "aggregate_stats": []string{"count", "sum", "percentiles", "histogram"}, "aggregate_fields": []string{"hook_events", "artifact_versions", "commits", "distinct_content", "model_calls", "unpriced_calls", "cost_usd", "tokens_in", "tokens_out", "tokens_cache_read", "tokens_cache_write", "tokens_reasoning", "first_ts", "last_ts", "duration_s"}, "aggregate_dimensions": []string{}, "measures": []string{"hook_events", "artifact_versions", "commits", "distinct_content", "model_calls", "unpriced_calls", "cost_usd", "tokens_in", "tokens_out", "tokens_cache_read", "tokens_cache_write", "tokens_reasoning", "first_ts", "last_ts", "duration_s"}, "scatter_fields": []string{"cost_usd", "tokens_in", "tokens_out", "tokens_cache_read", "tokens_cache_write", "tokens_reasoning"}, "time_basis": "in-window facts.ts; provenance is lifetime-derived", "cost_null_rules": map[string]any{"no_calls": 0, "all_unpriced": nil, "partial": "priced lower bound"}, "session_model": map[string]any{"threshold": 0.8, "mixed": "(mixed)", "none": "(none)", "unknown": "unknown"}, "session_repo": map[string]any{"single": "repo_id", "multi": "(multi)", "none": "(none)"}},
 	}
 	lenses := map[string]any{
 		"session_repo":  map[string]any{"grain": "session", "cardinality": "single-valued", "values": []string{"(multi)", "(none)"}},
@@ -51,7 +57,7 @@ func (s *Server) analyticsSchema(w http.ResponseWriter, r *http.Request, _ strin
 			"page_max": maxLimit, "scatter_points": 5000, "content_bytes": analyticsContentLimit, "explore_page_max": exploreCap, "heavy_read_concurrency": analyticsHeavyConcurrency,
 			"time_range": map[string]string{"min": minAnalyticsTime.Format(time.RFC3339Nano), "max": maxAnalyticsTime.Format(time.RFC3339Nano)}},
 		"grains": grains, "lenses": lenses, "coverage": coverage,
-		"features": map[string]bool{"bucket_auto": true, "entities_session": true, "entities_time": true, "exclude": true, "scores_by_lens": true, "artifact_content": true},
+		"features": map[string]bool{"bucket_auto": true, "entities_session": true, "entities_time": true, "entities_artifact": true, "exclude": true, "scores_by_lens": true, "artifact_content": true},
 	})
 }
 

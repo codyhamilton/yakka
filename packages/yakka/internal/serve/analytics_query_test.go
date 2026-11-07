@@ -83,7 +83,7 @@ func TestAnalyticsSchema(t *testing.T) {
 		t.Errorf("budget metadata: %v", budgets)
 	}
 	features := m["features"].(map[string]any)
-	for _, name := range []string{"bucket_auto", "entities_session", "entities_time", "exclude", "scores_by_lens"} {
+	for _, name := range []string{"bucket_auto", "entities_session", "entities_time", "entities_artifact", "exclude", "scores_by_lens"} {
 		if features[name] != true {
 			t.Errorf("missing Phase 4 feature %s: %v", name, features)
 		}
@@ -91,7 +91,7 @@ func TestAnalyticsSchema(t *testing.T) {
 	if features["artifact_content"] != true {
 		t.Errorf("artifact content capability not advertised: %v", features)
 	}
-	for _, name := range []string{"entities_artifact", "entities_plan", "entities_execution", "activity", "cohort", "actions", "reviews"} {
+	for _, name := range []string{"entities_plan", "entities_execution", "activity", "cohort", "actions", "reviews"} {
 		if _, ok := features[name]; ok {
 			t.Errorf("later phase feature advertised: %s", name)
 		}
