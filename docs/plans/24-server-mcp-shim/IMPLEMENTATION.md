@@ -126,3 +126,14 @@ Status: done with concerns; committed as `eeb787b`. Report artifact feedback ret
 - Agent: harness did not expose turn/context counts.
 
 - Checks: stale-claim scan passed; all three manifests parsed at version `3.4.1` and their prior committed versions were `3.4.0`; scoped `git diff --check` passed. The unrelated layout test was not run or investigated.
+
+### Unit `phase4-03-conformance-and-guard`
+
+Status: done with concerns; committed as `41f672b`. Report artifact feedback returned delivered, screen pass.
+
+- Built: replaced legacy client-owned tool wording tests with relay/corpus parity checks and added reader/action safety cases and a static thin-shim guard. The guard rejects planted tool names, corpus text and schema literals, and checks fixed subprocess entry points.
+- Surfaces: `plugins/yakka/client/test_mcp.py`, new `test_mcp_shim.py` and `test_mcp_guard.py`, and `reports/phase4-03-conformance-and-guard.md`.
+- Deviations/concerns: test relay parity uses a local authenticated HTTP fixture rather than a live Go server process; harness-specific Claude/Codex/Cursor observations were unavailable. The phase runner will perform a live local Go server check before closure.
+- Agent: harness did not expose turn/context counts.
+
+- Checks: `python3 -m unittest test_mcp test_mcp_guard` passed 10 tests; focused Go MCP tests passed; `py_compile` and `git diff --check` passed. The unrelated layout test was not run or investigated.
