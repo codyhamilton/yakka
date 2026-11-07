@@ -1,0 +1,98 @@
+{
+  "version": 1,
+  "readers": [
+    {
+      "name": "cwd",
+      "versions": [
+        1
+      ],
+      "params": {}
+    },
+    {
+      "name": "project_dir",
+      "versions": [
+        1
+      ],
+      "params": {}
+    },
+    {
+      "name": "resolved_path",
+      "versions": [
+        1
+      ],
+      "params": {
+        "path_arg": [],
+        "bases": [
+          "project_dir",
+          "cwd"
+        ]
+      },
+      "required_params": [
+        "path_arg",
+        "bases"
+      ]
+    },
+    {
+      "name": "file",
+      "versions": [
+        1
+      ],
+      "depends_on": [
+        "resolved_path"
+      ],
+      "params": {
+        "of": [
+          "resolved_path"
+        ]
+      },
+      "required_params": [
+        "of"
+      ]
+    },
+    {
+      "name": "git",
+      "versions": [
+        1
+      ],
+      "params": {
+        "of": [
+          "resolved_path",
+          "project_dir",
+          "cwd"
+        ]
+      },
+      "required_params": [
+        "of"
+      ]
+    },
+    {
+      "name": "queue",
+      "versions": [
+        1
+      ],
+      "depends_on": [
+        "git",
+        "resolved_path"
+      ],
+      "params": {
+        "of": [
+          "git"
+        ],
+        "path": [
+          "resolved_path"
+        ]
+      },
+      "required_params": [
+        "of",
+        "path"
+      ]
+    },
+    {
+      "name": "drain",
+      "versions": [
+        1
+      ],
+      "params": {}
+    }
+  ]
+}
