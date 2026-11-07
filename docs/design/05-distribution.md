@@ -103,6 +103,10 @@ fetch or build it.
 | Codex | `plugins/yakka/hooks/codex.json` | `plugins/yakka/script/spool.sh --harness codex` |
 | OpenCode | `packages/opencode-yakka-hooks` | writes spool files with the design 2 name; kicks `python3 plugins/yakka/client/yakka.py drain` |
 
+At session start, all four adapters capture the six `YAKKA_ACTION_*` values into the queue
+envelope. These values are supplied by `harness pick` on the launched process; plugins do not set
+them. Cursor's existing `sessionStart` registration is the capture point and remains verify-only.
+
 All four drop the `artifact_submit.py` registration.
 
 ## Retired

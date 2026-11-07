@@ -85,7 +85,29 @@ function snapshotOf(payload: Record<string, unknown>): string {
 const REMOVE_EVENTS = ["experimental.chat.system.transform", "chat.params", "chat.headers", "shell.env", "message.part.delta", "message.part.updated", "message.updated", "session.status", "session.updated", "session.diff", "tool.execute.before", "PostToolBatch"] as const
 // remove-list:end
 
-async function recordHooklog(payload: Record<string, unknown>): Promise<void> {
+function sessionAction(): Record<string, string> | undefined {
+  const fields: Record<string, string> = {}
+  for (const [key, env] of Object.entries({
+    kind: "YAKKA_ACTION_KIND", subject_type: "YAKKA_ACTION_SUBJECT_TYPE",
+    subject_id: "YAKKA_ACTION_SUBJECT_ID", phase: "YAKKA_ACTION_PHASE",
+    repo: "YAKKA_ACTION_REPO", pr: "YAKKA_ACTION_PR",
+  })) {
+    const raw = process.env[env]
+    if (!raw) continue
+    let value = ""
+    let bytes = 0
+    for (const char of raw) {
+      if (/[\u0000-\u001f\u007f-\u009f]/u.test(char)) continue
+      value += char
+      bytes += Buffer.byteLength(char, "utf8")
+      if (bytes >= 257) break
+    }
+    if (value) fields[key] = value
+  }
+  return Object.keys(fields).length ? fields : undefined
+}
+
+async function recordHooklog(payload: Record<string, unknown>, action?: Record<string, string>): Promise<void> {
   if (/^(0|off|false)$/i.test(process.env.YAKKA_HOOKLOG || "")) return
   if ((REMOVE_EVENTS as readonly string[]).includes(String(payload.hook_event_name || ""))) return
   try {
@@ -100,7 +122,7 @@ async function recordHooklog(payload: Record<string, unknown>): Promise<void> {
     await mkdir(path.join(dir, "tmp"), { recursive: true, mode: 0o700 })
     const tmp = path.join(dir, "tmp", name)
     const event = String(payload.hook_event_name || "").replace(/[^A-Za-z0-9._-]/g, "")
-    await writeFile(tmp, `${JSON.stringify({ ts: Number(ts), harness: "opencode", event })}\n${snapshot}`, { mode: 0o600 })
+    await writeFile(tmp, `${JSON.stringify({ ts: Number(ts), harness: "opencode", event, ...(action ? { action } : {}) })}\n${snapshot}`, { mode: 0o600 })
     await rename(tmp, path.join(dir, `${sid}-${name}.evt`))
     kickDrain()
   } catch {
@@ -176,6 +198,7 @@ export const YakkaSignalsPlugin: Plugin = async (ctx) => {
   // Calls between tool.execute.before and after, keyed by session and call ID: the after row carries the start
   // time, and a call still here at session.idle is written as incomplete.
   const inflight = new Map<string, InflightCall>()
+  const actionRecorded = new Set<string>()
   const inflightKey = (sessionID: string, callID: string) => `${sessionID}\u0000${callID}`
   // Serial writes retain callback/marker order even when the bus dispatches concurrently.
   let writes = Promise.resolve()
@@ -183,6 +206,10 @@ export const YakkaSignalsPlugin: Plugin = async (ctx) => {
     writes = writes.then(async () => {
       for (const payload of payloads) await recordHooklog({ cwd: ctxDir, ...payload })
     }).catch(() => {})
+    return writes
+  }
+  const recordStarted = (payload: Record<string, unknown>, action?: Record<string, string>) => {
+    writes = writes.then(() => recordHooklog(payload, action)).catch(() => {})
     return writes
   }
   const observe = (name: string) => async (input?: unknown, output?: unknown) => {
@@ -254,7 +281,14 @@ export const YakkaSignalsPlugin: Plugin = async (ctx) => {
         }
         rows.push({ hook_event_name: "Stop", session_id: sid, source: "derived" })
       }
-      await record(...rows)  // queue derived markers before teardown can drain the queue
+      if (sid && event.type === "session.created" && !actionRecorded.has(sid)) {
+        actionRecorded.add(sid)
+        const action = sessionAction()
+        await recordStarted(rows[0], action)
+        for (const row of rows.slice(1)) await record(row)
+      } else {
+        await record(...rows)  // queue derived markers before teardown can drain the queue
+      }
       if (enabled && sid && (event.type === "message.updated" || event.type === "session.idle")) {
         flushBatch(sid, ctxDir, undefined, pendingBySession)
       }

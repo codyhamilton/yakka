@@ -1,6 +1,8 @@
-Run: Codex execute skill, run ID 22-p1-2026-11-07
-Started: 2026-11-07 09:19:29 UTC
+Run: Codex execute skill, run ID 22-p2-2026-11-07
+Started: 2026-11-07 10:25:59 UTC
 Branch: feat/22-session-work-tagging
+
+Previous run: 22-p1-2026-11-07
 
 ## Phase 1 — Action record path
 
@@ -25,3 +27,11 @@ Verified the phase outcome through `POST /v1/ingest` → asynchronous projection
 
 - User-noted unrelated layout test failure: not reproduced by the baseline or final Go suite; not investigated. Preserve as a known external/unreproduced issue, and do not chase it in later Plan 22 phases unless it blocks their own checks.
 - None of the implementation or test contracts needs amendment for the next refinement.
+
+## Phase 2 — Session-start capture on all four harnesses
+
+### Unit outcome — `2-01-session-start-capture.md`
+
+Implemented Claude, Codex, OpenCode and Cursor session-start capture; robust action envelope encoding and the UTF-8 transport guard; tolerant parsing and `session_action` fact construction, including tag-only files; fixtures and tests; docs and plugin version metadata. Cursor's existing `sessionStart` registration was verified and left unchanged. Unit report: `reports/2-01-session-start-capture.md`.
+
+The spool tests passed (7), client fact/config tests passed (22), OpenCode hook tests passed (11), and `git diff --check` was clean. The brief's test names needed correction: the client module is `test_clientconfig` and the npm script is `test:hooks`; the brief is being amended. No live harness or real server egress probe was run. All four headless harness probes remain gated for Cody; the exact commands and requested observations are in the unit report. The unrelated layout-test failure documented in the design was not rerun or investigated.

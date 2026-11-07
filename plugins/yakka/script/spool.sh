@@ -23,6 +23,61 @@ while [ $# -gt 0 ]; do
 done
 harness=${harness//[^A-Za-z0-9._-]/}
 event=${event//[^A-Za-z0-9._-]/}
+ACTION_JSON=
+
+# Only session-start hooks capture work tags. Values stay raw for server validation; this
+# guard removes control bytes and keeps over-length values over the server's 256-byte limit.
+json_string() {
+  local value=$1 i c n bytes=0 out= char_bytes
+  for ((i=0; i<${#value}; i++)); do
+    c=${value:i:1}
+    printf -v n '%d' "'$c"
+    if [ "$n" -lt 32 ] || [ "$n" -eq 127 ]; then continue; fi
+    char_bytes=$(LC_ALL=C printf '%s' "$c" | wc -c | tr -d ' ')
+    bytes=$((bytes + char_bytes))
+    out+=$c
+    if [ "$bytes" -ge 257 ]; then break; fi
+  done
+  value=$out
+  out='"'
+  for ((i=0; i<${#value}; i++)); do
+    c=${value:i:1}
+    case $c in
+      '"') out+='\"' ;;
+      $'\\') out+='\\' ;;
+      $'\n') out+='\n' ;;
+      $'\r') out+='\r' ;;
+      $'\t') out+='\t' ;;
+      *)
+        printf -v n '%d' "'$c"
+        if [ "$n" -lt 32 ] || [ "$n" -eq 127 ]; then
+          printf -v c '\\u%04x' "$n"
+        fi
+        out+=$c
+        ;;
+    esac
+  done
+  REPLY="$out\""
+}
+
+action_json() {
+  [ "$event" = SessionStart ] || [ "$event" = sessionStart ] || return
+  local key var val any=0 first=1 result='"action":{'
+  for key in KIND SUBJECT_TYPE SUBJECT_ID PHASE REPO PR; do
+    var="YAKKA_ACTION_$key"
+    val=${!var-}
+    [ -n "$val" ] || continue
+    any=1
+    [ "$first" = 1 ] || result+=','
+    first=0
+    json_string "$(printf '%s' "$key" | tr '[:upper:]' '[:lower:]')"
+    result+="$REPLY:"
+    json_string "$val"
+    result+=$REPLY
+  done
+  [ "$any" = 1 ] || return
+  ACTION_JSON="${result}}"
+}
 
 dir=${YAKKA_QUEUE:-$HOME/.local/share/yakka/queue}
 spooled=
@@ -49,7 +104,10 @@ spool() {
   ts=$(date +%s.%N 2>/dev/null)
   case $ts in '' | *[!0-9.]*) ts=$(date +%s) ;; esac
   local name="$ts-$$-$RANDOM"
-  { printf '{"ts":%s,"harness":"%s","event":"%s"}\n' "$ts" "$harness" "$event"; cat; } >"$dir/tmp/$name" 2>/dev/null || return
+  action_json
+  local extra=
+  [ -z "${ACTION_JSON:-}" ] || extra=,"$ACTION_JSON"
+  { printf '{"ts":%s,"harness":"%s","event":"%s"%s}\n' "$ts" "$harness" "$event" "$extra"; cat; } >"$dir/tmp/$name" 2>/dev/null || return
   conv_id "$dir/tmp/$name"
   local id=$REPLY
   if [ -z "$id" ]; then rm -f "$dir/tmp/$name"; return; fi

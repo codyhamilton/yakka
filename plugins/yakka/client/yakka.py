@@ -491,6 +491,8 @@ class _Parsed:
     conv: str = ""
     harness: str = ""
     event: str = ""
+    action: Optional[dict[str, str]] = None
+    action_source: str = "env"
     ts: Any = 0
     base: str = ""
     refs: List["_Ref"] = field(default_factory=list)
@@ -562,9 +564,10 @@ def Build(ctx: Any, files: List[File]) -> List[Output]:
                 "ts": p.ts,
             }
 
-        hv = common("hook_event")
-        hv["payload"] = _redact_payload(p.payload)
-        add(hv)
+        if p.event != "yakka.session_action":
+            hv = common("hook_event")
+            hv["payload"] = _redact_payload(p.payload)
+            add(hv)
         seen: set[str] = set()
         for r in p.refs:
             if last[r.key] != i or r.key in seen:
@@ -585,6 +588,12 @@ def Build(ctx: Any, files: List[File]) -> List[Output]:
             v["source"] = "worktree"
             add(v)
         _build_commits(ctx, p, commits, common, add, o)
+        if p.action is not None:
+            action = common("session_action")
+            action.pop("event", None)
+            action["source"] = p.action_source
+            action["action"] = p.action
+            add(action)
         out.append(o)
     return out
 
@@ -597,7 +606,7 @@ def _parse_file(f: File) -> _Parsed:
     line, rest = f.Data.split(b"\n", 1) if b"\n" in f.Data else (f.Data, b"")
     try:
         env = json.loads(
-            line.decode("utf-8"),
+            line.decode("utf-8", errors="replace"),
             parse_float=lambda s: _Number(s),
         )
     except (json.JSONDecodeError, UnicodeDecodeError):
@@ -608,7 +617,7 @@ def _parse_file(f: File) -> _Parsed:
         return p
     try:
         payload = json.loads(
-            rest.decode("utf-8"),
+            rest.decode("utf-8", errors="replace"),
             parse_float=lambda s: _Number(s),
         )
     except (json.JSONDecodeError, UnicodeDecodeError):
@@ -622,15 +631,27 @@ def _parse_file(f: File) -> _Parsed:
     p.ts = env.get("ts", 0)
     if p.ts == "":
         p.ts = 0
+    p.event = env.get("event", "")
+    raw_action = env.get("action")
+    if isinstance(raw_action, dict):
+        p.action = {
+            str(k): v if isinstance(v, str) else str(v)
+            for k, v in raw_action.items()
+        }
+    if p.event == "yakka.session_action":
+        p.action_source = str(env.get("source", "env"))
     for key in ("session_id", "conversation_id", "sessionID"):
         s = payload.get(key)
         if isinstance(s, str) and s:
             p.conv = s
             break
+    if not p.conv and p.event == "yakka.session_action":
+        match = re.match(r"^(.*)-\d+(?:\.\d+)?-\d+-\d+(?:\.evt)?$", f.Name)
+        if match:
+            p.conv = match.group(1)
     if not p.conv:
         p.reasons = ["invalid: no conversation id"]
         return p
-    p.event = env.get("event", "")
     if not p.event:
         hen = payload.get("hook_event_name")
         if isinstance(hen, str):
@@ -644,6 +665,12 @@ def _parse_file(f: File) -> _Parsed:
             first = roots[0]
             if isinstance(first, str):
                 p.base = first
+    if p.event == "yakka.session_action":
+        if p.action is None:
+            p.reasons = ["invalid: no action object"]
+            return p
+        p.bad = False
+        return p
     p.bad = False
     return p
 

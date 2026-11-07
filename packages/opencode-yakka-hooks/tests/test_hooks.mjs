@@ -168,6 +168,29 @@ test('streamed part, message, status and session-snapshot events queue nothing; 
   } finally { await sb.done() }
 })
 
+test('session.created carries one raw action envelope with a UTF-8 byte guard', async () => {
+  const subject = 'a'.repeat(256) + 'é' + 'x'.repeat(10000)
+  const sb = await sandbox({
+    YAKKA_ACTION_KIND: 'build"\\\n', YAKKA_ACTION_SUBJECT_TYPE: 'plan',
+    YAKKA_ACTION_SUBJECT_ID: subject,
+  })
+  try {
+    const hooks = await plugin({ directory: '/tmp/project' })
+    const event = { event: { type: 'session.created', properties: { sessionID: 's-action' } } }
+    await hooks.event(event)
+    await hooks.event(event)
+    const rows = []
+    for (const n of await evts(sb.queue)) rows.push(await read(sb.queue, n))
+    const tagged = rows.filter(([env]) => env.action)
+    assert.equal(tagged.length, 1)
+    assert.equal(tagged[0][0].event, 'session.created')
+    assert.equal(tagged[0][0].action.kind, 'build"\\')
+    assert.equal(Buffer.byteLength(tagged[0][0].action.subject_id), 258)
+    assert(tagged[0][0].action.subject_id.endsWith('é'))
+    assert.equal(tagged[0][1].session_id, 's-action')
+  } finally { await sb.done() }
+})
+
 test('kick runs YAKKA_BIN drain at most once per 10 s', async () => {
   const sb = await sandbox({ YAKKA_HOOKLOG_KICK: '1' })
   try {
