@@ -1,7 +1,7 @@
 # Brief: 1-01 — Action record path
 
 Consumer: the Plan 22 execute runner and the next phase's implementer.
-Owned paths: `packages/yakka/internal/actions/`, `packages/yakka/internal/ingest/`, `packages/yakka/internal/store/`, `packages/yakka/internal/serve/`, `packages/yakka-analytics/src/lib/api.ts`, `packages/yakka/docs/design/01*`, `packages/yakka/docs/design/03*`.
+Owned paths: `packages/yakka/internal/actions/`, `packages/yakka/internal/ingest/`, `packages/yakka/internal/store/`, `packages/yakka/internal/serve/`, `packages/yakka-analytics/src/lib/api.ts`, `docs/design/01-event-model-and-ingest.md`, `docs/design/03-remote-service.md`.
 Commits: Commit to the current branch when done evidence passes, with a plain-summary title.
 Report: before committing, write `docs/plans/22-session-work-tagging/reports/1-01-action-record-path.md` and include it in the commit.
 Depends on: nothing.

@@ -194,7 +194,7 @@ func recomputeActionSegments(ctx context.Context, tx *sql.Tx, conv string) error
 			}
 			live[start].effective = live[start].ts < b.ts
 			live[start].segmentEnd = &b.ts
-			live[start].segmentStart = nil
+			live[i].segmentStart = &live[i].ts
 			start = i
 		}
 		live[start].effective = true

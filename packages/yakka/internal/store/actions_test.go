@@ -53,6 +53,7 @@ func TestActionProjectionValidationSegmentsAndPrecedence(t *testing.T) {
 		t.Fatal(err)
 	}
 	var active, ended int
+	var buildStart, buildEnd, designStart *float64
 	for _, x := range live {
 		if x.Effective {
 			active++
@@ -60,9 +61,18 @@ func TestActionProjectionValidationSegmentsAndPrecedence(t *testing.T) {
 		if x.SegmentEnd != nil {
 			ended++
 		}
+		if x.Kind == "build" && x.Effective {
+			buildStart, buildEnd = x.SegmentStart, x.SegmentEnd
+		}
+		if x.Kind == "design" && x.Effective {
+			designStart = x.SegmentStart
+		}
 	}
 	if active != 2 || ended != 1 {
 		t.Fatalf("segments: effective=%d ended=%d rows=%#v", active, ended, live)
+	}
+	if buildStart != nil || buildEnd == nil || *buildEnd != 20 || designStart == nil || *designStart != 20 {
+		t.Fatalf("segment boundaries: build=[%v,%v), design start=%v", buildStart, buildEnd, designStart)
 	}
 	var effectiveReview bool
 	for _, x := range rows {
@@ -72,6 +82,47 @@ func TestActionProjectionValidationSegmentsAndPrecedence(t *testing.T) {
 	}
 	if !effectiveReview {
 		t.Fatal("review did not override backfill")
+	}
+}
+
+func TestActionLiveOverridesBackfillAndLatestReviewWins(t *testing.T) {
+	ctx := context.Background()
+	tn := openT(t, Options{})
+	back := appendAction(t, tn, "back", "precedence", "backfill", "design", "owner/repo:plan/a", "", 1)
+	live := appendAction(t, tn, "live", "precedence", "env", "build", "owner/repo:plan/a", "", 2)
+	review1 := appendAction(t, tn, "review1", "precedence", "review", "fix", "owner/repo:plan/a", "", 3)
+	review2 := appendAction(t, tn, "review2", "precedence", "review", "research", "owner/repo:plan/a", "", 4)
+	for _, h := range []string{back, live} {
+		if err := tn.ProjectAction(ctx, h); err != nil {
+			t.Fatal(err)
+		}
+	}
+	rows, _, err := tn.ActionRows(ctx, "precedence", "", "", "", "", nil, 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	effective := map[string]bool{}
+	for _, row := range rows {
+		effective[row.Hash] = row.Effective
+	}
+	if effective[back] || !effective[live] {
+		t.Fatalf("live action did not override backfill: %#v", effective)
+	}
+	for _, h := range []string{review1, review2} {
+		if err := tn.ProjectAction(ctx, h); err != nil {
+			t.Fatal(err)
+		}
+	}
+	rows, _, err = tn.ActionRows(ctx, "precedence", "", "", "", "", nil, 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	effective = map[string]bool{}
+	for _, row := range rows {
+		effective[row.Hash] = row.Effective
+	}
+	if effective[back] || effective[live] || effective[review1] || !effective[review2] {
+		t.Fatalf("wrong review precedence: %#v", effective)
 	}
 }
 func TestActionProjectionPendingRetriesStopAtThree(t *testing.T) {
