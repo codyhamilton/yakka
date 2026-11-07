@@ -115,3 +115,14 @@ Status: done with concerns; committed as `b81e77f`. Report artifact feedback ret
 - Agent: harness did not expose turn/context counts.
 
 - Checks: `py_compile`, `bash -n plugins/yakka/script/spool.sh`, `git diff --check`, Go MCP registry conformance, reader smoke, and fake-server directive round-trip passed. No layout test was run or investigated.
+
+### Unit `phase4-04-docs-and-release`
+
+Status: done with concerns; committed as `eeb787b`. Report artifact feedback returned delivered, screen pass.
+
+- Built: rewrote the stable docs to describe the server-owned MCP boundary, declared local context and the bounded pointer enqueue, updated the `/v1/mcp` client row, and bumped the three plugin manifests from `3.4.0` to `3.4.1`.
+- Surfaces: `docs/design/02-edge-capture.md`, `docs/design/03-remote-service.md`, `docs/design/04-advisory-surface.md`, the Claude/Cursor/Codex plugin manifests, and `reports/phase4-04-docs-and-release.md`.
+- Deviations/concerns: no owned-path deviations. Its global whitespace check saw a concurrent Phase 4-03 trailing blank line in `test_mcp.py`; its six-path scoped check passed. Rerun global `git diff --check` after Phase 4-03 settles.
+- Agent: harness did not expose turn/context counts.
+
+- Checks: stale-claim scan passed; all three manifests parsed at version `3.4.1` and their prior committed versions were `3.4.0`; scoped `git diff --check` passed. The unrelated layout test was not run or investigated.
