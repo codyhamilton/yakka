@@ -1,5 +1,11 @@
 # Design Intent 7: Analytics Site
 
+> **Replacement designed, not built.** [plans/20-analytics-reset](../plans/20-analytics-reset/DESIGN.md)
+> designs a static, no-build analytics workspace to replace the SvelteKit site described below, and
+> removes the 399-day reporting-window cap. The sections below describe master `b2094eb`; each implementation phase updates the sections it
+> changes. The proposed server/UI contracts are in that plan's `CONTRACTS.md` section 17 and are
+> promoted here at close-out; this design-only publication changes no serving behavior.
+
 The person-facing view of one tenant's yakka ledger: read-only aggregate routes on `yakka
 serve`, and a static Svelte site that renders them. Part of
 [system-architecture.md](system-architecture.md); it reads the service in
@@ -225,7 +231,7 @@ on a compacted copy of the real ledger.
   Other origins get no CORS headers, so a public page cannot read a keyless loopback ledger.
   `localGuard` (loopback `Host`, JSON-only POST) runs first.
 - Keyed mode: the same headers only for an origin listed exactly in `YAKKA_SERVE_CORS_ORIGINS`
-  ([design 3](03-remote-service.md#configuration-first-round)). No wildcard, no reflected origin.
+  ([design 3](03-remote-service.md#configuration)). No wildcard, no reflected origin.
 - Remote collector: state-changing `Origin` checks and credentialed CORS allow
   `https://yakka.build`, `https://www.yakka.build`, the public API origin, and each exact entry
   of `YAKKA_SERVE_CORS_ORIGINS`. Credentialed responses set `Access-Control-Allow-Credentials: true`
