@@ -1,5 +1,5 @@
-status: unsuccessful
-reason: Implementation and fake-backed checks pass, but Phase 2 cannot close until the four harness probes pass or Cody records a per-harness limit or approved contingency.
+status: done with concerns
+reason: Local implementation and fake-backed checks pass. Runtime hook execution and environment forwarding remain unverified; documented as a per-harness limit until safe probes are available.
 
 # Phase 2 — Session-start capture
 
@@ -14,17 +14,17 @@ Before changes, `python3 plugins/yakka/script/test_kick.py` passed (6 tests). Th
 - `cd packages/opencode-yakka-hooks && npm run test:hooks` — 11 tests passed, including a one-time `session.created` tag and byte guard.
 - `git diff --check` — clean.
 
-## Harness probes and gate
+## Harness probes and documented limits
 
-No harness was launched: the required headless commands can run prompts that classify or egress, which this execution is prohibited from doing. No live or real server egress was made.
+No harness was launched: the required headless commands can run prompts that classify or egress, which this execution is prohibited from doing. No live or real server egress was made. The following per-harness limits are recorded under Design Assumption 8: the implementation captures action tags in its local hook/plugin path, but runtime hook/plugin execution and visibility of the launching process's environment are not established. Do not treat any harness as runtime-verified or rely on launch-time tags in it until a safe, non-classifying and non-egress probe records those observations. No contingency channel is approved.
 
 | Harness | Required command | Hook/env observation |
 |---|---|---|
-| Claude Code | `claude -p` | Not run; unverified |
-| Codex | `codex exec` | Not run; unverified |
-| OpenCode | `opencode run` | Not run; unverified |
-| Cursor | `cursor-agent -p` | Not run; unverified |
+| Claude Code | `claude -p` | Documented limit: runtime hook execution and exported-variable visibility unverified; no runtime support claim. |
+| Codex | `codex exec` | Documented limit: runtime hook execution and exported-variable visibility unverified; no runtime support claim. |
+| OpenCode | `opencode run` | Documented limit: runtime plugin execution and exported-variable visibility unverified; no runtime support claim. |
+| Cursor | `cursor-agent -p` | Documented limit: runtime hook execution and exported-variable visibility unverified; no runtime support claim. |
 
-gate: Cody must run or authorize a safe, non-classifying and non-egress headless probe for `claude -p`, `codex exec`, `opencode run`, and `cursor-agent -p`, recording hook execution and exported-variable visibility; then verify Phase 1 action projection for each harness if that can be done without real egress.
+gate: Before relying on session-start tags from any harness, record hook/plugin execution and exported-variable visibility with a safe, non-classifying and non-egress headless probe; verify Phase 1 projection if that can be done without real egress.
 
 Departure: substituted the repository's actual test names for the two incorrect brief commands; the brief is being corrected. The unrelated layout-test failure noted in the design was not rerun or investigated. No other unfinished implementation work is known.
