@@ -184,12 +184,12 @@ existing kick rules may start that drain. The shim does not own a drain launcher
 policy. An enqueue acknowledgment alone does not establish that an item remains queued or was
 delivered; feedback uses current queue coverage and the service's content hash.
 
-The shared endpoint and bearer still come from the env pair, `client.toml`, or the local default
-above. Harness configuration holds neither endpoint nor key. The queue and drain readers provide
-bounded facts for server-side `artifact_feedback`; the shim does not decide queue, rejection or
-delivery wording ([design 4](04-advisory-surface.md#artifact_feedback)). The wire contract, the
-declaration and carrier format, the reader table and the v2 action are specified in
-[design 8](08-server-mcp-contract.md).
+The shared endpoint and bearer still come from the env pair, `client.toml`, or explicit local mode
+above. The client does not choose a local default. Harness configuration holds neither endpoint nor
+key. The queue and drain readers provide bounded facts for server-side `artifact_feedback`; the shim
+does not decide queue, rejection or delivery wording ([design
+4](04-advisory-surface.md#artifact_feedback)). The wire contract, the declaration and carrier
+format, the reader table and the v2 action are specified in [design 8](08-server-mcp-contract.md).
 
 ## No repair submit
 

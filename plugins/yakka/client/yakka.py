@@ -1840,7 +1840,7 @@ def _parse_go_duration(s: str) -> float:
 def RunStandalone(ctx: DrainContext, stderr: Any) -> int:
     try:
         Load()
-    except ErrPartialEnv as err:
+    except (ErrPartialEnv, OSError, ValueError) as err:
         print("yakka drain:", err, file=stderr)
         return 1
     o = Options(Sink=ConfigSink, Log=stderr, Poll=0.25)
