@@ -83,12 +83,12 @@ func TestAnalyticsSchema(t *testing.T) {
 		t.Errorf("budget metadata: %v", budgets)
 	}
 	features := m["features"].(map[string]any)
-	for _, name := range []string{"bucket_auto", "entities_session", "entities_time", "exclude"} {
+	for _, name := range []string{"bucket_auto", "entities_session", "entities_time", "exclude", "scores_by_lens"} {
 		if features[name] != true {
 			t.Errorf("missing Phase 4 feature %s: %v", name, features)
 		}
 	}
-	for _, name := range []string{"entities_artifact", "entities_plan", "entities_execution", "scores_by_lens", "artifact_content", "activity", "cohort", "actions", "reviews"} {
+	for _, name := range []string{"entities_artifact", "entities_plan", "entities_execution", "artifact_content", "activity", "cohort", "actions", "reviews"} {
 		if _, ok := features[name]; ok {
 			t.Errorf("later phase feature advertised: %s", name)
 		}

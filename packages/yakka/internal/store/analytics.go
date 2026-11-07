@@ -590,6 +590,46 @@ func (t *Tenant) WindowScores(ctx context.Context, f AnalyticsFilter, kind strin
 	return out, rows.Err()
 }
 
+// ScoreObservation is one latest score over an eligible content hash, attached to its
+// canonical in-window artifact fact. File identity and score identity remain separate.
+type ScoreObservation struct {
+	Hash, Check, Scorer, RepoID, Path, ConversationID string
+	TS                                                float64
+	Score                                             float64
+}
+
+// WindowScoreObservations chooses the earliest eligible artifact fact for each hash before
+// joining the latest score row for each check. The order is part of the analytics contract.
+func (t *Tenant) WindowScoreObservations(ctx context.Context, f AnalyticsFilter, kind string) ([]ScoreObservation, error) {
+	f.Kinds = nil
+	w, args := f.factWhere()
+	args = append([]any{kind}, args...)
+	rows, err := t.rdb.QueryContext(ctx, `WITH eligible AS (
+		SELECT content_hash,ts,row_hash,repo_id,path,conversation_id,
+			ROW_NUMBER() OVER(PARTITION BY content_hash ORDER BY ts ASC,row_hash ASC,repo_id ASC,path ASC) rep
+		FROM facts WHERE type='artifact_version' AND content_hash!='' AND kind=? AND `+w+`
+	), latest AS (
+		SELECT content_hash,check_name,scorer,result,
+			ROW_NUMBER() OVER(PARTITION BY content_hash,check_name ORDER BY id DESC) rn FROM scores
+	)
+	SELECT e.content_hash,s.check_name,COALESCE(s.scorer,''),e.repo_id,e.path,COALESCE(e.conversation_id,''),e.ts,s.result
+	FROM eligible e JOIN latest s ON s.content_hash=e.content_hash AND s.rn=1
+	WHERE e.rep=1 ORDER BY s.check_name,e.content_hash`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []ScoreObservation
+	for rows.Next() {
+		var row ScoreObservation
+		if err := rows.Scan(&row.Hash, &row.Check, &row.Scorer, &row.RepoID, &row.Path, &row.ConversationID, &row.TS, &row.Score); err != nil {
+			return nil, err
+		}
+		out = append(out, row)
+	}
+	return out, rows.Err()
+}
+
 // execShapeSQL is the executions shape CASE expression, over the brief CTE alias b.
 const execShapeSQL = `CASE WHEN EXISTS (SELECT 1 FROM facts c WHERE c.type='commit' AND c.conversation_id=b.conversation_id AND c.repo_id=b.repo_id)
 			THEN CASE WHEN EXISTS (SELECT 1 FROM facts r WHERE r.type='artifact_version' AND r.conversation_id=b.conversation_id

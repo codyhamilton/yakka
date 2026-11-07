@@ -455,6 +455,11 @@ func (s *Server) analyticsScores(w http.ResponseWriter, r *http.Request, _ strin
 	}
 	kind := f.Kinds[0]
 	f.Kinds = nil
+	q := r.URL.Query()
+	if q.Has("dim") || q.Has("scorer") || q.Has("check") || q.Has("limit") || q.Has("offset") {
+		s.analyticsScoresByLens(w, r, ts, f, kind)
+		return
+	}
 	vals, err := ts.t.WindowScores(r.Context(), f, kind)
 	if err != nil {
 		readFailed(w)
@@ -471,6 +476,183 @@ func (s *Server) analyticsScores(w http.ResponseWriter, r *http.Request, _ strin
 	resp := map[string]any{"kind": kind, "checks": out}
 	addAnalyticsPartial(resp, ts)
 	writeJSON(w, 200, resp)
+}
+
+func (s *Server) analyticsScoresByLens(w http.ResponseWriter, r *http.Request, ts *tenantState, f store.AnalyticsFilter, kind string) {
+	q := r.URL.Query()
+	dim := q.Get("dim")
+	allowed := map[string]bool{"harness": true, "session_model": true, "repo_id": true, "plan": true, "scorer": true, "screen_verdict": true}
+	if dim != "" && !allowed[dim] {
+		errJSON(w, 400, "unsupported dimension "+dim+" for scores")
+		return
+	}
+	checks := map[string]bool{}
+	for _, c := range s.catalogChecks(kind) {
+		checks[c.Name] = true
+	}
+	selectedCheck := q.Get("check")
+	if selectedCheck != "" && !checks[selectedCheck] {
+		errJSON(w, 400, "unknown check "+selectedCheck)
+		return
+	}
+	limit := 100
+	if raw := q.Get("limit"); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n < 1 {
+			errJSON(w, 400, "limit must be a positive integer")
+			return
+		}
+		limit = min(n, 500)
+	}
+	offset := 0
+	if raw := q.Get("offset"); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n < 0 {
+			errJSON(w, 400, "offset must be a non-negative integer")
+			return
+		}
+		offset = n
+	}
+	// Harness and session-model are derived lenses. Their filters run after the canonical
+	// artifact fact is selected, so they cannot change which path represents a shared hash.
+	f.Harnesses = nil
+	f.Models = nil
+	rows, err := ts.t.WindowScoreObservations(r.Context(), f, kind)
+	if err != nil {
+		readFailed(w)
+		return
+	}
+	ids := make([]string, 0, len(rows))
+	seen := map[string]bool{}
+	for _, row := range rows {
+		if !seen[row.ConversationID] {
+			seen[row.ConversationID] = true
+			ids = append(ids, row.ConversationID)
+		}
+	}
+	provenance, err := scoreSessionProvenance(r.Context(), ts.t, ids)
+	if err != nil {
+		readFailed(w)
+		return
+	}
+	type scoreGroup struct {
+		key    string
+		values []float64
+	}
+	byCheck := map[string]map[string][]float64{}
+	for _, row := range rows {
+		if selectedCheck != "" && row.Check != selectedCheck || q.Get("scorer") != "" && row.Scorer != q.Get("scorer") {
+			continue
+		}
+		if len(q["harness"]) > 0 && !containsValue(q["harness"], provenance[row.ConversationID].Harness) {
+			continue
+		}
+		if len(q["model"]) > 0 && !containsValue(q["model"], provenance[row.ConversationID].Model) {
+			continue
+		}
+		key := "all"
+		switch dim {
+		case "harness":
+			key = provenance[row.ConversationID].Harness
+		case "session_model":
+			key = provenance[row.ConversationID].Model
+		case "repo_id":
+			key = row.RepoID
+		case "plan":
+			key = planFromArtifactPath(row.Path)
+		case "scorer":
+			key = row.Scorer
+		case "screen_verdict":
+			screen, e := ts.t.ArtifactScreen(r.Context(), row.Hash)
+			if e != nil {
+				readFailed(w)
+				return
+			}
+			key = "unknown"
+			if screen != nil {
+				key = screen.Verdict
+			}
+		}
+		if byCheck[row.Check] == nil {
+			byCheck[row.Check] = map[string][]float64{}
+		}
+		byCheck[row.Check][key] = append(byCheck[row.Check][key], row.Score)
+	}
+	out := []map[string]any{}
+	for check := range checks {
+		if selectedCheck != "" && check != selectedCheck {
+			continue
+		}
+		groups := []scoreGroup{}
+		for key, values := range byCheck[check] {
+			groups = append(groups, scoreGroup{key: key, values: values})
+		}
+		sort.Slice(groups, func(i, j int) bool { return groups[i].key < groups[j].key })
+		allN := 0
+		allValues := []float64{}
+		for _, g := range groups {
+			allN += len(g.values)
+			allValues = append(allValues, g.values...)
+		}
+		start := min(offset, len(groups))
+		end := min(start+limit, len(groups))
+		page := make([]map[string]any, 0, end-start)
+		for _, g := range groups[start:end] {
+			sort.Float64s(g.values)
+			page = append(page, map[string]any{"key": g.key, "n": len(g.values), "min": round3(percentile(g.values, 0)), "p25": round3(percentile(g.values, .25)), "median": round3(percentile(g.values, .5)), "p75": round3(percentile(g.values, .75)), "max": round3(percentile(g.values, 1))})
+		}
+		var minScore, p25, median, p75, maxScore any
+		if allN > 0 {
+			sort.Float64s(allValues)
+			minScore, p25, median, p75, maxScore = round3(percentile(allValues, 0)), round3(percentile(allValues, .25)), round3(percentile(allValues, .5)), round3(percentile(allValues, .75)), round3(percentile(allValues, 1))
+		}
+		out = append(out, map[string]any{"name": check, "n": allN, "min": minScore, "p25": p25, "median": median, "p75": p75, "max": maxScore, "groups": page, "omitted_groups": len(groups) - (end - start), "omitted_n": func() int {
+			n := 0
+			for _, g := range groups[:start] {
+				n += len(g.values)
+			}
+			for _, g := range groups[end:] {
+				n += len(g.values)
+			}
+			return n
+		}()})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i]["name"].(string) < out[j]["name"].(string) })
+	resp := map[string]any{"kind": kind, "dim": dim, "checks": out, "offset": offset, "limit": limit}
+	addAnalyticsPartial(resp, ts)
+	writeJSON(w, 200, resp)
+}
+
+func containsValue(values []string, value string) bool {
+	for _, candidate := range values {
+		if candidate == value {
+			return true
+		}
+	}
+	return false
+}
+
+func scoreSessionProvenance(ctx context.Context, t *store.Tenant, ids []string) (map[string]store.SessionProvenance, error) {
+	out := make(map[string]store.SessionProvenance, len(ids))
+	for start := 0; start < len(ids); start += 500 {
+		end := min(start+500, len(ids))
+		batch, err := t.SessionProvenanceFor(ctx, ids[start:end])
+		if err != nil {
+			return nil, err
+		}
+		for id, provenance := range batch {
+			out[id] = provenance
+		}
+	}
+	return out, nil
+}
+
+func planFromArtifactPath(path string) string {
+	parts := strings.Split(strings.ReplaceAll(path, "\\", "/"), "/")
+	if len(parts) > 2 && parts[0] == "docs" && parts[1] == "plans" {
+		return parts[2]
+	}
+	return ""
 }
 
 func parseExecShapes(w http.ResponseWriter, q url.Values) ([]string, bool) {

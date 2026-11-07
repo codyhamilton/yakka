@@ -362,6 +362,18 @@ func TestAnalyticsOutcome(t *testing.T) {
 				t.Errorf("scores %v want %v", c, want)
 			}
 		}
+		byLens := aok(t, s, A+"scores?kind=design&dim=repo_id&check="+url.QueryEscape(dcheck)+"&"+win)
+		lensChecks := rowsOf(byLens, "checks")
+		if len(lensChecks) != 1 || lensChecks[0]["n"] != float64(3) {
+			t.Fatalf("score lens population: %v", byLens)
+		}
+		lensGroups := lensChecks[0]["groups"].([]any)
+		if len(lensGroups) != 2 {
+			t.Fatalf("score lens groups: %v", byLens)
+		}
+		if _, _, body := getJSON(t, s, "ka", A+"scores?kind=design&dim=nope&"+win); !strings.Contains(body, "unsupported dimension") {
+			t.Fatalf("unsupported score dimension: %s", body)
+		}
 		// a window of days 0-3 holds only the 0.2 design content
 		w := aok(t, s, A+"scores?kind=design&from="+url.QueryEscape(base.Format(time.RFC3339))+"&to="+url.QueryEscape(base.AddDate(0, 0, 3).Format(time.RFC3339)))
 		for _, c := range rowsOf(w, "checks") {

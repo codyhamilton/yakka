@@ -8,11 +8,11 @@ import (
 	"sort"
 )
 
-// DistributionParams selects measure, grain, optional model dimension, and top-N keys.
+// DistributionParams selects measure, grain, optional lens dimension, and top-N keys.
 type DistributionParams struct {
 	Measure string
 	Grain   string // "call" or "conversation"
-	Dim     string // "" or "model"
+	Dim     string // "", "model", or a declared session/call lens
 	Top     int
 }
 
@@ -39,12 +39,16 @@ type DistributionRow struct {
 
 // DistributionResult is the store output for GET /v1/analytics/distribution.
 type DistributionResult struct {
-	Measure        string
-	Grain          string
-	Dim            string
-	Rows           []DistributionRow
-	Truncated      bool
-	IgnoredFilters []string
+	Measure         string
+	Grain           string
+	Dim             string
+	Rows            []DistributionRow
+	Truncated       bool
+	GroupN          int
+	OmittedGroups   int
+	OmittedN        int
+	OmittedUnpriced int
+	IgnoredFilters  []string
 }
 
 type distSample struct {
@@ -75,19 +79,51 @@ func (t *Tenant) Distribution(ctx context.Context, f AnalyticsFilter, p Distribu
 	if p.Dim == "model" {
 		keyExpr = "model"
 	}
+	if p.Grain == "call" {
+		switch p.Dim {
+		case "harness":
+			keyExpr = "harness"
+		case "session_model":
+			keyExpr = "model"
+		case "session_repo":
+			keyExpr = "COALESCE(sr.repo,'(none)')"
+		}
+	}
 	var query string
 	if p.Grain == "conversation" {
-		if p.Dim == "model" {
+		switch p.Dim {
+		case "model":
 			keyExpr = "coalesce(cm.model,'')"
+		case "harness":
+			keyExpr = "coalesce(sh.harness,'unknown')"
+		case "session_model":
+			keyExpr = "coalesce(sm.model,'unknown')"
+		case "session_repo":
+			keyExpr = "coalesce(sr.repo,'(none)')"
 		}
-		query = cte + `, counts AS (SELECT conversation_id,model,count(*) n FROM kept WHERE model!='' GROUP BY conversation_id,model),
+		query = cte + `, session_repo_counts AS (SELECT conversation_id,COUNT(DISTINCT repo_id) n,MIN(repo_id) repo FROM facts WHERE type IN ('artifact_version','commit') AND repo_id!='' GROUP BY conversation_id),
+			session_repo AS (SELECT conversation_id,CASE WHEN n=1 THEN repo WHEN n>1 THEN '(multi)' ELSE '(none)' END repo FROM session_repo_counts),
+			harness_counts AS (SELECT conversation_id,COALESCE(NULLIF(harness,''),'unknown') harness,COUNT(*) n FROM facts GROUP BY conversation_id,COALESCE(NULLIF(harness,''),'unknown')),
+			harness_ranked AS (SELECT conversation_id,harness,ROW_NUMBER() OVER(PARTITION BY conversation_id ORDER BY n DESC,harness ASC) rn FROM harness_counts),
+			session_harness AS (SELECT conversation_id,harness FROM harness_ranked WHERE rn=1),
+			all_usage AS (SELECT row_hash,conversation_id,model,CASE WHEN harness='claude' THEN json_extract(raw,'$.backfill.ref') END mid,tok_out FROM facts WHERE type='hook_event' AND norm_event='usage'),
+			all_kept AS (SELECT * FROM (SELECT *,ROW_NUMBER() OVER(PARTITION BY conversation_id,mid ORDER BY tok_out DESC,row_hash ASC) rn FROM all_usage) WHERE mid IS NULL OR mid='' OR rn=1),
+			model_counts AS (SELECT conversation_id,model,COUNT(*) n FROM all_kept WHERE model!='' GROUP BY conversation_id,model),
+			model_totals AS (SELECT conversation_id,COUNT(*) n FROM all_kept GROUP BY conversation_id),
+			model_ranked AS (SELECT conversation_id,model,n,ROW_NUMBER() OVER(PARTITION BY conversation_id ORDER BY n DESC,model ASC) rn FROM model_counts),
+			session_model AS (SELECT t.conversation_id,CASE WHEN t.n=0 THEN '(none)' WHEN COALESCE(r.n,0)*1.0/t.n<0.8 THEN '(mixed)' WHEN r.model IS NULL THEN 'unknown' ELSE r.model END model FROM model_totals t LEFT JOIN model_ranked r ON r.conversation_id=t.conversation_id AND r.rn=1),
+			counts AS (SELECT conversation_id,model,count(*) n FROM kept WHERE model!='' GROUP BY conversation_id,model),
 			mc AS (SELECT conversation_id,model,ROW_NUMBER() OVER(PARTITION BY conversation_id ORDER BY n DESC,model ASC) rn FROM counts),
 			cm AS (SELECT conversation_id,model FROM mc WHERE rn=1),
 			per AS (SELECT conversation_id,sum(CASE WHEN ` + pricedExpr + `=1 THEN ` + valueExpr + ` ELSE 0 END) value,
 				sum(1-` + pricedExpr + `) unpriced,sum(` + pricedExpr + `) priced FROM kept GROUP BY conversation_id)
-			INSERT INTO dist_samples SELECT ` + keyExpr + `,per.value,per.priced,per.unpriced FROM per LEFT JOIN cm USING(conversation_id)`
+			INSERT INTO dist_samples SELECT ` + keyExpr + `,per.value,per.priced,per.unpriced FROM per LEFT JOIN cm USING(conversation_id) LEFT JOIN session_repo sr USING(conversation_id) LEFT JOIN session_harness sh USING(conversation_id) LEFT JOIN session_model sm USING(conversation_id)`
 	} else {
-		query = cte + ` INSERT INTO dist_samples SELECT ` + keyExpr + `,` + valueExpr + `,` + pricedExpr + `,1-` + pricedExpr + ` FROM kept`
+		if p.Dim == "session_repo" {
+			query = cte + `, session_repo_counts AS (SELECT conversation_id,COUNT(DISTINCT repo_id) n,MIN(repo_id) repo FROM facts WHERE type IN ('artifact_version','commit') AND repo_id!='' GROUP BY conversation_id), session_repo AS (SELECT conversation_id,CASE WHEN n=1 THEN repo WHEN n>1 THEN '(multi)' ELSE '(none)' END repo FROM session_repo_counts) INSERT INTO dist_samples SELECT ` + keyExpr + `,` + valueExpr + `,` + pricedExpr + `,1-` + pricedExpr + ` FROM kept LEFT JOIN session_repo sr USING(conversation_id)`
+		} else {
+			query = cte + ` INSERT INTO dist_samples SELECT ` + keyExpr + `,` + valueExpr + `,` + pricedExpr + `,1-` + pricedExpr + ` FROM kept`
+		}
 	}
 	if _, err := t.rdb.ExecContext(ctx, `CREATE TEMP TABLE IF NOT EXISTS dist_samples(k TEXT,value REAL,priced INTEGER,unpriced INTEGER); DELETE FROM dist_samples`); err != nil {
 		return DistributionResult{}, err
@@ -108,6 +144,10 @@ func (t *Tenant) Distribution(ctx context.Context, f AnalyticsFilter, p Distribu
 	}
 	if groupN > top {
 		res.Truncated = true
+	}
+	res.GroupN = groupN
+	if err := t.rdb.QueryRowContext(ctx, `SELECT COALESCE(SUM(priced),0),COALESCE(SUM(unpriced),0) FROM dist_samples WHERE k NOT IN (SELECT k FROM dist_samples GROUP BY k ORDER BY SUM(priced) DESC,k ASC LIMIT ?)`, top).Scan(&res.OmittedN, &res.OmittedUnpriced); err != nil {
+		return DistributionResult{}, err
 	}
 	rows, err := t.rdb.QueryContext(ctx, `WITH groups AS (SELECT k,sum(priced) n,sum(unpriced) unpriced FROM dist_samples GROUP BY k),
 		ranked AS (SELECT d.k,d.value,ROW_NUMBER() OVER(PARTITION BY d.k ORDER BY d.value)-1 rn,g.n FROM dist_samples d JOIN groups g USING(k) WHERE d.priced=1),
@@ -169,6 +209,7 @@ func (t *Tenant) Distribution(ctx context.Context, f AnalyticsFilter, p Distribu
 	for i := range res.Rows {
 		res.Rows[i].Bins = binCounts(p.Measure, byKey[res.Rows[i].K])
 	}
+	res.OmittedGroups = res.GroupN - len(res.Rows)
 	return res, nil
 }
 

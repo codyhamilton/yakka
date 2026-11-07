@@ -51,7 +51,7 @@ func (s *Server) analyticsSchema(w http.ResponseWriter, r *http.Request, _ strin
 			"page_max": maxLimit, "scatter_points": 5000, "content_bytes": 16 * 1024 * 1024, "explore_page_max": exploreCap, "heavy_read_concurrency": analyticsHeavyConcurrency,
 			"time_range": map[string]string{"min": minAnalyticsTime.Format(time.RFC3339Nano), "max": maxAnalyticsTime.Format(time.RFC3339Nano)}},
 		"grains": grains, "lenses": lenses, "coverage": coverage,
-		"features": map[string]bool{"bucket_auto": true, "entities_session": true, "entities_time": true, "exclude": true},
+		"features": map[string]bool{"bucket_auto": true, "entities_session": true, "entities_time": true, "exclude": true, "scores_by_lens": true},
 	})
 }
 

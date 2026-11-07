@@ -103,6 +103,32 @@ func TestScoreSeriesLatestInBucket(t *testing.T) {
 	}
 }
 
+func TestScoreObservationsCanonicalAndLatestScorer(t *testing.T) {
+	tn := openT(t, Options{})
+	ctx := context.Background()
+	timeValue := float64(ad(10, 1, 9, 0).Unix())
+	hash := hx("shared-score-content")
+	mustExec(t, tn, `INSERT INTO facts(type,row_hash,conversation_id,harness,event,ts,received_at,repo_id,path,content_hash,kind,raw) VALUES('artifact_version','b','later','h2','Write',?,1,'repo-b','docs/plans/z/DESIGN.md',?,'design',x'')`, timeValue, hash)
+	mustExec(t, tn, `INSERT INTO facts(type,row_hash,conversation_id,harness,event,ts,received_at,repo_id,path,content_hash,kind,raw) VALUES('artifact_version','a','canonical','h1','Write',?,1,'repo-a','docs/plans/a/DESIGN.md',?,'design',x'')`, timeValue, hash)
+	mustExec(t, tn, `INSERT INTO scores(content_hash,check_name,result,scorer,at) VALUES(?,?,?,?,?)`, hash, "d.x", .2, "old", 1)
+	mustExec(t, tn, `INSERT INTO scores(content_hash,check_name,result,scorer,at) VALUES(?,?,?,?,?)`, hash, "d.x", .8, "new", 2)
+	f := AnalyticsFilter{From: ad(10, 1, 0, 0), To: ad(10, 2, 0, 0)}
+	got, err := tn.WindowScoreObservations(ctx, f, "design")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].RepoID != "repo-a" || got[0].Path != "docs/plans/a/DESIGN.md" || got[0].ConversationID != "canonical" || got[0].Score != .8 || got[0].Scorer != "new" {
+		t.Fatalf("canonical latest observation: %#v", got)
+	}
+	series, err := tn.ScoreSeriesObservations(ctx, f, "design", "day")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(series) != 1 || series[0].RepoID != "repo-a" || series[0].Scorer != "new" || series[0].Score != .8 {
+		t.Fatalf("canonical series observation: %#v", series)
+	}
+}
+
 func TestScoreSeriesOmitsEmptyBucket(t *testing.T) {
 	tn, f := scoreSeriesFixture(t)
 	ctx := context.Background()
