@@ -141,3 +141,7 @@ The worker identified two omitted integration seams in the first brief: route re
 - Deviations / unfinished: report `reports/4-01-capability-schema-and-session-grain.md` marks done with concerns. Session numeric filtering, session aggregate mode, and pending/scored-total/revision coverage are missing. The report's commit placeholder is malformed; runner records the actual commit here (`b9c9ca0`). Unit test command passed: `GOMAXPROCS=3 GOMEMLIMIT=8GiB go test -p=3 ./internal/store ./internal/serve -count=1` (store 6.7s, serve 23.9s); `git diff --check` passed. Report `artifact_feedback`: delivered / screen pass (`jev-1.13.0`).
 
 The fixed Phase 4 outcome is not yet verified or closed. Follow-up brief `4-02-session-outcome-remediation.md` covers only the three reported omissions, without changing the contract; it is committed before dispatch.
+
+### Independent Phase 4 verification finding
+
+Runner added `TestAnalyticsSessionScatterDeterministicSampleHasWholePopulationMarginals` for a 5,005-session fixture. The baseline failed: deterministic sample metadata was correct, but both token marginals summed to 0 rather than the whole 5,005-session population because no-call sessions had no histogram bins. This is a Phase 4 outcome defect, not a contract change. Brief `4-03-zero-call-scatter-marginals.md` scopes the fix and regression assertion; Phase 4 remains open.
