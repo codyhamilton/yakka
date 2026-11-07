@@ -219,6 +219,48 @@ class RelayTests(unittest.TestCase):
         self.assertFalse(worker.is_alive())
         self.assertEqual(self.relay.writer.getvalue(), b"")
 
+    def test_missing_file_is_a_fact_and_absent_git_does_not_hide_it(self) -> None:
+        repo = os.path.join(self.temp.name, "missing-repo")
+        os.makedirs(repo)
+        present = os.path.join(repo, "design.md")
+        Path(present).write_text("present")
+        missing = os.path.join(repo, "gone.md")
+        declaration = {"v": 1, "rev": "0123456789abcdef", "context": [
+            {"reader": "cwd", "v": 1, "params": {}},
+            {"reader": "resolved_path", "v": 1, "params": {"path_arg": "path", "bases": ["cwd"]}},
+            {"reader": "file", "v": 1, "params": {"of": "resolved_path"}},
+            {"reader": "git", "v": 1, "params": {"of": "resolved_path"}},
+        ]}
+        facts, _ = yakka._mcp_readers({"params": {"arguments": {"path": missing}}}, declaration, self.queue, getwd=lambda: (repo, None))
+        self.assertEqual(facts["file"], {"exists": False, "is_file": False, "size": None, "mtime": None, "content_hash": None, "withheld": None, "read_error": None})
+        self.assertNotIn("_failed", facts["file"])
+        with mock.patch.object(yakka, "_mcp_real_repo", side_effect=FileNotFoundError("git")):
+            facts, _ = yakka._mcp_readers({"params": {"arguments": {"path": present}}}, declaration, self.queue, getwd=lambda: (repo, None))
+        self.assertTrue(facts["file"]["exists"])
+        self.assertIsNone(facts["file"]["content_hash"])
+        self.assertEqual(facts["git"]["error"], "git_unavailable")
+
+    def test_unresolved_queue_entry_is_not_treated_as_absent(self) -> None:
+        payload = {"hook_event_name": "PostToolUse", "conversation_id": "c", "cwd": "/tmp", "tool_name": "Write", "tool_input": {"file_path": "/somewhere/else.md"}}
+        raw = b'{"ts":1,"harness":"codex","event":"PostToolUse"}\n' + json.dumps(payload).encode()
+        with open(os.path.join(self.queue, "c-1.evt"), "wb") as fh:
+            fh.write(raw)
+        with mock.patch.object(yakka, "_mcp_real_repo", side_effect=OSError("git failed")) as git:
+            with self.assertRaises(OSError) as raised:
+                yakka._mcp_queue_entries(self.queue, "repo", "docs/a.md", "/work/docs/a.md", 0, time.monotonic() + 5)
+        self.assertEqual(str(raised.exception), "incomplete queue")
+        self.assertTrue(git.called)
+
+    def test_cancel_does_not_collapse_string_and_number_ids(self) -> None:
+        self.assertNotEqual(yakka._mcp_id_key(1), yakka._mcp_id_key("1"))
+        number_conn = mock.Mock()
+        string_conn = mock.Mock()
+        self.relay.active[yakka._mcp_id_key(1)] = number_conn
+        self.relay.active[yakka._mcp_id_key("1")] = string_conn
+        self.relay.cancel(1)
+        number_conn.close.assert_called_once()
+        string_conn.close.assert_not_called()
+
     def test_same_target_enqueue_serializes_coverage_and_appends_once(self) -> None:
         repo = os.path.join(self.temp.name, "enqueue-repo")
         os.makedirs(repo)

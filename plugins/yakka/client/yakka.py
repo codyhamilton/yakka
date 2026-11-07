@@ -15,6 +15,7 @@ import random
 import re
 import shutil
 import socket
+import stat
 import subprocess
 import sys
 import threading
@@ -1844,6 +1845,12 @@ def RunStandalone(ctx: DrainContext, stderr: Any) -> int:
 _MCP_MAX_BODY = 8 << 20
 _MCP_WORKERS = 8
 _MCP_CANCEL = "notifications/cancelled"
+_MCP_CONNECT_TIMEOUT_S = 5.0
+_MCP_READER_TIMEOUT_S = 5.0
+_MCP_READERS_TIMEOUT_S = 10.0
+_MCP_CONNECT_TIMEOUT_S = 5.0
+_MCP_READER_TIMEOUT_S = 5.0
+_MCP_READERS_TIMEOUT_S = 10.0
 
 
 @dataclass
@@ -1947,15 +1954,47 @@ def _mcp_failed(code: str) -> dict[str, Any]:
     return {"_failed": {"code": code if code in _MCP_READER_FAILURES else "internal"}}
 
 
-def _mcp_real_repo(path: str) -> tuple[str, str, str]:
+def _mcp_id_key(ident: Any) -> str:
+    """JSON-encode a request id so number 1 and string "1" do not share a slot."""
+    try:
+        return json.dumps(ident, separators=(",", ":"), ensure_ascii=False)
+    except (TypeError, ValueError):
+        return "null"
+
+
+def _mcp_hash_file(path: str) -> str:
+    """Hash a regular file. O_NOFOLLOW refuses a final-component symlink swap."""
+    flags = os.O_RDONLY
+    nofollow = getattr(os, "O_NOFOLLOW", 0)
+    if nofollow:
+        flags |= nofollow
+    fd = os.open(path, flags)
+    try:
+        digest = hashlib.sha256()
+        while True:
+            chunk = os.read(fd, 1 << 20)
+            if not chunk:
+                break
+            digest.update(chunk)
+        return digest.hexdigest()
+    finally:
+        os.close(fd)
+
+
+def _mcp_real_repo(path: str, deadline: Optional[float] = None) -> tuple[str, str, str]:
     """Return canonical worktree top, repository identity and slash path."""
     git = shutil.which("git")
     if not git:
         raise FileNotFoundError("git unavailable")
     env = {"PATH": os.environ.get("PATH", ""), "HOME": _home(), "GIT_TERMINAL_PROMPT": "0", "GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_NOSYSTEM": "1"}
     def git_read(*args: str) -> str:
+        if deadline is not None and time.monotonic() >= deadline:
+            raise TimeoutError()
+        timeout = 3.0 if deadline is None else min(3.0, deadline - time.monotonic())
+        if timeout <= 0:
+            raise TimeoutError()
         try:
-            result = subprocess.run([git, "-C", os.path.dirname(path), *args], check=True, capture_output=True, timeout=3, env=env)
+            result = subprocess.run([git, "-C", os.path.dirname(path), *args], check=True, capture_output=True, timeout=timeout, env=env)
         except subprocess.TimeoutExpired as exc:
             raise TimeoutError() from exc
         except (OSError, subprocess.CalledProcessError) as exc:
@@ -1974,7 +2013,8 @@ def _mcp_real_repo(path: str) -> tuple[str, str, str]:
     remotes = sorted(git_read("remote").split())
     if remotes:
         remote = "origin" if "origin" in remotes else remotes[0]
-        rid = NormalizeRemote(git_read("remote", "get-url", remote))
+        # "--" keeps a remote named like an option from being parsed as one.
+        rid = NormalizeRemote(git_read("remote", "get-url", "--", remote))
     else:
         roots = sorted(git_read("rev-list", "--max-parents=0", "HEAD").split())
         if not roots:
@@ -2004,7 +2044,7 @@ def _mcp_queue_entries(queue_dir: str, repo_id: str, rel_path: str, absolute: st
     for folder, items, is_rejected in ((queue_dir, names, False), (rejected_dir, rejected_names, True)):
         for name in items:
             if deadline is not None and time.monotonic() >= deadline:
-                raise OSError("incomplete queue")
+                raise TimeoutError()
             if not name.endswith(".evt") or name.startswith("."):
                 continue
             p = os.path.join(folder, name)
@@ -2013,7 +2053,8 @@ def _mcp_queue_entries(queue_dir: str, repo_id: str, rel_path: str, absolute: st
                     raise OSError("incomplete queue")
                 if not os.path.isfile(p):
                     continue
-                raw = open(p, "rb").read(65537)
+                with open(p, "rb") as fh:
+                    raw = fh.read(65537)
                 if len(raw) > 65536:
                     raise OSError("incomplete queue")
                 parsed = _parse_file(File(Name=name, Data=raw))
@@ -2026,11 +2067,12 @@ def _mcp_queue_entries(queue_dir: str, repo_id: str, rel_path: str, absolute: st
                         matched = True
                         break
                     try:
-                        _, entry_repo, entry_rel = _mcp_real_repo(fp)
+                        _, entry_repo, entry_rel = _mcp_real_repo(fp, deadline)
                         if entry_repo == repo_id and entry_rel == rel_path:
                             matched = True
                             break
-                    except (OSError, ValueError, TimeoutError):
+                    except ValueError:
+                        # A path that is not in a repository cannot match this file.
                         continue
                 if not matched:
                     continue
@@ -2041,7 +2083,8 @@ def _mcp_queue_entries(queue_dir: str, repo_id: str, rel_path: str, absolute: st
                     try:
                         if os.path.islink(reason_path):
                             raise OSError("incomplete queue")
-                        reason = open(reason_path, encoding="utf-8").read(4097)
+                        with open(reason_path, encoding="utf-8") as fh:
+                            reason = fh.read(4097)
                     except OSError:
                         reason = ""
                     if len(reason) > 4096:
@@ -2051,6 +2094,8 @@ def _mcp_queue_entries(queue_dir: str, repo_id: str, rel_path: str, absolute: st
                 else:
                     item["age_s"] = max(0.0, now - st.st_mtime)
                     pending_all.append(item)
+            except TimeoutError:
+                raise
             except (OSError, UnicodeDecodeError, ValueError, json.JSONDecodeError):
                 # A potentially matching unreadable entry makes absence unprovable.
                 raise OSError("incomplete queue")
@@ -2085,7 +2130,7 @@ def _mcp_readers(request: dict[str, Any], declaration: Any, queue_dir: str, getw
         return local, guards
     values: dict[str, Any] = {}
     names_seen: set[str] = set()
-    deadline = time.monotonic() + 10
+    deadline = time.monotonic() + _MCP_READERS_TIMEOUT_S
     for entry in entries:
         if time.monotonic() >= deadline:
             values[str(entry.get("reader", ""))] = _mcp_failed("timeout") if isinstance(entry, dict) else _mcp_failed("bad_params")
@@ -2123,6 +2168,7 @@ def _mcp_readers(request: dict[str, Any], declaration: Any, queue_dir: str, getw
             valid_params = params.get("of") == "git" and params.get("path") == "resolved_path"
         if not valid_params:
             values[name] = _mcp_failed("bad_params"); continue
+        reader_deadline = min(deadline, time.monotonic() + _MCP_READER_TIMEOUT_S)
         deps = {"file": ["resolved_path"], "git": [], "queue": ["git", "resolved_path"] + (["file"] if ver == 2 else []), "resolved_path": [], "cwd": [], "project_dir": [], "drain": []}[name]
         if any(dep not in values for dep in deps):
             values[name] = _mcp_failed("bad_params"); continue
@@ -2165,35 +2211,34 @@ def _mcp_readers(request: dict[str, Any], declaration: Any, queue_dir: str, getw
                 if not isinstance(path, str):
                     value = {"skipped": "no_input"}
                 elif name == "file":
-                    st = os.stat(path)
-                    is_file = os.path.isfile(path)
-                    value = {"exists": True, "is_file": is_file, "size": st.st_size, "mtime": st.st_mtime, "content_hash": None, "withheld": None, "read_error": None}
                     try:
-                        top, rid, rel = _mcp_real_repo(path)
-                        real = os.path.realpath(path)
-                        if not is_file:
-                            value["exists"] = True
-                        elif st.st_size > 256 << 20:
-                            value["withheld"] = "too_large"
-                        else:
-                            try:
-                                with open(real, "rb") as f:
-                                    digest = hashlib.sha256()
-                                    while True:
-                                        chunk = f.read(1 << 20)
-                                        if not chunk: break
-                                        digest.update(chunk)
-                                value["content_hash"] = digest.hexdigest()
-                                guards["file"] = {"path": os.path.normpath(path), "real": real, "top": top, "repo_id": rid, "rel_path": rel, "dev": st.st_dev, "ino": st.st_ino, "size": st.st_size, "mtime": st.st_mtime, "hash": value["content_hash"]}
-                            except OSError as exc:
-                                value["read_error"] = type(exc).__name__
-                    except ValueError:
-                        value["withheld"] = "symlink_out" if os.path.realpath(path) != os.path.abspath(path) else "outside_repo"
+                        st = os.stat(path)
                     except FileNotFoundError:
+                        # A missing path is a fact. FileNotFoundError is an OSError, so it
+                        # must be caught here or the outer handler reports io_error.
                         value = {"exists": False, "is_file": False, "size": None, "mtime": None, "content_hash": None, "withheld": None, "read_error": None}
+                    else:
+                        is_file = stat.S_ISREG(st.st_mode)
+                        value = {"exists": True, "is_file": is_file, "size": st.st_size, "mtime": st.st_mtime, "content_hash": None, "withheld": None, "read_error": None}
+                        try:
+                            top, rid, rel = _mcp_real_repo(path, reader_deadline)
+                            real = os.path.realpath(path)
+                            if is_file and st.st_size > 256 << 20:
+                                value["withheld"] = "too_large"
+                            elif is_file:
+                                try:
+                                    value["content_hash"] = _mcp_hash_file(real)
+                                    guards["file"] = {"path": os.path.normpath(path), "real": real, "top": top, "repo_id": rid, "rel_path": rel, "dev": st.st_dev, "ino": st.st_ino, "size": st.st_size, "mtime": st.st_mtime, "hash": value["content_hash"]}
+                                except OSError as exc:
+                                    value["read_error"] = type(exc).__name__
+                        except ValueError:
+                            value["withheld"] = "symlink_out" if os.path.realpath(path) != os.path.abspath(path) else "outside_repo"
+                        except FileNotFoundError:
+                            # git is not installed. The file is still present; do not hash it.
+                            pass
                 elif name == "git":
                     try:
-                        top, rid, rel = _mcp_real_repo(path)
+                        top, rid, rel = _mcp_real_repo(path, reader_deadline)
                         value = {"repo_id": rid, "rel_path": rel, "error": None}
                         guards["repo"] = {"top": top, "repo_id": rid}
                     except FileNotFoundError:
@@ -2202,19 +2247,26 @@ def _mcp_readers(request: dict[str, Any], declaration: Any, queue_dir: str, getw
                         value = {"repo_id": None, "rel_path": None, "error": "no_commit" if str(exc) == "no commit" else "no_repo"}
                 else:
                     gitv = values.get("git", {})
-                    filev = values.get("file", {})
-                    if ver == 2 and (not isinstance(gitv, dict) or not gitv.get("repo_id") or not isinstance(filev, dict) or not isinstance(filev.get("mtime"), (int, float))):
-                        raise OSError("incomplete queue")
-                    gitv = values.get("git", {})
-                    if isinstance(gitv, dict) and gitv.get("repo_id"):
-                        top = guards.get("repo", {}).get("top")
-                        abs_file = os.path.realpath(path)
-                        pending, rejected, coverage = _mcp_queue_entries(queue_dir, gitv["repo_id"], gitv.get("rel_path", ""), abs_file, float(filev.get("mtime", 0)), deadline)
-                        value = {"pending": pending, "rejected": rejected}
-                        if ver == 2: value["coverage"] = coverage
-                    else:
+                    filev = values.get("file", {}) if isinstance(values.get("file"), dict) else {}
+                    if not isinstance(gitv, dict) or "_failed" in gitv:
+                        raise RuntimeError("dependency")
+                    empty_coverage = {"complete": True, "pending_covering": 0, "rejected_covering": 0, "oldest_covering_age_s": None}
+                    if not gitv.get("repo_id"):
+                        # No repository identity means nothing can be queued for this path.
                         value = {"pending": [], "rejected": []}
-                        if ver == 2: value["coverage"] = {"complete": True, "pending_covering": 0, "rejected_covering": 0, "oldest_covering_age_s": None}
+                        if ver == 2:
+                            value["coverage"] = empty_coverage
+                    else:
+                        mtime = filev.get("mtime")
+                        if ver == 2 and (isinstance(mtime, bool) or not isinstance(mtime, (int, float))):
+                            if "_failed" in filev:
+                                raise RuntimeError("dependency")
+                            raise OSError("incomplete queue")
+                        abs_file = os.path.realpath(path)
+                        pending, rejected, coverage = _mcp_queue_entries(queue_dir, gitv["repo_id"], gitv.get("rel_path") or "", abs_file, float(mtime or 0), reader_deadline)
+                        value = {"pending": pending, "rejected": rejected}
+                        if ver == 2:
+                            value["coverage"] = coverage
             elif name == "drain":
                 value = {"running": Running(queue_dir)}
             else:
@@ -2236,8 +2288,10 @@ def _mcp_readers(request: dict[str, Any], declaration: Any, queue_dir: str, getw
     local.update(values)
     try:
         cfg = Load()
-        if cfg.Key and cfg.Key in json.dumps(local, separators=(",", ":")):
-            matches = [name for name, value in local.items() if not name.startswith("_") and cfg.Key in json.dumps(value, separators=(",", ":"))]
+        # Same encoding as the body the shim sends, so an escaped form cannot hide the key.
+        encoded = json.dumps(local, separators=(",", ":"), ensure_ascii=False)
+        if cfg.Key and cfg.Key in encoded:
+            matches = [name for name, value in local.items() if not name.startswith("_") and cfg.Key in json.dumps(value, separators=(",", ":"), ensure_ascii=False)]
             for name in matches or [n for n in local if not n.startswith("_")]:
                 local[name] = _mcp_failed("secret_in_context")
     except Exception:
@@ -2273,10 +2327,6 @@ def _mcp_context_call(body: bytes, method: str, request: dict[str, Any], declara
     return json.dumps(clone, separators=(",", ":"), ensure_ascii=False).encode("utf-8"), local, guards, token
 
 
-def _mcp_prepare_context(body: bytes, method: str, request: dict[str, Any], declaration: Any, queue_dir: str = "") -> bytes:
-    return _mcp_context_call(body, method, request, declaration, queue_dir)[0]
-
-
 def _mcp_effect(action_id: Any, ok: bool, outcome: str, error: Optional[str]) -> dict[str, Any]:
     return {"action": "enqueue_file_snapshot", "v": 1, "action_id": action_id, "ok": ok, "outcome": outcome, "error": error}
 
@@ -2299,8 +2349,12 @@ def _mcp_enqueue(guards: dict[str, Any], resolved: Any, queue_dir: str, call: st
         return failed("path_changed")
     lock = None
     try:
-        os.makedirs(queue_dir, mode=0o700, exist_ok=True)
-        lock = open(os.path.join(queue_dir, ".mcp-enqueue.lock"), "a+b")
+        old_umask = os.umask(0o077)
+        try:
+            os.makedirs(queue_dir, mode=0o700, exist_ok=True)
+            lock = open(os.path.join(queue_dir, ".mcp-enqueue.lock"), "a+b")
+        finally:
+            os.umask(old_umask)
         while True:
             if cancelled.is_set():
                 return failed("effect_unknown", "unknown")
@@ -2314,7 +2368,7 @@ def _mcp_enqueue(guards: dict[str, Any], resolved: Any, queue_dir: str, call: st
         if not os.path.isabs(resolved) or os.path.realpath(resolved) != pinned["real"]:
             return failed("path_changed")
         st = os.stat(resolved)
-        top, rid, rel = _mcp_real_repo(resolved)
+        top, rid, rel = _mcp_real_repo(resolved, deadline)
         if top != pinned["top"] or (st.st_dev, st.st_ino, st.st_size, st.st_mtime, rid, rel) != (pinned["dev"], pinned["ino"], pinned["size"], pinned["mtime"], pinned["repo_id"], pinned["rel_path"]):
             return failed("path_changed")
         digest = hashlib.sha256()
@@ -2460,20 +2514,29 @@ class _McpRelay:
         if cancelled.is_set():
             return None, b"", "cancelled", host
         conn: Any = None
+        slot = _mcp_id_key(active_id)
         try:
             cls = http.client.HTTPSConnection if secure else http.client.HTTPConnection
-            conn = cls(host, port, timeout=timeout)
+            # Connect is bounded separately from the call. A connect failure has not sent the request.
+            conn = cls(host, port, timeout=min(_MCP_CONNECT_TIMEOUT_S, max(0.05, timeout)))
             with self.active_lock:
-                self.active[str(active_id)] = conn
+                self.active[slot] = conn
             if cancelled.is_set():
                 conn.close()
                 return None, b"", "cancelled", host
+            try:
+                conn.connect()
+            except (TimeoutError, socket.timeout, OSError):
+                return None, b"", "network", host
+            if conn.sock is not None:
+                conn.sock.settimeout(timeout)
+            version = (self.opts.Version or _plugin_version_text()).replace("\r", "").replace("\n", "")
             headers = {
                 "Content-Type": "application/json",
                 "Accept": "application/json",
                 "Yakka-Context": "2",
                 "Yakka-Local-Actions": "enqueue_file_snapshot/1",
-                "User-Agent": "yakka-shim/" + (self.opts.Version or _plugin_version_text()),
+                "User-Agent": "yakka-shim/" + version,
             }
             if auth:
                 headers["Authorization"] = auth
@@ -2486,7 +2549,9 @@ class _McpRelay:
             if status in (504, 524):
                 return status, raw, "timeout", host
             if 300 <= status < 400:
-                return status, raw, "redirect", host
+                # Name only the redirect target's host, never the Location URL.
+                target = _mcp_host(response.getheader("Location") or "") or host
+                return status, raw, "redirect", target
             return status, raw, "", host
         except (TimeoutError, socket.timeout):
             return None, b"", "timeout", host
@@ -2495,8 +2560,8 @@ class _McpRelay:
         finally:
             if conn is not None:
                 with self.active_lock:
-                    if self.active.get(str(active_id)) is conn:
-                        self.active.pop(str(active_id), None)
+                    if self.active.get(slot) is conn:
+                        self.active.pop(slot, None)
                 conn.close()
 
     def _timeout(self, method: str, declaration: Any) -> float:
@@ -2525,15 +2590,14 @@ class _McpRelay:
             return
         effect_outcome: Optional[str] = None
         response = _mcp_response(raw) if status is not None else None
-        stale_retried = False
         first_error = response.get("error") if isinstance(response, dict) else None
         if method == "tools/call" and isinstance(first_error, dict) and first_error.get("code") == -32010 and not cancelled.is_set():
+            # One refresh before any local effect. A later stale error is relayed as-is.
             self._refresh(min(10.0, max(0.05, call_deadline - time.monotonic())), cancelled, ident)
             declaration = self._declaration(request or {})
             outbound, initial_local, guards, call_token = _mcp_context_call(body, method, request or {}, declaration, self.opts.QueueDir, getwd=self.opts.Getwd)
             status, raw, problem, host = self._post(outbound, max(0.05, call_deadline - time.monotonic()), cancelled, ident)
             response = _mcp_response(raw) if status is not None and not problem else None
-            stale_retried = True
         server_error = response.get("error") if isinstance(response, dict) else None
         directive = server_error.get("data") if isinstance(server_error, dict) and server_error.get("code") == -32011 else None
         if method == "tools/call" and isinstance(server_error, dict) and server_error.get("code") == -32011:
@@ -2613,31 +2677,9 @@ class _McpRelay:
                     self._cache_initialize(response)
                 if method == "tools/list" and "error" not in response:
                     self._cache_list(response)
-                error = response.get("error")
-                stale = isinstance(error, dict) and error.get("code") == -32010
-                if stale and method == "tools/call" and not cancelled.is_set() and not stale_retried:
-                    self._refresh(10.0, cancelled, ident)
-                    outbound = _mcp_prepare_context(body, method, request or {}, self._declaration(request or {}), self.opts.QueueDir)
-                    status, raw, problem, host = self._post(outbound, timeout, cancelled, ident)
-                    response = _mcp_response(raw) if not problem and status is not None else None
-                    if problem == "timeout":
-                        reply = _mcp_error("timeout", "the server did not reply in time", host, ident)
-                    elif problem == "redirect":
-                        reply = _mcp_error("redirect refused", "the endpoint redirected the request", host, ident)
-                    elif problem or status is None:
-                        reply = _mcp_error("unreachable", "the configured server could not be reached", host, ident, _mcp_queued_count(self.opts.QueueDir))
-                    elif response is not None:
-                        reply = raw + b"\n"
-                    elif status == 401:
-                        reply = _mcp_error("unauthorized", "the server rejected the credential", host, ident)
-                    elif status in (404, 405):
-                        reply = _mcp_error("server unsupported", "the server does not support this endpoint", host, ident)
-                    elif status >= 500:
-                        reply = _mcp_error("unreachable", "the configured server returned an HTTP error", host, ident, _mcp_queued_count(self.opts.QueueDir))
-                    else:
-                        reply = _mcp_error("bad reply", "the retry returned a non-JSON-RPC response", host, ident)
-                else:
-                    reply = raw + b"\n"
+                # Do not start a second call here. After an enqueue, a fresh tools/call
+                # would drop the effect facts and could ask for the action again.
+                reply = raw + b"\n"
             elif status == 401:
                 reply = _mcp_error("unauthorized", "the server rejected the credential", host, ident)
             elif status in (404, 405):
@@ -2660,7 +2702,7 @@ class _McpRelay:
 
     def cancel(self, request_id: Any) -> None:
         with self.active_lock:
-            conn = self.active.get(str(request_id))
+            conn = self.active.get(_mcp_id_key(request_id))
         if conn is not None:
             conn.close()
 
@@ -2677,9 +2719,21 @@ def Serve(r: Any, w: Any, opts: McpOptions) -> Optional[BaseException]:
         while True:
             if opts.Cancelled():
                 break
-            line = r.readline()
+            line = r.readline(_MCP_MAX_BODY + 3)
             if not line:
                 break
+            if not line.endswith(b"\n") and len(line) > _MCP_MAX_BODY + 2:
+                while True:
+                    extra = r.readline(65536)
+                    if not extra or extra.endswith(b"\n"):
+                        break
+                with relay.stdout_lock:
+                    relay._write(_mcp_error("bad reply", "the request exceeded 8 MiB", "", None))
+                continue
+            if len(line.rstrip(b"\r\n")) > _MCP_MAX_BODY:
+                with relay.stdout_lock:
+                    relay._write(_mcp_error("bad reply", "the request exceeded 8 MiB", "", None))
+                continue
             if not line.strip():
                 continue
             request, ident, method = _mcp_parse(line)
@@ -2688,7 +2742,7 @@ def Serve(r: Any, w: Any, opts: McpOptions) -> Optional[BaseException]:
                 cancelled_id = params.get("requestId") if isinstance(params, dict) else None
                 if cancelled_id is not None:
                     with pending_lock:
-                        event = pending.get(str(cancelled_id))
+                        event = pending.get(_mcp_id_key(cancelled_id))
                         if event is not None:
                             event.set()
                     relay.cancel(cancelled_id)
@@ -2699,7 +2753,7 @@ def Serve(r: Any, w: Any, opts: McpOptions) -> Optional[BaseException]:
                 inflight.add(event)
             if expects_reply:
                 with pending_lock:
-                    pending[str(ident)] = event
+                    pending[_mcp_id_key(ident)] = event
             def run(raw: bytes = line.rstrip(b"\r\n"), req: Optional[dict[str, Any]] = request, rid: Any = ident, meth: str = method, wants_reply: bool = expects_reply, ev: threading.Event = event) -> None:
                 try:
                     relay._dispatch(raw, req, rid, meth, wants_reply, ev)
@@ -2710,7 +2764,7 @@ def Serve(r: Any, w: Any, opts: McpOptions) -> Optional[BaseException]:
                 finally:
                     if wants_reply:
                         with pending_lock:
-                            pending.pop(str(rid), None)
+                            pending.pop(_mcp_id_key(rid), None)
                     with pending_lock:
                         inflight.discard(ev)
             pool.submit(run)
