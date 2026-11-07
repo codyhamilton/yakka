@@ -95,6 +95,7 @@ Branch: feat/22-session-work-tagging
 Implemented an explicit-root, offline back-fill tool for Claude JSONL, Codex rollout JSONL, OpenCode session/message/part JSON, and Cursor agent transcript JSONL. It emits complete, partial, unresolved, and excluded labels; extracts plan/phase/issue/PR evidence; joins nested queue logs; writes scrubbed local label files; reports coverage and masked gold-set agreement; and optionally writes complete labels through the client queue writer. The Yakka writer creates tag-only events with an empty payload and a conversation id at the envelope level; its stable content-derived event id makes repeated writes idempotent. `Build` emits source, method, confidence and scrubbed evidence in the resulting `session_action` fact. No network call is present in the tool.
 
 Brief `5-01-deterministic-backfill.md` was committed first as `4105c24`, then its documentation path was corrected against the repository (`docs/design/02-edge-capture.md`) in `a86c83e`. `artifact_feedback`: amended brief delivered, screen pass by jev-1.13.0, version 2.
+Report `5-01-deterministic-backfill.md`: `artifact_feedback` delivered, screen pass by jev-1.13.0, version 1; no flagged checks.
 
 Evidence:
 
