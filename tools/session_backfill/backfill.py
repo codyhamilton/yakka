@@ -91,6 +91,22 @@ def read_session(path: Path, store: str, session_id: str | None = None, related_
             continue
     if not objects:
         return None
+    if store == "codex":
+        # Rollout filenames identify timestamped files; usage facts use the
+        # thread ID recorded in the first session_meta payload.
+        for obj in objects:
+            if not isinstance(obj, dict) or obj.get("type") != "session_meta":
+                continue
+            payload = obj.get("payload")
+            if not isinstance(payload, dict):
+                continue
+            meta = payload.get("meta")
+            if not isinstance(meta, dict):
+                meta = payload
+            transcript_id = meta.get("id")
+            if isinstance(transcript_id, str) and SAFE_SESSION_RE.fullmatch(transcript_id):
+                session_id = transcript_id
+                break
     strings: list[str] = []
     keys: dict[str, list[str]] = {}
     for obj in objects:

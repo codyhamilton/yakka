@@ -50,6 +50,26 @@ class BackfillTests(unittest.TestCase):
             self.assertEqual({s.session_id for s in sessions}, {"c1", "rollout-c2", "o3", "c4"})
             self.assertIn("docs/plans/22-demo", next(s.text for s in sessions if s.store == "opencode"))
 
+    def test_codex_backfill_uses_transcript_thread_id_for_queued_fact(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            transcript_id = "019b7c53-ec1d-7a10-8b9d-53e1c4f0c421"
+            rollout = root / "codex" / "2026" / "rollout-2026-11-07T10-30-00-filename-stem.jsonl"
+            rollout.parent.mkdir(parents=True)
+            rollout.write_text("\n".join([
+                json.dumps({"type": "session_meta", "payload": {"id": transcript_id, "session_id": "different-session-id", "cwd": "/repo"}}),
+                json.dumps({"type": "response_item", "payload": {"text": "docs/plans/22-session-work-tagging phase 5"}}),
+            ]) + "\n")
+
+            session = next(iter(discover({"codex": root / "codex"})))
+            self.assertEqual(session.session_id, transcript_id)
+            label = label_session(session, "owner/repo", {transcript_id: {"plan": "22-session-work-tagging", "phase": "5", "kind": "build"}})
+            label.status = "complete"
+            queue = root / "queue"
+            self.assertEqual(enqueue([label], str(queue)), 1)
+            envelope = json.loads(next(queue.glob("*.evt")).read_text().splitlines()[0])
+            self.assertEqual(envelope["conversation_id"], transcript_id)
+
     def test_queue_log_matching_and_masked_gold_agreement(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
