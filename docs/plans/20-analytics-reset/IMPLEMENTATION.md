@@ -133,3 +133,11 @@ Start time: 2026-11-08 06:56 Australia/Brisbane (2026-11-07 20:56 UTC)
 Inline refinement: Phase 4 is one server unit. Brief `4-01-capability-schema-and-session-grain.md` fixes the signed outcome, bounds the open implementation choice to session attribute derivation under the Phase 3 budgets, and explicitly excludes later-phase capabilities and any new grain/join/route/dependency/contract. Committed before dispatch as `bc74c12`. Runner `artifact_feedback` returned delivered / screen pass (`jev-1.13.0`); the initial relative-path call resolved against the plugin cache, so the absolute worktree path was used.
 
 The worker identified two omitted integration seams in the first brief: route registration for the signed `/analytics/entities` route and parsing/application of the signed shared `exclude` filter. Brief amendment `ad42d3b` adds `serve.go` and `analytics.go` for those existing semantics only; it adds no route/filter behavior.
+
+### `4-01-capability-schema-and-session-grain.md`
+
+- Outcome: committed as `b9c9ca0`; added `/schema` Phase 4 metadata, session/time entity handlers and store reads, lifetime-derived session provenance, deterministic scatter/marginals, time aggregation, typed population metadata and shared exclusions.
+- Surfaces: `serve/{analytics.go,analytics_entities.go,analytics_query.go,serve.go}`, `store/{analytics.go,query.go,session_entities.go,usage.go}`, focused tests and `docs/design/03-remote-service.md`.
+- Deviations / unfinished: report `reports/4-01-capability-schema-and-session-grain.md` marks done with concerns. Session numeric filtering, session aggregate mode, and pending/scored-total/revision coverage are missing. The report's commit placeholder is malformed; runner records the actual commit here (`b9c9ca0`). Unit test command passed: `GOMAXPROCS=3 GOMEMLIMIT=8GiB go test -p=3 ./internal/store ./internal/serve -count=1` (store 6.7s, serve 23.9s); `git diff --check` passed. Report `artifact_feedback`: delivered / screen pass (`jev-1.13.0`).
+
+The fixed Phase 4 outcome is not yet verified or closed. Follow-up brief `4-02-session-outcome-remediation.md` covers only the three reported omissions, without changing the contract; it is committed before dispatch.
