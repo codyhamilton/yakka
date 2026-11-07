@@ -31,6 +31,13 @@ Phase outcome is open for implementation approach, so this run uses the signed o
 - Deviations / unfinished: report identifies missing keyset sort for `artifacts:<kind>`, `design_score:<check>`, `associated_cost_usd`, `unpriced_calls`, and `complete_share`. Follow-up brief 6-01d closes these signed measure sorts.
 - Verification: focused and full bounded store/serve suites plus `git diff --check` passed. `artifact_feedback` on the brief and report returned delivered / screen pass (`jev-1.13.0`), no flags.
 
+### `6-01d-derived-plan-sort.md`
+
+- Outcome: committed as `2e59ea2` (`Sort plans by derived measures`), after brief ownership amendment `2525382`; keyset sort now supports every signed plan measure, validates dynamic kind/check values, sorts nulls last and ties by full identity. `/schema` advertises all implemented sort dimensions.
+- Surfaces: plan sort parsing and SQL in `analytics_entities.go` / `plan_entities.go`, existing schema declaration, and focused fixtures.
+- Deviations: none. No contract changed.
+- Verification: `GOMEMLIMIT=8GiB GOMAXPROCS=3 go test -p=3 ./internal/store ./internal/serve -run 'AnalyticsPlan' -count=1` and full bounded store/serve suites passed; `git diff --check` passed. `artifact_feedback` on the amended brief and report returned delivered / screen pass (`jev-1.13.0`), no flags.
+
 Tool: Codex execute skill
 Run ID: feat/20-analytics-reset phase 3 execution
 Start time: 2026-11-08 09:10 Australia/Brisbane (2026-11-07 23:10 UTC)
