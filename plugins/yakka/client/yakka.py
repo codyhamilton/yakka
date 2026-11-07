@@ -1872,7 +1872,7 @@ def _mcp_host(endpoint: str) -> str:
         return ""
 
 
-def _mcp_error(kind: str, detail: str, host: str, ident: Any, queued: Optional[int] = None) -> bytes:
+def _mcp_error(kind: str, detail: str, host: str, ident: Any, queued: Optional[int] = None, effect_outcome: Optional[str] = None) -> bytes:
     fixes = {
         "bad config": "Check the shared login and endpoint configuration.",
         "unreachable": "Check the network and try again.",
@@ -1885,6 +1885,8 @@ def _mcp_error(kind: str, detail: str, host: str, ident: Any, queued: Optional[i
     data: dict[str, Any] = {"code": kind.replace(" ", "_"), "host": host}
     if queued is not None:
         data["queued_locally"] = queued
+    if effect_outcome is not None:
+        data["local_effect_outcome"] = effect_outcome
     value = {
         "jsonrpc": "2.0",
         "id": ident,
@@ -1935,15 +1937,433 @@ def _mcp_response(raw: bytes) -> Optional[dict[str, Any]]:
     return value
 
 
-def _mcp_prepare_context(body: bytes, method: str, request: dict[str, Any], declaration: Any) -> bytes:
-    """Narrow seam for the declared-context unit; transport currently relays unchanged."""
-    return body
+_MCP_ACTION = {"action": "enqueue_file_snapshot", "v": 1, "path_from": "resolved_path"}
+_MCP_ACTION_CAPABILITY = {"v": 1, "actions": [{"action": "enqueue_file_snapshot", "v": 1}]}
+_MCP_READER_VERSIONS = {"cwd": {1}, "project_dir": {1}, "resolved_path": {1}, "file": {1}, "git": {1}, "queue": {1, 2}, "drain": {1}}
+_MCP_READER_FAILURES = {"unsupported_reader", "unsupported_reader_version", "unsupported_declaration", "bad_params", "bad_input", "dependency_failed", "timeout", "io_error", "over_budget", "secret_in_context", "internal", "incomplete_queue"}
+
+
+def _mcp_failed(code: str) -> dict[str, Any]:
+    return {"_failed": {"code": code if code in _MCP_READER_FAILURES else "internal"}}
+
+
+def _mcp_real_repo(path: str) -> tuple[str, str, str]:
+    """Return canonical worktree top, repository identity and slash path."""
+    git = shutil.which("git")
+    if not git:
+        raise FileNotFoundError("git unavailable")
+    env = {"PATH": os.environ.get("PATH", ""), "HOME": _home(), "GIT_TERMINAL_PROMPT": "0", "GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_NOSYSTEM": "1"}
+    def git_read(*args: str) -> str:
+        try:
+            result = subprocess.run([git, "-C", os.path.dirname(path), *args], check=True, capture_output=True, timeout=3, env=env)
+        except subprocess.TimeoutExpired as exc:
+            raise TimeoutError() from exc
+        except (OSError, subprocess.CalledProcessError) as exc:
+            raise ValueError("no repo") from exc
+        if len(result.stdout) > 65536:
+            raise ValueError("no repo")
+        return result.stdout.decode("utf-8").strip()
+    try:
+        top = os.path.realpath(git_read("rev-parse", "--show-toplevel"))
+    except (ValueError, TimeoutError):
+        raise
+    real = os.path.realpath(path)
+    rel = os.path.relpath(real, top)
+    if rel == ".." or rel.startswith(".." + os.sep):
+        raise ValueError("outside repo")
+    remotes = sorted(git_read("remote").split())
+    if remotes:
+        remote = "origin" if "origin" in remotes else remotes[0]
+        rid = NormalizeRemote(git_read("remote", "get-url", remote))
+    else:
+        roots = sorted(git_read("rev-list", "--max-parents=0", "HEAD").split())
+        if not roots:
+            raise ValueError("no commit")
+        rid = "root:" + roots[0]
+    return top, rid, rel.replace(os.sep, "/")
+
+
+def _mcp_queue_entries(queue_dir: str, repo_id: str, rel_path: str, absolute: str, file_mtime: float, deadline: Optional[float] = None) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, Any]]:
+    """Read the full queue set before returning diagnostic samples and v2 coverage."""
+    pending_all: list[dict[str, Any]] = []
+    rejected_all: list[dict[str, Any]] = []
+    now = time.time()
+    rejected_dir = os.path.join(queue_dir, "rejected")
+    try:
+        names = os.listdir(queue_dir)
+    except FileNotFoundError:
+        names = []
+    except OSError as exc:
+        raise OSError("queue unavailable") from exc
+    try:
+        rejected_names = os.listdir(rejected_dir)
+    except FileNotFoundError:
+        rejected_names = []
+    except OSError as exc:
+        raise OSError("queue unavailable") from exc
+    for folder, items, is_rejected in ((queue_dir, names, False), (rejected_dir, rejected_names, True)):
+        for name in items:
+            if deadline is not None and time.monotonic() >= deadline:
+                raise OSError("incomplete queue")
+            if not name.endswith(".evt") or name.startswith("."):
+                continue
+            p = os.path.join(folder, name)
+            try:
+                if os.path.islink(p):
+                    raise OSError("incomplete queue")
+                if not os.path.isfile(p):
+                    continue
+                raw = open(p, "rb").read(65537)
+                if len(raw) > 65536:
+                    raise OSError("incomplete queue")
+                parsed = _parse_file(File(Name=name, Data=raw))
+                if parsed.bad:
+                    raise OSError("incomplete queue")
+                paths = _write_paths(parsed)
+                matched = False
+                for fp in paths:
+                    if os.path.normpath(fp) == os.path.normpath(absolute):
+                        matched = True
+                        break
+                    try:
+                        _, entry_repo, entry_rel = _mcp_real_repo(fp)
+                        if entry_repo == repo_id and entry_rel == rel_path:
+                            matched = True
+                            break
+                    except (OSError, ValueError, TimeoutError):
+                        continue
+                if not matched:
+                    continue
+                st = os.stat(p)
+                item: dict[str, Any] = {"mtime": st.st_mtime}
+                if is_rejected:
+                    reason_path = p + ".reason"
+                    try:
+                        if os.path.islink(reason_path):
+                            raise OSError("incomplete queue")
+                        reason = open(reason_path, encoding="utf-8").read(4097)
+                    except OSError:
+                        reason = ""
+                    if len(reason) > 4096:
+                        raise OSError("incomplete queue")
+                    item["reason"] = reason
+                    rejected_all.append(item)
+                else:
+                    item["age_s"] = max(0.0, now - st.st_mtime)
+                    pending_all.append(item)
+            except (OSError, UnicodeDecodeError, ValueError, json.JSONDecodeError):
+                # A potentially matching unreadable entry makes absence unprovable.
+                raise OSError("incomplete queue")
+    pending_all.sort(key=lambda x: x["mtime"])
+    rejected_all.sort(key=lambda x: x["mtime"])
+    pcover = [e for e in pending_all if e["mtime"] >= file_mtime]
+    rcover = [e for e in rejected_all if e["mtime"] >= file_mtime]
+    coverage = {"complete": True, "pending_covering": len(pcover), "rejected_covering": len(rcover), "oldest_covering_age_s": min((max(0.0, now-e["mtime"]) for e in pcover), default=None)}
+    return pending_all[:50], rejected_all[:50], coverage
+
+
+def _mcp_readers(request: dict[str, Any], declaration: Any, queue_dir: str, getwd: Optional[Callable[[], Tuple[str, Optional[BaseException]]]] = None) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Evaluate only the fixed declared reader table; return values and private guards."""
+    local: dict[str, Any] = {}
+    guards: dict[str, Any] = {}
+    if not isinstance(declaration, dict):
+        return local, guards
+    dv = declaration.get("v", 1)
+    entries = declaration.get("context", [])
+    if isinstance(dv, bool) or not isinstance(dv, int) or dv not in (1, 2) or not isinstance(entries, list):
+        return {str(e.get("reader", "unknown")): _mcp_failed("unsupported_declaration") for e in entries if isinstance(e, dict)} if isinstance(entries, list) else {}, guards
+    rev = declaration.get("rev")
+    if not isinstance(rev, str) or re.fullmatch(r"[0-9a-f]{16}", rev) is None:
+        return {str(e.get("reader", "unknown")): _mcp_failed("unsupported_declaration") for e in entries if isinstance(e, dict)}, guards
+    if "local_actions" in declaration:
+        expected = {"v": 2, "local_actions": [_MCP_ACTION]}
+        names = {e.get("reader"): e for e in entries if isinstance(e, dict)}
+        if dv != expected["v"] or declaration.get("local_actions") != expected["local_actions"] or any(n not in names or names[n].get("required", True) is not True for n in ("resolved_path", "file", "git", "queue", "drain")) or names.get("queue", {}).get("v") != 2:
+            return {str(e.get("reader", "unknown")): _mcp_failed("unsupported_declaration") for e in entries if isinstance(e, dict)}, guards
+    args = request.get("params", {}).get("arguments", {}) if isinstance(request.get("params"), dict) else {}
+    if not isinstance(args, dict):
+        return local, guards
+    values: dict[str, Any] = {}
+    names_seen: set[str] = set()
+    deadline = time.monotonic() + 10
+    for entry in entries:
+        if time.monotonic() >= deadline:
+            values[str(entry.get("reader", ""))] = _mcp_failed("timeout") if isinstance(entry, dict) else _mcp_failed("bad_params")
+            continue
+        if not isinstance(entry, dict):
+            continue
+        name, ver, params = entry.get("reader"), entry.get("v", 1), entry.get("params", {})
+        if not isinstance(name, str):
+            continue
+        if name in names_seen:
+            values[name] = _mcp_failed("bad_params"); continue
+        names_seen.add(name)
+        if not isinstance(params, dict):
+            values[name] = _mcp_failed("bad_params"); continue
+        if "required" in entry and not isinstance(entry["required"], bool):
+            values[name] = _mcp_failed("bad_params"); continue
+        if dv > 2:
+            values[name] = _mcp_failed("unsupported_declaration"); continue
+        if name not in _MCP_READER_VERSIONS:
+            values[name] = _mcp_failed("unsupported_reader"); continue
+        if isinstance(ver, bool) or not isinstance(ver, int) or ver not in _MCP_READER_VERSIONS[name]:
+            values[name] = _mcp_failed("unsupported_reader_version"); continue
+        allowed_params = {"cwd": set(), "project_dir": set(), "resolved_path": {"path_arg", "bases"}, "file": {"of"}, "git": {"of"}, "queue": {"of", "path"}, "drain": set()}[name]
+        if set(params) != allowed_params:
+            values[name] = _mcp_failed("bad_params"); continue
+        valid_params = True
+        if name == "resolved_path":
+            bases = params.get("bases")
+            valid_params = isinstance(params.get("path_arg"), str) and bool(params.get("path_arg")) and isinstance(bases, list) and all(isinstance(x, str) and x in ("project_dir", "cwd") for x in bases) and len(bases) == len(set(bases))
+        elif name == "file":
+            valid_params = params.get("of") == "resolved_path"
+        elif name == "git":
+            valid_params = params.get("of") in ("resolved_path", "project_dir", "cwd")
+        elif name == "queue":
+            valid_params = params.get("of") == "git" and params.get("path") == "resolved_path"
+        if not valid_params:
+            values[name] = _mcp_failed("bad_params"); continue
+        deps = {"file": ["resolved_path"], "git": [], "queue": ["git", "resolved_path"] + (["file"] if ver == 2 else []), "resolved_path": [], "cwd": [], "project_dir": [], "drain": []}[name]
+        if any(dep not in values for dep in deps):
+            values[name] = _mcp_failed("bad_params"); continue
+        try:
+            if name == "cwd":
+                if getwd is not None:
+                    path, error = getwd()
+                    if error is not None:
+                        raise OSError("cwd unavailable")
+                else:
+                    path = os.getcwd()
+                value = {"path": os.path.normpath(path)}
+            elif name == "project_dir":
+                path = next((os.environ[k] for k in ("CLAUDE_PROJECT_DIR", "CODEX_PROJECT_DIR", "CURSOR_PROJECT_DIR") if os.environ.get(k)), None)
+                value = {"path": os.path.normpath(path) if path else None}
+            elif name == "resolved_path":
+                pa, bases = params.get("path_arg"), params.get("bases")
+                if not isinstance(pa, str) or not isinstance(bases, list):
+                    raise ValueError("params")
+                raw = args.get(pa)
+                base = next((values[b]["path"] for b in bases if isinstance(values.get(b), dict) and values[b].get("path")), None)
+                resolved = os.path.normpath(raw if os.path.isabs(raw) else os.path.join(base, raw)) if isinstance(raw, str) and raw and (os.path.isabs(raw) or base) else None
+                value = {"path": resolved, "base": base}
+            elif name in ("file", "git", "queue"):
+                parent = params.get("of")
+                pkey = parent if isinstance(parent, str) else (parent[0] if isinstance(parent, list) and parent else None)
+                parent_value = values.get(pkey) if pkey else None
+                if name == "queue":
+                    git_fact = values.get("git")
+                    if isinstance(git_fact, dict) and "_failed" in git_fact:
+                        raise RuntimeError("dependency")
+                    path_fact = values.get(params.get("path"))
+                    parent_value = path_fact if isinstance(path_fact, dict) else parent_value
+                if isinstance(parent_value, dict) and "_failed" in parent_value:
+                    raise RuntimeError("dependency")
+                path = parent_value.get("path") if isinstance(parent_value, dict) else None
+                if name == "git" and path is None:
+                    # git accepts only declared resolved_path/project_dir/cwd facts.
+                    path = parent_value.get("path") if isinstance(parent_value, dict) else None
+                if not isinstance(path, str):
+                    value = {"skipped": "no_input"}
+                elif name == "file":
+                    st = os.stat(path)
+                    is_file = os.path.isfile(path)
+                    value = {"exists": True, "is_file": is_file, "size": st.st_size, "mtime": st.st_mtime, "content_hash": None, "withheld": None, "read_error": None}
+                    try:
+                        top, rid, rel = _mcp_real_repo(path)
+                        real = os.path.realpath(path)
+                        if not is_file:
+                            value["exists"] = True
+                        elif st.st_size > 256 << 20:
+                            value["withheld"] = "too_large"
+                        else:
+                            try:
+                                with open(real, "rb") as f:
+                                    digest = hashlib.sha256()
+                                    while True:
+                                        chunk = f.read(1 << 20)
+                                        if not chunk: break
+                                        digest.update(chunk)
+                                value["content_hash"] = digest.hexdigest()
+                                guards["file"] = {"path": os.path.normpath(path), "real": real, "top": top, "repo_id": rid, "rel_path": rel, "dev": st.st_dev, "ino": st.st_ino, "size": st.st_size, "mtime": st.st_mtime, "hash": value["content_hash"]}
+                            except OSError as exc:
+                                value["read_error"] = type(exc).__name__
+                    except ValueError:
+                        value["withheld"] = "symlink_out" if os.path.realpath(path) != os.path.abspath(path) else "outside_repo"
+                    except FileNotFoundError:
+                        value = {"exists": False, "is_file": False, "size": None, "mtime": None, "content_hash": None, "withheld": None, "read_error": None}
+                elif name == "git":
+                    try:
+                        top, rid, rel = _mcp_real_repo(path)
+                        value = {"repo_id": rid, "rel_path": rel, "error": None}
+                        guards["repo"] = {"top": top, "repo_id": rid}
+                    except FileNotFoundError:
+                        value = {"repo_id": None, "rel_path": None, "error": "git_unavailable"}
+                    except ValueError as exc:
+                        value = {"repo_id": None, "rel_path": None, "error": "no_commit" if str(exc) == "no commit" else "no_repo"}
+                else:
+                    gitv = values.get("git", {})
+                    filev = values.get("file", {})
+                    if ver == 2 and (not isinstance(gitv, dict) or not gitv.get("repo_id") or not isinstance(filev, dict) or not isinstance(filev.get("mtime"), (int, float))):
+                        raise OSError("incomplete queue")
+                    gitv = values.get("git", {})
+                    if isinstance(gitv, dict) and gitv.get("repo_id"):
+                        top = guards.get("repo", {}).get("top")
+                        abs_file = os.path.realpath(path)
+                        pending, rejected, coverage = _mcp_queue_entries(queue_dir, gitv["repo_id"], gitv.get("rel_path", ""), abs_file, float(filev.get("mtime", 0)), deadline)
+                        value = {"pending": pending, "rejected": rejected}
+                        if ver == 2: value["coverage"] = coverage
+                    else:
+                        value = {"pending": [], "rejected": []}
+                        if ver == 2: value["coverage"] = {"complete": True, "pending_covering": 0, "rejected_covering": 0, "oldest_covering_age_s": None}
+            elif name == "drain":
+                value = {"running": Running(queue_dir)}
+            else:
+                value = _mcp_failed("unsupported_reader")
+            if len(json.dumps(value, separators=(",", ":"), ensure_ascii=False).encode("utf-8")) > 65536:
+                values[name] = _mcp_failed("over_budget")
+            else:
+                values[name] = value
+        except RuntimeError:
+            values[name] = _mcp_failed("dependency_failed")
+        except TimeoutError:
+            values[name] = _mcp_failed("timeout")
+        except ValueError:
+            values[name] = _mcp_failed("bad_params")
+        except OSError as exc:
+            values[name] = _mcp_failed("incomplete_queue" if name == "queue" and str(exc) == "incomplete queue" else "io_error")
+        except Exception:
+            values[name] = _mcp_failed("internal")
+    local.update(values)
+    try:
+        cfg = Load()
+        if cfg.Key and cfg.Key in json.dumps(local, separators=(",", ":")):
+            matches = [name for name, value in local.items() if not name.startswith("_") and cfg.Key in json.dumps(value, separators=(",", ":"))]
+            for name in matches or [n for n in local if not n.startswith("_")]:
+                local[name] = _mcp_failed("secret_in_context")
+    except Exception:
+        pass
+    return local, guards
+
+
+def _mcp_context_call(body: bytes, method: str, request: dict[str, Any], declaration: Any, queue_dir: str = "", call: Optional[str] = None, effects: Optional[list[dict[str, Any]]] = None, getwd: Optional[Callable[[], Tuple[str, Optional[BaseException]]]] = None) -> tuple[bytes, dict[str, Any], dict[str, Any], Optional[str]]:
+    if method != "tools/call" or not isinstance(request, dict):
+        return body, {}, {}, None
+    clone = json.loads(body)
+    params = clone.get("params")
+    if not isinstance(params, dict):
+        return body, {}, {}, None
+    args = params.get("arguments")
+    if not isinstance(args, dict):
+        return body, {}, {}, None
+    args.pop("_local", None)
+    local: dict[str, Any] = {}
+    guards: dict[str, Any] = {}
+    token: Optional[str] = None
+    if isinstance(declaration, dict):
+        local, guards = _mcp_readers(request, declaration, queue_dir or QueueDir(), getwd)
+        version = declaration.get("v", 1)
+        local["_v"] = version
+        local["_rev"] = declaration.get("rev", "")
+        if version == 2:
+            token = call or os.urandom(16).hex()
+            local["_call"] = token
+        if effects is not None:
+            local["effects"] = effects
+        args["_local"] = local
+    return json.dumps(clone, separators=(",", ":"), ensure_ascii=False).encode("utf-8"), local, guards, token
+
+
+def _mcp_prepare_context(body: bytes, method: str, request: dict[str, Any], declaration: Any, queue_dir: str = "") -> bytes:
+    return _mcp_context_call(body, method, request, declaration, queue_dir)[0]
+
+
+def _mcp_effect(action_id: Any, ok: bool, outcome: str, error: Optional[str]) -> dict[str, Any]:
+    return {"action": "enqueue_file_snapshot", "v": 1, "action_id": action_id, "ok": ok, "outcome": outcome, "error": error}
+
+
+def _mcp_action_error(code: str, ident: Any, host: str) -> bytes:
+    return json.dumps({"jsonrpc": "2.0", "id": ident, "error": {"code": -32000, "message": "bad directive: the server returned an unbound local action. Retry the call.", "data": {"code": code, "host": host}}}, separators=(",", ":")).encode() + b"\n"
+
+
+def _mcp_enqueue(guards: dict[str, Any], resolved: Any, queue_dir: str, call: str, cancelled: threading.Event, deadline: float, action_id: Any = None) -> dict[str, Any]:
+    def failed(code: str, outcome: str = "failed") -> dict[str, Any]:
+        return _mcp_effect(action_id, False, outcome, code)
+    if os.environ.get("YAKKA_HOOKLOG", "").lower() in ("0", "off", "false"):
+        return failed("capture_off")
+    if os.environ.get("YAKKA_BIN", ""):
+        return failed("yakka_bin_set")
+    if not isinstance(resolved, str):
+        return failed("path_changed")
+    pinned = guards.get("file")
+    if not isinstance(pinned, dict) or resolved != pinned.get("path"):
+        return failed("path_changed")
+    lock = None
+    try:
+        os.makedirs(queue_dir, mode=0o700, exist_ok=True)
+        lock = open(os.path.join(queue_dir, ".mcp-enqueue.lock"), "a+b")
+        while True:
+            if cancelled.is_set():
+                return failed("effect_unknown", "unknown")
+            if time.monotonic() >= deadline:
+                return failed("effect_unknown", "unknown")
+            try:
+                fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                time.sleep(min(0.02, max(0.001, deadline - time.monotonic())))
+        if not os.path.isabs(resolved) or os.path.realpath(resolved) != pinned["real"]:
+            return failed("path_changed")
+        st = os.stat(resolved)
+        top, rid, rel = _mcp_real_repo(resolved)
+        if top != pinned["top"] or (st.st_dev, st.st_ino, st.st_size, st.st_mtime, rid, rel) != (pinned["dev"], pinned["ino"], pinned["size"], pinned["mtime"], pinned["repo_id"], pinned["rel_path"]):
+            return failed("path_changed")
+        digest = hashlib.sha256()
+        with open(resolved, "rb") as f:
+            for chunk in iter(lambda: f.read(1 << 20), b""):
+                digest.update(chunk)
+        if digest.hexdigest() != pinned["hash"]:
+            return failed("path_changed")
+        _, rejected, coverage = _mcp_queue_entries(queue_dir, rid, rel, os.path.realpath(resolved), st.st_mtime, deadline)
+        if coverage["rejected_covering"]:
+            return failed("queue_rejected")
+        if coverage["pending_covering"]:
+            return _mcp_effect(action_id, True, "covered", None)
+        script = os.path.realpath(os.path.join(os.path.dirname(__file__), "..", "script", "spool.sh"))
+        # The fixed hook payload contains pointer metadata only; it never includes file bytes.
+        payload = {"hook_event_name": "PostToolUse", "conversation_id": call, "session_id": call, "cwd": top, "tool_name": "Write", "tool_input": {"file_path": resolved}}
+        packet = json.dumps(payload, separators=(",", ":")).encode()
+        env = os.environ.copy()
+        env["YAKKA_QUEUE"] = queue_dir
+        env["YAKKA_SPOOL_PRINT"] = "1"
+        timeout = max(0.05, min(10.0, deadline - time.monotonic()))
+        if cancelled.is_set() or time.monotonic() >= deadline:
+            return failed("effect_unknown", "unknown")
+        try:
+            out = subprocess.run([script, "--harness", "codex", "--event", "PostToolUse"], input=packet, capture_output=True, timeout=timeout, env=env, check=False)
+        except subprocess.TimeoutExpired:
+            return failed("effect_unknown", "unknown")
+        if out.returncode != 0:
+            return failed("spool_dropped")
+        ack = out.stdout.decode("ascii", "ignore").strip()
+        if not re.fullmatch(r"[A-Za-z0-9._-]+\.evt", ack):
+            return failed("spool_dropped")
+        return _mcp_effect(action_id, True, "enqueued", None)
+    except (OSError, ValueError, TimeoutError):
+        return failed("queue_unavailable")
+    finally:
+        if lock is not None:
+            try:
+                fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+            except OSError:
+                pass
+            lock.close()
 
 
 class _McpRelay:
     def __init__(self, opts: McpOptions) -> None:
         self.opts = opts
         self.declarations: dict[str, Any] = {}
+        self.action_capability: Any = None
         self.declarations_lock = threading.Lock()
         self.active: dict[str, Any] = {}
         self.active_lock = threading.Lock()
@@ -1973,6 +2393,12 @@ class _McpRelay:
         with self.declarations_lock:
             self.declarations = found
 
+    def _cache_initialize(self, response: dict[str, Any]) -> None:
+        result = response.get("result")
+        meta = result.get("_meta") if isinstance(result, dict) else None
+        with self.declarations_lock:
+            self.action_capability = meta.get("yakka/local-actions") if isinstance(meta, dict) else None
+
     def _refresh(self, timeout: float, cancelled: threading.Event, active_id: Any) -> None:
         with self.stdout_lock:
             self.counter += 1
@@ -1982,6 +2408,21 @@ class _McpRelay:
         response = _mcp_response(raw) if status is not None and status < 300 else None
         if response is not None and "error" not in response:
             self._cache_list(response)
+
+    def _action_supported(self, timeout: float, cancelled: threading.Event, active_id: Any) -> bool:
+        with self.declarations_lock:
+            self.action_capability = None
+        with self.stdout_lock:
+            self.counter += 1
+            internal_id = f"yakka-internal-init-{self.counter}"
+        request = json.dumps({"jsonrpc": "2.0", "id": internal_id, "method": "initialize", "params": {"protocolVersion": "2025-11-25", "capabilities": {}}}, separators=(",", ":")).encode()
+        status, raw, problem, _ = self._post(request, min(timeout, 10.0), cancelled, internal_id)
+        response = _mcp_response(raw) if status is not None and not problem else None
+        if response is not None and "error" not in response:
+            self._cache_initialize(response)
+        with self.declarations_lock:
+            cap = self.action_capability
+        return cap == _MCP_ACTION_CAPABILITY
 
     def _endpoint(self, cfg: Config) -> tuple[str, str, int, bool]:
         base = _request_base(cfg.Endpoint)
@@ -2030,7 +2471,8 @@ class _McpRelay:
             headers = {
                 "Content-Type": "application/json",
                 "Accept": "application/json",
-                "Yakka-Context": "1",
+                "Yakka-Context": "2",
+                "Yakka-Local-Actions": "enqueue_file_snapshot/1",
                 "User-Agent": "yakka-shim/" + (self.opts.Version or _plugin_version_text()),
             }
             if auth:
@@ -2069,15 +2511,93 @@ class _McpRelay:
         host = ""
         declaration = self._declaration(request or {}) if method == "tools/call" else None
         timeout = self._timeout(method, declaration)
+        call_deadline = time.monotonic() + timeout
         if method == "tools/call" and declaration is None:
-            self._refresh(10.0, cancelled, ident)
+            self._refresh(min(10.0, max(0.05, call_deadline - time.monotonic())), cancelled, ident)
             declaration = self._declaration(request or {})
-        outbound = _mcp_prepare_context(body, method, request or {}, declaration)
-        status, raw, problem, host = self._post(outbound, timeout, cancelled, ident)
+        outbound, initial_local, guards, call_token = _mcp_context_call(body, method, request or {}, declaration, self.opts.QueueDir, getwd=self.opts.Getwd)
+        remaining = call_deadline - time.monotonic()
+        if remaining <= 0:
+            status, raw, problem = None, b"", "timeout"
+        else:
+            status, raw, problem, host = self._post(outbound, remaining, cancelled, ident)
         if cancelled.is_set() or not expects_reply:
             return
+        effect_outcome: Optional[str] = None
+        response = _mcp_response(raw) if status is not None else None
+        stale_retried = False
+        first_error = response.get("error") if isinstance(response, dict) else None
+        if method == "tools/call" and isinstance(first_error, dict) and first_error.get("code") == -32010 and not cancelled.is_set():
+            self._refresh(min(10.0, max(0.05, call_deadline - time.monotonic())), cancelled, ident)
+            declaration = self._declaration(request or {})
+            outbound, initial_local, guards, call_token = _mcp_context_call(body, method, request or {}, declaration, self.opts.QueueDir, getwd=self.opts.Getwd)
+            status, raw, problem, host = self._post(outbound, max(0.05, call_deadline - time.monotonic()), cancelled, ident)
+            response = _mcp_response(raw) if status is not None and not problem else None
+            stale_retried = True
+        server_error = response.get("error") if isinstance(response, dict) else None
+        directive = server_error.get("data") if isinstance(server_error, dict) and server_error.get("code") == -32011 else None
+        if method == "tools/call" and isinstance(server_error, dict) and server_error.get("code") == -32011:
+            if not isinstance(directive, dict) or directive.get("code") != "local_action_required":
+                reply = _mcp_action_error("bad_directive", ident, host)
+                with self.stdout_lock:
+                    self._write(reply)
+                return
+            resolved = initial_local.get("resolved_path") if isinstance(initial_local, dict) else None
+            resolved_path = resolved.get("path") if isinstance(resolved, dict) else None
+            safely_bound = (
+                isinstance(declaration, dict) and declaration.get("v") == 2 and call_token is not None
+                and type(directive.get("v")) is int and directive.get("v") == 1 and directive.get("call") == call_token
+                and directive.get("rev") == declaration.get("rev")
+                and isinstance(directive.get("action_id"), str) and 0 < len(directive["action_id"]) <= 128
+                and isinstance(resolved_path, str) and directive.get("path") == resolved_path
+            )
+            if not safely_bound:
+                reply = _mcp_action_error("bad_directive", ident, host)
+                with self.stdout_lock:
+                    self._write(reply)
+                return
+            self._refresh(max(0.05, call_deadline - time.monotonic()), cancelled, ident)
+            if self._declaration(request or {}) != declaration:
+                reply = _mcp_action_error("bad_directive", ident, host)
+                with self.stdout_lock:
+                    self._write(reply)
+                return
+            supported = self._action_supported(max(0.05, call_deadline - time.monotonic()), cancelled, ident)
+            declared = declaration.get("local_actions") == [_MCP_ACTION]
+            if directive.get("action") != "enqueue_file_snapshot" or type(directive.get("action_v")) is not int or directive.get("action_v") != 1 or not declared or not supported:
+                effect = _mcp_effect(directive["action_id"], False, "failed", "unsupported")
+            elif cancelled.is_set():
+                return
+            else:
+                effect = _mcp_enqueue(guards, resolved_path, self.opts.QueueDir, call_token, cancelled, call_deadline, directive["action_id"])
+            effect_outcome = effect["outcome"]
+            continuation, _, _, same_call = _mcp_context_call(body, method, request or {}, declaration, self.opts.QueueDir, call_token, [effect], self.opts.Getwd)
+            if same_call != call_token:
+                reply = _mcp_action_error("bad_directive", ident, host)
+                with self.stdout_lock:
+                    self._write(reply)
+                return
+            remaining = call_deadline - time.monotonic()
+            if remaining <= 0:
+                status, raw, problem = None, b"", "timeout"
+            else:
+                status, raw, problem, host = self._post(continuation, remaining, cancelled, ident)
+            if problem and not cancelled.is_set():
+                # After the effect, retry only the same result facts; never run the primitive again.
+                remaining = call_deadline - time.monotonic()
+                if remaining > 0:
+                    status, raw, problem, host = self._post(continuation, remaining, cancelled, ident)
+            if cancelled.is_set():
+                return
+            response = _mcp_response(raw) if status is not None and not problem else None
+            again = response.get("error") if isinstance(response, dict) else None
+            if isinstance(again, dict) and again.get("code") == -32011:
+                reply = _mcp_action_error("bad_directive", ident, host)
+                with self.stdout_lock:
+                    self._write(reply)
+                return
         if problem == "timeout":
-            reply = _mcp_error("timeout", "the server did not reply in time", host, ident)
+            reply = _mcp_error("timeout", "the server did not reply in time", host, ident, effect_outcome=effect_outcome)
         elif problem == "redirect":
             reply = _mcp_error("redirect refused", "the endpoint redirected the request", host, ident)
         elif problem == "oversize":
@@ -2085,17 +2605,19 @@ class _McpRelay:
         elif problem.startswith("config:"):
             reply = _mcp_error("bad config", "login or endpoint configuration is unusable", host, ident)
         elif problem or status is None:
-            reply = _mcp_error("unreachable", "the configured server could not be reached", host, ident, _mcp_queued_count(self.opts.QueueDir))
+            reply = _mcp_error("unreachable", "the configured server could not be reached", host, ident, _mcp_queued_count(self.opts.QueueDir), effect_outcome)
         else:
             response = _mcp_response(raw)
             if response is not None:
+                if method == "initialize" and "error" not in response:
+                    self._cache_initialize(response)
                 if method == "tools/list" and "error" not in response:
                     self._cache_list(response)
                 error = response.get("error")
                 stale = isinstance(error, dict) and error.get("code") == -32010
-                if stale and method == "tools/call" and not cancelled.is_set():
+                if stale and method == "tools/call" and not cancelled.is_set() and not stale_retried:
                     self._refresh(10.0, cancelled, ident)
-                    outbound = _mcp_prepare_context(body, method, request or {}, self._declaration(request or {}))
+                    outbound = _mcp_prepare_context(body, method, request or {}, self._declaration(request or {}), self.opts.QueueDir)
                     status, raw, problem, host = self._post(outbound, timeout, cancelled, ident)
                     response = _mcp_response(raw) if not problem and status is not None else None
                     if problem == "timeout":

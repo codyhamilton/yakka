@@ -67,12 +67,11 @@
     },
     {
       "name": "queue",
-      "versions": [
-        1
-      ],
+      "versions": [1, 2],
       "depends_on": [
         "git",
-        "resolved_path"
+        "resolved_path",
+        "file"
       ],
       "params": {
         "of": [

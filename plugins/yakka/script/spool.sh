@@ -26,6 +26,7 @@ event=${event//[^A-Za-z0-9._-]/}
 
 dir=${YAKKA_QUEUE:-$HOME/.local/share/yakka/queue}
 spooled=
+spooled_name=
 
 conv_id() {  # $1 = file; sets REPLY to the sanitised conversation ID, or empty
   local buf key
@@ -52,7 +53,10 @@ spool() {
   conv_id "$dir/tmp/$name"
   local id=$REPLY
   if [ -z "$id" ]; then rm -f "$dir/tmp/$name"; return; fi
-  mv "$dir/tmp/$name" "$dir/$id-$name.evt" 2>/dev/null && spooled=1
+  if mv "$dir/tmp/$name" "$dir/$id-$name.evt" 2>/dev/null; then
+    spooled=1
+    spooled_name="$id-$name.evt"
+  fi
 }
 
 start_drain() {  # $1 = optional prefix (setsid); detached, so $! is the drain's pid
@@ -97,6 +101,9 @@ kick() {
 }
 
 spool
+if [ "${YAKKA_SPOOL_PRINT:-}" = 1 ] && [ -n "$spooled_name" ]; then
+  printf '%s\n' "$spooled_name"
+fi
 case "${YAKKA_HOOKLOG:-}" in 0 | off | OFF | false | FALSE) ;; *) kick ;; esac
 
 if [ "$harness" = cursor ]; then
