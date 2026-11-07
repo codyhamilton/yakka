@@ -1,5 +1,13 @@
 # Implementation: Server-defined MCP shim
 
+## Current Run — Phase 4
+
+- Tool: Codex (GPT-6)
+- Session: API run; session URL/ID unavailable
+- Start: 2026-11-07T13:14:20Z
+- Branch: feat/24-server-mcp-shim
+- Invocation: build Phase 4 only; stop before review, terminal review, and close-out.
+
 ## Run
 
 - Tool: Codex (GPT-6)
