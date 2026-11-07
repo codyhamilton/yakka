@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"runtime"
 	"testing"
 	"time"
 )
@@ -123,5 +124,39 @@ func TestDistributionTruncatedWithoutOther(t *testing.T) {
 		if row.K == "__other__" {
 			t.Fatal("found __other__ row")
 		}
+	}
+}
+
+func TestDistributionGoHeapDoesNotScaleWithScannedRows(t *testing.T) {
+	queryAlloc := func(n int) uint64 {
+		tn := openT(t, Options{})
+		rows := make([]FactRow, n)
+		for i := range rows {
+			rows[i] = ufact(i, "opencode", "model-a", fmt.Sprintf("c-%d", i), fmt.Sprintf(`{"n":%d}`, i), aFrom, 0, int64(i+1), 0, 0, 0, nil)
+		}
+		if _, err := tn.Append(context.Background(), rows); err != nil {
+			t.Fatal(err)
+		}
+		params := DistributionParams{Measure: "tokens_out", Grain: "call", Top: 20}
+		if _, err := tn.Distribution(context.Background(), distFilter(), params); err != nil {
+			t.Fatal(err) // warm the SQL and result path before measuring
+		}
+		runtime.GC()
+		var before, after runtime.MemStats
+		runtime.ReadMemStats(&before)
+		if _, err := tn.Distribution(context.Background(), distFilter(), params); err != nil {
+			t.Fatal(err)
+		}
+		runtime.ReadMemStats(&after)
+		return after.TotalAlloc - before.TotalAlloc
+	}
+
+	small := queryAlloc(128)
+	large := queryAlloc(2048)
+	t.Logf("Go allocations: 128 rows=%d bytes, 2048 rows=%d bytes", small, large)
+	// The input population grows 16x. Allow fixed driver/query overhead while rejecting
+	// per-row Go retention or accumulation in the aggregate path.
+	if large > small*4+64*1024 {
+		t.Fatalf("Go allocations scale with scanned rows: 128 rows=%d bytes, 2048 rows=%d bytes", small, large)
 	}
 }

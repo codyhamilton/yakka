@@ -29,9 +29,9 @@ import (
 
 // The design's performance bound (DESIGN.md plan 12, "Performance bound"): times every analytics
 // route, measure, dimension pair and in-cap bucket against a copy of a ledger and fails any case
-// whose p95 is over YAKKA_BENCH_P95_MS. It is skipped unless YAKKA_BENCH_DIR names a tenant
-// directory (one containing ledger.db). The source is never opened or written: only ledger.db and
-// its -wal/-shm siblings are copied into a temp dir, and the copy is opened there. This file lives
+// whose p95 is over YAKKA_BENCH_P95_MS. It uses the committed synthetic fixture by default; when
+// YAKKA_BENCH_DIR is set, only ledger.db and its -wal/-shm siblings are copied into a temp dir.
+// This file lives
 // in package serve rather than store because it drives HTTP routes, and store cannot import serve.
 
 const (
@@ -42,17 +42,20 @@ const (
 	benchLiveEnv = "YAKKA_BENCH_ALLOW_LIVE"
 )
 
-// TestAnalyticsBench is the env-gated benchmark. YAKKA_BENCH_DIR names the source tenant dir;
+// TestAnalyticsBench uses the fixture unless YAKKA_BENCH_DIR names an additional real-corpus source;
 // YAKKA_BENCH_OUT writes the table; YAKKA_BENCH_RUNS sets timed runs per case (default 3,
 // after one discarded warm-up); YAKKA_BENCH_FILTER is a case-name substring; YAKKA_BENCH_P95_MS
 // is the bound (default 500).
 func TestAnalyticsBench(t *testing.T) {
 	src := os.Getenv("YAKKA_BENCH_DIR")
-	if src == "" {
-		t.Skip("set YAKKA_BENCH_DIR to a tenant directory to run the analytics benchmark")
+	fixture := src == ""
+	if fixture {
+		src = benchFixtureSource(t)
 	}
-	if err := benchLiveRefused(src); err != nil {
-		t.Fatal(err)
+	if !fixture {
+		if err := benchLiveRefused(src); err != nil {
+			t.Fatal(err)
+		}
 	}
 	h := openBenchCopy(t, src)
 	to := benchMaxTS(t, h.db)
@@ -267,7 +270,7 @@ func benchPresets(to time.Time) []benchPreset {
 		{name: "7d", from: to.Add(-7 * 24 * time.Hour), to: to},
 		{name: "30d", from: to.Add(-30 * 24 * time.Hour), to: to},
 		{name: "90d", from: to.Add(-90 * 24 * time.Hour), to: to},
-		{name: "all", from: time.Unix(0, 0).UTC(), to: to, all: true},
+		{name: "all", from: minAnalyticsTime, to: to, all: true},
 	}
 }
 
@@ -278,19 +281,12 @@ func (p benchPreset) filter() string {
 	return "from=" + p.from.UTC().Format(time.RFC3339) + "&to=" + p.to.UTC().Format(time.RFC3339)
 }
 
-// servable reports whether a route whose parseFilter caps the window at maxBuckets UTC days can
-// answer this preset. The legacy routes reject `all` with 400 "range too wide" because all=1 sets
-// from to the epoch; /query validates the cap per bucket itself, so it is not gated here.
-func (p benchPreset) servable() bool {
-	return !tooWide(p.from, p.to, false)
-}
-
 type benchCase struct {
 	name string
 	path string
 }
 
-// buildBenchCases enumerates every case the design names: each route per servable preset, the
+// buildBenchCases enumerates every case the design names: each route per preset, the
 // schema once, each measure at 0/1/2 dims per preset, and each in-cap bucket at 0 dims and the
 // first dim per preset.
 func buildBenchCases(t *testing.T, h *benchHarness, to time.Time) []benchCase {
@@ -301,9 +297,6 @@ func buildBenchCases(t *testing.T, h *benchHarness, to time.Time) []benchCase {
 	add := func(name, path string) { cases = append(cases, benchCase{name: name, path: path}) }
 
 	for _, p := range presets {
-		if !p.servable() {
-			continue
-		}
 		win := p.filter()
 		add("facets/"+p.name, "/v1/analytics/facets?"+win)
 		add("summary/"+p.name, "/v1/analytics/summary?"+win)
@@ -330,6 +323,9 @@ func buildBenchCases(t *testing.T, h *benchHarness, to time.Time) []benchCase {
 		for _, m := range schema {
 			for _, dims := range dimCombos(m.dims) {
 				add(queryCaseName(m.name, dims, "none", p.name), "/v1/analytics/query?"+queryParams(m.name, dims, "none", win))
+				if p.all {
+					add(queryCaseName(m.name, dims, "auto", p.name), "/v1/analytics/query?"+queryParams(m.name, dims, "auto", win))
+				}
 			}
 		}
 	}

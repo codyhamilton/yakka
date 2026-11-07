@@ -32,7 +32,7 @@ func (s *Server) analyticsDistribution(w http.ResponseWriter, r *http.Request, _
 		return
 	}
 	dim := q.Get("dim")
-	if dim != "" && dim != "model" {
+	if dim != "" && dim != "model" && dim != "harness" && dim != "session_model" && dim != "session_repo" {
 		errJSON(w, 400, "unsupported dimension "+dim+" for "+measure)
 		return
 	}
@@ -62,7 +62,8 @@ func (s *Server) analyticsDistribution(w http.ResponseWriter, r *http.Request, _
 		readFailed(w)
 		return
 	}
-	out := map[string]any{"measure": measure, "grain": grain, "rows": distRowsJSON(res.Rows)}
+	out := map[string]any{"measure": measure, "grain": grain, "rows": distRowsJSON(res.Rows),
+		"group_n": res.GroupN, "omitted_groups": res.OmittedGroups, "omitted_n": res.OmittedN, "omitted_unpriced": res.OmittedUnpriced}
 	if dim != "" {
 		out["dim"] = dim
 	}
@@ -72,6 +73,7 @@ func (s *Server) analyticsDistribution(w http.ResponseWriter, r *http.Request, _
 	if len(res.IgnoredFilters) > 0 {
 		out["ignored_filters"] = res.IgnoredFilters
 	}
+	addAnalyticsPartial(out, ts)
 	writeJSON(w, 200, out)
 }
 

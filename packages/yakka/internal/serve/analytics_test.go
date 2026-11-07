@@ -242,9 +242,9 @@ func TestAnalyticsOutcome(t *testing.T) {
 		aerr(t, s, A+"scores?kind=design&kind=brief", 400, "kind required")
 		aerr(t, s, A+"scores?kind=nope", 400, "kind must be design, brief or report")
 		wide := "from=2025-01-01T00:00:00Z&to=2026-02-05T00:00:00Z" // 401 days inclusive
-		aerr(t, s, A+"summary?"+wide, 400, "range too wide")
-		aerr(t, s, A+"series?metric=commits&bucket=day&"+wide, 400, "range too wide")
-		aerr(t, s, A+"executions?"+wide, 400, "range too wide")
+		aok(t, s, A+"summary?"+wide)
+		aok(t, s, A+"series?metric=commits&bucket=day&"+wide)
+		aok(t, s, A+"executions?"+wide)
 		if m := aok(t, s, A+"series?metric=commits&bucket=week&"+wide); m["bucket"] != "week" {
 			t.Errorf("week series: %v", m)
 		}
@@ -362,6 +362,18 @@ func TestAnalyticsOutcome(t *testing.T) {
 				t.Errorf("scores %v want %v", c, want)
 			}
 		}
+		byLens := aok(t, s, A+"scores?kind=design&dim=repo_id&check="+url.QueryEscape(dcheck)+"&"+win)
+		lensChecks := rowsOf(byLens, "checks")
+		if len(lensChecks) != 1 || lensChecks[0]["n"] != float64(3) {
+			t.Fatalf("score lens population: %v", byLens)
+		}
+		lensGroups := lensChecks[0]["groups"].([]any)
+		if len(lensGroups) != 2 {
+			t.Fatalf("score lens groups: %v", byLens)
+		}
+		if _, _, body := getJSON(t, s, "ka", A+"scores?kind=design&dim=nope&"+win); !strings.Contains(body, "unsupported dimension") {
+			t.Fatalf("unsupported score dimension: %s", body)
+		}
 		// a window of days 0-3 holds only the 0.2 design content
 		w := aok(t, s, A+"scores?kind=design&from="+url.QueryEscape(base.Format(time.RFC3339))+"&to="+url.QueryEscape(base.AddDate(0, 0, 3).Format(time.RFC3339)))
 		for _, c := range rowsOf(w, "checks") {
@@ -478,12 +490,18 @@ func TestAnalyticsOutcome(t *testing.T) {
 			var ks []string
 			for k, v := range r {
 				ks = append(ks, k)
-				if _, ok := v.(string); !ok {
+				if k == "priced" {
+					if _, ok := v.(bool); !ok {
+						t.Fatalf("priced not boolean: %v", v)
+					}
+				} else if _, ok := v.(string); !ok {
 					t.Fatalf("%s not a string: %v", k, v)
 				}
 			}
 			sort.Strings(ks)
-			if !reflect.DeepEqual(ks, cols) {
+			withPriced := append(append([]string(nil), cols...), "priced")
+			sort.Strings(withPriced)
+			if !reflect.DeepEqual(ks, cols) && !reflect.DeepEqual(ks, withPriced) {
 				t.Fatalf("columns %v", ks)
 			}
 		}
@@ -513,6 +531,15 @@ func TestAnalyticsOutcome(t *testing.T) {
 		c := aok(t, s, A+"explore?"+win)
 		if len(rowsOf(c, "rows")) != 5 || c["truncated"] != true {
 			t.Errorf("capped: %d %v", len(rowsOf(c, "rows")), c["truncated"])
+		}
+		seen := append([]map[string]any(nil), rowsOf(c, "rows")...)
+		for c["next"] != nil {
+			next := url.QueryEscape(c["next"].(string))
+			c = aok(t, s, A+"explore?"+win+"&cursor="+next)
+			seen = append(seen, rowsOf(c, "rows")...)
+		}
+		if len(seen) != 16 {
+			t.Fatalf("paged explore rows %d, want 16", len(seen))
 		}
 		exploreCap = 16
 		c = aok(t, s, A+"explore?"+win)

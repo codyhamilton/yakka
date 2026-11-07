@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"fmt"
 	"math"
 	"testing"
 	"time"
@@ -32,6 +33,49 @@ func scoreSeriesFixture(t *testing.T) (*Tenant, AnalyticsFilter) {
 	return tn, AnalyticsFilter{From: ad(10, 1, 0, 0), To: ad(10, 3, 12, 0)}
 }
 
+func TestScoreSeriesOverSQLiteBindLimit(t *testing.T) {
+	tn := openT(t, Options{})
+	tx, err := tn.rdb.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	fi, err := tx.Prepare(`INSERT INTO facts(type,row_hash,conversation_id,harness,event,ts,received_at,repo_id,path,content_hash,raw,kind) VALUES('artifact_version',?,'c','h','artifact',?,?, 'r','docs/plans/p/DESIGN.md',?,x'', 'design')`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	si, err := tx.Prepare(`INSERT INTO scores(content_hash,check_name,result,scorer,at) VALUES(?,'d.x',?,'test',1)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const population = 32767
+	for i := 0; i < population; i++ {
+		hash := fmt.Sprintf("%064x", i+1)
+		if _, err := fi.Exec(hash, float64(ad(10, 1, 0, 0).Unix()), int64(1), hash); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := si.Exec(hash, float64(i%1000)/1000); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := fi.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := si.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	got, err := tn.ScoreSeries(context.Background(), AnalyticsFilter{From: ad(10, 1, 0, 0), To: ad(10, 2, 0, 0)}, "design", "day")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].Name != "d.x" || len(got[0].Points) != 1 || got[0].Points[0].N != population {
+		t.Fatalf("unexpected series population: %#v", got)
+	}
+}
+
 func TestScoreSeriesLatestInBucket(t *testing.T) {
 	tn, f := scoreSeriesFixture(t)
 	ctx := context.Background()
@@ -56,6 +100,32 @@ func TestScoreSeriesLatestInBucket(t *testing.T) {
 	// 2026-10-03 only other hash
 	if pts[1].T != "2026-10-03T00:00:00Z" || pts[1].N != 1 || pts[1].Median != 1 {
 		t.Fatalf("day3: %#v", pts[1])
+	}
+}
+
+func TestScoreObservationsCanonicalAndLatestScorer(t *testing.T) {
+	tn := openT(t, Options{})
+	ctx := context.Background()
+	timeValue := float64(ad(10, 1, 9, 0).Unix())
+	hash := hx("shared-score-content")
+	mustExec(t, tn, `INSERT INTO facts(type,row_hash,conversation_id,harness,event,ts,received_at,repo_id,path,content_hash,kind,raw) VALUES('artifact_version','b','later','h2','Write',?,1,'repo-b','docs/plans/z/DESIGN.md',?,'design',x'')`, timeValue, hash)
+	mustExec(t, tn, `INSERT INTO facts(type,row_hash,conversation_id,harness,event,ts,received_at,repo_id,path,content_hash,kind,raw) VALUES('artifact_version','a','canonical','h1','Write',?,1,'repo-a','docs/plans/a/DESIGN.md',?,'design',x'')`, timeValue, hash)
+	mustExec(t, tn, `INSERT INTO scores(content_hash,check_name,result,scorer,at) VALUES(?,?,?,?,?)`, hash, "d.x", .2, "old", 1)
+	mustExec(t, tn, `INSERT INTO scores(content_hash,check_name,result,scorer,at) VALUES(?,?,?,?,?)`, hash, "d.x", .8, "new", 2)
+	f := AnalyticsFilter{From: ad(10, 1, 0, 0), To: ad(10, 2, 0, 0)}
+	got, err := tn.WindowScoreObservations(ctx, f, "design")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].RepoID != "repo-a" || got[0].Path != "docs/plans/a/DESIGN.md" || got[0].ConversationID != "canonical" || got[0].Score != .8 || got[0].Scorer != "new" {
+		t.Fatalf("canonical latest observation: %#v", got)
+	}
+	series, err := tn.ScoreSeriesObservations(ctx, f, "design", "day")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(series) != 1 || series[0].RepoID != "repo-a" || series[0].Scorer != "new" || series[0].Score != .8 {
+		t.Fatalf("canonical series observation: %#v", series)
 	}
 }
 

@@ -220,6 +220,22 @@ func TestAnalyticsSeries(t *testing.T) {
 	}
 }
 
+func TestAnalyticsSeriesUsesTimezoneForCalendarBuckets(t *testing.T) {
+	tn, f := fixture(t)
+	f.TZ, _ = time.LoadLocation("America/New_York")
+	got, err := tn.Series(context.Background(), f, "hook_events", "day", "none")
+	if err != nil {
+		t.Fatal(err)
+	}
+	counts := map[string]int{}
+	for _, p := range got {
+		counts[p.T] = p.N
+	}
+	if counts["2026-10-04"] != 2 || counts["2026-10-05"] != 1 {
+		t.Fatalf("local day buckets = %v", counts)
+	}
+}
+
 func TestAnalyticsWindowScores(t *testing.T) {
 	tn, f := fixture(t)
 	ctx := context.Background()
@@ -796,6 +812,100 @@ func TestAnalyticsExploreCap(t *testing.T) {
 		if page[i].Type != want[i].typ || page[i].TS != want[i].ts || page[i].Path != want[i].path {
 			t.Fatalf("page row %d got %+v want %+v", i, page[i], want[i])
 		}
+	}
+}
+
+func TestAnalyticsExploreKeysetWatermark(t *testing.T) {
+	tn := openT(t, Options{})
+	ctx := context.Background()
+	base := ad(10, 1, 0, 0)
+	addFacts(t, tn,
+		afx{typ: "hook_event", conv: "c", harness: "h", event: "one", ts: base},
+		afx{typ: "hook_event", conv: "c", harness: "h", event: "two", ts: base},
+		afx{typ: "hook_event", conv: "c", harness: "h", event: "three", ts: base.Add(-time.Second)},
+	)
+	mustExec(t, tn, `INSERT INTO rejections (stage,fact_type,conversation_id,path,content_hash,pattern,reason,at) VALUES (?,?,?,?,?,?,?,?)`,
+		"precheck", "artifact_version", "c", "rejected", "", "p", "r", base.UnixNano())
+	f := AnalyticsFilter{From: base.Add(-time.Minute), To: base.Add(time.Minute)}
+	first, more, cursor, err := tn.ExplorePage(ctx, f, nil, 2)
+	if err != nil || !more || cursor == nil {
+		t.Fatalf("first page: n=%d more=%v cursor=%+v err=%v", len(first), more, cursor, err)
+	}
+	// A late row inside the requested event-time range is beyond the receive watermark.
+	addFacts(t, tn, afx{typ: "hook_event", conv: "c", harness: "h", event: "late", ts: base.Add(-2 * time.Second)})
+	all := append([]ExploreRow(nil), first...)
+	for more {
+		var next *ExploreCursor
+		var page []ExploreRow
+		page, more, next, err = tn.ExplorePage(ctx, f, cursor, 2)
+		if err != nil {
+			t.Fatal(err)
+		}
+		all = append(all, page...)
+		cursor = next
+	}
+	if len(all) != 4 {
+		t.Fatalf("traversal returned %d rows, want original 4", len(all))
+	}
+	seen := map[string]bool{}
+	for _, row := range all {
+		key := row.Type + "/" + row.Event + "/" + row.Path
+		if seen[key] {
+			t.Fatalf("duplicate row %q", key)
+		}
+		seen[key] = true
+	}
+	if !seen["rejection//rejected"] || seen["hook_event/late/"] {
+		t.Fatalf("unexpected traversal population: %v", seen)
+	}
+}
+
+func TestAnalyticsExploreKeysetTraversesBeyondTwentyThousand(t *testing.T) {
+	tn := openT(t, Options{})
+	ctx := context.Background()
+	const population = 20005
+	base := ad(10, 1, 0, 0)
+	tx, err := tn.rdb.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ins, err := tx.PrepareContext(ctx, `INSERT INTO facts(type,row_hash,conversation_id,harness,event,ts,received_at,repo_id,path,content_hash,raw,kind)
+		VALUES('hook_event',?,'c','h','event',?,?, '','','',x'','')`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < population; i++ {
+		if _, err := ins.ExecContext(ctx, fmt.Sprintf("%064x", i+1), float64(base.Unix()), int64(i+1)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := ins.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+
+	f := AnalyticsFilter{From: base.Add(-time.Minute), To: base.Add(time.Minute)}
+	first, more, cursor, err := tn.ExplorePage(ctx, f, nil, 20000)
+	if err != nil || !more || len(first) != 20000 || cursor == nil {
+		t.Fatalf("first page: rows=%d more=%v cursor=%+v err=%v", len(first), more, cursor, err)
+	}
+	second, more, next, err := tn.ExplorePage(ctx, f, cursor, 20000)
+	if err != nil || more || next != nil || len(second) != population-20000 {
+		t.Fatalf("second page: rows=%d more=%v cursor=%+v err=%v", len(second), more, next, err)
+	}
+	seen := make(map[string]bool, population)
+	for _, page := range [][]ExploreRow{first, second} {
+		for _, row := range page {
+			if seen[row.PageKey] {
+				t.Fatalf("duplicate explore key %s", row.PageKey)
+			}
+			seen[row.PageKey] = true
+		}
+	}
+	if len(seen) != population {
+		t.Fatalf("traversed %d distinct keys, want %d", len(seen), population)
 	}
 }
 

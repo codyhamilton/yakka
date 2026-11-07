@@ -9,8 +9,9 @@ UI may rely on; it says nothing about the old UX, layout, components or chart ch
 **Basis.** Every server fact below was read from the Go and Python source at master `b2094eb`
 (files named per section); no test was run for this file and no production ledger or credential was
 read. Where `docs/design/07-analytics-site.md` and the code differ, this file follows the code and says
-so. Statements labelled **Current** describe master; statements labelled **Target** are what DESIGN.md
-changes, in the phase named; nothing labelled Target exists yet. At close-out this file is promoted
+so. Statements labelled **Current** describe master. Statements labelled **Target** define what
+DESIGN.md changes in the named phase; implementation progress is recorded in the plan's phase reports.
+At close-out this file is promoted
 into `docs/design/07-analytics-site.md`.
 
 ## Contents
@@ -306,13 +307,13 @@ Source: `analytics.go`, `analytics_query.go`, `analytics_conversation.go`, `anal
 | Param | Meaning |
 |---|---|
 | `from`, `to` | RFC3339, inclusive. Omitted `to` is now. Omitted `from` is `to` minus 30 days. Bad value: 400 `from and to must be RFC3339`. `from` after `to`: 400 `from is after to` |
-| `all=1` | `from` becomes the Unix epoch (whole ledger). **Current:** usable on `/query` with `bucket=none` only; every other route, and `/query` with a time bucket, answers `range too wide`, which is why the old UI clamped All time to 399 days (7.5). **Target (Phase 3):** accepted by every route; see section 12 |
+| `all=1` | Before Phase 3, `from` became the Unix epoch and time-bucketed routes refused wide windows. **Phase 3 / 3-01:** shared filters now begin at the inclusive signed-nanosecond minimum, preserving pre-epoch rows; width-only refusals are removed. Full route coverage, effective-window reporting and adaptive year/multi-year grouping remain Phase 3 work; see section 17.1 |
 | `tz` | IANA zone name, default UTC. Drives bucket boundaries and `hour_of_day` / `weekday`. Unknown: 400 `invalid tz` (note `Local` is accepted) |
 | `repo_id`, `harness`, `kind`, `plan`, `norm_event`, `event`, `tool`, `model`, `source`, `conversation_id` | Repeatable. OR within a parameter, AND across parameters |
 | `kind` | Must be `design`, `brief` or `report`: 400 `kind must be design, brief or report` |
 | `tenant` | See 3.1 |
 
-- **Current, removed by Phase 3:** a window of more than 400 inclusive UTC days (ISO weeks when the route buckets by week, so at most 399 days for day-based routes), or more than 400 buckets of the requested unit, is 400 `range too wide` (`serve/analytics.go:20,82-91,154-156`; `analytics_query.go:81-84,118-142`; `analytics_score_series.go:31-34`; `analytics.go:402-404`). `/query` skips the day cap but enforces the bucket cap for its unit, so `all=1` works with `bucket=none` only: a month bucket over the whole ledger is about 680 buckets, not within 400. (An earlier version of this file said `month` worked; it does not.) `bucket=month` on `/executions` and `/score-series` is effectively capped at 399 days because the day cap runs first. `/series` has no bucket check and only the day or week cap.
+- **Phase 3 progress (3-01):** the shared filter, `/query`, `/series`, `/executions` and `/score-series` no longer refuse requests solely because their window or bucket count is wide. `all=1` starts at the representable minimum to include pre-epoch data. `/query` accepts `bucket=auto` and a lower-only `max_cells` override, reports requested/effective bucket and cell metadata, and converts visible over-budget/truncated results to `too_many_cells` or `too_many_series` with suggestions. This unit currently resolves through month; year and multi-year storage grouping plus automatic retry after cell overflow are carried to 3-02. The legacy `/schema.buckets` array remains unchanged. The exact accepted inclusive time range is specified in section 17.1.
 - `kind` and `plan` are columns filled at ingest from the path: `docs/plans/<plan>/DESIGN.md` (design), `docs/plans/<plan>/briefs/<file>.md` (brief), `docs/plans/<plan>/reports/<file>.md`
   (report). Nested brief paths have no kind and count as `other`.
 - Usage clocks use `facts.ts` (event time); rejection counts and rows use `rejections.at`.
@@ -552,8 +553,8 @@ Secrets (not in the repo): `GITHUB_OAUTH_CLIENT_ID`, `GITHUB_OAUTH_CLIENT_SECRET
 
 ### 11.3 Go tests that pin the contract
 
-- `internal/serve/site_test.go`: `TestSitePlaceholderMode`, `TestSiteMissingIndexIsNotEmbedded`, `TestSiteEmbeddedPlaceholder` (uses the real embedded placeholder), `TestSiteBuiltMode` (keyed and local; uses `_app/immutable/x.js`, `_app/version.json`, `p.wasm` in a `fstest.MapFS`), `TestSiteLocalGuardStillWraps`. They
-  fix everything in 10.1. `TestSiteBuiltMode` hard-codes the old SvelteKit `_app/immutable/` paths; it and `site.go` change together to the generic cache rules in 10.1 (Phase 1), plus a test that the embedded CSP and framing headers equal `web/_headers`.
+- `internal/serve/site_test.go`: `TestSitePlaceholderMode`, `TestSiteMissingIndexIsNotEmbedded`, `TestSiteEmbeddedPlaceholder` (uses the real embedded placeholder), `TestSiteBuiltMode` (keyed and local; uses a versioned `vendor/` asset, ordinary JS/JSON assets and WASM in a `fstest.MapFS`), `TestSiteHandlerDirectCallbackFallback`, `TestSiteLocalGuardStillWraps`. They
+  fix everything in 10.1. `TestSiteBuiltMode` covers generic cache rules, ETag revalidation and security headers equal to `web/_headers`; the direct callback fallback is tested at `siteHandler` level. The full server mux currently registers `/oauth/callback` before the site handler in local mode too, so that route-level integration remains for Phase 2.
 - `internal/serve/analytics_pageset_test.go` (see 12), `analytics_bench_test.go` and the per-route tests (`analytics_test.go`, `analytics_query_test.go`, `analytics_conversation_test.go`, `analytics_executions_test.go`, `analytics_distribution_test.go`, `analytics_score_series_test.go`) pin section 7.
 - Tests never need Node: they use the placeholder or an in-memory FS.
 

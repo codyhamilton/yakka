@@ -59,9 +59,58 @@ func percentile(sorted []float64, q float64) float64 {
 func round3(v float64) float64 { return math.Round(v*1000) / 1000 }
 
 func (s *Server) baselines(w http.ResponseWriter, r *http.Request, _ string, ts *tenantState) {
-	kind := r.URL.Query().Get("kind")
+	q := r.URL.Query()
+	kind := q.Get("kind")
 	if !validKind(kind) {
 		badKind(w)
+		return
+	}
+	population := q.Get("population")
+	if population != "" && population != "content" {
+		errJSON(w, 400, "population must be content")
+		return
+	}
+	if population == "" && (q.Get("check") != "" || q.Get("scorer") != "") {
+		errJSON(w, 400, "check and scorer require population=content")
+		return
+	}
+	if population == "content" {
+		rows, err := ts.t.LatestContentScores(r.Context(), kind)
+		if err != nil {
+			writeJSON(w, 500, map[string]string{"error": "read failed"})
+			return
+		}
+		selectedCheck, selectedScorer := q.Get("check"), q.Get("scorer")
+		byScorer := map[string]map[string][]float64{}
+		for _, row := range rows {
+			if selectedCheck != "" && selectedCheck != row.Check || selectedScorer != "" && selectedScorer != row.Scorer {
+				continue
+			}
+			if byScorer[row.Scorer] == nil {
+				byScorer[row.Scorer] = map[string][]float64{}
+			}
+			byScorer[row.Scorer][row.Check] = append(byScorer[row.Scorer][row.Check], row.Score)
+		}
+		scorers := map[string]any{}
+		for scorer, checks := range byScorer {
+			outChecks := map[string]any{}
+			for name, values := range checks {
+				sort.Float64s(values)
+				outChecks[name] = map[string]any{"n": len(values), "p25": round3(percentile(values, .25)),
+					"median": round3(percentile(values, .5)), "p75": round3(percentile(values, .75))}
+			}
+			scorers[scorer] = outChecks
+		}
+		if selectedCheck != "" && selectedScorer != "" {
+			if scorers[selectedScorer] == nil {
+				scorers[selectedScorer] = map[string]any{}
+			}
+			checkRows := scorers[selectedScorer].(map[string]any)
+			if checkRows[selectedCheck] == nil {
+				checkRows[selectedCheck] = map[string]any{"n": 0, "p25": nil, "median": nil, "p75": nil}
+			}
+		}
+		writeJSON(w, 200, map[string]any{"kind": kind, "population": "content", "scorers": scorers})
 		return
 	}
 	rows, err := ts.t.LatestScores(r.Context())

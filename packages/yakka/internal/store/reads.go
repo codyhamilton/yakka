@@ -93,6 +93,42 @@ type Baseline struct {
 	Score       float64
 }
 
+// ContentBaseline is the latest score for one distinct retained content hash.
+// Scorer is taken from that latest score row, so re-scores never revive an older scorer.
+type ContentBaseline struct {
+	Hash, Check, Scorer string
+	Score               float64
+}
+
+// LatestContentScores returns one latest score per retained (kind, content_hash, check).
+// The population is content-weighted and deliberately does not join files into the result.
+func (t *Tenant) LatestContentScores(ctx context.Context, kind string) ([]ContentBaseline, error) {
+	rows, err := t.rdb.QueryContext(ctx, `
+	WITH hashes AS (
+		SELECT DISTINCT content_hash FROM facts
+		WHERE type='artifact_version' AND content_hash!='' AND kind=?
+	), latest AS (
+		SELECT s.content_hash,s.check_name,s.scorer,s.result,
+			ROW_NUMBER() OVER(PARTITION BY s.content_hash,s.check_name ORDER BY s.id DESC) rn
+		FROM scores s JOIN hashes h USING(content_hash)
+	)
+	SELECT content_hash,check_name,COALESCE(scorer,''),result FROM latest WHERE rn=1
+	ORDER BY check_name,scorer,content_hash`, kind)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []ContentBaseline
+	for rows.Next() {
+		var row ContentBaseline
+		if err := rows.Scan(&row.Hash, &row.Check, &row.Scorer, &row.Score); err != nil {
+			return nil, err
+		}
+		out = append(out, row)
+	}
+	return out, rows.Err()
+}
+
 // LatestScores returns, for the latest artifact_version of every (repo_id, path), the latest score
 // per check. Rows for every path are returned; the caller filters by kind.
 func (t *Tenant) LatestScores(ctx context.Context) ([]Baseline, error) {

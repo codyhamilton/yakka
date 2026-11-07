@@ -1,13 +1,18 @@
 package serve
 
 import (
+	"bytes"
+	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"math"
 	"net/http"
 	"net/url"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/codyhamilton/yakka/packages/yakka/internal/store"
@@ -17,10 +22,80 @@ import (
 // shared filter, calls one store query and shapes the JSON; tenant auth is the same as /v1/artifacts.
 
 const (
-	maxBuckets   = 400
+	// maxBuckets remains for the benchmark's historical search helper. Request
+	// handlers do not use it as a window or resolution cap.
+	maxBuckets   = int(^uint(0) >> 1)
 	defaultLimit = 100
 	maxLimit     = 500
 )
+
+var (
+	minAnalyticsTime = time.Unix(0, math.MinInt64).UTC()
+	maxAnalyticsTime = time.Unix(0, math.MaxInt64).UTC()
+)
+
+const analyticsHeavyConcurrency = 4
+
+// The local fixture's slowest route p95 is below 5 ms; 1 s leaves substantial tail room while
+// remaining twice the unchanged 500 ms p95 contract. The fixture result is recorded in the report.
+var analyticsDeadline = time.Second
+
+type analyticsBuffer struct {
+	header http.Header
+	status int
+	body   bytes.Buffer
+}
+
+func newAnalyticsBuffer() *analyticsBuffer     { return &analyticsBuffer{header: make(http.Header)} }
+func (b *analyticsBuffer) Header() http.Header { return b.header }
+func (b *analyticsBuffer) WriteHeader(status int) {
+	if b.status == 0 {
+		b.status = status
+	}
+}
+func (b *analyticsBuffer) Write(p []byte) (int, error) {
+	if b.status == 0 {
+		b.status = http.StatusOK
+	}
+	return b.body.Write(p)
+}
+
+func serveBoundedAnalytics(w http.ResponseWriter, r *http.Request, name string, ts *tenantState, h tenantHandler) {
+	select {
+	case ts.analyticsSlots <- struct{}{}:
+		defer func() { <-ts.analyticsSlots }()
+	default:
+		w.Header().Set("Retry-After", "1")
+		errCodeJSON(w, http.StatusServiceUnavailable, "busy", "analytics read concurrency limit reached", map[string]any{"retry": map[string]any{"after_s": 1}})
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), analyticsDeadline)
+	b := newAnalyticsBuffer()
+	h(b, r.WithContext(ctx), name, ts)
+	expired := errors.Is(ctx.Err(), context.DeadlineExceeded)
+	canceled := r.Context().Err() != nil
+	cancel()
+	if canceled {
+		return
+	}
+	if expired {
+		errCodeJSON(w, http.StatusServiceUnavailable, "query_timeout", "analytics query deadline exceeded", map[string]any{
+			"retry": map[string]any{"after_s": 1, "suggested_action": "narrow_window_or_coarsen_bucket"},
+		})
+		return
+	}
+	for k, values := range b.header {
+		for _, v := range values {
+			w.Header().Add(k, v)
+		}
+	}
+	status := b.status
+	if status == 0 {
+		status = http.StatusOK
+	}
+	w.WriteHeader(status)
+	_, _ = w.Write(b.body.Bytes())
+}
 
 // exploreCap is the most rows /explore returns. A variable so the test can lower it.
 var exploreCap = 20000
@@ -29,17 +104,28 @@ func errJSON(w http.ResponseWriter, code int, msg string) {
 	writeJSON(w, code, map[string]string{"error": msg})
 }
 
+func errCodeJSON(w http.ResponseWriter, status int, code, msg string, extra map[string]any) {
+	out := map[string]any{"error": msg, "code": code}
+	for k, v := range extra {
+		out[k] = v
+	}
+	writeJSON(w, status, out)
+}
+
 func readFailed(w http.ResponseWriter) { errJSON(w, 500, "read failed") }
 
 // cursor is the opaque paging token: the route and filter it was issued for, the first page's
 // resolved window, and the sort key of the last row returned.
 type cursor struct {
-	Route  string   `json:"r"`
-	Filter string   `json:"f"`
-	From   int64    `json:"from"`
-	To     int64    `json:"to"`
-	TS     float64  `json:"ts"`
-	Key    []string `json:"k"`
+	Route              string   `json:"r"`
+	Filter             string   `json:"f"`
+	From               int64    `json:"from"`
+	To                 int64    `json:"to"`
+	TS                 float64  `json:"ts"`
+	NS                 int64    `json:"ns,omitempty"`
+	Key                []string `json:"k"`
+	FactWatermark      int64    `json:"fw,omitempty"`
+	RejectionWatermark int64    `json:"rw,omitempty"`
 }
 
 func (c cursor) encode() string {
@@ -64,7 +150,7 @@ func canonFilter(q url.Values) string {
 	out := url.Values{}
 	for _, k := range []string{"from", "to", "repo_id", "harness", "kind", "plan",
 		"norm_event", "event", "tool", "model", "source", "conversation_id", "tz", "all",
-		"shape", "bucket"} {
+		"shape", "bucket", "exclude", "sort", "mode", "grain", "field", "fields", "stat", "where"} {
 		if v, ok := q[k]; ok {
 			c := append([]string(nil), v...)
 			sort.Strings(c)
@@ -128,7 +214,7 @@ func parseFilter(w http.ResponseWriter, r *http.Request, o filterOpts) (store.An
 		}
 	}
 	if q.Get("all") == "1" {
-		from, hasFrom = time.Unix(0, 0), true
+		from, hasFrom = minAnalyticsTime, true
 		if !hasTo {
 			to = time.Now().UTC()
 		}
@@ -151,12 +237,25 @@ func parseFilter(w http.ResponseWriter, r *http.Request, o filterOpts) (store.An
 		errJSON(w, 400, "from is after to")
 		return f, false
 	}
-	if !o.query && tooWide(from, to, o.weeks) {
-		errJSON(w, 400, "range too wide")
+	if from.Before(minAnalyticsTime) || from.After(maxAnalyticsTime) || to.Before(minAnalyticsTime) || to.After(maxAnalyticsTime) {
+		errCodeJSON(w, 400, "time_out_of_range", "time is outside the nanosecond-representable range", map[string]any{
+			"min": minAnalyticsTime.Format(time.RFC3339Nano), "max": maxAnalyticsTime.Format(time.RFC3339Nano),
+		})
 		return f, false
+	}
+	excludes := map[string][]string{}
+	allowedExclude := map[string]bool{"repo_id": true, "harness": true, "kind": true, "plan": true, "norm_event": true, "event": true, "tool": true, "model": true, "source": true, "conversation_id": true, "stage": true}
+	for _, item := range q["exclude"] {
+		dim, value, ok := strings.Cut(item, ":")
+		if !ok || !allowedExclude[dim] || value == "" {
+			errJSON(w, 400, "exclude must be <dimension>:<value>")
+			return f, false
+		}
+		excludes[dim] = append(excludes[dim], value)
 	}
 	f = store.AnalyticsFilter{From: from.UTC(), To: to.UTC(), Repos: q["repo_id"], Harnesses: q["harness"], Kinds: q["kind"], Plans: q["plan"],
 		NormEvents: q["norm_event"], Events: q["event"], Tools: q["tool"], Models: q["model"], Sources: q["source"], ConversationIDs: q["conversation_id"], TZ: loc}
+	f.Excludes = excludes
 	if o.scoresKind && len(f.Kinds) != 1 {
 		errJSON(w, 400, "kind required")
 		return f, false
@@ -244,9 +343,11 @@ func (s *Server) analyticsFacets(w http.ResponseWriter, r *http.Request, _ strin
 	for _, c := range s.catalogChecks(kindOrder...) {
 		checks = append(checks, map[string]string{"kind": c.Kind, "name": c.Name})
 	}
-	writeJSON(w, 200, map[string]any{"repos": nz(fc.Repos), "harnesses": nz(fc.Harnesses), "kinds": nz(fc.Kinds),
+	out := map[string]any{"repos": nz(fc.Repos), "harnesses": nz(fc.Harnesses), "kinds": nz(fc.Kinds),
 		"plans": nz(fc.Plans), "events": nz(fc.Events), "models": nz(fc.Models), "norm_events": nz(fc.NormEvents),
-		"tools": tools, "checks": checks})
+		"tools": tools, "checks": checks}
+	addAnalyticsPartial(out, ts)
+	writeJSON(w, 200, out)
 }
 
 func (s *Server) analyticsSummary(w http.ResponseWriter, r *http.Request, _ string, ts *tenantState) {
@@ -259,7 +360,7 @@ func (s *Server) analyticsSummary(w http.ResponseWriter, r *http.Request, _ stri
 		readFailed(w)
 		return
 	}
-	writeJSON(w, 200, map[string]any{"from": f.From.Format(time.RFC3339), "to": f.To.Format(time.RFC3339),
+	out := map[string]any{"from": f.From.Format(time.RFC3339), "to": f.To.Format(time.RFC3339),
 		"conversations": sm.Conversations, "hook_events": sm.HookEvents, "artifact_versions": sm.ArtifactVersions,
 		"distinct_content": sm.DistinctContent,
 		"by_kind":          counts(sm.ByKind, "design", "brief", "report", "other"),
@@ -269,7 +370,9 @@ func (s *Server) analyticsSummary(w http.ResponseWriter, r *http.Request, _ stri
 		"screens":          counts(sm.Screens, "pass", "unscreened"),
 		"model_calls":      sm.ModelCalls, "unpriced_calls": sm.UnpricedCalls, "cost_usd": sm.CostUSD,
 		"tokens_in": sm.TokensIn, "tokens_out": sm.TokensOut, "tokens_cache_read": sm.TokensCacheRead,
-		"tokens_cache_write": sm.TokensCacheWrite, "tokens_reasoning": sm.TokensReasoning})
+		"tokens_cache_write": sm.TokensCacheWrite, "tokens_reasoning": sm.TokensReasoning}
+	addAnalyticsPartial(out, ts)
+	writeJSON(w, 200, out)
 }
 
 var seriesGroups = map[string][]string{
@@ -340,7 +443,9 @@ func (s *Server) analyticsSeries(w http.ResponseWriter, r *http.Request, _ strin
 	if list == nil {
 		list = []*entry{}
 	}
-	writeJSON(w, 200, map[string]any{"bucket": bucket, "series": list})
+	out := map[string]any{"bucket": bucket, "series": list}
+	addAnalyticsPartial(out, ts)
+	writeJSON(w, 200, out)
 }
 
 func (s *Server) analyticsScores(w http.ResponseWriter, r *http.Request, _ string, ts *tenantState) {
@@ -350,6 +455,11 @@ func (s *Server) analyticsScores(w http.ResponseWriter, r *http.Request, _ strin
 	}
 	kind := f.Kinds[0]
 	f.Kinds = nil
+	q := r.URL.Query()
+	if q.Has("dim") || q.Has("scorer") || q.Has("check") || q.Has("limit") || q.Has("offset") {
+		s.analyticsScoresByLens(w, r, ts, f, kind)
+		return
+	}
 	vals, err := ts.t.WindowScores(r.Context(), f, kind)
 	if err != nil {
 		readFailed(w)
@@ -363,7 +473,186 @@ func (s *Server) analyticsScores(w http.ResponseWriter, r *http.Request, _ strin
 			"p25": round3(percentile(v, .25)), "median": round3(percentile(v, .5)),
 			"p75": round3(percentile(v, .75)), "max": round3(percentile(v, 1))})
 	}
-	writeJSON(w, 200, map[string]any{"kind": kind, "checks": out})
+	resp := map[string]any{"kind": kind, "checks": out}
+	addAnalyticsPartial(resp, ts)
+	writeJSON(w, 200, resp)
+}
+
+func (s *Server) analyticsScoresByLens(w http.ResponseWriter, r *http.Request, ts *tenantState, f store.AnalyticsFilter, kind string) {
+	q := r.URL.Query()
+	dim := q.Get("dim")
+	allowed := map[string]bool{"harness": true, "session_model": true, "repo_id": true, "plan": true, "scorer": true, "screen_verdict": true}
+	if dim != "" && !allowed[dim] {
+		errJSON(w, 400, "unsupported dimension "+dim+" for scores")
+		return
+	}
+	checks := map[string]bool{}
+	for _, c := range s.catalogChecks(kind) {
+		checks[c.Name] = true
+	}
+	selectedCheck := q.Get("check")
+	if selectedCheck != "" && !checks[selectedCheck] {
+		errJSON(w, 400, "unknown check "+selectedCheck)
+		return
+	}
+	limit := 100
+	if raw := q.Get("limit"); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n < 1 {
+			errJSON(w, 400, "limit must be a positive integer")
+			return
+		}
+		limit = min(n, 500)
+	}
+	offset := 0
+	if raw := q.Get("offset"); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n < 0 {
+			errJSON(w, 400, "offset must be a non-negative integer")
+			return
+		}
+		offset = n
+	}
+	// Harness and session-model are derived lenses. Their filters run after the canonical
+	// artifact fact is selected, so they cannot change which path represents a shared hash.
+	f.Harnesses = nil
+	f.Models = nil
+	rows, err := ts.t.WindowScoreObservations(r.Context(), f, kind)
+	if err != nil {
+		readFailed(w)
+		return
+	}
+	ids := make([]string, 0, len(rows))
+	seen := map[string]bool{}
+	for _, row := range rows {
+		if !seen[row.ConversationID] {
+			seen[row.ConversationID] = true
+			ids = append(ids, row.ConversationID)
+		}
+	}
+	provenance, err := scoreSessionProvenance(r.Context(), ts.t, ids)
+	if err != nil {
+		readFailed(w)
+		return
+	}
+	type scoreGroup struct {
+		key    string
+		values []float64
+	}
+	byCheck := map[string]map[string][]float64{}
+	for _, row := range rows {
+		if selectedCheck != "" && row.Check != selectedCheck || q.Get("scorer") != "" && row.Scorer != q.Get("scorer") {
+			continue
+		}
+		if len(q["harness"]) > 0 && !containsValue(q["harness"], provenance[row.ConversationID].Harness) {
+			continue
+		}
+		if len(q["model"]) > 0 && !containsValue(q["model"], provenance[row.ConversationID].Model) {
+			continue
+		}
+		key := "all"
+		switch dim {
+		case "harness":
+			key = provenance[row.ConversationID].Harness
+		case "session_model":
+			key = provenance[row.ConversationID].Model
+		case "repo_id":
+			key = row.RepoID
+		case "plan":
+			key = planFromArtifactPath(row.Path)
+		case "scorer":
+			key = row.Scorer
+		case "screen_verdict":
+			screen, e := ts.t.ArtifactScreen(r.Context(), row.Hash)
+			if e != nil {
+				readFailed(w)
+				return
+			}
+			key = "unknown"
+			if screen != nil {
+				key = screen.Verdict
+			}
+		}
+		if byCheck[row.Check] == nil {
+			byCheck[row.Check] = map[string][]float64{}
+		}
+		byCheck[row.Check][key] = append(byCheck[row.Check][key], row.Score)
+	}
+	out := []map[string]any{}
+	for check := range checks {
+		if selectedCheck != "" && check != selectedCheck {
+			continue
+		}
+		groups := []scoreGroup{}
+		for key, values := range byCheck[check] {
+			groups = append(groups, scoreGroup{key: key, values: values})
+		}
+		sort.Slice(groups, func(i, j int) bool { return groups[i].key < groups[j].key })
+		allN := 0
+		allValues := []float64{}
+		for _, g := range groups {
+			allN += len(g.values)
+			allValues = append(allValues, g.values...)
+		}
+		start := min(offset, len(groups))
+		end := min(start+limit, len(groups))
+		page := make([]map[string]any, 0, end-start)
+		for _, g := range groups[start:end] {
+			sort.Float64s(g.values)
+			page = append(page, map[string]any{"key": g.key, "n": len(g.values), "min": round3(percentile(g.values, 0)), "p25": round3(percentile(g.values, .25)), "median": round3(percentile(g.values, .5)), "p75": round3(percentile(g.values, .75)), "max": round3(percentile(g.values, 1))})
+		}
+		var minScore, p25, median, p75, maxScore any
+		if allN > 0 {
+			sort.Float64s(allValues)
+			minScore, p25, median, p75, maxScore = round3(percentile(allValues, 0)), round3(percentile(allValues, .25)), round3(percentile(allValues, .5)), round3(percentile(allValues, .75)), round3(percentile(allValues, 1))
+		}
+		out = append(out, map[string]any{"name": check, "n": allN, "min": minScore, "p25": p25, "median": median, "p75": p75, "max": maxScore, "groups": page, "omitted_groups": len(groups) - (end - start), "omitted_n": func() int {
+			n := 0
+			for _, g := range groups[:start] {
+				n += len(g.values)
+			}
+			for _, g := range groups[end:] {
+				n += len(g.values)
+			}
+			return n
+		}()})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i]["name"].(string) < out[j]["name"].(string) })
+	resp := map[string]any{"kind": kind, "dim": dim, "checks": out, "offset": offset, "limit": limit}
+	addAnalyticsPartial(resp, ts)
+	writeJSON(w, 200, resp)
+}
+
+func containsValue(values []string, value string) bool {
+	for _, candidate := range values {
+		if candidate == value {
+			return true
+		}
+	}
+	return false
+}
+
+func scoreSessionProvenance(ctx context.Context, t *store.Tenant, ids []string) (map[string]store.SessionProvenance, error) {
+	out := make(map[string]store.SessionProvenance, len(ids))
+	for start := 0; start < len(ids); start += 500 {
+		end := min(start+500, len(ids))
+		batch, err := t.SessionProvenanceFor(ctx, ids[start:end])
+		if err != nil {
+			return nil, err
+		}
+		for id, provenance := range batch {
+			out[id] = provenance
+		}
+	}
+	return out, nil
+}
+
+func planFromArtifactPath(path string) string {
+	parts := strings.Split(strings.ReplaceAll(path, "\\", "/"), "/")
+	if len(parts) > 2 && parts[0] == "docs" && parts[1] == "plans" {
+		return parts[2]
+	}
+	return ""
 }
 
 func parseExecShapes(w http.ResponseWriter, q url.Values) ([]string, bool) {
@@ -448,6 +737,7 @@ func (s *Server) analyticsExecutions(w http.ResponseWriter, r *http.Request, _ s
 		resp["next"] = cursor{Route: "executions", Filter: canonFilter(r.URL.Query()), From: f.From.UnixNano(), To: f.To.UnixNano(),
 			TS: last.TS, Key: []string{last.ConversationID, last.BriefPath, last.RepoID}}.encode()
 	}
+	addAnalyticsPartial(resp, ts)
 	writeJSON(w, 200, resp)
 }
 
@@ -498,15 +788,32 @@ func (s *Server) analyticsConversations(w http.ResponseWriter, r *http.Request, 
 		resp["next"] = cursor{Route: "conversations", Filter: canonFilter(r.URL.Query()), From: f.From.UnixNano(), To: f.To.UnixNano(),
 			TS: last.LastTS, Key: []string{last.ConversationID}}.encode()
 	}
+	addAnalyticsPartial(resp, ts)
 	writeJSON(w, 200, resp)
 }
 
 func (s *Server) analyticsExplore(w http.ResponseWriter, r *http.Request, _ string, ts *tenantState) {
-	f, ok := parseFilter(w, r, filterOpts{})
+	limit, cur, ok := pageParams(w, r)
 	if !ok {
 		return
 	}
-	rows, truncated, err := ts.t.Explore(r.Context(), f, exploreCap)
+	if limit > exploreCap {
+		limit = exploreCap
+	}
+	f, ok := parseFilter(w, r, filterOpts{route: "explore", cur: cur})
+	if !ok {
+		return
+	}
+	var ec *store.ExploreCursor
+	if cur != nil {
+		if len(cur.Key) != 2 {
+			errJSON(w, 400, "cursor mismatch")
+			return
+		}
+		ec = &store.ExploreCursor{TS: cur.TS, NS: cur.NS, Type: cur.Key[0], Key: cur.Key[1],
+			FactWatermark: cur.FactWatermark, RejectionWatermark: cur.RejectionWatermark}
+	}
+	rows, more, next, err := ts.t.ExplorePage(r.Context(), f, ec, limit)
 	if err != nil {
 		readFailed(w)
 		return
@@ -529,11 +836,23 @@ func (s *Server) analyticsExplore(w http.ResponseWriter, r *http.Request, _ stri
 		ScreenVerdict  string   `json:"screen_verdict"`
 		RejectionStage string   `json:"rejection_stage"`
 		CostUSD        *float64 `json:"cost_usd,omitempty"`
+		Priced         *bool    `json:"priced,omitempty"`
 	}
 	out := make([]row, 0, len(rows))
 	for _, x := range rows {
+		var priced *bool
+		if x.Type == "hook_event" && x.NormEvent == "usage" {
+			p := x.Priced
+			priced = &p
+		}
 		out = append(out, row{x.Type, rfc(x.TS), x.Harness, x.RepoID, x.Plan, x.Kind, x.Event, x.Tool,
-			x.NormEvent, x.Model, x.Path, x.ConversationID, x.Source, x.SHA, x.ScreenVerdict, x.RejectionStage, x.CostUSD})
+			x.NormEvent, x.Model, x.Path, x.ConversationID, x.Source, x.SHA, x.ScreenVerdict, x.RejectionStage, x.CostUSD, priced})
 	}
-	writeJSON(w, 200, map[string]any{"rows": out, "truncated": truncated})
+	resp := map[string]any{"rows": out, "truncated": more}
+	if more && next != nil {
+		resp["next"] = cursor{Route: "explore", Filter: canonFilter(r.URL.Query()), From: f.From.UnixNano(), To: f.To.UnixNano(),
+			TS: next.TS, NS: next.NS, Key: []string{next.Type, next.Key}, FactWatermark: next.FactWatermark, RejectionWatermark: next.RejectionWatermark}.encode()
+	}
+	addAnalyticsPartial(resp, ts)
+	writeJSON(w, 200, resp)
 }

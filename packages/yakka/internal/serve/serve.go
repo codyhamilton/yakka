@@ -217,12 +217,13 @@ func unscreened(ctx context.Context, t *store.Tenant, hash string) error {
 }
 
 type tenantState struct {
-	t       *store.Tenant
-	wake    chan struct{}
-	started bool
-	gaps    atomic.Int64            // screen gaps counted at worker start
-	fails   map[string]*hashFailure // worker-only: pending hashes whose screen step keeps failing
-	rescore rescoreState            // the admin rescore job
+	t              *store.Tenant
+	wake           chan struct{}
+	analyticsSlots chan struct{}
+	started        bool
+	gaps           atomic.Int64            // screen gaps counted at worker start
+	fails          map[string]*hashFailure // worker-only: pending hashes whose screen step keeps failing
+	rescore        rescoreState            // the admin rescore job
 }
 
 // hashFailure is the in-memory retry state of one pending hash. A restart forgets it, which gives
@@ -451,7 +452,7 @@ func (s *Server) tenant(name string) (*tenantState, error) {
 	if err != nil {
 		return nil, err
 	}
-	ts := &tenantState{t: t, wake: make(chan struct{}, 1)}
+	ts := &tenantState{t: t, wake: make(chan struct{}, 1), analyticsSlots: make(chan struct{}, analyticsHeavyConcurrency)}
 	s.tenants[name] = ts
 	s.startWorkerLocked(ts) // the worker's first pass handles leftover pending files
 	return ts, nil
@@ -503,6 +504,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/v1/analytics/conversation", s.method(http.MethodGet, s.auth(s.analyticsConversation)))
 	mux.HandleFunc("/v1/analytics/explore", s.method(http.MethodGet, s.auth(s.analyticsExplore)))
 	mux.HandleFunc("/v1/analytics/schema", s.method(http.MethodGet, s.auth(s.analyticsSchema)))
+	mux.HandleFunc("/v1/analytics/entities", s.method(http.MethodGet, s.auth(s.analyticsEntities)))
+	mux.HandleFunc("/v1/analytics/entity", s.method(http.MethodGet, s.auth(s.analyticsEntity)))
+	mux.HandleFunc("/v1/analytics/content", s.method(http.MethodGet, s.auth(s.analyticsContent)))
 	mux.HandleFunc("/v1/analytics/query", s.method(http.MethodGet, s.auth(s.analyticsQuery)))
 	mux.HandleFunc("/v1/analytics/distribution", s.method(http.MethodGet, s.auth(s.analyticsDistribution)))
 	mux.HandleFunc("/v1/analytics/score-series", s.method(http.MethodGet, s.auth(s.analyticsScoreSeries)))
@@ -520,8 +524,10 @@ func (s *Server) Handler() http.Handler {
 		mux.HandleFunc("/v1/device/grant", s.method(http.MethodGet, s.sessionOnly(s.handleDeviceGrant)))
 		mux.HandleFunc("/v1/device/token", s.handleDeviceTokenRoute)
 	}
-	mux.HandleFunc("/oauth/login", s.method(http.MethodGet, s.oauthLogin))
-	mux.HandleFunc("/oauth/callback", s.method(http.MethodGet, s.oauthCallback))
+	if s.cfg.Remote() {
+		mux.HandleFunc("/oauth/login", s.method(http.MethodGet, s.oauthLogin))
+		mux.HandleFunc("/oauth/callback", s.method(http.MethodGet, s.oauthCallback))
+	}
 	mux.HandleFunc("/logout", s.method(http.MethodPost, s.originGuard(s.logout)))
 	mux.HandleFunc("/", siteHandler(siteFS))
 	h := s.withSession(s.cors(mux))
@@ -658,6 +664,10 @@ func (s *Server) auth(h tenantHandler) http.HandlerFunc {
 				return
 			}
 			writeJSON(w, 503, map[string]string{"error": "tenant unavailable"})
+			return
+		}
+		if strings.HasPrefix(r.URL.Path, "/v1/analytics/") && r.URL.Path != "/v1/analytics/schema" {
+			serveBoundedAnalytics(w, r, name, ts, h)
 			return
 		}
 		h(w, r, name, ts)

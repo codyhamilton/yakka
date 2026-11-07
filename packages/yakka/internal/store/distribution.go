@@ -2,15 +2,17 @@ package store
 
 import (
 	"context"
+	"database/sql"
+	"fmt"
 	"math"
 	"sort"
 )
 
-// DistributionParams selects measure, grain, optional model dimension, and top-N keys.
+// DistributionParams selects measure, grain, optional lens dimension, and top-N keys.
 type DistributionParams struct {
 	Measure string
 	Grain   string // "call" or "conversation"
-	Dim     string // "" or "model"
+	Dim     string // "", "model", or a declared session/call lens
 	Top     int
 }
 
@@ -37,12 +39,16 @@ type DistributionRow struct {
 
 // DistributionResult is the store output for GET /v1/analytics/distribution.
 type DistributionResult struct {
-	Measure        string
-	Grain          string
-	Dim            string
-	Rows           []DistributionRow
-	Truncated      bool
-	IgnoredFilters []string
+	Measure         string
+	Grain           string
+	Dim             string
+	Rows            []DistributionRow
+	Truncated       bool
+	GroupN          int
+	OmittedGroups   int
+	OmittedN        int
+	OmittedUnpriced int
+	IgnoredFilters  []string
 }
 
 type distSample struct {
@@ -59,35 +65,72 @@ func distributionApplyFilters(f AnalyticsFilter) (AnalyticsFilter, []string) {
 
 func (t *Tenant) Distribution(ctx context.Context, f AnalyticsFilter, p DistributionParams) (DistributionResult, error) {
 	f2, ignored := distributionApplyFilters(f)
-	rows, err := t.usageKeptRows(ctx, f2)
-	if err != nil {
-		return DistributionResult{}, err
-	}
-	samples := distSamplesFromCalls(rows, p)
 	res := DistributionResult{
 		Measure: p.Measure, Grain: p.Grain, Dim: p.Dim,
 		IgnoredFilters: ignored,
 	}
-	groups := map[string]*distGroup{}
-	for _, s := range samples {
-		g := groups[s.key]
-		if g == nil {
-			g = &distGroup{key: s.key}
-			groups[s.key] = g
-		}
-		g.add(p.Measure, s.value, s.priced, s.unpricedCalls)
+	cte, args := usageRowsWhere(f2)
+	valueExpr := distributionValueSQL(p.Measure)
+	pricedExpr := "1"
+	if p.Measure == "cost_usd" {
+		pricedExpr = "wf_usage_priced(harness,model,tok_in,tok_out,tok_cache_read,tok_cache_write,tok_reasoning,cost_reported)"
 	}
-	keys := make([]string, 0, len(groups))
-	for k := range groups {
-		keys = append(keys, k)
+	keyExpr := "'all'"
+	if p.Dim == "model" {
+		keyExpr = "model"
 	}
-	sort.Slice(keys, func(i, j int) bool {
-		ni, nj := groups[keys[i]].n, groups[keys[j]].n
-		if ni != nj {
-			return ni > nj
+	if p.Grain == "call" {
+		switch p.Dim {
+		case "harness":
+			keyExpr = "harness"
+		case "session_model":
+			keyExpr = "model"
+		case "session_repo":
+			keyExpr = "COALESCE(sr.repo,'(none)')"
 		}
-		return keys[i] < keys[j]
-	})
+	}
+	var query string
+	if p.Grain == "conversation" {
+		switch p.Dim {
+		case "model":
+			keyExpr = "coalesce(cm.model,'')"
+		case "harness":
+			keyExpr = "coalesce(sh.harness,'unknown')"
+		case "session_model":
+			keyExpr = "coalesce(sm.model,'unknown')"
+		case "session_repo":
+			keyExpr = "coalesce(sr.repo,'(none)')"
+		}
+		query = cte + `, session_repo_counts AS (SELECT conversation_id,COUNT(DISTINCT repo_id) n,MIN(repo_id) repo FROM facts WHERE type IN ('artifact_version','commit') AND repo_id!='' GROUP BY conversation_id),
+			session_repo AS (SELECT conversation_id,CASE WHEN n=1 THEN repo WHEN n>1 THEN '(multi)' ELSE '(none)' END repo FROM session_repo_counts),
+			harness_counts AS (SELECT conversation_id,COALESCE(NULLIF(harness,''),'unknown') harness,COUNT(*) n FROM facts GROUP BY conversation_id,COALESCE(NULLIF(harness,''),'unknown')),
+			harness_ranked AS (SELECT conversation_id,harness,ROW_NUMBER() OVER(PARTITION BY conversation_id ORDER BY n DESC,harness ASC) rn FROM harness_counts),
+			session_harness AS (SELECT conversation_id,harness FROM harness_ranked WHERE rn=1),
+			all_usage AS (SELECT row_hash,conversation_id,model,CASE WHEN harness='claude' THEN json_extract(raw,'$.backfill.ref') END mid,tok_out FROM facts WHERE type='hook_event' AND norm_event='usage'),
+			all_kept AS (SELECT * FROM (SELECT *,ROW_NUMBER() OVER(PARTITION BY conversation_id,mid ORDER BY tok_out DESC,row_hash ASC) rn FROM all_usage) WHERE mid IS NULL OR mid='' OR rn=1),
+			model_counts AS (SELECT conversation_id,model,COUNT(*) n FROM all_kept WHERE model!='' GROUP BY conversation_id,model),
+			model_totals AS (SELECT conversation_id,COUNT(*) n FROM all_kept GROUP BY conversation_id),
+			model_ranked AS (SELECT conversation_id,model,n,ROW_NUMBER() OVER(PARTITION BY conversation_id ORDER BY n DESC,model ASC) rn FROM model_counts),
+			session_model AS (SELECT t.conversation_id,CASE WHEN t.n=0 THEN '(none)' WHEN COALESCE(r.n,0)*1.0/t.n<0.8 THEN '(mixed)' WHEN r.model IS NULL THEN 'unknown' ELSE r.model END model FROM model_totals t LEFT JOIN model_ranked r ON r.conversation_id=t.conversation_id AND r.rn=1),
+			counts AS (SELECT conversation_id,model,count(*) n FROM kept WHERE model!='' GROUP BY conversation_id,model),
+			mc AS (SELECT conversation_id,model,ROW_NUMBER() OVER(PARTITION BY conversation_id ORDER BY n DESC,model ASC) rn FROM counts),
+			cm AS (SELECT conversation_id,model FROM mc WHERE rn=1),
+			per AS (SELECT conversation_id,sum(CASE WHEN ` + pricedExpr + `=1 THEN ` + valueExpr + ` ELSE 0 END) value,
+				sum(1-` + pricedExpr + `) unpriced,sum(` + pricedExpr + `) priced FROM kept GROUP BY conversation_id)
+			INSERT INTO dist_samples SELECT ` + keyExpr + `,per.value,per.priced,per.unpriced FROM per LEFT JOIN cm USING(conversation_id) LEFT JOIN session_repo sr USING(conversation_id) LEFT JOIN session_harness sh USING(conversation_id) LEFT JOIN session_model sm USING(conversation_id)`
+	} else {
+		if p.Dim == "session_repo" {
+			query = cte + `, session_repo_counts AS (SELECT conversation_id,COUNT(DISTINCT repo_id) n,MIN(repo_id) repo FROM facts WHERE type IN ('artifact_version','commit') AND repo_id!='' GROUP BY conversation_id), session_repo AS (SELECT conversation_id,CASE WHEN n=1 THEN repo WHEN n>1 THEN '(multi)' ELSE '(none)' END repo FROM session_repo_counts) INSERT INTO dist_samples SELECT ` + keyExpr + `,` + valueExpr + `,` + pricedExpr + `,1-` + pricedExpr + ` FROM kept LEFT JOIN session_repo sr USING(conversation_id)`
+		} else {
+			query = cte + ` INSERT INTO dist_samples SELECT ` + keyExpr + `,` + valueExpr + `,` + pricedExpr + `,1-` + pricedExpr + ` FROM kept`
+		}
+	}
+	if _, err := t.rdb.ExecContext(ctx, `CREATE TEMP TABLE IF NOT EXISTS dist_samples(k TEXT,value REAL,priced INTEGER,unpriced INTEGER); DELETE FROM dist_samples`); err != nil {
+		return DistributionResult{}, err
+	}
+	if _, err := t.rdb.ExecContext(ctx, query, args...); err != nil {
+		return DistributionResult{}, err
+	}
 	top := p.Top
 	if top <= 0 {
 		top = 20
@@ -95,14 +138,113 @@ func (t *Tenant) Distribution(ctx context.Context, f AnalyticsFilter, p Distribu
 	if top > 100 {
 		top = 100
 	}
-	if len(keys) > top {
+	var groupN int
+	if err := t.rdb.QueryRowContext(ctx, `SELECT count(*) FROM (SELECT k FROM dist_samples GROUP BY k)`).Scan(&groupN); err != nil {
+		return DistributionResult{}, err
+	}
+	if groupN > top {
 		res.Truncated = true
-		keys = keys[:top]
 	}
-	for _, k := range keys {
-		res.Rows = append(res.Rows, groups[k].row(p.Measure))
+	res.GroupN = groupN
+	if err := t.rdb.QueryRowContext(ctx, `SELECT COALESCE(SUM(priced),0),COALESCE(SUM(unpriced),0) FROM dist_samples WHERE k NOT IN (SELECT k FROM dist_samples GROUP BY k ORDER BY SUM(priced) DESC,k ASC LIMIT ?)`, top).Scan(&res.OmittedN, &res.OmittedUnpriced); err != nil {
+		return DistributionResult{}, err
 	}
+	rows, err := t.rdb.QueryContext(ctx, `WITH groups AS (SELECT k,sum(priced) n,sum(unpriced) unpriced FROM dist_samples GROUP BY k),
+		ranked AS (SELECT d.k,d.value,ROW_NUMBER() OVER(PARTITION BY d.k ORDER BY d.value)-1 rn,g.n FROM dist_samples d JOIN groups g USING(k) WHERE d.priced=1),
+		stats AS (SELECT k,MIN(value) minv,MAX(value) maxv,MAX(n) n,
+			SUM(CASE WHEN rn=CAST((n-1)*0.25 AS INTEGER) THEN value*(1-((n-1)*0.25-CAST((n-1)*0.25 AS INTEGER))) WHEN rn=CAST((n-1)*0.25 AS INTEGER)+1 THEN value*((n-1)*0.25-CAST((n-1)*0.25 AS INTEGER)) ELSE 0 END) p25,
+			SUM(CASE WHEN rn=CAST((n-1)*0.5 AS INTEGER) THEN value*(1-((n-1)*0.5-CAST((n-1)*0.5 AS INTEGER))) WHEN rn=CAST((n-1)*0.5 AS INTEGER)+1 THEN value*((n-1)*0.5-CAST((n-1)*0.5 AS INTEGER)) ELSE 0 END) med,
+			SUM(CASE WHEN rn=CAST((n-1)*0.75 AS INTEGER) THEN value*(1-((n-1)*0.75-CAST((n-1)*0.75 AS INTEGER))) WHEN rn=CAST((n-1)*0.75 AS INTEGER)+1 THEN value*((n-1)*0.75-CAST((n-1)*0.75 AS INTEGER)) ELSE 0 END) p75,
+			SUM(CASE WHEN rn=CAST((n-1)*0.95 AS INTEGER) THEN value*(1-((n-1)*0.95-CAST((n-1)*0.95 AS INTEGER))) WHEN rn=CAST((n-1)*0.95 AS INTEGER)+1 THEN value*((n-1)*0.95-CAST((n-1)*0.95 AS INTEGER)) ELSE 0 END) p95
+		FROM ranked GROUP BY k) SELECT g.k,g.n,g.unpriced,s.minv,s.p25,s.med,s.p75,s.p95,s.maxv FROM groups g LEFT JOIN stats s USING(k) ORDER BY g.n DESC,g.k ASC LIMIT ?`, top)
+	if err != nil {
+		return DistributionResult{}, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var r DistributionRow
+		var minv, p25, med, p75, p95, maxv sql.NullFloat64
+		if err := rows.Scan(&r.K, &r.N, &r.Unpriced, &minv, &p25, &med, &p75, &p95, &maxv); err != nil {
+			return DistributionResult{}, err
+		}
+		if minv.Valid {
+			round := func(v float64) float64 { return roundMeasure(p.Measure, v) }
+			r.Min = round(minv.Float64)
+			r.P25 = round(p25.Float64)
+			r.Median = round(med.Float64)
+			r.P75 = round(p75.Float64)
+			r.P95 = round(p95.Float64)
+			r.Max = round(maxv.Float64)
+		}
+		r.Bins = distributionBinDefs(p.Measure)
+		res.Rows = append(res.Rows, r)
+	}
+	if err := rows.Err(); err != nil {
+		return DistributionResult{}, err
+	}
+	binRows, err := t.rdb.QueryContext(ctx, `WITH top_keys AS (
+		SELECT k FROM dist_samples GROUP BY k ORDER BY sum(priced) DESC,k ASC LIMIT ?
+	), counts AS (
+		SELECT d.k,`+distributionBinIndexSQL(p.Measure)+` AS bin_index,count(*) AS n
+		FROM dist_samples d JOIN top_keys USING(k) WHERE d.priced=1 GROUP BY d.k,bin_index
+	) SELECT k,bin_index,n FROM counts ORDER BY k,bin_index`, top)
+	if err != nil {
+		return DistributionResult{}, err
+	}
+	defer binRows.Close()
+	byKey := map[string][]DistributionBin{}
+	for _, r := range res.Rows {
+		byKey[r.K] = r.Bins
+	}
+	for binRows.Next() {
+		var k string
+		var index, count int
+		if err := binRows.Scan(&k, &index, &count); err != nil {
+			return DistributionResult{}, err
+		}
+		if bins := byKey[k]; bins != nil && index >= 0 && index < len(bins) {
+			bins[index].N = count
+		}
+	}
+	for i := range res.Rows {
+		res.Rows[i].Bins = binCounts(p.Measure, byKey[res.Rows[i].K])
+	}
+	res.OmittedGroups = res.GroupN - len(res.Rows)
 	return res, nil
+}
+
+func distributionBinIndexSQL(measure string) string {
+	if measure == "cost_usd" {
+		query := "CASE WHEN value=0 THEN 0 WHEN value>0 AND value<0.0001 THEN 1 WHEN value>=100 THEN 8"
+		for i := -4; i <= 1; i++ {
+			lo, hi := math.Pow(10, float64(i)), math.Pow(10, float64(i+1))
+			query += fmt.Sprintf(" WHEN value>=%g AND value<%g THEN %d", lo, hi, i+6)
+		}
+		return query + " ELSE 8 END"
+	}
+	query := "CASE WHEN value=0 OR (value>0 AND value<1) THEN 0 WHEN value>=1048576 THEN 21"
+	for i := 0; i < 20; i++ {
+		query += fmt.Sprintf(" WHEN value>=%d AND value<%d THEN %d", 1<<i, 1<<(i+1), i+1)
+	}
+	return query + " ELSE 21 END"
+}
+
+func distributionValueSQL(measure string) string {
+	switch measure {
+	case "cost_usd":
+		return "wf_usage_cost(harness,model,tok_in,tok_out,tok_cache_read,tok_cache_write,tok_reasoning,cost_reported)"
+	case "tokens_in":
+		return "tok_in"
+	case "tokens_out":
+		return "tok_out"
+	case "tokens_cache_read":
+		return "tok_cache_read"
+	case "tokens_cache_write":
+		return "tok_cache_write"
+	case "tokens_reasoning":
+		return "tok_reasoning"
+	}
+	return "0"
 }
 
 type distGroup struct {

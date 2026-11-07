@@ -2,8 +2,10 @@ package store
 
 import (
 	"context"
+	"fmt"
 	"math"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -174,5 +176,37 @@ func TestUsageIndexDrivesUsageRead(t *testing.T) {
 	}
 	if !strings.Contains(plan, "facts_usage_ts") {
 		t.Fatalf("usage CTE does not use facts_usage_ts:\n%s", plan)
+	}
+}
+
+func TestUsageGoHeapDoesNotScaleWithScannedRows(t *testing.T) {
+	queryAlloc := func(n int) uint64 {
+		tn := openT(t, Options{})
+		rows := make([]FactRow, n)
+		for i := range rows {
+			rows[i] = ufact(i, "opencode", "model-a", fmt.Sprintf("c-%d", i), fmt.Sprintf(`{"n":%d}`, i), aFrom, 1, int64(i+1), 0, 0, 0, nil)
+		}
+		if _, err := tn.Append(context.Background(), rows); err != nil {
+			t.Fatal(err)
+		}
+		params := QueryParams{Measure: "tokens_out"}
+		if _, err := tn.Query(context.Background(), usageFilter(), params); err != nil {
+			t.Fatal(err)
+		}
+		runtime.GC()
+		var before, after runtime.MemStats
+		runtime.ReadMemStats(&before)
+		if _, err := tn.Query(context.Background(), usageFilter(), params); err != nil {
+			t.Fatal(err)
+		}
+		runtime.ReadMemStats(&after)
+		return after.TotalAlloc - before.TotalAlloc
+	}
+
+	small := queryAlloc(128)
+	large := queryAlloc(2048)
+	t.Logf("Go allocations: 128 rows=%d bytes, 2048 rows=%d bytes", small, large)
+	if large > small*4+64*1024 {
+		t.Fatalf("Go allocations scale with scanned rows: 128 rows=%d bytes, 2048 rows=%d bytes", small, large)
 	}
 }

@@ -117,7 +117,7 @@ func TestConversationRouteFields(t *testing.T) {
 		t.Errorf("tool event = %v", ev[1])
 	}
 	tk, ok := ev[2]["tokens"].(map[string]any)
-	if !ok || tk["in"] != 1000.0 || tk["out"] != 50.0 || ev[2]["cost_usd"] == nil {
+	if !ok || tk["in"] != 1000.0 || tk["out"] != 50.0 || ev[2]["cost_usd"] == nil || ev[2]["priced"] != true {
 		t.Errorf("usage event = %v", ev[2])
 	}
 	if ev[3]["kind"] != "design" || ev[3]["source"] != "worktree" || ev[3]["path"] != "docs/plans/p1/DESIGN.md" {
@@ -135,6 +135,17 @@ func TestConversationRouteFields(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertNoRaw(t, decoded, body)
+}
+
+func TestAnalyticsPartialReasonOnConversation(t *testing.T) {
+	s, ts, _ := convFixture(t)
+	if err := ts.t.SetMeta(t.Context(), "compaction", "required"); err != nil {
+		t.Fatal(err)
+	}
+	m := aok(t, s, "/v1/analytics/conversation?id=c1")
+	if m["partial"] != true || !equalStrs(strs(m["partial_reasons"]), []string{"compaction_incomplete"}) {
+		t.Fatalf("partial metadata: %v", m)
+	}
 }
 
 func TestConversationRouteErrors(t *testing.T) {

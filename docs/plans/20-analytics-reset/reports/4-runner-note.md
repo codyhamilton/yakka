@@ -1,0 +1,7 @@
+# Phase 4 runner note
+
+- Unit `4-01` committed as `b9c9ca0`; its report had a `<commit>` placeholder, corrected here to the actual commit. The report accurately named missing numeric session filters, aggregate modes, and coverage fields.
+- Remediation `4-02` committed as `dd66a06`, implementing numeric `where`, bounded session aggregate stats, and pending/per-kind score coverage. Pricing, catalogue, and tool-kind revision identifiers are not represented by stable local sources; `/schema` reports null values with `revision_gaps` explanations. Session aggregate dimensions are not supported and are explicitly listed as empty.
+- The first independent 5,005-session scatter check failed because no-call sessions had no histogram bins. Fix `839d1de` creates the zero bin and preserves the whole-population denominator for token and cost marginals, including cost eligibility.
+- Runner-added HTTP fixture checks now prove single/multi/none repo values, unknown/mixed model behavior, lifetime provenance across two windows, no-call zero cost, all-unpriced null cost, numeric filtering and aggregate totals, time-grid alignment, exclusions, and legacy count reconciliation. Repeated sampled scatter requests produce identical rows; token/cost marginals sum to all 5,005 sessions.
+- `artifact_feedback` on all three briefs and all three unit reports returned delivered / screen pass (`jev-1.13.0`); no rubric flags. No external service was needed for these checks.

@@ -2,14 +2,72 @@ package store
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"database/sql/driver"
+	"encoding/hex"
 	"fmt"
-	"strings"
+	"modernc.org/sqlite"
 	"time"
 )
 
 // init registers the usage-measure executor 3-04 left nil.
-func init() { usageQuery = usageQueryImpl }
+func init() {
+	usageQuery = usageQueryImpl
+	sqlite.RegisterDeterministicScalarFunction("wf_session_hash", 1, func(_ *sqlite.FunctionContext, a []driver.Value) (driver.Value, error) {
+		v, _ := a[0].(string)
+		h := sha256.Sum256([]byte(v))
+		return hex.EncodeToString(h[:]), nil
+	})
+	sqlite.RegisterDeterministicScalarFunction("wf_usage_cost", 8, func(_ *sqlite.FunctionContext, a []driver.Value) (driver.Value, error) {
+		str := func(i int) string { v, _ := a[i].(string); return v }
+		integer := func(i int) int64 {
+			switch v := a[i].(type) {
+			case int64:
+				return v
+			case float64:
+				return int64(v)
+			}
+			return 0
+		}
+		var reported *float64
+		if v, ok := a[7].(float64); ok {
+			reported = &v
+		} else if v, ok := a[7].(int64); ok {
+			x := float64(v)
+			reported = &x
+		}
+		v, ok := Cost(str(0), str(1), Tokens{In: integer(2), Out: integer(3), CacheRead: integer(4), CacheWrite: integer(5), Reasoning: integer(6)}, reported)
+		if !ok {
+			return float64(0), nil
+		}
+		return v, nil
+	})
+	sqlite.RegisterDeterministicScalarFunction("wf_usage_priced", 8, func(_ *sqlite.FunctionContext, a []driver.Value) (driver.Value, error) {
+		str := func(i int) string { v, _ := a[i].(string); return v }
+		integer := func(i int) int64 {
+			switch v := a[i].(type) {
+			case int64:
+				return v
+			case float64:
+				return int64(v)
+			}
+			return 0
+		}
+		var reported *float64
+		if v, ok := a[7].(float64); ok {
+			reported = &v
+		} else if v, ok := a[7].(int64); ok {
+			x := float64(v)
+			reported = &x
+		}
+		_, ok := Cost(str(0), str(1), Tokens{In: integer(2), Out: integer(3), CacheRead: integer(4), CacheWrite: integer(5), Reasoning: integer(6)}, reported)
+		if ok {
+			return int64(1), nil
+		}
+		return int64(0), nil
+	})
+}
 
 // usageRowsWhere returns a "WITH usage_u AS (...), kept AS (...)" fragment selecting the
 // deduplicated usage calls (facts with type='hook_event' AND norm_event='usage') matching f,
@@ -103,6 +161,12 @@ func usageQueryImpl(ctx context.Context, t *Tenant, f AnalyticsFilter, p QueryPa
 			break
 		}
 	}
+	if bucket == "year" {
+		validBucket = true
+	}
+	if _, ok := multiYearStep(bucket); ok {
+		validBucket = true
+	}
 	if !validBucket {
 		return QueryResult{}, fmt.Errorf("unknown bucket %q", p.Bucket)
 	}
@@ -118,71 +182,36 @@ func usageQueryImpl(ctx context.Context, t *Tenant, f AnalyticsFilter, p QueryPa
 	if top > 100 {
 		top = 100
 	}
-	res := QueryResult{Measure: p.Measure, Bucket: bucket, Dims: append([]string{}, p.Dims...)}
 	f2, ignored := def.applyFilters(f)
-	res.Ignored = ignored
-	rows, err := t.usageKeptRows(ctx, f2)
+	where, args := def.whereClause(AnalyticsFilter{From: f2.From, To: f2.To})
+	cte, sourceArgs := usageRowsWhere(f2)
+	value := "count(*)"
+	switch p.Measure {
+	case "tokens_in":
+		value = "sum(tok_in)"
+	case "tokens_out":
+		value = "sum(tok_out)"
+	case "tokens_cache_read":
+		value = "sum(tok_cache_read)"
+	case "tokens_cache_write":
+		value = "sum(tok_cache_write)"
+	case "tokens_reasoning":
+		value = "sum(tok_reasoning)"
+	case "cost_usd":
+		value = "sum(wf_usage_cost(harness,model,tok_in,tok_out,tok_cache_read,tok_cache_write,tok_reasoning,cost_reported))"
+	case "unpriced_calls":
+		value = "sum(1-wf_usage_priced(harness,model,tok_in,tok_out,tok_cache_read,tok_cache_write,tok_reasoning,cost_reported))"
+	}
+	qdef := measureDef{table: "facts", value: value, dims: []string{"harness", "repo_id", "model", "conversation_id"}, sourceSQL: "(" + cte + " SELECT harness,repo_id,model,conversation_id,ts,tok_in,tok_out,tok_cache_read,tok_cache_write,tok_reasoning,cost_reported FROM kept)", sourceArgs: sourceArgs}
+	// The source CTE already applied the usage-specific filter and message dedupe. The outer time
+	// predicate is neutral, retaining queryMeasure's rank/fold/bucket SQL without materializing calls.
+	_ = where
+	_ = args
+	res, err := t.queryMeasure(ctx, AnalyticsFilter{From: f.From, To: f.To, TZ: f.TZ}, p, qdef, top, bucket)
 	if err != nil {
 		return QueryResult{}, err
 	}
-	val := func(r usageRow) float64 { return usageValue(p.Measure, r) }
-
-	tops := map[string][]string{}
-	for _, d := range p.Dims {
-		if d == "hour_of_day" || d == "weekday" {
-			continue
-		}
-		totals := map[string]float64{}
-		for _, r := range rows {
-			totals[r.dim(d)] += val(r)
-		}
-		tops[d] = rankKeys(totals, top)
-	}
-
-	loc := f.TZ
-	if loc == nil {
-		loc = time.UTC
-	}
-	type usageGroup struct {
-		t string
-		k []string
-		v float64
-	}
-	groups := map[string]*usageGroup{}
-	var order []string
-	for _, r := range rows {
-		kv := make([]string, len(p.Dims))
-		for i, d := range p.Dims {
-			switch d {
-			case "hour_of_day":
-				kv[i] = localKey(usageHourKey(r.ts), loc, "hour_of_day")
-			case "weekday":
-				kv[i] = localKey(usageHourKey(r.ts), loc, "weekday")
-			default:
-				kv[i] = foldUsageDim(r.dim(d), tops[d])
-			}
-		}
-		tv := usageBucketKey(r.ts, loc, bucket)
-		gk := tv + "\x00" + strings.Join(kv, "\x00")
-		g := groups[gk]
-		if g == nil {
-			g = &usageGroup{t: tv, k: kv}
-			groups[gk] = g
-			order = append(order, gk)
-		}
-		g.v += val(r)
-	}
-	out := make([]QueryRow, 0, len(order))
-	for _, gk := range order {
-		g := groups[gk]
-		out = append(out, QueryRow{T: g.t, K: g.k, V: g.v})
-	}
-	sortRows(out)
-	if len(out) > queryRowCap {
-		out = out[:queryRowCap]
-		res.Truncated = true
-	}
-	res.Rows = out
+	res.Ignored = ignored
 	return res, nil
 }
 
@@ -235,7 +264,15 @@ func usageBucketKey(sec float64, loc *time.Location, bucket string) string {
 			return mon.Format("2006-01-02") + "T00:00:00Z"
 		case "month":
 			return fmt.Sprintf("%04d-%02d-01T00:00:00Z", y, int(m))
+		case "year":
+			return fmt.Sprintf("%04d-01-01T00:00:00Z", y)
 		}
+	}
+	if bucket == "year" {
+		return localBucket(usageHourKey(sec), loc, bucket)
+	}
+	if _, ok := multiYearStep(bucket); ok {
+		return localBucket(usageHourKey(sec), loc, bucket)
 	}
 	return localBucket(usageHourKey(sec), loc, bucket)
 }

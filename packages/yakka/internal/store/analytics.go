@@ -14,6 +14,7 @@ import (
 	"math"
 	"path"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -30,6 +31,28 @@ func init() {
 	sqlite.RegisterDeterministicScalarFunction("wf_plan", 1, func(_ *sqlite.FunctionContext, args []driver.Value) (driver.Value, error) {
 		s, _ := args[0].(string)
 		return planOf(s), nil
+	})
+	sqlite.RegisterDeterministicScalarFunction("wf_series_bucket", 3, func(_ *sqlite.FunctionContext, args []driver.Value) (driver.Value, error) {
+		seconds, ok := args[0].(float64)
+		if !ok {
+			return nil, fmt.Errorf("series timestamp is not numeric")
+		}
+		unit, _ := args[1].(string)
+		zone, _ := args[2].(string)
+		loc, err := time.LoadLocation(zone)
+		if err != nil {
+			return nil, err
+		}
+		t := time.Unix(0, int64(seconds*1e9)).In(loc)
+		switch unit {
+		case "day":
+			return t.Format("2006-01-02"), nil
+		case "week":
+			days := (int(t.Weekday()) + 6) % 7
+			return t.AddDate(0, 0, -days).Format("2006-01-02"), nil
+		default:
+			return nil, fmt.Errorf("unknown series bucket %q", unit)
+		}
 	})
 }
 
@@ -49,7 +72,15 @@ type AnalyticsFilter struct {
 	NormEvents, Events             []string
 	Tools, Models, Sources         []string
 	ConversationIDs                []string
+	Excludes                       map[string][]string
+	SessionRanges                  []SessionRange
 	TZ                             *time.Location // nil means UTC
+}
+
+// SessionRange is an inclusive numeric predicate over a session measure. Nil bounds are open.
+type SessionRange struct {
+	Measure string
+	Lo, Hi  *float64
 }
 
 type ToolCount struct {
@@ -87,7 +118,17 @@ type ConvRow struct {
 	HookEvents, ArtifactVersions, Commits int
 	ModelCalls, UnpricedCalls             int
 	TokensIn, TokensOut                   int
+	TokensCacheRead, TokensCacheWrite     int
+	TokensReasoning, DistinctContent      int
 	CostUSD                               float64
+}
+
+// SessionProvenance contains lifetime-derived lenses. Windowed measures remain in ConvRow.
+type SessionProvenance struct {
+	Repo, RepoAttribution, Model, Harness string
+	Repos, Harnesses                      []string
+	ModelShares                           map[string]float64
+	HarnessMixed                          bool
 }
 
 // ExecCursor is the keyset position in the executions order (ts desc, conversation_id, path, repo_id).
@@ -107,6 +148,19 @@ type ExploreRow struct {
 	TS                                                                                                                           float64
 	Harness, RepoID, Plan, Kind, Event, Tool, NormEvent, Model, Path, ConversationID, Source, SHA, ScreenVerdict, RejectionStage string
 	CostUSD                                                                                                                      *float64
+	Priced                                                                                                                       bool
+	PageKey                                                                                                                      string
+	PageNanos                                                                                                                    int64
+	PageType                                                                                                                     string
+}
+
+// ExploreCursor binds a traversal to the populations present on its first page.
+type ExploreCursor struct {
+	TS                 float64
+	NS                 int64
+	Type, Key          string
+	FactWatermark      int64
+	RejectionWatermark int64
 }
 
 func inList(expr string, vals []string, args *[]any) string {
@@ -135,6 +189,15 @@ func (f AnalyticsFilter) factWhere() (string, []any) {
 	w += inList("model", f.Models, &args)
 	w += inList("source", f.Sources, &args)
 	w += inList("conversation_id", f.ConversationIDs, &args)
+	for dim, values := range f.Excludes {
+		col := map[string]string{"repo_id": "repo_id", "harness": "harness", "kind": "kind", "plan": "plan", "norm_event": "norm_event", "event": "event", "tool": "tool", "model": "model", "source": "source", "conversation_id": "conversation_id"}[dim]
+		if col != "" && len(values) > 0 {
+			for _, v := range values {
+				args = append(args, v)
+			}
+			w += " AND " + col + " NOT IN (?" + strings.Repeat(",?", len(values)-1) + ")"
+		}
+	}
 	return w, args
 }
 
@@ -147,6 +210,12 @@ func (f AnalyticsFilter) rejWhere() (string, []any) {
 	w += inList("''", f.Harnesses, &args)
 	w += inList("wf_kind(path)", f.Kinds, &args)
 	w += inList("wf_plan(path)", f.Plans, &args)
+	if values := f.Excludes["stage"]; len(values) > 0 {
+		for _, v := range values {
+			args = append(args, v)
+		}
+		w += " AND stage NOT IN (?" + strings.Repeat(",?", len(values)-1) + ")"
+	}
 	return w, args
 }
 
@@ -418,12 +487,16 @@ func (t *Tenant) Summary(ctx context.Context, f AnalyticsFilter) (Summary, error
 // Series: see the brief for metric/bucket/group. The caller validates pairings; an unsupported
 // one is an error.
 func (t *Tenant) Series(ctx context.Context, f AnalyticsFilter, metric, bucket, group string) ([]SeriesPoint, error) {
+	zone := "UTC"
+	if f.TZ != nil {
+		zone = f.TZ.String()
+	}
 	bucketOf := func(ts string) (string, error) {
 		switch bucket {
 		case "day":
-			return `strftime('%Y-%m-%d', ` + ts + `, 'unixepoch')`, nil
-		case "week": // Monday of the ISO week, UTC
-			return `date(` + ts + `, 'unixepoch', 'weekday 0', '-6 days')`, nil
+			return `wf_series_bucket(` + ts + `, 'day', '` + strings.ReplaceAll(zone, "'", "''") + `')`, nil
+		case "week":
+			return `wf_series_bucket(` + ts + `, 'week', '` + strings.ReplaceAll(zone, "'", "''") + `')`, nil
 		}
 		return "", fmt.Errorf("store: unknown bucket %q", bucket)
 	}
@@ -513,6 +586,46 @@ func (t *Tenant) WindowScores(ctx context.Context, f AnalyticsFilter, kind strin
 			return nil, err
 		}
 		out[c] = append(out[c], r)
+	}
+	return out, rows.Err()
+}
+
+// ScoreObservation is one latest score over an eligible content hash, attached to its
+// canonical in-window artifact fact. File identity and score identity remain separate.
+type ScoreObservation struct {
+	Hash, Check, Scorer, RepoID, Path, ConversationID string
+	TS                                                float64
+	Score                                             float64
+}
+
+// WindowScoreObservations chooses the earliest eligible artifact fact for each hash before
+// joining the latest score row for each check. The order is part of the analytics contract.
+func (t *Tenant) WindowScoreObservations(ctx context.Context, f AnalyticsFilter, kind string) ([]ScoreObservation, error) {
+	f.Kinds = nil
+	w, args := f.factWhere()
+	args = append([]any{kind}, args...)
+	rows, err := t.rdb.QueryContext(ctx, `WITH eligible AS (
+		SELECT content_hash,ts,row_hash,repo_id,path,conversation_id,
+			ROW_NUMBER() OVER(PARTITION BY content_hash ORDER BY ts ASC,row_hash ASC,repo_id ASC,path ASC) rep
+		FROM facts WHERE type='artifact_version' AND content_hash!='' AND kind=? AND `+w+`
+	), latest AS (
+		SELECT content_hash,check_name,scorer,result,
+			ROW_NUMBER() OVER(PARTITION BY content_hash,check_name ORDER BY id DESC) rn FROM scores
+	)
+	SELECT e.content_hash,s.check_name,COALESCE(s.scorer,''),e.repo_id,e.path,COALESCE(e.conversation_id,''),e.ts,s.result
+	FROM eligible e JOIN latest s ON s.content_hash=e.content_hash AND s.rn=1
+	WHERE e.rep=1 ORDER BY s.check_name,e.content_hash`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []ScoreObservation
+	for rows.Next() {
+		var row ScoreObservation
+		if err := rows.Scan(&row.Hash, &row.Check, &row.Scorer, &row.RepoID, &row.Path, &row.ConversationID, &row.TS, &row.Score); err != nil {
+			return nil, err
+		}
+		out = append(out, row)
 	}
 	return out, rows.Err()
 }
@@ -776,6 +889,7 @@ func (t *Tenant) ConversationsPage(ctx context.Context, f AnalyticsFilter, cur *
 		SUM(CASE WHEN type='hook_event' THEN 1 ELSE 0 END),
 		SUM(CASE WHEN type='artifact_version' THEN 1 ELSE 0 END),
 		SUM(CASE WHEN type='commit' THEN 1 ELSE 0 END),
+		COUNT(DISTINCT CASE WHEN type='artifact_version' THEN content_hash END),
 		group_concat(DISTINCT repo_id),
 		group_concat(DISTINCT CASE WHEN kind <> '' THEN kind END)
 	FROM facts WHERE ` + w + ` GROUP BY conversation_id`
@@ -795,7 +909,7 @@ func (t *Tenant) ConversationsPage(ctx context.Context, f AnalyticsFilter, cur *
 	for rows.Next() {
 		var r ConvRow
 		var repos, kinds sql.NullString
-		if err := rows.Scan(&r.ConversationID, &r.FirstTS, &r.LastTS, &r.HookEvents, &r.ArtifactVersions, &r.Commits, &repos, &kinds); err != nil {
+		if err := rows.Scan(&r.ConversationID, &r.FirstTS, &r.LastTS, &r.HookEvents, &r.ArtifactVersions, &r.Commits, &r.DistinctContent, &repos, &kinds); err != nil {
 			return nil, false, err
 		}
 		r.Repos = splitConcat(repos)
@@ -892,10 +1006,10 @@ func (t *Tenant) fillConvUsage(ctx context.Context, f AnalyticsFilter, out []Con
 		return err
 	}
 	type acc struct {
-		modelCalls, unpriced              int
-		tokensIn, tokensOut               int64
-		cost                              float64
-		models                            map[string]int
+		modelCalls, unpriced                                                    int
+		tokensIn, tokensOut, tokensCacheRead, tokensCacheWrite, tokensReasoning int64
+		cost                                                                    float64
+		models                                                                  map[string]int
 	}
 	m := map[string]*acc{}
 	for _, r := range kept {
@@ -907,6 +1021,9 @@ func (t *Tenant) fillConvUsage(ctx context.Context, f AnalyticsFilter, out []Con
 		a.modelCalls++
 		a.tokensIn += r.tokIn
 		a.tokensOut += r.tokOut
+		a.tokensCacheRead += r.tokCacheRead
+		a.tokensCacheWrite += r.tokCacheWrite
+		a.tokensReasoning += r.tokReasoning
 		usd, priced := Cost(r.harness, r.model, r.tokens(), r.costReported)
 		a.cost += usd
 		if !priced {
@@ -927,6 +1044,9 @@ func (t *Tenant) fillConvUsage(ctx context.Context, f AnalyticsFilter, out []Con
 		out[i].CostUSD = roundCost(a.cost)
 		out[i].TokensIn = int(a.tokensIn)
 		out[i].TokensOut = int(a.tokensOut)
+		out[i].TokensCacheRead = int(a.tokensCacheRead)
+		out[i].TokensCacheWrite = int(a.tokensCacheWrite)
+		out[i].TokensReasoning = int(a.tokensReasoning)
 	}
 	return nil
 }
@@ -948,25 +1068,63 @@ func exploreFactsQuery(where string) string {
 // facts precede rejections). It fetches at most limit+1 from each side, merging them in Go with the
 // same tie rule, and reports whether more than limit matched.
 func (t *Tenant) Explore(ctx context.Context, f AnalyticsFilter, limit int) ([]ExploreRow, bool, error) {
+	rows, more, _, err := t.ExplorePage(ctx, f, nil, limit)
+	return rows, more, err
+}
+
+// ExplorePage traverses facts and rejections by (ts desc, source type asc, source key asc).
+// The first page captures independent receive bounds so later pages cannot grow with late input.
+func (t *Tenant) ExplorePage(ctx context.Context, f AnalyticsFilter, cur *ExploreCursor, limit int) ([]ExploreRow, bool, *ExploreCursor, error) {
+	if limit < 1 {
+		return nil, false, nil, fmt.Errorf("explore limit must be positive")
+	}
+	if cur == nil {
+		cur = &ExploreCursor{}
+		if err := t.rdb.QueryRowContext(ctx, `SELECT COALESCE(MAX(received_at),0) FROM facts`).Scan(&cur.FactWatermark); err != nil {
+			return nil, false, nil, err
+		}
+		if err := t.rdb.QueryRowContext(ctx, `SELECT COALESCE(MAX(id),0) FROM rejections`).Scan(&cur.RejectionWatermark); err != nil {
+			return nil, false, nil, err
+		}
+	} else {
+		copy := *cur
+		cur = &copy
+	}
 	fw, fargs := f.factWhere()
 	rw, rargs := f.rejWhere()
 
-	frows, err := t.rdb.QueryContext(ctx, exploreFactsQuery(fw), append(fargs, limit+1)...)
+	fq := `SELECT type, ts, harness, repo_id, plan, kind, event,
+		CASE WHEN type='hook_event' THEN tool ELSE '' END AS tool,
+		norm_event, model, path, conversation_id, source, sha, content_hash,
+		tok_in, tok_out, tok_cache_read, tok_cache_write, tok_reasoning, cost_reported, row_hash
+	FROM facts WHERE ` + fw + ` AND received_at <= ?`
+	fargs = append(fargs, cur.FactWatermark)
+	if cur.Type != "" {
+		if cur.Type == "fact" {
+			fq += ` AND (ts < ? OR (ts = ? AND row_hash > ?))`
+			fargs = append(fargs, cur.TS, cur.TS, cur.Key)
+		} else {
+			fq += ` AND ts < ?`
+			fargs = append(fargs, cur.TS)
+		}
+	}
+	fq += ` ORDER BY ts DESC, row_hash ASC LIMIT ?`
+	frows, err := t.rdb.QueryContext(ctx, fq, append(fargs, limit+1)...)
 	if err != nil {
-		return nil, false, err
+		return nil, false, nil, err
 	}
 	defer frows.Close()
 	var facts []ExploreRow
 	var hashes []string
 	for frows.Next() {
 		var r ExploreRow
-		var contentHash string
+		var contentHash, rowHash string
 		var tokIn, tokOut, tokCR, tokCW, tokReas int64
 		var cost sql.NullFloat64
 		if err := frows.Scan(&r.Type, &r.TS, &r.Harness, &r.RepoID, &r.Plan, &r.Kind, &r.Event, &r.Tool,
 			&r.NormEvent, &r.Model, &r.Path, &r.ConversationID, &r.Source, &r.SHA, &contentHash,
-			&tokIn, &tokOut, &tokCR, &tokCW, &tokReas, &cost); err != nil {
-			return nil, false, err
+			&tokIn, &tokOut, &tokCR, &tokCW, &tokReas, &cost, &rowHash); err != nil {
+			return nil, false, nil, err
 		}
 		if r.Type == "hook_event" && r.NormEvent == "usage" {
 			var reported *float64
@@ -974,36 +1132,57 @@ func (t *Tenant) Explore(ctx context.Context, f AnalyticsFilter, limit int) ([]E
 				v := cost.Float64
 				reported = &v
 			}
-			usd, _ := Cost(r.Harness, r.Model, Tokens{In: tokIn, Out: tokOut, CacheRead: tokCR, CacheWrite: tokCW, Reasoning: tokReas}, reported)
+			usd, priced := Cost(r.Harness, r.Model, Tokens{In: tokIn, Out: tokOut, CacheRead: tokCR, CacheWrite: tokCW, Reasoning: tokReas}, reported)
 			r.CostUSD = &usd
+			r.Priced = priced
 		}
 		facts = append(facts, r)
 		hashes = append(hashes, contentHash)
+		r.PageKey = rowHash
+		r.PageType = "fact"
+		facts[len(facts)-1] = r
 	}
 	if err := frows.Err(); err != nil {
-		return nil, false, err
+		return nil, false, nil, err
 	}
 
-	rrows, err := t.rdb.QueryContext(ctx, `
-		SELECT at, wf_plan(path), wf_kind(path), path, conversation_id, stage
-		FROM rejections WHERE `+rw+`
-		ORDER BY at DESC, id ASC LIMIT ?`, append(rargs, limit+1)...)
+	rq := `SELECT at, wf_plan(path), wf_kind(path), path, conversation_id, stage, id
+		FROM rejections WHERE ` + rw + ` AND id <= ?`
+	rargs = append(rargs, cur.RejectionWatermark)
+	if cur.Type != "" {
+		if cur.Type == "rejection" {
+			id, _ := strconv.ParseInt(cur.Key, 10, 64)
+			rq += ` AND (at < ? OR (at = ? AND id > ?))`
+			rargs = append(rargs, cur.NS, cur.NS, id)
+		} else if cur.Type == "fact" {
+			rq += ` AND at <= ?`
+			rargs = append(rargs, cur.NS)
+		} else {
+			rq += ` AND at < ?`
+			rargs = append(rargs, int64(cur.TS*1e9))
+		}
+	}
+	rq += ` ORDER BY at DESC, id ASC LIMIT ?`
+	rrows, err := t.rdb.QueryContext(ctx, rq, append(rargs, limit+1)...)
 	if err != nil {
-		return nil, false, err
+		return nil, false, nil, err
 	}
 	defer rrows.Close()
 	var rejs []ExploreRow
 	for rrows.Next() {
-		var at int64
+		var at, id int64
 		r := ExploreRow{Type: "rejection"}
-		if err := rrows.Scan(&at, &r.Plan, &r.Kind, &r.Path, &r.ConversationID, &r.RejectionStage); err != nil {
-			return nil, false, err
+		if err := rrows.Scan(&at, &r.Plan, &r.Kind, &r.Path, &r.ConversationID, &r.RejectionStage, &id); err != nil {
+			return nil, false, nil, err
 		}
 		r.TS = float64(at) / 1e9
+		r.PageKey = strconv.FormatInt(id, 10)
+		r.PageNanos = at
+		r.PageType = "rejection"
 		rejs = append(rejs, r)
 	}
 	if err := rrows.Err(); err != nil {
-		return nil, false, err
+		return nil, false, nil, err
 	}
 
 	page := make([]ExploreRow, 0, limit+1)
@@ -1021,13 +1200,23 @@ func (t *Tenant) Explore(ctx context.Context, f AnalyticsFilter, limit int) ([]E
 		}
 	}
 	if err := t.fillVerdicts(ctx, pageHashes, page); err != nil {
-		return nil, false, err
+		return nil, false, nil, err
 	}
 	truncated := len(page) > limit
 	if truncated {
 		page = page[:limit]
 	}
-	return page, truncated, nil
+	if truncated {
+		last := page[len(page)-1]
+		ns := last.PageNanos
+		if last.PageType == "fact" {
+			ns = int64(math.Round(last.TS * 1e9))
+		}
+		cur.TS, cur.NS, cur.Type, cur.Key = last.TS, ns, last.PageType, last.PageKey
+	} else {
+		cur = nil
+	}
+	return page, truncated, cur, nil
 }
 
 // fillVerdicts sets each page row's ScreenVerdict to the latest screen (by id) for its content

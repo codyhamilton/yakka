@@ -66,6 +66,19 @@ func Measures() []MeasureSpec {
 
 var Buckets = []string{"none", "hour", "day", "week", "month"}
 
+// multiYearStep recognizes the private storage spelling used by the range planner. It is not
+// added to Buckets because that list is the legacy /schema vocabulary.
+func multiYearStep(bucket string) (int, bool) {
+	if !strings.HasPrefix(bucket, "year:") {
+		return 0, false
+	}
+	n, err := strconv.Atoi(strings.TrimPrefix(bucket, "year:"))
+	if err != nil || n < 2 {
+		return 0, false
+	}
+	return n, true
+}
+
 type QueryParams struct {
 	Measure string
 	Dims    []string
@@ -103,6 +116,8 @@ type measureDef struct {
 	rollup     string   // hourly rollup table read for whole interior hours; "" reads table alone
 	rollupCols []string // base/rollup columns the union exposes beside the time column
 	rollupType string   // constant exposed as `type` when the outer WHERE filters on it; "" otherwise
+	sourceSQL  string
+	sourceArgs []any
 }
 
 var factColumns = map[string]string{
@@ -190,6 +205,9 @@ func (d measureDef) aggSQL() string {
 // counting rollup sums w, a distinct rollup counts DISTINCT over the union. Other measures read
 // their table.
 func (d measureDef) source(f AnalyticsFilter) string {
+	if d.sourceSQL != "" {
+		return d.sourceSQL
+	}
 	if d.rollup == "" {
 		return d.table
 	}
@@ -256,6 +274,12 @@ func (t *Tenant) Query(ctx context.Context, f AnalyticsFilter, p QueryParams) (Q
 			break
 		}
 	}
+	if bucket == "year" {
+		validBucket = true
+	}
+	if _, ok := multiYearStep(bucket); ok {
+		validBucket = true
+	}
 	if !validBucket {
 		return QueryResult{}, fmt.Errorf("unknown bucket %q", p.Bucket)
 	}
@@ -279,6 +303,7 @@ func (t *Tenant) queryMeasure(ctx context.Context, f AnalyticsFilter, p QueryPar
 	f2, ignored := def.applyFilters(f)
 	res.Ignored = ignored
 	where, args := def.whereClause(f2)
+	args = append(append([]any{}, def.sourceArgs...), args...)
 	src := def.source(f2)
 	loc := f.TZ
 	if loc == nil {
@@ -333,6 +358,16 @@ func (d measureDef) applyFilters(f AnalyticsFilter) (AnalyticsFilter, []string) 
 	f2.Models = keepFilter(f.Models, applied["model"], "model", &ignored)
 	f2.Sources = keepFilter(f.Sources, applied["source"], "source", &ignored)
 	f2.ConversationIDs = keepFilter(f.ConversationIDs, applied["conversation_id"], "conversation_id", &ignored)
+	if len(f.Excludes) > 0 {
+		f2.Excludes = make(map[string][]string, len(f.Excludes))
+		for dim, values := range f.Excludes {
+			if applied[dim] || (dim == "stage" && d.table == "rejections") {
+				f2.Excludes[dim] = values
+			} else {
+				ignored = append(ignored, dim)
+			}
+		}
+	}
 	sort.Strings(ignored)
 	return f2, ignored
 }
@@ -619,6 +654,11 @@ func bucketExprSQL(def measureDef, bucket string) string {
 		return "date(" + te + ", 'unixepoch', 'weekday 0', '-6 days') || 'T00:00:00Z'"
 	case "month":
 		return "strftime('%Y-%m-01T00:00:00', " + te + ", 'unixepoch') || 'Z'"
+	case "year":
+		return "strftime('%Y-01-01T00:00:00', " + te + ", 'unixepoch') || 'Z'"
+	}
+	if n, ok := multiYearStep(bucket); ok {
+		return "printf('%04d-01-01T00:00:00Z',(CAST(strftime('%Y'," + te + ", 'unixepoch') AS INTEGER)/" + strconv.Itoa(n) + ")*" + strconv.Itoa(n) + ")"
 	}
 	return "''"
 }
@@ -653,6 +693,11 @@ func localBucket(h string, loc *time.Location, bucket string) string {
 		return mon.Format(time.RFC3339)
 	case "month":
 		return time.Date(y, m, 1, 0, 0, 0, 0, loc).Format(time.RFC3339)
+	case "year":
+		return time.Date(y, 1, 1, 0, 0, 0, 0, loc).Format(time.RFC3339)
+	}
+	if n, ok := multiYearStep(bucket); ok {
+		return time.Date((y/n)*n, 1, 1, 0, 0, 0, 0, loc).Format(time.RFC3339)
 	}
 	return ""
 }

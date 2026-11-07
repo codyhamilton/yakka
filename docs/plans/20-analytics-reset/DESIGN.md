@@ -476,6 +476,14 @@ The count/order is fixed at this headless checkpoint: 13 outcome phases. Phase 1
 - Approach: open (generating the deterministic multi-year fixture ledger through the store with bodies and scores).
 - Depends on: nothing.
 
+**Units**
+
+| Unit | Brief | Depends on | May run alongside |
+|---|---|---|---|
+| Deterministic fixture ledger | [1-01-fixture-ledger](briefs/1-01-fixture-ledger.md) | Nothing | Framework-free shell |
+| Framework-free shell | [1-02-framework-free-shell](briefs/1-02-framework-free-shell.md) | Nothing | Deterministic fixture ledger |
+| Release and embedded serving | [1-03-release-and-serving](briefs/1-03-release-and-serving.md) | Deterministic fixture ledger; Framework-free shell | Nothing |
+
 ### Phase 2 — Identity flows
 
 - Outcome: On the Pages-faithful identity rig, a signed-out deep link signs in through the callback and returns to its safe original path; a denied/failed/redirected callback stays with its error. Device approval preserves and normalises the code, presents the host, approves or denies with exactly the current server fields and shows failures verbatim. Profile tenant/token operations, no-tenant recovery, bearer Settings and sign-out follow the preserved contract. The one-time issued token is absent from storage/URLs/reload; credential and secret checks pass.
@@ -490,6 +498,21 @@ The count/order is fixed at this headless checkpoint: 13 outcome phases. Phase 1
 - Approach: open (SQL aggregation, a day-grain rollup, or both, and how cancellation reaches the driver).
 - Depends on: Phase 1 (the fixture generator).
 
+**Units**
+
+| Unit | Brief | Depends on | May run alongside |
+|---|---|---|---|
+| Range resolution and budget responses | [3-01-range-resolution](briefs/3-01-range-resolution.md) | Nothing | Nothing |
+| Bounded aggregate storage reads | [3-02-bounded-aggregation](briefs/3-02-bounded-aggregation.md) | 3-01 | Nothing |
+| Paged reads and honest coverage | [3-03-paged-reads-and-coverage](briefs/3-03-paged-reads-and-coverage.md) | 3-01, 3-02 | Nothing |
+| Runtime bounds and benchmark | [3-04-runtime-bounds-and-benchmark](briefs/3-04-runtime-bounds-and-benchmark.md) | 3-01, 3-02, 3-03 | Nothing |
+
+**Carried from Phase 2**
+
+- Reuse the 32,767-hash fixture once per setup: absorbed into 3-02.
+- Playwright identity-flow acceptance: bounced from Phase 3; it verifies Phase 2 UI behavior and does not bear on Phase 3 server outcomes.
+- External Pages output-directory check: bounced from Phase 3 to release readiness; it is not a Phase 3 server dependency.
+
 ### Phase 4 — Capability schema and session grain
 
 - Outcome: The schema advertises exactly the implemented session/time/entity modes, budgets, lens/null/time rules and typed coverage; later-phase capabilities remain absent. On the fixture, session repo/model/harness provenance is stable across window changes, unknown/mixed/multi groups are explicit, additive sums reconcile, and null/lower-bound/no-call money differs correctly. Session rows page and sort by every supported measure; legacy counts agree on matching eligibility, with documented lifetime-derived lens differences exposed. Numeric predicates, deterministic scatter samples, whole-population marginals, time-grain shared bucket grids and session aggregates match fixture populations. Exclusions work server-side. Existing response fields and defaults retain their legacy meaning, permitting the documented additive metadata and corrections.
@@ -503,6 +526,19 @@ The count/order is fixed at this headless checkpoint: 13 outcome phases. Phase 1
 - Surfaces: new routes in `packages/yakka/internal/serve/`, store artifact read paths (`store/store.go`, `store/reads.go`, `store/score_series.go`), tests, `docs/design/03-remote-service.md` and CONTRACTS.md 7.
 - Approach: known (reads of existing tables; the observation/partition rules are fixed in CONTRACTS.md 17.3).
 - Depends on: Phase 4.
+
+#### Units
+
+| Unit | Brief | Depends on | Runs alongside |
+|---|---|---|---|
+| 5-01 Artifact identity, history and observations | [briefs/5-01-artifact-entities.md](briefs/5-01-artifact-entities.md) | Phases 1–4 | Nothing; establishes artifact observation semantics for 5-02. |
+| 5-02 Hash-weighted scores by lens | [briefs/5-02-scores-by-lens.md](briefs/5-02-scores-by-lens.md) | 5-01 | Nothing; shares score/read and schema surfaces with adjacent units. |
+| 5-03 Bounded artifact content reads | [briefs/5-03-artifact-content.md](briefs/5-03-artifact-content.md) | 5-02 | Nothing; route registration and capability schema are already established. |
+| 5-04 Artifact schema, score bands and writing-session measures | [briefs/5-04-artifact-schema-and-bands.md](briefs/5-04-artifact-schema-and-bands.md) | 5-01, 5-02, 5-03 | Nothing; closes capability publication and artifact-row integration after the routes land. |
+
+Phase 4 carried items were reviewed. Null revision identifiers remain valid under CONTRACTS.md 17.2; stable local identifiers do not exist, and Phase 5 does not add a source or alter that contract. Session aggregate dimensions remain unsupported and are outside Phase 5's artifact/content contracts. Both remain documented Phase 4 limitations; no Phase 5 work is authorized to change them.
+
+Refinement verdict: **Proceed**, three sequential units. The fixture ledger and existing schema, artifact, score and blob paths are available locally; no live service, production ledger or credential is needed. No additional orchestrator decision is required.
 
 ### Phase 6 — Plan and execution entities and the cohort predicate
 

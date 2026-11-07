@@ -107,7 +107,7 @@ endpoints. Unknown fields in a fact are kept in its raw payload, never rejected.
 | `GET /v1/health` | none | liveness, version, pending count, screen gaps, `compaction` (`complete` or `required`) |
 | `POST /v1/ingest` | local: none; remote: bearer `read_write` | a batch of facts from a drain |
 | advisory reads (`/v1/artifacts`, `/v1/checks`, `/v1/baselines`, `/v1/search`) | local: none; remote: bearer `read` or `read_write`, or session with `?tenant=` for an owned tenant | defined by [design 4](04-advisory-surface.md#api) |
-| analytics reads (`/v1/analytics/*`) | same as advisory reads | defined by [design 7](07-analytics-site.md#analytics-reads) |
+| analytics reads (`/v1/analytics/*`) | same as advisory reads | defined by [design 7](07-analytics-site.md#analytics-reads); artifact content is read only from exact tenant-local design, brief and report versions, with full hash verification and a schema-advertised byte budget |
 | `GET /v1/whoami` | bearer only (local: none) | the tenant, scope and `expires_at` (Unix seconds, 0 for none) a bearer token resolves to; no cookie, never opens the tenant. `yakka sync` calls it before sending to check the target tenant and `read_write` scope. A 404 means a collector too old to be a sync target |
 | `GET /v1/me` | session | signed-in GitHub identity and owned tenants (collector dashboard) |
 | `POST /v1/tenants`, `POST /v1/tokens`, `GET /v1/tokens`, `POST /v1/tokens/<id>/revoke` | session (tenant owner) | create tenant; issue, list, or revoke tokens; plaintext `token` only in the `POST /v1/tokens` response |
@@ -129,6 +129,17 @@ screen failures but offers no retry, because content that fails five times is de
 Outside `/v1`, a binary with the site embedded serves it at `/`. The production Fly image does not
 embed the site, so those paths are `analytics bundle not embedded`. Browsers follow the CORS rules
 in [design 7](07-analytics-site.md#browser-access). `/v1` paths are never HTML.
+
+### Analytics ranges and output budgets
+
+Analytics time windows are inclusive RFC3339 intervals and have no product reporting-window maximum.
+`all=1` starts early enough to include pre-epoch ledger facts. The retained representability boundary is
+the signed `UnixNano` interval, 1677-09-21T00:12:43.145224192Z through
+2262-04-11T23:47:16.854775807Z; a request outside it returns `time_out_of_range`. Time series may use
+`bucket=auto`, which preserves the requested dates while selecting calendar resolution. Explicit output
+budgets return machine-readable `too_many_cells` or `too_many_series` errors with suggestions instead of
+silently dropping the newest buckets. The complete range, resolution, paging and runtime contract is
+maintained in [Plan 20, section 17.1](../plans/20-analytics-reset/CONTRACTS.md#171-range-resolution-and-budgets).
 
 ### Ingest
 
@@ -242,6 +253,45 @@ Derived views (execution, gaps, moves) are never built on the ingest path. The e
 read: `/v1/analytics/executions` computes it per brief from `facts` at request time
 ([design 7](07-analytics-site.md#routes), following design 1). Any other derived view belongs to
 design 4 and the lab.
+
+### Analytics capability discovery and entities
+
+`GET /v1/analytics/schema` is the analytics capability inventory. The measure matrix and legacy
+bucket vocabulary remain stable; additive metadata publishes the active budgets, time resolutions,
+supported grains, lens provenance and tenant coverage. The server advertises only capabilities it
+serves. Phase 4 exposes session and time entities through
+`GET /v1/analytics/entities?grain=session|time`; Plan 20 Phase 5 exposes artifact entities
+and bounded artifact content through `GET /v1/analytics/content?repo_id=&path=&hash=`. Content reads
+require the exact tenant-local version identity, return complete bytes only after SHA-256 checking,
+and distinguish screened-pass from explicit unscreened content in `X-Yakka-Screen-Verdict`. Later
+plan, execution, activity, cohort, action and review capabilities remain absent until their phases
+are implemented.
+
+Artifact rows use `(repo_id,path)` identities, with in-window membership and lifetime latest
+versions selected by receive time. Their schema entry lists the implemented measures, per-kind
+checks, single-valued lenses, modes, statistics, limits and the bounded versions collection.
+Scorer and `band:<check>` lenses require a selected check. Bands compare the selected version's
+latest score with the all-time distinct-content baseline for its kind, check and that score's
+scorer; values below p25 are low, values above p75 are high, and both boundaries belong to mid.
+Unscored and baseline-unavailable states remain separate. Per-check scorer metadata remains
+independent. Rubric revisions were not captured, so scorer equality does not establish unchanged
+rubrics. Artifact bucket grouping remains unsupported and unadvertised because no file timestamp
+assignment is defined for versions spanning buckets.
+
+Selected-version writing-session measures count only session facts inside the requested window;
+artifact repo/kind/path filters do not remove the joined session's calls. No calls means zero cost,
+all unpriced calls mean null cost, and partial pricing carries a lower-bound flag and unpriced
+call count. These measures may overlap across files and are not offered as additive sums.
+Harness and session-model filters run after lifetime writer selection, so filtering cannot reassign
+captured provenance. Content access remains an independently advertised capability.
+
+Session rows are keyed by `conversation_id`. Measures use the requested event-time window, while
+`session_repo`, `session_model`, and harness provenance are derived over the session lifetime so a
+window change does not reassign provenance. Repository provenance uses artifact and commit facts,
+model provenance uses deduplicated usage calls with an 80 percent dominance threshold, and harness
+provenance is the lexical-tie-broken mode. Shared `exclude=<dimension>:<value>` filters are applied
+by the store before aggregation. Details and the exact response contract are maintained in
+Plan 20's `CONTRACTS.md` sections 7 and 17.2–17.3.
 
 ### Behind an interface
 
