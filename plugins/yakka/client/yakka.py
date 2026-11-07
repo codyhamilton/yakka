@@ -8,6 +8,7 @@ import calendar
 import fcntl
 import hashlib
 import http.client
+import ipaddress
 import json
 import os
 import random
@@ -21,6 +22,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from queue import Empty, Queue
 from typing import Any, Callable, List, Optional, Tuple
@@ -1839,15 +1841,9 @@ def RunStandalone(ctx: DrainContext, stderr: Any) -> int:
 
 # --- mcp ---
 
-_MCP_VERSIONS = frozenset(
-    {"2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"}
-)
-_MCP_INSTRUCTIONS = (
-    "Read-only advice on design, brief and report files: delivery state and "
-    "scores for a file, the checks a kind is scored against, and similar past "
-    "artifacts."
-)
-_MCP_FIX_LINE = "Fix: rewrite the file; the new write is the repair."
+_MCP_MAX_BODY = 8 << 20
+_MCP_WORKERS = 8
+_MCP_CANCEL = "notifications/cancelled"
 
 
 @dataclass
@@ -1862,642 +1858,350 @@ class McpOptions:
     def defaults(self) -> None:
         if not self.QueueDir:
             self.QueueDir = QueueDir()
-        if self.Wait == 0:
-            self.Wait = 1.5
-        if self.StartDrain is None:
-            self.StartDrain = _mcp_start_drain
-        if self.Getwd is None:
-            self.Getwd = _mcp_getcwd
         if self.Cancelled is None:
             self.Cancelled = lambda: False
 
 
-def _mcp_getcwd() -> Tuple[str, Optional[BaseException]]:
+def _mcp_host(endpoint: str) -> str:
+    base = _request_base(endpoint)
+    if base is None:
+        return ""
     try:
-        return os.getcwd(), None
-    except OSError as err:
-        return "", err
-
-
-def _mcp_start_drain() -> Optional[BaseException]:
-    yakka_bin = os.environ.get("YAKKA_BIN", "")
-    if yakka_bin and os.access(yakka_bin, os.X_OK):
-        cmd = [yakka_bin, "drain"]
-    else:
-        script = os.path.abspath(__file__)
-        cmd = ["python3", script, "drain"]
-    try:
-        proc = subprocess.Popen(
-            cmd,
-            start_new_session=True,
-            close_fds=True,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-    except OSError as err:
-        return err
-    threading.Thread(target=proc.wait, daemon=True).start()
-    return None
-
-
-class _McpServer:
-    def __init__(self, o: McpOptions) -> None:
-        self.o = o
-
-    def _get(
-        self,
-        cfg: Config,
-        path: str,
-        q: dict[str, str],
-        timeout: float,
-    ) -> Tuple[int, bytes, Optional[BaseException]]:
-        base = _request_base(cfg.Endpoint)
-        if base is None:
-            return 0, b"", OSError("request failed")
-        params = urllib.parse.urlencode({k: v for k, v in q.items() if v})
-        u = base + path
-        if params:
-            u += "?" + params
-        req = urllib.request.Request(u, method="GET")
-        if cfg.Key:
-            header = _bearer_header(cfg.Key)
-            if header is None:
-                return 0, b"", OSError("request failed")
-            req.add_header("Authorization", header)
-        try:
-            resp = _urlopen(req, timeout=timeout)
-            try:
-                body = resp.read(8 << 20)
-                return resp.status, body, None
-            finally:
-                resp.close()
-        except urllib.error.HTTPError as err:
-            try:
-                body = err.read(8 << 20) if err.fp else b""
-            finally:
-                err.close()
-            return err.code, body, None
-        except (urllib.error.URLError, OSError, http.client.HTTPException, ValueError):
-            return 0, b"", OSError("request failed")
-
-    def _fetch(
-        self, path: str, q: dict[str, str], out: dict[str, Any]
-    ) -> str:
-        try:
-            cfg = Load()
-        except (ErrPartialEnv, OSError, ValueError) as err:
-            return _mcp_bad_config_text(err)
-        code, body, err = self._get(cfg, path, q, 3.0)
-        if err is not None or code >= 500:
-            return "service unreachable at " + _shown_endpoint(cfg.Endpoint)
-        if code != 200:
-            return (
-                f"service refused the request (HTTP {code}) at {_shown_endpoint(cfg.Endpoint)}"
-            )
-        try:
-            parsed = json.loads(body.decode())
-        except (json.JSONDecodeError, UnicodeDecodeError):
-            return "service at " + _shown_endpoint(cfg.Endpoint) + " returned an unreadable answer"
-        if not isinstance(parsed, dict):
-            return "service at " + _shown_endpoint(cfg.Endpoint) + " returned an unreadable answer"
-        out.update(parsed)
+        return urllib.parse.urlsplit(base).hostname or ""
+    except ValueError:
         return ""
 
-    def feedback(self, args: dict[str, Any]) -> Tuple[str, bool]:
-        p = args.get("path")
-        if not isinstance(p, str) or not p.strip():
-            return "path must be a non-empty string", True
-        abs_path = p
-        if not os.path.isabs(p):
-            wd, err = self.o.Getwd()
-            if err is not None:
-                return "cannot resolve the working directory", True
-            abs_path = os.path.join(wd, p)
-        abs_path = os.path.normpath(abs_path)
+
+def _mcp_error(kind: str, detail: str, host: str, ident: Any, queued: Optional[int] = None) -> bytes:
+    fixes = {
+        "bad config": "Check the shared login and endpoint configuration.",
+        "unreachable": "Check the network and try again.",
+        "unauthorized": "Log in again or check the key.",
+        "server unsupported": "Update the server to a version with MCP support.",
+        "timeout": "Retry; the request may have completed.",
+        "redirect refused": "Use the configured endpoint directly.",
+        "bad reply": "Update the server or retry the request.",
+    }
+    data: dict[str, Any] = {"code": kind.replace(" ", "_"), "host": host}
+    if queued is not None:
+        data["queued_locally"] = queued
+    value = {
+        "jsonrpc": "2.0",
+        "id": ident,
+        "error": {
+            "code": -32000,
+            "message": f"{kind}: {detail}. {fixes[kind]}",
+            "data": data,
+        },
+    }
+    return json.dumps(value, separators=(",", ":")).encode("utf-8") + b"\n"
+
+
+def _mcp_queued_count(queue_dir: str) -> int:
+    try:
+        return sum(1 for name in os.listdir(queue_dir) if name.endswith(".evt") and not name.startswith("."))
+    except OSError:
+        return 0
+
+
+def _mcp_parse(line: bytes) -> tuple[Optional[dict[str, Any]], Any, str]:
+    try:
+        value = json.loads(line)
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return None, None, ""
+    if not isinstance(value, dict):
+        return None, None, ""
+    return value, value.get("id"), value.get("method", "") if isinstance(value.get("method", ""), str) else ""
+
+
+def _mcp_response(raw: bytes) -> Optional[dict[str, Any]]:
+    try:
+        value = json.loads(raw)
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return None
+    if not isinstance(value, dict) or value.get("jsonrpc") != "2.0":
+        return None
+    if "id" not in value or ("result" in value) == ("error" in value):
+        return None
+    if "error" in value:
+        error = value["error"]
+        if (
+            not isinstance(error, dict)
+            or isinstance(error.get("code"), bool)
+            or not isinstance(error.get("code"), int)
+            or not isinstance(error.get("message"), str)
+        ):
+            return None
+    return value
+
+
+def _mcp_prepare_context(body: bytes, method: str, request: dict[str, Any], declaration: Any) -> bytes:
+    """Narrow seam for the declared-context unit; transport currently relays unchanged."""
+    return body
+
+
+class _McpRelay:
+    def __init__(self, opts: McpOptions) -> None:
+        self.opts = opts
+        self.declarations: dict[str, Any] = {}
+        self.declarations_lock = threading.Lock()
+        self.active: dict[str, Any] = {}
+        self.active_lock = threading.Lock()
+        self.stdout_lock = threading.Lock()
+        self.counter = 0
+
+    def _declaration(self, request: dict[str, Any]) -> Any:
+        params = request.get("params")
+        name = params.get("name") if isinstance(params, dict) else None
+        if not isinstance(name, str):
+            return None
+        with self.declarations_lock:
+            return self.declarations.get(name)
+
+    def _cache_list(self, response: dict[str, Any]) -> None:
+        result = response.get("result")
+        tools = result.get("tools") if isinstance(result, dict) else None
+        found: dict[str, Any] = {}
+        if isinstance(tools, list):
+            for item in tools:
+                if not isinstance(item, dict) or not isinstance(item.get("name"), str):
+                    continue
+                meta = item.get("_meta")
+                declaration = meta.get("yakka/tool") if isinstance(meta, dict) else None
+                if declaration is not None:
+                    found[item["name"]] = declaration
+        with self.declarations_lock:
+            self.declarations = found
+
+    def _refresh(self, timeout: float, cancelled: threading.Event, active_id: Any) -> None:
+        with self.stdout_lock:
+            self.counter += 1
+            ident = f"yakka-internal-{self.counter}"
+        request = json.dumps({"jsonrpc": "2.0", "id": ident, "method": "tools/list"}, separators=(",", ":")).encode()
+        status, raw, _, _ = self._post(request, timeout, cancelled, active_id)
+        response = _mcp_response(raw) if status is not None and status < 300 else None
+        if response is not None and "error" not in response:
+            self._cache_list(response)
+
+    def _endpoint(self, cfg: Config) -> tuple[str, str, int, bool]:
+        base = _request_base(cfg.Endpoint)
+        if base is None:
+            raise ValueError("invalid endpoint")
+        parts = urllib.parse.urlsplit(base)
+        if parts.path not in ("", "/"):
+            raise ValueError("endpoint must be an origin")
+        host = parts.hostname or ""
+        secure = parts.scheme == "https"
         try:
-            info = os.stat(abs_path)
-        except OSError:
-            return "path does not exist: " + abs_path, True
-        if not os.path.isfile(abs_path):
-            return "path is a directory, not a file: " + abs_path, True
-        try:
-            with open(abs_path, "rb") as f:
-                data = f.read()
-        except OSError:
-            return "cannot read " + abs_path, True
-        content_hash = ContentHash(data)
-        top, rel, in_repo, err = RepoPath(abs_path)
+            port = parts.port or (443 if secure else 80)
+        except ValueError as exc:
+            raise ValueError("invalid endpoint") from exc
+        if not secure:
+            try:
+                loopback = host.lower() == "localhost" or ipaddress.ip_address(host).is_loopback
+            except ValueError:
+                loopback = False
+            if not loopback and cfg.Key:
+                raise ValueError("cleartext endpoint is not loopback")
+        return host, parts.scheme, port, secure
 
-        def untracked(why: str) -> Tuple[str, bool]:
-            return (
-                "state: not tracked\npath: "
-                + abs_path
-                + "\n"
-                + why
-                + "; nothing is captured for this file",
-                False,
-            )
-
-        if err is not None or not in_repo:
-            return untracked("not inside a git repository")
-        if not Kind(rel):
-            return untracked("not a design, brief or report path")
-        repo, rid_err = RepoID(top)
-        if rid_err is not None:
-            return untracked("repository has no commit yet, so it has no repo_id")
-        head = f"path: {rel}\nrepo: {repo}\ncontent_hash: {content_hash}\n"
-
-        def state(st: str, *lines: str) -> Tuple[str, bool]:
-            body = "state: " + st + "\n" + head + "\n".join(lines)
-            return body, False
-
-        matcher = _McpMatcher(abs_path, rel, repo)
-        qdir = self.o.QueueDir
-        queued = matcher.scan(qdir)
+    def _post(self, body: bytes, timeout: float, cancelled: threading.Event, active_id: Any) -> tuple[Optional[int], bytes, str, str]:
         cfg: Optional[Config] = None
-        cfg_err: Optional[Exception] = None
+        host = ""
         try:
             cfg = Load()
+            host, scheme, port, secure = self._endpoint(cfg)
+            auth = _bearer_header(cfg.Key) if not cfg.Local else ""
+            if auth is None:
+                raise ValueError("invalid bearer header")
         except (ErrPartialEnv, OSError, ValueError) as exc:
-            cfg_err = exc
-        if queued and cfg_err is None:
-            if not Running(qdir):
-                drain_err = self.o.StartDrain()
-                if drain_err is not None:
-                    print(
-                        "yakka mcp: could not start the drain:",
-                        drain_err,
-                        file=sys.stderr,
-                    )
-        if queued and cfg_err is None and self.o.Wait > 0:
-            deadline = time.monotonic() + self.o.Wait
-            while queued and time.monotonic() < deadline:
-                if self.o.Cancelled():
-                    break
-                time.sleep(0.1)
-                queued = matcher.scan(qdir)
-        if queued:
-            why = "draining"
-            extra: List[str] = []
-            if cfg_err is not None:
-                why = "bad config (" + Path() + ")"
-            elif cfg is not None:
-                code, _, herr = self._get(cfg, "/v1/health", {}, 3.0)
-                if herr is not None or code >= 500:
-                    why = "remote unreachable"
-                    extra = ["service unreachable at " + _shown_endpoint(cfg.Endpoint)]
-            age_s = f"{int(round(time.time() - queued[0].mod))}s"
-            lines = [
-                f"{len(queued)} events for this file still queued, oldest {age_s}, {why}"
-            ]
-            return state("queued", *lines, *extra)
-        rej_lines: List[str] = []
-        superseded = False
-        rej_dir = os.path.join(qdir, "rejected")
-        for r in matcher.scan(rej_dir):
-            if r.mod < info.st_mtime:
-                superseded = True
-                continue
-            reason_path = os.path.join(rej_dir, r.name + ".reason")
-            rej_lines.extend(_mcp_reasons(reason_path))
-        if rej_lines:
-            return state("rejected", *rej_lines, _MCP_FIX_LINE)
-        note: List[str] = []
-        if superseded:
-            note = ["note: earlier rejection superseded by a later write"]
-        if cfg_err is not None:
-            return state("bad config", _mcp_bad_config_text(cfg_err), *note)
-        code, body, herr = self._get(
-            cfg,
-            "/v1/artifacts",
-            {"repo_id": repo, "path": rel},
-            3.0,
-        )
-        if herr is not None or code >= 500:
-            return state(
-                "not delivered",
-                "nothing queued or rejected locally",
-                "service unreachable at " + _shown_endpoint(cfg.Endpoint),
-                *note,
-            )
-        if code == 404:
-            return state(
-                "not delivered",
-                "the service has no version of this file and nothing is queued; "
-                "if it was just written, wait for the hook or rewrite the file",
-                *note,
-            )
-        if code != 200:
-            return state(
-                "not delivered",
-                f"service refused the request (HTTP {code}) at {_shown_endpoint(cfg.Endpoint)}",
-                *note,
-            )
+            return None, b"", "config:" + str(exc), host
+        if cancelled.is_set():
+            return None, b"", "cancelled", host
+        conn: Any = None
         try:
-            artifact = json.loads(body.decode())
-        except (json.JSONDecodeError, UnicodeDecodeError):
-            return state(
-                "not delivered",
-                "service at " + _shown_endpoint(cfg.Endpoint) + " returned an unreadable answer",
-            )
-        if not isinstance(artifact, dict):
-            return state(
-                "not delivered",
-                "service at " + _shown_endpoint(cfg.Endpoint) + " returned an unreadable answer",
-            )
-        latest = artifact.get("latest")
-        if latest is None:
-            latest = {}
-        elif not isinstance(latest, dict):
-            return state(
-                "not delivered",
-                "service at " + _shown_endpoint(cfg.Endpoint) + " returned an unreadable answer",
-            )
-        if latest.get("content_hash") != content_hash:
-            short = latest.get("content_hash", "")
-            if len(short) > 12:
-                short = short[:12]
-            return state(
-                "stale",
-                f"current content not yet delivered (service has {short} from "
-                f"{latest.get('received_at', '')}); normally a write still in the "
-                "batch window",
-                *note,
-            )
-        lines: List[str] = []
-        screen = latest.get("screen")
-        rejection = latest.get("rejection")
-        verdict = screen.get("verdict") if isinstance(screen, dict) else None
-        if verdict == "unscreened":
-            lines.append("screen: unscreened (no scorer on the service)")
-        elif verdict == "pass":
-            lines.append("screen: pass by " + str(screen.get("scorer", "")))
-        elif verdict:
-            lines.append("screen: " + str(verdict))
-        elif isinstance(rejection, dict) and rejection.get("stage") == "screen":
-            lines.append("screen: flagged: " + str(rejection.get("reason", "")))
-            lines.append(_MCP_FIX_LINE)
-        else:
-            lines.append("screen: awaiting screen")
-            if isinstance(rejection, dict) and rejection.get("stage"):
-                lines.append(
-                    f"rejection at {rejection['stage']}: {rejection.get('reason', '')}"
-                )
-        scores = latest.get("scores") or []
-        bl: dict[str, Any] = {}
-        if scores and cfg is not None:
-            c, b, berr = self._get(
-                cfg, "/v1/baselines", {"kind": Kind(rel)}, 3.0
-            )
-            if berr is not None or c != 200:
-                lines.append("baselines unavailable")
-            else:
-                try:
-                    bl = json.loads(b.decode())
-                except (json.JSONDecodeError, UnicodeDecodeError):
-                    lines.append("baselines unavailable")
-                    bl = {}
-        checks_bl = bl.get("checks") if isinstance(bl, dict) else {}
-        if not isinstance(checks_bl, dict):
-            checks_bl = {}
-        for sc in scores:
-            if not isinstance(sc, dict):
-                continue
-            check = sc.get("check", "")
-            score = sc.get("score", 0.0)
-            if isinstance(score, bool) or not isinstance(score, (int, float)):
-                return state(
-                    "not delivered",
-                    "service at " + _shown_endpoint(cfg.Endpoint) + " returned an unreadable answer",
-                )
-            b = checks_bl.get(check)
-            if not isinstance(b, dict):
-                lines.append(f"{check} {score:.2f} (no baseline)")
-                continue
-            try:
-                n = int(b.get("n", 0))
-                p25 = float(b.get("p25", 0))
-                median = float(b.get("median", 0))
-            except (TypeError, ValueError):
-                lines.append(f"{check} {score:.2f} (no baseline)")
-                continue
-            if n < 4:
-                lines.append(
-                    f"{check} {score:.2f} (baseline n={n}, too few to flag)"
-                )
-            else:
-                tag = " BELOW p25" if score < p25 else ""
-                lines.append(
-                    f"{check} {score:.2f} (baseline p25 {p25:.2f}, "
-                    f"median {median:.2f}, n {n}){tag}"
-                )
-        versions = artifact.get("versions", 0)
-        lines.append(f"versions: {versions}")
-        return state("delivered", *lines, *note)
-
-    def list_checks(self, args: dict[str, Any]) -> Tuple[str, bool]:
-        kind, bad = _mcp_kind_arg(args, True)
-        if bad:
-            return bad, True
-        out: dict[str, Any] = {}
-        msg = self._fetch("/v1/checks", {"kind": kind}, out)
-        if msg:
-            return msg, False
-        checks = out.get("checks") or []
-        loaded = out.get("loaded")
-        if (loaded is not None and not loaded) or not checks:
-            return "no checks loaded on the service", False
-        parts: List[str] = []
-        for c in checks:
-            if not isinstance(c, dict):
-                continue
-            levels = c.get("levels") or []
-            line = f"{c.get('name', '')} [levels {'/'.join(levels)}]"
-            if c.get("invert"):
-                line += " [inverted]"
-            line += f": {c.get('q', '')}"
-            parts.append(line)
-        return "\n".join(parts), False
-
-    def search(self, args: dict[str, Any]) -> Tuple[str, bool]:
-        q = args.get("query")
-        if not isinstance(q, str) or not q.strip():
-            return "query must be a non-empty string", True
-        kind, bad = _mcp_kind_arg(args, False)
-        if bad:
-            return bad, True
-        out: dict[str, Any] = {}
-        msg = self._fetch(
-            "/v1/search", {"q": q, "kind": kind, "limit": "10"}, out
-        )
-        if msg:
-            return msg, False
-        hits = out.get("hits") or []
-        if not hits:
-            return "no matches", False
-        parts: List[str] = []
-        for h in hits:
-            if not isinstance(h, dict):
-                continue
-            parts.append(
-                f"{h.get('kind', '')} {h.get('repo_id', '')}:"
-                f"{h.get('path', '')} (rank {h.get('rank', 0)})\n"
-                f"{h.get('snippet', '')}\n"
-            )
-        return "\n".join(parts).rstrip("\n"), False
-
-
-class _McpMatcher:
-    def __init__(self, abs_path: str, rel: str, repo: str) -> None:
-        self.abs = abs_path
-        self.rel = rel
-        self.repo = repo
-        self.cache: dict[str, Tuple[str, str]] = {}
-
-    def _key(self, p: str) -> Tuple[str, str]:
-        if p in self.cache:
-            return self.cache[p]
-        k = ("", "")
-        top, rel, in_repo, err = RepoPath(p)
-        if err is None and in_repo:
-            rid, rid_err = RepoID(top)
-            if rid_err is None:
-                k = (rid, rel)
-        self.cache[p] = k
-        return k
-
-    def scan(self, dir_path: str) -> List[_QueueEntry]:
-        try:
-            names = os.listdir(dir_path)
-        except OSError:
-            return []
-        out: List[_QueueEntry] = []
-        for n in names:
-            if n.startswith(".") or not n.endswith(".evt"):
-                continue
-            path = os.path.join(dir_path, n)
-            try:
-                st = os.stat(path)
-            except OSError:
-                continue
-            if not os.path.isfile(path):
-                continue
-            try:
-                with open(path, "rb") as f:
-                    raw = f.read()
-            except OSError:
-                continue
-            paths = WritePaths(raw)
-            if not paths:
-                continue
-            matched = False
-            for wp in paths:
-                if wp == self.abs:
-                    matched = True
-                    break
-                k = self._key(wp)
-                if k[0] == self.repo and k[1] == self.rel:
-                    matched = True
-                    break
-            if matched:
-                out.append(_QueueEntry(n, st.st_mtime))
-        out.sort(key=lambda x: x.mod)
-        return out
-
-
-def _mcp_reasons(path: str) -> List[str]:
-    try:
-        with open(path, encoding="utf-8") as f:
-            text = f.read()
-    except OSError:
-        return []
-    out: List[str] = []
-    for line in text.split("\n"):
-        line = line.strip()
-        if not line:
-            continue
-        if ": " in line:
-            _, line = line.split(": ", 1)
-        out.append(line)
-    return out
-
-
-def _mcp_bad_config_text(err: Exception) -> str:
-    return f"client config at {Path()} is unusable: {err}"
-
-
-def _mcp_kind_arg(args: dict[str, Any], required: bool) -> Tuple[str, str]:
-    if "kind" not in args and not required:
-        return "", ""
-    k = args.get("kind")
-    if k not in ("design", "brief", "report"):
-        return "", "kind must be one of design, brief, report"
-    return k, ""
-
-
-def _mcp_schema(props: dict[str, Any], *required: str) -> dict[str, Any]:
-    return {
-        "type": "object",
-        "properties": props,
-        "required": list(required),
-        "additionalProperties": False,
-    }
-
-
-_KIND_ENUM = {"type": "string", "enum": ["design", "brief", "report"]}
-
-_MCP_TOOL_LIST = [
-    {
-        "name": "artifact_feedback",
-        "description": (
-            "State of one design, brief or report file: queued, rejected (with the "
-            "reason), delivered (screen verdict, scores against the tenant baseline), "
-            "stale or not delivered."
-        ),
-        "inputSchema": _mcp_schema(
-            {
-                "path": {
-                    "type": "string",
-                    "description": (
-                        "path of the file, absolute or relative to the working directory"
-                    ),
-                }
-            },
-            "path",
-        ),
-        "annotations": {"readOnlyHint": True},
-    },
-    {
-        "name": "list_checks",
-        "description": "The checks a design, brief or report is scored against.",
-        "inputSchema": _mcp_schema({"kind": _KIND_ENUM}, "kind"),
-        "annotations": {"readOnlyHint": True},
-    },
-    {
-        "name": "search_artifacts",
-        "description": (
-            "Similar past designs, briefs and reports in this tenant, with path, "
-            "repo and a snippet."
-        ),
-        "inputSchema": _mcp_schema(
-            {"query": {"type": "string"}, "kind": _KIND_ENUM},
-            "query",
-        ),
-        "annotations": {"readOnlyHint": True},
-    },
-]
-
-
-def _mcp_fail(id_raw: Any, code: int, msg: str) -> dict[str, Any]:
-    return {
-        "jsonrpc": "2.0",
-        "id": id_raw,
-        "error": {"code": code, "message": msg},
-    }
-
-
-def _mcp_handle(server: _McpServer, line: bytes) -> Optional[dict[str, Any]]:
-    try:
-        v = json.loads(line)
-    except (json.JSONDecodeError, UnicodeDecodeError):
-        return _mcp_fail(None, -32700, "parse error")
-    if not isinstance(v, dict):
-        return _mcp_fail(None, -32600, "invalid request: expected a single JSON object")
-    rq_id = v.get("id")
-    method = v.get("method", "")
-    params = v.get("params")
-    if not method:
-        return _mcp_fail(rq_id, -32600, "invalid request")
-    if rq_id is None:
-        return None
-
-    def ok(res: Any) -> dict[str, Any]:
-        return {"jsonrpc": "2.0", "id": rq_id, "result": res}
-
-    if method == "initialize":
-        pv = "2025-11-25"
-        if isinstance(params, dict):
-            client_pv = params.get("protocolVersion", "")
-            if client_pv in _MCP_VERSIONS:
-                pv = client_pv
-        return ok(
-            {
-                "protocolVersion": pv,
-                "capabilities": {"tools": {"listChanged": False}},
-                "serverInfo": {"name": "yakka", "version": server.o.Version},
-                "instructions": _MCP_INSTRUCTIONS,
+            cls = http.client.HTTPSConnection if secure else http.client.HTTPConnection
+            conn = cls(host, port, timeout=timeout)
+            with self.active_lock:
+                self.active[str(active_id)] = conn
+            if cancelled.is_set():
+                conn.close()
+                return None, b"", "cancelled", host
+            headers = {
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+                "Yakka-Context": "1",
+                "User-Agent": "yakka-shim/" + (self.opts.Version or _plugin_version_text()),
             }
-        )
-    if method == "ping":
-        return ok({})
-    if method == "tools/list":
-        return ok({"tools": _MCP_TOOL_LIST})
-    if method == "tools/call":
-        if not isinstance(params, dict):
-            params = {}
-        name = params.get("name", "")
-        args_raw = params.get("arguments")
-        args: dict[str, Any] = {}
-        arg_err = ""
-        if args_raw is not None:
-            if not isinstance(args_raw, dict):
-                arg_err = "arguments must be an object"
-            else:
-                args = args_raw
-        if name not in ("artifact_feedback", "list_checks", "search_artifacts"):
-            return _mcp_fail(rq_id, -32602, "unknown tool")
-        if arg_err:
-            text, bad = arg_err, True
-        elif name == "artifact_feedback":
-            text, bad = server.feedback(args)
-        elif name == "list_checks":
-            text, bad = server.list_checks(args)
+            if auth:
+                headers["Authorization"] = auth
+            conn.request("POST", "/v1/mcp", body=body, headers=headers)
+            response = conn.getresponse()
+            raw = response.read(_MCP_MAX_BODY + 1)
+            status = response.status
+            if len(raw) > _MCP_MAX_BODY:
+                return status, raw, "oversize", host
+            if status in (504, 524):
+                return status, raw, "timeout", host
+            if 300 <= status < 400:
+                return status, raw, "redirect", host
+            return status, raw, "", host
+        except (TimeoutError, socket.timeout):
+            return None, b"", "timeout", host
+        except (OSError, http.client.HTTPException, ValueError):
+            return None, b"", "network", host
+        finally:
+            if conn is not None:
+                with self.active_lock:
+                    if self.active.get(str(active_id)) is conn:
+                        self.active.pop(str(active_id), None)
+                conn.close()
+
+    def _timeout(self, method: str, declaration: Any) -> float:
+        if method != "tools/call":
+            return 10.0
+        seconds = declaration.get("timeout_s", 5) if isinstance(declaration, dict) else 5
+        if isinstance(seconds, bool) or not isinstance(seconds, (int, float)) or seconds <= 0:
+            seconds = 5
+        return min(float(seconds), 300.0) + 5.0
+
+    def _dispatch(self, body: bytes, request: Optional[dict[str, Any]], ident: Any, method: str, expects_reply: bool, cancelled: threading.Event) -> None:
+        host = ""
+        declaration = self._declaration(request or {}) if method == "tools/call" else None
+        timeout = self._timeout(method, declaration)
+        if method == "tools/call" and declaration is None:
+            self._refresh(10.0, cancelled, ident)
+            declaration = self._declaration(request or {})
+        outbound = _mcp_prepare_context(body, method, request or {}, declaration)
+        status, raw, problem, host = self._post(outbound, timeout, cancelled, ident)
+        if cancelled.is_set() or not expects_reply:
+            return
+        if problem == "timeout":
+            reply = _mcp_error("timeout", "the server did not reply in time", host, ident)
+        elif problem == "redirect":
+            reply = _mcp_error("redirect refused", "the endpoint redirected the request", host, ident)
+        elif problem == "oversize":
+            reply = _mcp_error("bad reply", "the response exceeded 8 MiB", host, ident)
+        elif problem.startswith("config:"):
+            reply = _mcp_error("bad config", "login or endpoint configuration is unusable", host, ident)
+        elif problem or status is None:
+            reply = _mcp_error("unreachable", "the configured server could not be reached", host, ident, _mcp_queued_count(self.opts.QueueDir))
         else:
-            text, bad = server.search(args)
-        return ok(
-            {
-                "content": [{"type": "text", "text": text}],
-                "isError": bad,
-            }
-        )
-    return _mcp_fail(rq_id, -32601, "method not found: " + method)
+            response = _mcp_response(raw)
+            if response is not None:
+                if method == "tools/list" and "error" not in response:
+                    self._cache_list(response)
+                error = response.get("error")
+                stale = isinstance(error, dict) and error.get("code") == -32010
+                if stale and method == "tools/call" and not cancelled.is_set():
+                    self._refresh(10.0, cancelled, ident)
+                    outbound = _mcp_prepare_context(body, method, request or {}, self._declaration(request or {}))
+                    status, raw, problem, host = self._post(outbound, timeout, cancelled, ident)
+                    response = _mcp_response(raw) if not problem and status is not None else None
+                    if problem == "timeout":
+                        reply = _mcp_error("timeout", "the server did not reply in time", host, ident)
+                    elif problem == "redirect":
+                        reply = _mcp_error("redirect refused", "the endpoint redirected the request", host, ident)
+                    elif problem or status is None:
+                        reply = _mcp_error("unreachable", "the configured server could not be reached", host, ident, _mcp_queued_count(self.opts.QueueDir))
+                    elif response is not None:
+                        reply = raw + b"\n"
+                    elif status == 401:
+                        reply = _mcp_error("unauthorized", "the server rejected the credential", host, ident)
+                    elif status in (404, 405):
+                        reply = _mcp_error("server unsupported", "the server does not support this endpoint", host, ident)
+                    elif status >= 500:
+                        reply = _mcp_error("unreachable", "the configured server returned an HTTP error", host, ident, _mcp_queued_count(self.opts.QueueDir))
+                    else:
+                        reply = _mcp_error("bad reply", "the retry returned a non-JSON-RPC response", host, ident)
+                else:
+                    reply = raw + b"\n"
+            elif status == 401:
+                reply = _mcp_error("unauthorized", "the server rejected the credential", host, ident)
+            elif status in (404, 405):
+                reply = _mcp_error("server unsupported", "the server does not support this endpoint", host, ident)
+            elif response is None:
+                if status >= 500:
+                    reply = _mcp_error("unreachable", "the configured server returned an HTTP error", host, ident, _mcp_queued_count(self.opts.QueueDir))
+                else:
+                    reply = _mcp_error("bad reply", "the server returned a non-JSON-RPC response", host, ident)
+        if not cancelled.is_set():
+            with self.stdout_lock:
+                self._write(reply)
+
+    def _write(self, reply: bytes) -> None:
+        # Serve installs its output stream here so each complete frame is serialized.
+        writer = getattr(self, "writer", None)
+        if writer is not None:
+            writer.write(reply)
+            writer.flush()
+
+    def cancel(self, request_id: Any) -> None:
+        with self.active_lock:
+            conn = self.active.get(str(request_id))
+        if conn is not None:
+            conn.close()
 
 
-def Serve(
-    r: Any, w: Any, opts: McpOptions
-) -> Optional[BaseException]:
+def Serve(r: Any, w: Any, opts: McpOptions) -> Optional[BaseException]:
     opts.defaults()
-    server = _McpServer(opts)
-    lines: Queue[bytes] = Queue()
-
-    def reader() -> None:
+    relay = _McpRelay(opts)
+    relay.writer = w
+    pending: dict[str, threading.Event] = {}
+    inflight: set[threading.Event] = set()
+    pending_lock = threading.Lock()
+    pool = ThreadPoolExecutor(max_workers=_MCP_WORKERS, thread_name_prefix="yakka-mcp")
+    try:
         while True:
+            if opts.Cancelled():
+                break
             line = r.readline()
             if not line:
                 break
-            if line.strip():
-                lines.put(line)
-
-    t = threading.Thread(target=reader, daemon=True)
-    t.start()
-    while True:
-        if opts.Cancelled():
-            return InterruptedError()
-        try:
-            line = lines.get(timeout=0.05)
-        except Empty:
-            if not t.is_alive() and lines.empty():
-                return None
-            continue
-        resp = _mcp_handle(server, line)
-        if resp is not None:
-            out = json.dumps(resp, separators=(",", ":")).encode() + b"\n"
-            try:
-                w.write(out)
-                w.flush()
-            except OSError as err:
-                return err
+            if not line.strip():
+                continue
+            request, ident, method = _mcp_parse(line)
+            params = request.get("params") if request else None
+            if method == _MCP_CANCEL:
+                cancelled_id = params.get("requestId") if isinstance(params, dict) else None
+                if cancelled_id is not None:
+                    with pending_lock:
+                        event = pending.get(str(cancelled_id))
+                        if event is not None:
+                            event.set()
+                    relay.cancel(cancelled_id)
+                continue
+            expects_reply = request is None or "id" in request or not method
+            event = threading.Event()
+            with pending_lock:
+                inflight.add(event)
+            if expects_reply:
+                with pending_lock:
+                    pending[str(ident)] = event
+            def run(raw: bytes = line.rstrip(b"\r\n"), req: Optional[dict[str, Any]] = request, rid: Any = ident, meth: str = method, wants_reply: bool = expects_reply, ev: threading.Event = event) -> None:
+                try:
+                    relay._dispatch(raw, req, rid, meth, wants_reply, ev)
+                except (OSError, ValueError):
+                    if wants_reply and not ev.is_set():
+                        with relay.stdout_lock:
+                            relay._write(_mcp_error("bad reply", "the relay could not process the response", "", rid))
+                finally:
+                    if wants_reply:
+                        with pending_lock:
+                            pending.pop(str(rid), None)
+                    with pending_lock:
+                        inflight.discard(ev)
+            pool.submit(run)
+        with pending_lock:
+            for event in inflight:
+                event.set()
+        with relay.active_lock:
+            active = list(relay.active.values())
+        for conn in active:
+            conn.close()
+        return None
+    finally:
+        pool.shutdown(wait=True, cancel_futures=True)
 
 
 def cmd_mcp(argv: List[str]) -> int:
