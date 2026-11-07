@@ -1,7 +1,7 @@
 # Brief: phase2-01 — stateless MCP tools
 
 Consumer: Codex, inline Phase 2 execution in `/home/codyh/workspace/yakka-build/24` on `feat/24-server-mcp-shim`.
-Owned paths: `packages/yakka/internal/serve/`, `packages/yakka/internal/serve/testdata/mcp-golden/`, `docs/plans/24-server-mcp-shim/IMPLEMENTATION.md`, and `docs/plans/24-server-mcp-shim/reports/phase2-01-stateless-tools.md`. Touch nothing else.
+Owned paths: `packages/yakka/internal/serve/`, `packages/yakka/internal/serve/testdata/mcp-golden/`, `packages/yakka/cmd/yakka/main.go`, `docs/plans/24-server-mcp-shim/IMPLEMENTATION.md`, and `docs/plans/24-server-mcp-shim/reports/phase2-01-stateless-tools.md`. Touch nothing else.
 Commits: commit to the current branch when done evidence passes, with a plain-summary title. Never push or merge; do not touch master or another branch, Plans 21/22/23, or `/home/codyh/workspace/yakka-wt/`. Never run fly/wrangler or touch secrets.
 Report: before committing, write `docs/plans/24-server-mcp-shim/reports/phase2-01-stateless-tools.md` (a handoff; rubric in `packages/yakka/catalogue/checks/execution-report.json`) and include it in the commit.
 Depends on: Phase 1 `8d7d185` and characterization corpus `8f91f4b`.
@@ -27,7 +27,7 @@ Move `list_checks` and `search_artifacts` into the server MCP registry, preservi
 
 ## Changes
 
-Register `list_checks` and `search_artifacts` with exact old descriptions, schemas, annotations, read scopes and instruction sentence. Implement argument validation and output formatting server-side, reading checks from loaded service options and search hits through the authenticated tenant store. Ensure registry declarations have empty context and ignore caller `_local` according to the registry contract. Add direct MCP conformance coverage that loads the corpus, checks metadata/instructions/results, compares MCP output to the corresponding REST response formatting without an HTTP self-call, and proves a second tenant cannot see another tenant's search hit.
+Register `list_checks` and `search_artifacts` with exact old descriptions, schemas, annotations, read scopes and instruction sentence. Implement argument validation and output formatting server-side, reading checks from loaded service options and search hits through the authenticated tenant store. Expose an explicit registration seam and call it during service startup so Phase 1 conformance servers remain tool-free. Ensure registry declarations have empty context and ignore caller `_local` according to the registry contract. Add direct MCP conformance coverage that loads the corpus, checks metadata/instructions/results, compares MCP output to the corresponding REST response formatting without an HTTP self-call, and proves a second tenant cannot see another tenant's search hit.
 
 ### Keep untouched
 
