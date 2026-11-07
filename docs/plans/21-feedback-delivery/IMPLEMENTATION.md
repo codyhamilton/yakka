@@ -143,4 +143,27 @@ Single unit, so the brief is authored inline (`briefs/phase5-codex-feedback.md`)
 
 ### Brief `phase5-codex-feedback.md`
 
-Status: in progress.
+Status: closed.
+
+- Declaration: `artifact_feedback` now declares `cwd`, `project_dir` (optional), then `resolved_path` with `bases: ["project_dir"]`, then `file`, `git`, `queue`, `drain`. Surface: `packages/yakka/internal/serve/mcp_stateless.go` (`RegisterFeedbackMCPTool`).
+- Relative path with no project directory: the handler returns a tool error through `feedbackRelativeError` (`mcp_feedback.go`), naming the missing or unreadable project directory and, only when `cwd` was injected, the shim's working directory as not the project. Nothing resolves under the plugin directory.
+- Instruction: `feedbackMCPInstruction` is the tool's `Instruction` and the last sentence of its `Description`; `initialize` joins it after the base sentence.
+- Shim: `plugins/yakka/client/test_mcp_shim.py` gained `test_relative_path_resolves_only_under_project_dir` (project directory absent gives `{path: null}`; `CODEX_PROJECT_DIR` set resolves under it).
+- Docs: `CHANGELOG.md` Codex step 2 names `python3 ./client/yakka.py mcp`; `packages/hooklog/codex-mcp.example.toml` removed (`git rm`); `packages/hooklog/README.md` Codex paragraph points at `plugins/yakka/.codex-mcp.json`.
+- Unchanged, as briefed: `plugins/yakka/.codex-mcp.json`, the `yakka.py` reader code, `internal/mcp`, `admin.go`, and all design docs.
+- Deviations: none from the brief's outcomes. The golden corpus carries the `cwd`-injected relative case and the Go test `TestMCPArtifactFeedbackRelativePathNeedsProjectDir` carries the cases without `cwd`.
+- Inline execution (single unit; no worker dispatched). Per agent: none dispatched.
+- Evidence: `go test ./internal/serve/ -count=1` ok (10.358 s); `go test ./... -count=1` ok for every package; `go vet ./internal/serve/`, `gofmt -l` clean; `python3 -m unittest test_mcp_shim test_mcp test_mcp_guard` ran 25 tests, OK; `git diff --check` clean. All tests use fakes and the in-process handler; no live call was made.
+- The report is `reports/phase5-codex-feedback.md`.
+
+### Verification
+
+The outcome's entry point is the in-process MCP `artifact_feedback` handler with the real declaration. The action is a relative-path call with the project directory absent and with `cwd` injected or not, and the shim's `project_dir`/`resolved_path` readers with the harness variables removed and with `CODEX_PROJECT_DIR` set. The result is the named tool error with the expected frame in each case, and a relative path resolving under the project directory only when one is supplied. This was observed through the real handler and reader, not through the report. It was run inline and not by a separate cheap-tier agent. The live closure (a Codex session, the live harness environment check, and deployment) is gated and was not run.
+
+### Carried
+
+- Open question 1 is still open: whether Codex or Claude sets `CODEX_PROJECT_DIR` or `CLAUDE_PROJECT_DIR` for the stdio MCP child. Static evidence only (the Codex 0.163.0 binary has no `CODEX_PROJECT_DIR`; Claude 2.1.316 has `CLAUDE_PROJECT_DIR`). Until a live check runs, a relative call on Codex errors with the named message, and on Claude it depends on the variable reaching the child. This may be a regression on Claude relative paths, which previously resolved against the inherited working directory.
+- `docs/design/08-server-mcp-contract.md:165-168` and `:491` still describe `bases:["cwd"]` as today's behaviour. The brief says not to edit design docs; a later design pass should update them.
+- `packages/yakka/internal/mcp/mcp.go` (line 212-213) and `internal/mcp/feedback.go` (line 160) still carry the old description and the `cannot resolve the working directory` message. This is the legacy Go client, which the brief leaves untouched.
+- The unrelated `tools/release/test_layout.py::test_repo_passes_layout_check` failure on ignored `packages/yakka-analytics/node_modules/**` is documented by Plan 19 Phase 4; it was not run or chased.
+- Gates for Cody (egress, model session, or deployment): a fresh `codex exec` session in a scratch repo producing an `mcp__yakka__artifact_feedback` call whose relative path resolves; the live `CODEX_PROJECT_DIR` / `CLAUDE_PROJECT_DIR` check in each harness; deploying the declaration change to the live service (ledger 28); `artifact_feedback` checks on this brief and this report.

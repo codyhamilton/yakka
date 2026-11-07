@@ -64,10 +64,11 @@ example a cloud worker). `YAKKA_CLIENT_CONFIG` overrides only the file path.
 ## MCP
 
 The advisory shim is the stdio command `python3 plugins/yakka/client/yakka.py mcp`. Claude Code picks it up from the
-repo's [`plugins/yakka/.mcp.json`](../../plugins/yakka/.mcp.json). For Cursor, merge
-[`cursor-mcp.example.json`](cursor-mcp.example.json) into `~/.cursor/mcp.json`; for Codex, merge
-[`codex-mcp.example.toml`](codex-mcp.example.toml) into `~/.codex/config.toml`. Replace
-`/ABS/PATH/yakka` with the checkout path.
+repo's [`plugins/yakka/.mcp.json`](../../plugins/yakka/.mcp.json). Codex reads the plugin's
+[`plugins/yakka/.codex-mcp.json`](../../plugins/yakka/.codex-mcp.json) (`python3 ./client/yakka.py mcp`,
+`cwd` `.`), so no manual `~/.codex/config.toml` entry is needed. For Cursor, merge
+[`cursor-mcp.example.json`](cursor-mcp.example.json) into `~/.cursor/mcp.json`. Replace
+`/ABS/PATH/yakka` in the Cursor example with the checkout path.
 
 ## Claude Code
 

@@ -2,13 +2,13 @@
   "tools": [
     {
       "name": "artifact_feedback",
-      "description": "State of one design, brief or report file: queued, rejected (with the reason), delivered (screen verdict, scores against the tenant baseline), stale or not delivered.",
+      "description": "State of one design, brief or report file: queued, rejected (with the reason), delivered (screen verdict, scores against the tenant baseline), stale or not delivered. After writing or changing a design, brief or report, call artifact_feedback with the file's absolute path, then fix a flagged check or record the pass.",
       "inputSchema": {
         "type": "object",
         "properties": {
           "path": {
             "type": "string",
-            "description": "path of the file, absolute or relative to the working directory"
+            "description": "path of the file: absolute, or relative to the project directory the harness supplies"
           }
         },
         "required": [
@@ -53,9 +53,12 @@
         "cwd": {
           "path": "/work"
         },
+        "project_dir": {
+          "path": "/work"
+        },
         "resolved_path": {
           "path": "/work/docs/plans/x/DESIGN.md",
-          "base": "cwd"
+          "base": "project_dir"
         },
         "file": {
           "exists": false,
@@ -73,6 +76,71 @@
         }
       },
       "text": "path does not exist: /work/docs/plans/x/DESIGN.md",
+      "isError": true
+    },
+    {
+      "name": "artifact_feedback",
+      "arguments": {
+        "path": "docs/plans/x/DESIGN.md"
+      },
+      "local": {
+        "cwd": {
+          "path": "/work"
+        },
+        "project_dir": {
+          "path": null
+        },
+        "resolved_path": {
+          "path": null,
+          "base": null
+        },
+        "file": {
+          "skipped": "no_input"
+        },
+        "git": {
+          "skipped": "no_input"
+        },
+        "queue": {
+          "pending": [],
+          "rejected": []
+        },
+        "drain": {
+          "running": false
+        }
+      },
+      "text": "path is relative and cannot be resolved: docs/plans/x/DESIGN.md; no project directory was supplied; the shim ran in /work, which is not the project, so the path was not resolved there; pass the absolute path of the file",
+      "isError": true
+    },
+    {
+      "name": "artifact_feedback",
+      "arguments": {
+        "path": "docs/plans/x/DESIGN.md"
+      },
+      "local": {
+        "project_dir": {
+          "_failed": {
+            "code": "io_error"
+          }
+        },
+        "resolved_path": {
+          "path": null,
+          "base": null
+        },
+        "file": {
+          "skipped": "no_input"
+        },
+        "git": {
+          "skipped": "no_input"
+        },
+        "queue": {
+          "pending": [],
+          "rejected": []
+        },
+        "drain": {
+          "running": false
+        }
+      },
+      "text": "path is relative and cannot be resolved: docs/plans/x/DESIGN.md; the project directory could not be read (io_error); pass the absolute path of the file",
       "isError": true
     },
     {

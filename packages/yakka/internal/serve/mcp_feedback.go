@@ -93,6 +93,25 @@ func (l LocalContext) feedbackFacts() (feedbackLocal, *LocalFailure) {
 	return facts, nil
 }
 
+// feedbackRelativeError names why a relative path has no resolved location. The
+// path resolves only under the project directory, so a missing or unreadable
+// project directory is the cause; the shim's working directory is named only
+// when it was supplied, and only to say it is not the project.
+func feedbackRelativeError(path string, local LocalContext) any {
+	msg := "path is relative and cannot be resolved: " + path + "; "
+	if _, fail := local.Get("project_dir"); fail != nil && fail.Code != "missing" {
+		msg += "the project directory could not be read (" + fail.Code + ")"
+	} else {
+		msg += "no project directory was supplied"
+	}
+	if cwd, fail := local.Get("cwd"); fail == nil {
+		if dir := feedbackString(cwd, "path"); dir != "" {
+			msg += "; the shim ran in " + dir + ", which is not the project, so the path was not resolved there"
+		}
+	}
+	return mcpToolError(msg + "; pass the absolute path of the file")
+}
+
 func (s *Server) mcpArtifactFeedback(ctx context.Context, _ string, ts *tenantState, args map[string]any, local LocalContext) (any, error) {
 	f, failure := local.feedbackFacts()
 	if failure != nil {
@@ -102,7 +121,7 @@ func (s *Server) mcpArtifactFeedback(ctx context.Context, _ string, ts *tenantSt
 	argPath := args["path"].(string)
 	if path == "" {
 		if !strings.HasPrefix(argPath, "/") {
-			return mcpToolError("cannot resolve the working directory"), nil
+			return feedbackRelativeError(argPath, local), nil
 		}
 		path = argPath
 	}
