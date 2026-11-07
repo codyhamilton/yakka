@@ -534,6 +534,7 @@ The count/order is fixed at this headless checkpoint: 13 outcome phases. Phase 1
 | 5-01 Artifact identity, history and observations | [briefs/5-01-artifact-entities.md](briefs/5-01-artifact-entities.md) | Phases 1–4 | Nothing; establishes artifact observation semantics for 5-02. |
 | 5-02 Hash-weighted scores by lens | [briefs/5-02-scores-by-lens.md](briefs/5-02-scores-by-lens.md) | 5-01 | Nothing; shares score/read and schema surfaces with adjacent units. |
 | 5-03 Bounded artifact content reads | [briefs/5-03-artifact-content.md](briefs/5-03-artifact-content.md) | 5-02 | Nothing; route registration and capability schema are already established. |
+| 5-04 Artifact schema, score bands and writing-session measures | [briefs/5-04-artifact-schema-and-bands.md](briefs/5-04-artifact-schema-and-bands.md) | 5-01, 5-02, 5-03 | Nothing; closes capability publication and artifact-row integration after the routes land. |
 
 Phase 4 carried items were reviewed. Null revision identifiers remain valid under CONTRACTS.md 17.2; stable local identifiers do not exist, and Phase 5 does not add a source or alter that contract. Session aggregate dimensions remain unsupported and are outside Phase 5's artifact/content contracts. Both remain documented Phase 4 limitations; no Phase 5 work is authorized to change them.
 

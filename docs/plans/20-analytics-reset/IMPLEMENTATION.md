@@ -188,3 +188,7 @@ Refinement commit: `d23bf4693bab93a79e32096cb830fbd301037341`; three sequential 
 - Surfaces: score/baseline/distribution handlers and store reads under `packages/yakka/internal/{serve,store}/`, focused tests and the report.
 - Deviations and carried: exact score aggregation retains observations in memory as the legacy path does, under request context; group pages are bounded and no data is silently truncated. The artifact aggregate bucket ambiguity remains from 5-01.
 - Verification: `GOMEMLIMIT=8GiB GOMAXPROCS=3 go test -p=3 ./internal/store ./internal/serve -count=1` passed (store 8.128s; serve 27.535s); `git diff --check` passed. `artifact_feedback` on the brief and report returned delivered / screen pass (`jev-1.13.0`).
+
+### Runner verification finding after `5-03-artifact-content.md`
+
+The integrated store/serve tests passed, but `TestAnalyticsSchema` confirmed `entities_artifact` remains absent and the artifact row path does not return `band:<check>` or the contract's writing-session measures. Those are explicit Phase 5 §17.2/17.3 requirements. Added a focused integration unit 5-04 before closure; its brief is `briefs/5-04-artifact-schema-and-bands.md`.
