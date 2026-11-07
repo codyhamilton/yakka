@@ -10,6 +10,10 @@ import (
 
 const statelessMCPInstruction = "Read-only advice on design, brief and report files: delivery state and scores for a file, the checks a kind is scored against, and similar past artifacts."
 
+// feedbackMCPInstruction is the artifact_feedback tool's instruction. It is the
+// tool's Instruction and the last sentence of its Description, defined once.
+const feedbackMCPInstruction = "After writing or changing a design, brief or report, call artifact_feedback with the file's absolute path, then fix a flagged check or record the pass."
+
 // RegisterStatelessMCPTools adds the two store-backed MCP reads used by the
 // service. It is explicit so conformance servers can register only their test
 // tools.
@@ -63,16 +67,18 @@ func (s *Server) RegisterStatelessMCPTools() error {
 func (s *Server) RegisterFeedbackMCPTool() error {
 	return s.RegisterMCPTool(MCPTool{
 		Name:        "artifact_feedback",
-		Description: "State of one design, brief or report file: queued, rejected (with the reason), delivered (screen verdict, scores against the tenant baseline), stale or not delivered.",
+		Description: "State of one design, brief or report file: queued, rejected (with the reason), delivered (screen verdict, scores against the tenant baseline), stale or not delivered. " + feedbackMCPInstruction,
 		InputSchema: map[string]any{
 			"type":       "object",
-			"properties": map[string]any{"path": map[string]any{"type": "string", "description": "path of the file, absolute or relative to the working directory"}},
+			"properties": map[string]any{"path": map[string]any{"type": "string", "description": "path of the file: absolute, or relative to the project directory the harness supplies"}},
 			"required":   []string{"path"}, "additionalProperties": false,
 		},
 		Annotations: map[string]any{"readOnlyHint": true},
+		Instruction: feedbackMCPInstruction,
 		Context: []MCPReader{
 			{Reader: "cwd", Version: 1, Required: mcpRequired(false)},
-			{Reader: "resolved_path", Version: 1, Params: map[string]any{"path_arg": "path", "bases": []any{"cwd"}}},
+			{Reader: "project_dir", Version: 1, Required: mcpRequired(false)},
+			{Reader: "resolved_path", Version: 1, Params: map[string]any{"path_arg": "path", "bases": []any{"project_dir"}}},
 			{Reader: "file", Version: 1, Params: map[string]any{"of": "resolved_path"}},
 			{Reader: "git", Version: 1, Params: map[string]any{"of": "resolved_path"}},
 			{Reader: "queue", Version: 1, Params: map[string]any{"of": "git", "path": "resolved_path"}},

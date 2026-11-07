@@ -1,10 +1,12 @@
 import fcntl
+import io
 import os
 import socket
 import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from threading import Thread
 
@@ -91,19 +93,18 @@ class TestStatus(StatusEnv):
             "queued: 2",
             "rejected: 1",
             "drain: not running",
-            f"config: {self._cfg} (invalid)",
+            f"config: bad config: clientconfig: {self._cfg}: line 1 is not a `name = \"string\"` line",
             "endpoint: -",
         ):
             self.assertIn(want + "\n", out, msg=out)
-        self.assertEqual(code, 0)
+        self.assertEqual(code, 1)
 
         os.remove(self._cfg)
-        out, _ = self._status()
-        self.assertIn(
-            "config: none (local mode)\nendpoint: http://127.0.0.1:8770 ",
-            out,
-            msg=out,
-        )
+        out, code = self._status()
+        self.assertEqual(code, 1, msg=out)
+        self.assertIn("yakka is not logged in", out)
+        self.assertIn("/yakka:login", out)
+        self.assertNotIn("127.0.0.1:8770", out)
 
         lock_path = os.path.join(self._queue, ".drain.lock")
         lock = open(lock_path, "a+b")
@@ -139,6 +140,7 @@ class TestStatus(StatusEnv):
             out, code = self._status()
         finally:
             srv.shutdown()
+            srv.server_close()
         self.assertEqual(code, 0)
         self.assertIn(" reachable\n", out, msg=out)
         self.assertNotIn(_API_KEY, out)
@@ -168,6 +170,35 @@ class TestHalfSetEnvRefusalStatus(StatusEnv):
         self.assertEqual(code, 1, msg=out)
         self.assertNotIn("127.0.0.1:8770", out, msg=out)
         self.assertIn("YAKKA_ENDPOINT", out, msg=out)
+
+
+class TestNoLoopbackFallback(StatusEnv):
+    def test_missing_config_makes_no_request(self) -> None:
+        os.environ["YAKKA_CLIENT_CONFIG"] = os.path.join(self._tmpdir, "absent.toml")
+        os.environ["YAKKA_QUEUE"] = self._queue
+        stream = io.StringIO()
+        with patch.object(yakka, "_urlopen") as request:
+            code = yakka.run_status(stream)
+        self.assertEqual(code, 1)
+        self.assertIn("yakka is not logged in", stream.getvalue())
+        request.assert_not_called()
+
+    def test_unreachable_remote_uses_only_configured_endpoint(self) -> None:
+        self._write_config("collector.example")
+        os.environ["YAKKA_CLIENT_CONFIG"] = self._cfg
+        os.environ["YAKKA_QUEUE"] = self._queue
+        stream = io.StringIO()
+        requested: list[str] = []
+
+        def unreachable(req: object, timeout: float = 0) -> object:
+            requested.append(req.full_url)
+            raise OSError("offline")
+
+        with patch.object(yakka, "_urlopen", side_effect=unreachable):
+            code = yakka.run_status(stream)
+        self.assertEqual(code, 1)
+        self.assertEqual(requested, ["http://collector.example/v1/health"])
+        self.assertIn("http://collector.example unreachable", stream.getvalue())
 
 
 if __name__ == "__main__":
