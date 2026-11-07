@@ -24,3 +24,25 @@ Refinement commit: `d570de6` (`docs: refine Plan 20 Phase 1 briefs`). It records
 - Verification: `GOMEMLIMIT=8GiB go test ./internal/analyticsfixture -count=1 -v` passed; generated-ledger assertions cover exact manifest counts, timestamp bounds, shared bodies, scorer-specific scores, session repo cardinalities, three execution shapes, rejection stages and the unpriced tail. Candidate comparison selected batch append: same 5,015-event oracle, 196 ms versus 11.855 s for single-row append.
 - Deviations and carried items: none. The 32,767-hash fixture takes about 187 seconds to generate and verify; later tests should construct it once per setup and reuse it.
 - `artifact_feedback`: delivered, screen pass (`jev-1.13.0`).
+
+### `1-03-release-and-serving.md`
+
+- Outcome: committed as `aacab5eb85827459043a7a2a13f92837fbec251e`; release embeds the framework-free `web/` tree without Node/npm, restores the placeholder on success/failure, and serves generic cache/security policy with ETag revalidation. Pages output is `./web`.
+- Surfaces: `tools/release/`, `packages/yakka/internal/serve/site.go`, `packages/yakka/internal/serve/site_test.go`, `packages/yakka-analytics/wrangler.toml`, `.dockerignore`, `docs/design/07-analytics-site.md`, `docs/design/system-architecture.md`, and `docs/plans/20-analytics-reset/CONTRACTS.md`.
+- Verification: release suite 11/11 with an isolated PATH lacking Node/npm; `GOMAXPROCS=3 GOMEMLIMIT=8GiB go test -p=3 ./internal/serve -run 'TestSite' -count=1` passed; Node shell suite 13/13; layout checks 7/7; `git diff --check` passed. Builds embed the app/uPlot but exclude `_headers`; placeholder restoration is checked for success and failure.
+- Deviations and carried items: the brief's `./build` instruction conflicted with the signed design/contract; `./web` was applied. `GOTOOLCHAIN=auto` is needed for the release build because the installed local Go version is older than the module's declared version. The full-server OAuth API handler shadows the UI callback path in local mode; route integration remains for Phase 2, as stated in the updated contract.
+- `artifact_feedback`: delivered, screen pass (`jev-1.13.0`).
+- gate: verify the external Pages automation accepts `./web` as its output directory.
+
+### Phase 1 verification and closure
+
+- Entry point → action → result: the committed test harness serves `/__test/fixture-summary-probe` from the embedded manifest; shell tests observe the summary, uncapped URL round-trip, legacy limit message without automatic retry, request deduplication/abort/four-request cap, and unknown-route fallback. The built Go site serves direct client routes with the committed app, generic cache/security headers and correct ETags; the release harness confirms no-Node embedding and placeholder restoration.
+- Final checks on the integrated branch: `GOMAXPROCS=3 GOMEMLIMIT=8GiB go test -p=3 ./internal/analyticsfixture -count=1` passed (306.215 s); `GOMAXPROCS=3 python3 -m unittest tools.release.test_release` passed (11); `PUBLIC_CANVAS_TEST_MODE=true NODE_OPTIONS=--max-old-space-size=8192 node --test packages/yakka-analytics/tests/*.test.mjs packages/yakka-analytics/tests/e2e/*.test.mjs` passed (13); `python3 tools/release/test_layout.py` passed (7); `GOMAXPROCS=3 GOMEMLIMIT=8GiB go test -p=3 ./internal/serve -run 'TestSite' -count=1` passed. No animation or timing tests were used.
+- Playwright-core is unavailable in this worktree, so the Playwright Chromium harness was not run; system Chrome smoke evidence is recorded in the shell report.
+
+Carried
+
+- Playwright-core browser harness run when available.
+- Verify the external Pages automation accepts `./web` as its output directory.
+- Phase 2 reconcile the local full-server `/oauth/callback` route collision while preserving the remote API callback.
+- Reuse the 32,767-hash fixture once per test setup; its generation and verification take about 187 seconds.
