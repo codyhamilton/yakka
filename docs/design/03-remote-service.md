@@ -118,10 +118,7 @@ endpoints. Unknown fields in a fact are kept in its raw payload, never rejected.
 | `GET /v1/admin/tokens` | session (admin) | list every token without plaintext |
 | `GET /v1/admin/status` | session (admin) | per tenant: fact count, disk by part (ledger, WAL, archive, blobs, pending), latest screen verdicts, score counts, recent screen failures, rescore progress; plus data-volume total and free bytes and whether scoring is configured |
 | `POST /v1/admin/rescore` | session (admin), same-origin, JSON | body `{"tenant"}`; screens every blob whose latest verdict is `unscreened` in the background and answers `202` with the job state. `409` when no scorer is configured or a rescore is already running for that tenant |
-
-> **Proposed by [plan 24](../plans/24-server-mcp-shim/DESIGN.md), not built:** `POST /v1/mcp`, bearer only (`read` or `read_write`
-> per tool; local mode keyless), the MCP endpoint behind which the server defines every agent tool. Cookie sessions and any
-> request with an `Origin` header are refused.
+| `POST /v1/mcp` | bearer (per-tool `read` or `read_write`; keyless loopback local mode) | stateless JSON-RPC endpoint used by the `yakka mcp` stdio shim for server-defined MCP tools. The shim supplies declared local context and relays replies; cookie sessions and requests with an `Origin` header are refused. |
 
 Admin operations are remote-only: local mode has no session, so `/v1/admin/*` answers `401`. A
 rescore runs through the same screen step the worker uses, one blob at a time, and counts a

@@ -30,7 +30,7 @@ requests it?” The answer, verbatim:
 
 This selects alternative A in Assumption 26 and removes only its decision hold. E1 is now an
 authorized, separately versioned Plan 24 extension, not implementation evidence. Its sole wire,
-capability, safety and retry contract is [Plan 24's bounded enqueue addendum](../24-server-mcp-shim/DESIGN.md#authorized-amendment-bounded-enqueue-declaration-v2).
+capability, safety and retry contract is [Plan 24's bounded enqueue addendum](../../design/08-server-mcp-contract.md#bounded-enqueue-declaration-v2).
 No direct upload or secret scan enters the MCP path. Plan 21 retains ownership of the feedback
 handler's decision and final wording, the sweep, Python drain and queue matching.
 

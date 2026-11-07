@@ -77,6 +77,7 @@ are maintainer operations and move to the REST API or CLI.
 | 5 | [Distribution](05-distribution.md) | plugin layout, per-harness packaging, the pinned Codex copy |
 | 6 | Lab and analysis | held-out set, white paper, check-to-cost revisit |
 | 7 | [Analytics site](07-analytics-site.md) | person-facing `/v1/analytics` reads, browser CORS, the static Svelte site, local and Pages hosting |
+| 8 | [Server MCP contract](08-server-mcp-contract.md) | the `/v1/mcp` endpoint and tool registry, the declaration and `_local` carrier, the shim's reader table, and the bounded enqueue extension |
 
 Order: 1 first, since the rest depend on its keys and envelope types. 2 and 3 can then proceed
 together.

@@ -238,6 +238,7 @@ type Server struct {
 	opts     Options
 	screen   ScreenFunc
 	registry *Registry
+	mcpTools mcpRegistry
 	grants   *deviceGrants
 
 	mu      sync.Mutex
@@ -260,11 +261,12 @@ func New(cfg Config, opts Options) *Server {
 	if opts.Version == "" {
 		opts.Version = "dev"
 	}
+	mcpTools := newMCPRegistry()
 	reg, err := OpenRegistry(cfg.Data)
 	if err != nil {
 		panic("serve: registry: " + err.Error())
 	}
-	s := &Server{cfg: cfg, opts: opts, registry: reg, grants: newDeviceGrants(), tenants: map[string]*tenantState{}, stop: make(chan struct{}), screen: opts.ScreenStep}
+	s := &Server{cfg: cfg, opts: opts, registry: reg, mcpTools: mcpTools, grants: newDeviceGrants(), tenants: map[string]*tenantState{}, stop: make(chan struct{}), screen: opts.ScreenStep}
 	s.ctx, s.cancel = context.WithCancel(context.Background())
 	if s.screen == nil {
 		s.screen = unscreened
@@ -485,6 +487,7 @@ func (s *Server) Close() error {
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/v1/health", s.method(http.MethodGet, s.health))
+	mux.HandleFunc("/v1/mcp", s.method(http.MethodPost, s.mcp))
 	mux.HandleFunc("/v1/whoami", s.method(http.MethodGet, s.whoami))
 	mux.HandleFunc("/v1/ingest", s.method(http.MethodPost, s.auth(s.ingest)))
 	mux.HandleFunc("/v1/artifacts", s.method(http.MethodGet, s.auth(s.artifacts)))
@@ -556,6 +559,12 @@ func (s *Server) cors(h http.Handler) http.Handler {
 		return decision{}
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// MCP is program-only; preserve its own Origin refusal and method handling.
+		if r.URL.Path == "/v1/mcp" {
+			h.ServeHTTP(w, r)
+			return
+		}
+
 		if origin := r.Header.Get("Origin"); origin != "" {
 			d := allowed(origin)
 			if d.ok {

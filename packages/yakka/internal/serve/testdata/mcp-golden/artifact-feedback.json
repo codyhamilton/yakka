@@ -1,0 +1,329 @@
+{
+  "tools": [
+    {
+      "name": "artifact_feedback",
+      "description": "State of one design, brief or report file: queued, rejected (with the reason), delivered (screen verdict, scores against the tenant baseline), stale or not delivered.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "path of the file, absolute or relative to the working directory"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true
+      }
+    }
+  ],
+  "calls": [
+    {
+      "name": "artifact_feedback",
+      "arguments": {},
+      "text": "path must be a non-empty string",
+      "isError": true
+    },
+    {
+      "name": "artifact_feedback",
+      "arguments": {
+        "path": ""
+      },
+      "text": "path must be a non-empty string",
+      "isError": true
+    },
+    {
+      "name": "artifact_feedback",
+      "arguments": {
+        "path": 5
+      },
+      "text": "path must be a non-empty string",
+      "isError": true
+    },
+    {
+      "name": "artifact_feedback",
+      "arguments": {
+        "path": "docs/plans/x/DESIGN.md"
+      },
+      "local": {
+        "cwd": {
+          "path": "/work"
+        },
+        "resolved_path": {
+          "path": "/work/docs/plans/x/DESIGN.md",
+          "base": "cwd"
+        },
+        "file": {
+          "exists": false,
+          "is_file": false
+        },
+        "git": {
+          "error": "no_repo"
+        },
+        "queue": {
+          "pending": [],
+          "rejected": []
+        },
+        "drain": {
+          "running": false
+        }
+      },
+      "text": "path does not exist: /work/docs/plans/x/DESIGN.md",
+      "isError": true
+    },
+    {
+      "name": "artifact_feedback",
+      "arguments": {
+        "path": "/outside/docs/plans/x/DESIGN.md"
+      },
+      "local": {
+        "resolved_path": {
+          "path": "/outside/docs/plans/x/DESIGN.md",
+          "base": null
+        },
+        "file": {
+          "exists": true,
+          "is_file": true,
+          "size": 12,
+          "mtime": 1700000000,
+          "content_hash": null,
+          "withheld": "outside_repo"
+        },
+        "git": {
+          "error": "no_repo"
+        },
+        "queue": {
+          "pending": [],
+          "rejected": []
+        },
+        "drain": {
+          "running": false
+        }
+      },
+      "text": "state: not tracked\npath: /outside/docs/plans/x/DESIGN.md\nnot inside a git repository; nothing is captured for this file",
+      "isError": false
+    },
+    {
+      "name": "artifact_feedback",
+      "arguments": {
+        "path": "/work/notes.txt"
+      },
+      "local": {
+        "resolved_path": {
+          "path": "/work/notes.txt",
+          "base": null
+        },
+        "file": {
+          "exists": true,
+          "is_file": true,
+          "size": 4,
+          "mtime": 1700000000,
+          "content_hash": "abc",
+          "withheld": null
+        },
+        "git": {
+          "repo_id": "root:repo",
+          "rel_path": "notes.txt",
+          "error": null
+        },
+        "queue": {
+          "pending": [],
+          "rejected": []
+        },
+        "drain": {
+          "running": false
+        }
+      },
+      "text": "state: not tracked\npath: /work/notes.txt\nnot a design, brief or report path; nothing is captured for this file",
+      "isError": false
+    },
+    {
+      "name": "artifact_feedback",
+      "arguments": {
+        "path": "/work/docs/plans/x/DESIGN.md"
+      },
+      "local": {
+        "resolved_path": {
+          "path": "/work/docs/plans/x/DESIGN.md",
+          "base": null
+        },
+        "file": {
+          "exists": true,
+          "is_file": true,
+          "size": 4,
+          "mtime": 1700000000,
+          "content_hash": "abc",
+          "withheld": null
+        },
+        "git": {
+          "repo_id": "root:repo",
+          "rel_path": "docs/plans/x/DESIGN.md",
+          "error": "no_commit"
+        },
+        "queue": {
+          "pending": [],
+          "rejected": []
+        },
+        "drain": {
+          "running": false
+        }
+      },
+      "text": "state: not tracked\npath: /work/docs/plans/x/DESIGN.md\nrepository has no commit yet, so it has no repo_id; nothing is captured for this file",
+      "isError": false
+    },
+    {
+      "name": "artifact_feedback",
+      "arguments": {
+        "path": "/work/docs/plans/x/DESIGN.md"
+      },
+      "local": {
+        "resolved_path": {
+          "path": "/work/docs/plans/x/DESIGN.md",
+          "base": null
+        },
+        "file": {
+          "exists": true,
+          "is_file": true,
+          "size": 4,
+          "mtime": 1700000000,
+          "content_hash": "abc",
+          "withheld": null
+        },
+        "git": {
+          "repo_id": "root:repo",
+          "rel_path": "docs/plans/x/DESIGN.md",
+          "error": null
+        },
+        "queue": {
+          "pending": [
+            {
+              "age_s": 4,
+              "mtime": 1700000000
+            },
+            {
+              "age_s": 2,
+              "mtime": 1700000002
+            }
+          ],
+          "rejected": []
+        },
+        "drain": {
+          "running": false
+        }
+      },
+      "text": "state: queued\npath: docs/plans/x/DESIGN.md\nrepo: root:repo\ncontent_hash: abc\n\n2 events for this file still queued, oldest 4s, no drain running\nFix: start the plugin drain at the next hook event, or run the plugin's bin/yakka drain",
+      "isError": false
+    },
+    {
+      "name": "artifact_feedback",
+      "arguments": {
+        "path": "/work/docs/plans/x/DESIGN.md"
+      },
+      "local": {
+        "resolved_path": {
+          "path": "/work/docs/plans/x/DESIGN.md",
+          "base": null
+        },
+        "file": {
+          "exists": true,
+          "is_file": true,
+          "size": 4,
+          "mtime": 1699996400,
+          "content_hash": "abc",
+          "withheld": null
+        },
+        "git": {
+          "repo_id": "root:repo",
+          "rel_path": "docs/plans/x/DESIGN.md",
+          "error": null
+        },
+        "queue": {
+          "pending": [],
+          "rejected": [
+            {
+              "reason": "secret: aws_access_key at line 3 in docs/plans/x/DESIGN.md",
+              "mtime": 1700000000
+            }
+          ]
+        },
+        "drain": {
+          "running": false
+        }
+      },
+      "text": "state: rejected\npath: docs/plans/x/DESIGN.md\nrepo: root:repo\ncontent_hash: abc\n\nsecret: aws_access_key at line 3 in docs/plans/x/DESIGN.md\nFix: rewrite the file; the new write is the repair.",
+      "isError": false
+    },
+    {
+      "name": "artifact_feedback",
+      "arguments": {
+        "path": "/work/docs/plans/x/DESIGN.md"
+      },
+      "local": {
+        "resolved_path": {
+          "path": "/work/docs/plans/x/DESIGN.md",
+          "base": null
+        },
+        "file": {
+          "exists": true,
+          "is_file": true,
+          "size": 4,
+          "mtime": 1700000000,
+          "content_hash": "abc",
+          "withheld": null
+        },
+        "git": {
+          "repo_id": "root:repo",
+          "rel_path": "docs/plans/x/DESIGN.md",
+          "error": null
+        },
+        "queue": {
+          "pending": [],
+          "rejected": []
+        },
+        "drain": {
+          "running": false
+        }
+      },
+      "text": "state: not delivered\npath: docs/plans/x/DESIGN.md\nrepo: root:repo\ncontent_hash: abc\n\nthe service has no version of this file and nothing is queued; if it was just written, wait for the hook or rewrite the file",
+      "isError": false
+    },
+    {
+      "name": "artifact_feedback",
+      "arguments": {
+        "path": "/work/docs/plans/x/DESIGN.md"
+      },
+      "local": {
+        "resolved_path": {
+          "path": "/work/docs/plans/x/DESIGN.md",
+          "base": null
+        },
+        "file": {
+          "exists": true,
+          "is_file": true,
+          "size": 268435457,
+          "mtime": 1700000000,
+          "content_hash": null,
+          "withheld": "too_large"
+        },
+        "git": {
+          "repo_id": "root:repo",
+          "rel_path": "docs/plans/x/DESIGN.md",
+          "error": null
+        },
+        "queue": {
+          "pending": [],
+          "rejected": []
+        },
+        "drain": {
+          "running": false
+        }
+      },
+      "text": "file too large to hash: /work/docs/plans/x/DESIGN.md",
+      "isError": true
+    }
+  ]
+}

@@ -291,6 +291,35 @@ func (s *Server) authorizeRequest(r *http.Request) authResult {
 	if s.cfg.Local() {
 		return authResult{tenant: LocalTenant, status: authOK}
 	}
+	if _, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer "); ok {
+		return s.authorizeBearer(r)
+	}
+	if !s.cfg.Remote() {
+		return authResult{status: authUnauthorized, msg: "unauthorized: this service requires a key; run yakka login"}
+	}
+	if r.Method == http.MethodPost && r.URL.Path == "/v1/ingest" {
+		return authResult{status: authUnauthorized, msg: s.remoteUnauthorizedMsg()}
+	}
+	sess := sessionFromContext(r.Context())
+	if sess == nil {
+		return authResult{status: authUnauthorized, msg: s.remoteUnauthorizedMsg()}
+	}
+	tenant := r.URL.Query().Get("tenant")
+	if tenant == "" || !s.registry.ownsTenant(sess.GitHubID, tenant) {
+		return authResult{status: authForbidden}
+	}
+	return authResult{tenant: tenant, status: authOK}
+}
+
+// authorizeBearer resolves only bearer credentials (or the explicit keyless local mode).
+// Both REST and MCP share tenant selection, token expiry and scope semantics.
+func (s *Server) authorizeBearer(r *http.Request) authResult {
+	if s.cfg.Local() {
+		// Keyless loopback is the local tenant with every scope. An empty scope
+		// must not mean the same thing, or a token record with a missing scope
+		// would pass the read_write gate.
+		return authResult{tenant: LocalTenant, scope: TokenScopeReadWrite, status: authOK}
+	}
 	if tok, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer "); ok {
 		now := time.Now()
 		var tenant, scope string
@@ -311,21 +340,11 @@ func (s *Server) authorizeRequest(r *http.Request) authResult {
 		}
 		return authResult{tenant: tenant, scope: scope, status: authOK}
 	}
-	if !s.cfg.Remote() {
-		return authResult{status: authUnauthorized, msg: "unauthorized: this service requires a key; run yakka login"}
+	msg := "unauthorized: this service requires a key; run yakka login"
+	if s.cfg.Remote() {
+		msg = s.remoteUnauthorizedMsg()
 	}
-	if r.Method == http.MethodPost && r.URL.Path == "/v1/ingest" {
-		return authResult{status: authUnauthorized, msg: s.remoteUnauthorizedMsg()}
-	}
-	sess := sessionFromContext(r.Context())
-	if sess == nil {
-		return authResult{status: authUnauthorized, msg: s.remoteUnauthorizedMsg()}
-	}
-	tenant := r.URL.Query().Get("tenant")
-	if tenant == "" || !s.registry.ownsTenant(sess.GitHubID, tenant) {
-		return authResult{status: authForbidden}
-	}
-	return authResult{tenant: tenant, status: authOK}
+	return authResult{status: authUnauthorized, msg: msg}
 }
 
 func (s *Server) remoteUnauthorizedMsg() string {
