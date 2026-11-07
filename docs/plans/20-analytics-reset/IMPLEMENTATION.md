@@ -145,3 +145,24 @@ The fixed Phase 4 outcome is not yet verified or closed. Follow-up brief `4-02-s
 ### Independent Phase 4 verification finding
 
 Runner added `TestAnalyticsSessionScatterDeterministicSampleHasWholePopulationMarginals` for a 5,005-session fixture. The baseline failed: deterministic sample metadata was correct, but both token marginals summed to 0 rather than the whole 5,005-session population because no-call sessions had no histogram bins. This is a Phase 4 outcome defect, not a contract change. Brief `4-03-zero-call-scatter-marginals.md` scopes the fix and regression assertion; Phase 4 remains open.
+
+### `4-02-session-outcome-remediation.md`
+
+- Outcome: committed as `dd66a06`; implemented numeric session `where` filtering, SQL-backed count/sum/percentiles/histogram aggregate modes, typed missing population for unpriced cost, pending and per-kind scored/total coverage, and explicit unavailable revision metadata.
+- Deviations / carried: session aggregate dimensions are not supported and are advertised as an empty set; pricing/catalogue/tool-kind revision identifiers have no stable local sources and are null with reasons. `reports/4-02-session-outcome-remediation.md` records both. Verification command passed in the report. Report `artifact_feedback`: delivered / screen pass (`jev-1.13.0`).
+
+### `4-03-zero-call-scatter-marginals.md`
+
+- Outcome: committed as `839d1de`; included the runner's 5,005-session regression and adds no-call sessions to zero-value token/cost marginal bins while retaining all-unpriced cost exclusion. Focused and full bounded store/serve tests passed as recorded in `reports/4-03-zero-call-scatter-marginals.md`. Report `artifact_feedback`: delivered / screen pass (`jev-1.13.0`).
+
+### Phase 4 verification and closure
+
+- Entry point → action → result: `GET /v1/analytics/schema` returns the published session/time grains, modes, measures, budgets, null/time rules, typed coverage and only Phase 1–4 feature flags; HTTP assertions prove artifact/content/plan/execution/activity/cohort/action/review flags are absent. `GET /v1/analytics/entities` against fixtures lists and sorts sessions, returns lifetime-stable repo/model/harness provenance, applies numeric `where` and shared exclusions, serves session count/sum/percentile/histogram aggregates, and returns time measures on one shared day grid. HTTP checks prove no-call zero cost, all-unpriced null cost, partial lower-bound marking, single/multi/none repo groups, unknown/mixed model groups, filtered population counts and matching legacy count totals. A 5,005-session request returns the same deterministic 5,000-point sample twice and token/cost marginal counts over all 5,005 sessions.
+- Independent integrated verification on this closing tree: `GOMAXPROCS=3 GOMEMLIMIT=8GiB go test -p=3 ./internal/store ./internal/serve -count=1` passed (store 8.026s; serve 27.913s); `git diff --check` passed. The separate zero-call scatter assertion first failed (empty marginal totals), then passed after `839d1de`. No animation/timing tests, live systems, production data or secrets were used.
+- Before closure, `artifact_feedback` on `4-01`, `4-02`, and `4-03` briefs and reports all returned delivered / screen pass (`jev-1.13.0`); no checks were flagged.
+- Runner note: `reports/4-runner-note.md` records the first report's commit placeholder, remediation history, initial scatter failure, independent assertions and artifact feedback.
+
+Carried
+
+- `/schema` reports null pricing, catalogue, and tool-kind revision identifiers with reasons because stable local IDs do not exist; populate them only when a source is added to the existing contract. gate: provide stable local revision identifiers for pricing, catalogue, and tool-kind if non-null revision values are required.
+- Session aggregate dimensions remain unsupported; `/schema` explicitly advertises none, and requests for `dim` return a named error. The signed Phase 4 outcome is satisfied by the implemented scalar aggregate modes; any future grouped session aggregate capability must be reconciled against the existing schema contract before being offered.
