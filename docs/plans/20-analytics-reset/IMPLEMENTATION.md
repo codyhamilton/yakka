@@ -10,6 +10,13 @@ Refinement commit: `c85e5b9` (`docs: refine Phase 6 analytics work`). Four seque
 
 Phase outcome is open for implementation approach, so this run uses the signed outcome as the fixed yardstick. No new grain, join, route, dependency, gesture, or contract is authorized.
 
+### `6-01-plan-execution-entities.md`
+
+- Outcome: committed as `2daf7c6` (`Add plan and execution analytics entities`); added plan/execution list grains and plan detail collections, shared-session cost coverage, process shapes, and schema metadata. Plan 21/22/23 features remain absent.
+- Surfaces: `packages/yakka/internal/store/plan_entities.go`, `packages/yakka/internal/serve/analytics_entities.go`, focused store/serve tests and `reports/6-01-plan-execution-entities.md`.
+- Deviations / unfinished: report status is done with concerns. It identifies missing plan `artifacts` by kind and `design_score:<check>`, execution `brief_score:<check>` and `report_score:<check>`, incomplete plan lenses and sort fields, missing receive-watermark/revision pinning, and limited order/cursor fixture coverage. These are required by CONTRACTS.md 17.3 and block phase verification; follow-up brief 6-01b is added before cohort work.
+- Verification: `GOMEMLIMIT=8GiB GOMAXPROCS=3 go test -p=3 ./internal/store ./internal/serve -run 'Analytics(Entity|Execution|Plan|SessionTimeEntitiesAndExclusions)' -count=1` passed; full `GOMEMLIMIT=8GiB GOMAXPROCS=3 go test -p=3 ./internal/store ./internal/serve -count=1` passed (store 6.970s; serve 25.565s); `git diff --check` passed. `artifact_feedback` on the brief and report returned delivered / screen pass (`jev-1.13.0`), no flags. The unit commit had a premature phase trailer; it was removed by amending the local commit before any push.
+
 Tool: Codex execute skill
 Run ID: feat/20-analytics-reset phase 3 execution
 Start time: 2026-11-08 09:10 Australia/Brisbane (2026-11-07 23:10 UTC)

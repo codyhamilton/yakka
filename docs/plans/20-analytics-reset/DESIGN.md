@@ -552,7 +552,8 @@ Refinement verdict: **Proceed**, three sequential units. The fixture ledger and 
 | Unit | Brief | Depends on | Runs alongside |
 |---|---|---|---|
 | 6-01 Plan and execution entities | [briefs/6-01-plan-execution-entities.md](briefs/6-01-plan-execution-entities.md) | Phases 1–5 | Nothing; establishes plan/execution rows and detail collections. |
-| 6-02 Cohort predicates and resolution | [briefs/6-02-cohort-predicates-and-resolution.md](briefs/6-02-cohort-predicates-and-resolution.md) | 6-01; Phases 1–5 | Nothing; establishes the shared bounded resolver. |
+| 6-01b Plan and execution contract completion | [briefs/6-01b-plan-execution-completion.md](briefs/6-01b-plan-execution-completion.md) | 6-01; Phases 1–5 | Nothing; closes gaps found in the first implementation before cohort work builds on these grains. |
+| 6-02 Cohort predicates and resolution | [briefs/6-02-cohort-predicates-and-resolution.md](briefs/6-02-cohort-predicates-and-resolution.md) | 6-01b; Phases 1–5 | Nothing; establishes the shared bounded resolver. |
 | 6-03 Cohort target-route integration | [briefs/6-03-cohort-target-integration.md](briefs/6-03-cohort-target-integration.md) | 6-02; Phases 1–5 | Nothing; applies resolution consistently to every listed target. |
 | 6-04 Time cohorts and activity feed | [briefs/6-04-time-cohorts-and-activity.md](briefs/6-04-time-cohorts-and-activity.md) | 6-01, 6-02, 6-03; Phases 1–5 | Nothing; closes time-source membership and the merged feed/probe. |
 
