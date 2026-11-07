@@ -2416,7 +2416,7 @@ class _McpRelay:
             self.counter += 1
             internal_id = f"yakka-internal-init-{self.counter}"
         request = json.dumps({"jsonrpc": "2.0", "id": internal_id, "method": "initialize", "params": {"protocolVersion": "2025-11-25", "capabilities": {}}}, separators=(",", ":")).encode()
-        status, raw, problem, _ = self._post(request, min(timeout, 10.0), cancelled, internal_id)
+        status, raw, problem, _ = self._post(request, min(timeout, 10.0), cancelled, active_id)
         response = _mcp_response(raw) if status is not None and not problem else None
         if response is not None and "error" not in response:
             self._cache_initialize(response)
