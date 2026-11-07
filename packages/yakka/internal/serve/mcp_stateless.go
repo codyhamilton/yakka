@@ -34,7 +34,7 @@ func (s *Server) RegisterStatelessMCPTools() error {
 	}); err != nil {
 		return err
 	}
-	return s.RegisterMCPTool(MCPTool{
+	if err := s.RegisterMCPTool(MCPTool{
 		Name:        "search_artifacts",
 		Description: "Similar past designs, briefs and reports in this tenant, with path, repo and a snippet.",
 		InputSchema: map[string]any{
@@ -53,8 +53,43 @@ func (s *Server) RegisterStatelessMCPTools() error {
 			return ""
 		},
 		Handler: s.mcpSearchArtifacts,
+	}); err != nil {
+		return err
+	}
+	return nil
+}
+
+// RegisterFeedbackMCPTool adds the tenant-backed read-only feedback tool.
+func (s *Server) RegisterFeedbackMCPTool() error {
+	return s.RegisterMCPTool(MCPTool{
+		Name:        "artifact_feedback",
+		Description: "State of one design, brief or report file: queued, rejected (with the reason), delivered (screen verdict, scores against the tenant baseline), stale or not delivered.",
+		InputSchema: map[string]any{
+			"type":       "object",
+			"properties": map[string]any{"path": map[string]any{"type": "string", "description": "path of the file, absolute or relative to the working directory"}},
+			"required":   []string{"path"}, "additionalProperties": false,
+		},
+		Annotations: map[string]any{"readOnlyHint": true},
+		Context: []MCPReader{
+			{Reader: "cwd", Version: 1, Required: mcpRequired(false)},
+			{Reader: "resolved_path", Version: 1, Params: map[string]any{"path_arg": "path", "bases": []any{"cwd"}}},
+			{Reader: "file", Version: 1, Params: map[string]any{"of": "resolved_path"}},
+			{Reader: "git", Version: 1, Params: map[string]any{"of": "resolved_path"}},
+			{Reader: "queue", Version: 1, Params: map[string]any{"of": "git", "path": "resolved_path"}},
+			{Reader: "drain", Version: 1},
+		},
+		Validate: func(args map[string]any) string {
+			p, ok := args["path"].(string)
+			if !ok || strings.TrimSpace(p) == "" {
+				return "path must be a non-empty string"
+			}
+			return ""
+		},
+		Handler: s.mcpArtifactFeedback,
 	})
 }
+
+func mcpRequired(required bool) *bool { return &required }
 
 func mcpKindArgument(args map[string]any, required bool) (string, string) {
 	if _, present := args["kind"]; !present && !required {

@@ -62,4 +62,24 @@ The characterization corpus was committed first at `8f91f4b`; the single-unit br
 
 Run identity: Codex (GPT-6), API session (ID unavailable), started 2026-11-07T12:51:07Z; branch `feat/24-server-mcp-shim`. Invoked for Phase 3 only; stop before review, terminal review and close-out.
 
-Status: in progress. The one-unit brief `briefs/phase3-01-artifact-feedback.md` is committed before implementation. The 7 Nov v2 enqueue amendment is explicitly outside this phase; Phase 3 implements the read-only v1 behavior only.
+Status: closed, 2026-11-07 (closing commit carries `Workflow-Phase: 24-server-mcp-shim:3`). The one-unit brief `briefs/phase3-01-artifact-feedback.md` and the reference corpus `testdata/mcp-golden/artifact-feedback.json` were committed before implementation. Artifact feedback on the brief returned delivered, screen pass. Feedback on the report returned not delivered because the service has no version of this file; no report rating was available.
+
+### Unit `phase3-01-artifact-feedback`
+
+- Built: registered server-owned `artifact_feedback` in the production MCP service with read scope, `readOnlyHint`, path validation, and the v1 `cwd`, `resolved_path`, `file`, `git`, `queue`, and `drain` declaration. The handler now reads the authenticated tenant's artifact and baseline data directly and formats the feedback states, screen and score lines, queue/rejection details, and D1 running-drain wait. No queue effect, drain kick, ingest, store write or worker wake was added. The 7 Nov v2 enqueue amendment remains outside this phase.
+- Surfaces: `packages/yakka/internal/serve/mcp_stateless.go`, new `mcp_feedback.go` and `mcp_feedback_test.go`, `testdata/mcp-golden/artifact-feedback.json`, and `packages/yakka/cmd/yakka/main.go`.
+- Deviations: none from the Phase 3 brief. The Python reference and hooks/drain were not changed.
+- Agent: inline implementation; harness did not expose turn/context counts.
+
+### Verification (Phase 3)
+
+- Entry point: direct authenticated `POST /v1/mcp` `tools/list` and `tools/call artifact_feedback` requests exercise the declaration, validation, context reader gates, and response states. Tests prove tenant B cannot see tenant A's artifact, the handler leaves the store unchanged, and server logs omit injected paths and hashes. Running-drain cases verify both matching-hash delivery and the bounded queued response without starting a drain.
+- `go test ./internal/serve/... -run 'TestMCP(ArtifactFeedback|Stateless|.*Conformance)' -count=1` passed (1.985s).
+- `go test ./... -count=1` passed all 16 packages, including `cmd/yakka` and `internal/serve`; `git diff --check` passed.
+- Result: the Phase 3 outcome holds for the characterized feedback cases, direct store-backed delivery/screen/score behavior, required-reader failures, read-scope access and tenant isolation. The unrelated pre-existing layout test failure was not encountered, investigated or changed.
+
+### Phase 3 — Carried
+
+1. Phase 4 refinement must include the design addendum's v2 `enqueue_file_snapshot` compatibility and directive deltas; Phase 3 retains read-only v1 behavior.
+2. The store's normal path does not provide a deterministic `LatestScores` failure fixture. The `baselines unavailable` fallback is implemented, while ordinary baseline formatting is covered.
+3. The unrelated pre-existing layout test failure remains uninvestigated and unchanged; do not chase it in this plan.
