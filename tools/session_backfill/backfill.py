@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+from collections import Counter
 import os
 import re
 import secrets
@@ -42,6 +43,9 @@ class Session:
     cwd: str = ""
     branch: str = ""
     files: list[str] = field(default_factory=list)
+    # Set when the transcript could not be read or has no parseable records.
+    # Such a session is still labelled (unresolved) so it is never silently dropped.
+    unreadable: bool = False
 
 
 @dataclass
@@ -68,7 +72,13 @@ def _walk_strings(value, out: list[str], key_values: dict[str, list[str]]) -> No
         out.append(value)
 
 
-def read_session(path: Path, store: str, session_id: str | None = None, related_paths: Iterable[Path] = ()) -> Session | None:
+def _unreadable(path: Path, store: str, session_id: str | None) -> Session:
+    # Codex identity comes only from session_meta, so an unreadable rollout has none.
+    sid = "" if store == "codex" else (session_id or path.stem)
+    return Session(sid, store, str(path), "", unreadable=True)
+
+
+def read_session(path: Path, store: str, session_id: str | None = None, related_paths: Iterable[Path] = ()) -> Session:
     """Read JSON/JSONL transcript envelopes into a bounded text view."""
     try:
         size = path.stat().st_size
@@ -81,7 +91,7 @@ def read_session(path: Path, store: str, session_id: str | None = None, related_
                 raw_bytes = f.read(1 << 20)
         raw = raw_bytes.decode("utf-8", errors="replace")
     except OSError:
-        return None
+        return _unreadable(path, store, session_id)
     objects = _read_objects(raw)
     for related in related_paths:
         try:
@@ -91,7 +101,7 @@ def read_session(path: Path, store: str, session_id: str | None = None, related_
         except OSError:
             continue
     if not objects and store != "codex":
-        return None
+        return _unreadable(path, store, session_id)
     if store == "codex":
         # Rollout filenames identify timestamped files; usage facts use the
         # thread ID recorded in session_meta. Never use a filename (or a
@@ -190,13 +200,12 @@ def _discover_opencode(root: Path) -> Iterable[Session]:
         try:
             meta = json.loads(path.read_text(encoding="utf-8", errors="replace"))
         except (OSError, ValueError):
+            yield _unreadable(path, "opencode", None)
             continue
         sid = meta.get("id") if isinstance(meta, dict) else None
         sid = sid if isinstance(sid, str) else path.stem
         related = [*messages_by_session.get(sid, []), *parts_by_session.get(sid, [])]
-        session = read_session(path, "opencode", sid, related)
-        if session:
-            yield session
+        yield read_session(path, "opencode", sid, related)
 
 
 def discover(roots: dict[str, Path]) -> Iterable[Session]:
@@ -259,6 +268,10 @@ def _scrub_evidence(text: str, limit: int = 300) -> str:
 
 
 def label_session(session: Session, repo: str = "", queue_truth: dict[str, dict[str, str]] | None = None) -> Label:
+    if session.unreadable:
+        return Label(session.session_id, session.store, "unresolved",
+                     evidence="transcript unreadable or has no parseable records",
+                     source_file=session.path)
     if not session.session_id:
         # Keep identity failures visible without creating a label that a later
         # pass could complete and attach to an invented conversation ID.
@@ -345,9 +358,14 @@ def write_labels(path: Path, labels: list[Label]) -> None:
 
 def enqueue(labels: Iterable[Label], queue_dir: str | None = None) -> int:
     count = 0
+    # One action per conversation: the same ID can come from two transcript files
+    # (Cursor files one chat under two project directories), so only the first
+    # complete label for an ID is emitted.
+    seen: set[str] = set()
     for label in labels:
-        if label.status != "complete" or not label.session_id:
+        if label.status != "complete" or not label.session_id or label.session_id in seen:
             continue
+        seen.add(label.session_id)
         yakka.EnqueueSessionAction(
             conversation_id=label.session_id,
             action=label.action,
@@ -389,9 +407,11 @@ def main(argv: list[str] | None = None) -> int:
     labels: list[Label] = []
     excluded: list[Label] = []
     session_count = 0
+    unreadable_count = 0
     gold: list[Label] = []
     for session in sessions:
         session_count += 1
+        unreadable_count += session.unreadable
         if session.store == "opencode" and is_flash_analysis(session):
             excluded.append(Label(session.session_id, session.store, "excluded", evidence="automated Flash analysis excluded"))
             continue
@@ -406,7 +426,8 @@ def main(argv: list[str] | None = None) -> int:
         write_labels(args.labels, [*labels, *excluded])
     correct, total, agreement = score_gold(gold, truth)
     server_ids = set(args.server_action_ids.read_text(encoding="utf-8").splitlines()) if args.server_action_ids else set()
-    result = {"stores": report, "sessions": session_count, "gold": {"correct": correct, "labelled": total, "agreement": agreement}, "coverage": {"complete": sum(r["complete"] for r in report.values()), "incomplete": sum(r["partial"] + r["unresolved"] for r in report.values())}, "label_file": str(args.labels), "server_fact_count": args.server_fact_count, "labelled_sessions_with_server_facts": sum(1 for label in labels if label.action.get("subject_id") and label.session_id in server_ids) if args.server_action_ids else None}
+    id_counts = Counter(label.session_id for label in labels if label.session_id)
+    result = {"stores": report, "sessions": session_count, "unreadable": unreadable_count, "duplicate_conversation_ids": sum(1 for n in id_counts.values() if n > 1), "gold":{"correct": correct, "labelled": total, "agreement": agreement}, "coverage": {"complete": sum(r["complete"] for r in report.values()), "incomplete": sum(r["partial"] + r["unresolved"] for r in report.values())}, "label_file": str(args.labels), "server_fact_count": args.server_fact_count, "labelled_sessions_with_server_facts": sum(1 for label in labels if label.action.get("subject_id") and label.session_id in server_ids) if args.server_action_ids else None}
     if args.enqueue:
         result["emitted"] = enqueue(labels, args.queue_dir)
     print(json.dumps(result, sort_keys=True))

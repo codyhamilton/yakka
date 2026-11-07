@@ -218,6 +218,62 @@ class BackfillTests(unittest.TestCase):
             self.assertEqual(json.loads(envelope)["event"], "yakka.session_action")
             self.assertEqual(payload, "{}")
 
+    def test_unreadable_transcripts_are_labelled_unresolved_not_dropped(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            claude = root / "claude" / "project"
+            claude.mkdir(parents=True)
+            (claude / "empty.jsonl").write_bytes(b"")
+            (claude / "garbage.jsonl").write_text("not json\n")
+            cursor = root / "cursor" / "project" / "agent-transcripts" / "c9"
+            cursor.mkdir(parents=True)
+            (cursor / "c9.jsonl").write_text("{broken\n")
+            opencode = root / "opencode" / "session" / "project"
+            opencode.mkdir(parents=True)
+            (opencode / "o9.json").write_text("{not json")
+            roots = {"claude": root / "claude", "cursor": root / "cursor", "opencode": root / "opencode"}
+            sessions = list(discover(roots))
+            self.assertEqual(sorted(s.session_id for s in sessions), ["c9", "empty", "garbage", "o9"])
+            self.assertTrue(all(s.unreadable for s in sessions))
+            for session in sessions:
+                label = label_session(session, "owner/repo")
+                self.assertEqual(label.status, "unresolved")
+                self.assertEqual(label.session_id, session.session_id)
+                self.assertEqual(label.source_file, session.path)
+            self.assertFalse((root / "queue").exists())
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                main(["--root", f"claude={root / 'claude'}", "--root", f"cursor={root / 'cursor'}",
+                      "--root", f"opencode={root / 'opencode'}", "--labels", str(root / "labels.jsonl")])
+            summary = json.loads(output.getvalue())
+            self.assertEqual(summary["sessions"], 4)
+            self.assertEqual(summary["unreadable"], 4)
+            self.assertEqual(summary["coverage"]["incomplete"], 4)
+            self.assertEqual(summary["stores"]["claude"]["unresolved"], 2)
+            self.assertEqual(len((root / "labels.jsonl").read_text().splitlines()), 4)
+
+    def test_duplicate_conversation_ids_are_reported_and_enqueued_once(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            for project in ("empty-window", "garcia"):
+                d = root / "cursor" / project / "agent-transcripts" / "dup-1"
+                d.mkdir(parents=True)
+                (d / "dup-1.jsonl").write_text(json.dumps({"text": "docs/plans/22-demo phase 2"}) + "\n")
+            sessions = list(discover({"cursor": root / "cursor"}))
+            self.assertEqual([s.session_id for s in sessions], ["dup-1", "dup-1"])
+            truth = {"dup-1": {"plan": "22-demo", "phase": "2", "kind": "build", "queue_log": "x.log"}}
+            labels = [label_session(s, "owner/repo", truth) for s in sessions]
+            self.assertEqual([x.status for x in labels], ["complete", "complete"])
+            queue = root / "queue"
+            self.assertEqual(enqueue(labels, str(queue)), 1)
+            self.assertEqual(len(list(queue.glob("*.evt"))), 1)
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                main(["--root", f"cursor={root / 'cursor'}", "--labels", str(root / "labels.jsonl")])
+            summary = json.loads(output.getvalue())
+            self.assertEqual(summary["duplicate_conversation_ids"], 1)
+            self.assertEqual(summary["sessions"], 2)
+
 
 if __name__ == "__main__":
     unittest.main()

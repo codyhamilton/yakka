@@ -24,8 +24,14 @@ python3 tools/session_backfill/backfill.py \
   --repo owner/repo --labels session-labels.jsonl
 ```
 
-The tool prints per-store complete, partial, unresolved and excluded counts, coverage, and the
-masked queue-log gold agreement. A prior `/v1/actions` snapshot can be supplied as newline-delimited
+A transcript that cannot be read, or has no parseable records, is still labelled `unresolved`
+(evidence "transcript unreadable or has no parseable records") so it appears in the counts. Two
+transcript files can carry the same conversation ID (Cursor files one chat under two project
+directories); the report counts these as `duplicate_conversation_ids`, and `--enqueue` emits at
+most one fact per conversation ID.
+
+The tool prints per-store complete, partial, unresolved and excluded counts, coverage, the
+masked queue-log gold agreement, and the unreadable and duplicate-ID counts. A prior `/v1/actions` snapshot can be supplied as newline-delimited
 conversation ids with `--server-action-ids`, or its count with `--server-fact-count`; the tool makes
 no request. `--enqueue` writes complete labels to the local Yakka queue only. The ordinary drain
 later handles them with the other queued facts. Re-running the same labels creates no new event
