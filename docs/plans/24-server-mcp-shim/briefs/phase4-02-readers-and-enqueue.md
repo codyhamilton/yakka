@@ -1,7 +1,7 @@
 # Brief: phase4-02 — local readers and bounded enqueue
 
 Consumer: the Phase 4 execution worker implementing declared local context and the approved v2 action.
-Owned paths: `plugins/yakka/client/yakka.py`, `plugins/yakka/client/spool.sh`, `packages/yakka/internal/serve/testdata/mcp-readers.json`, `docs/plans/24-server-mcp-shim/reports/phase4-02-readers-and-enqueue.md`. Touch nothing else.
+Owned paths: `plugins/yakka/client/yakka.py`, `plugins/yakka/script/spool.sh`, `packages/yakka/internal/serve/testdata/mcp-readers.json`, `docs/plans/24-server-mcp-shim/reports/phase4-02-readers-and-enqueue.md`. Touch nothing else.
 Commits: Commit to the current branch when done evidence passes, with a plain-summary title.
 Report: before committing, write `docs/plans/24-server-mcp-shim/reports/phase4-02-readers-and-enqueue.md` and include it in the commit.
 Depends on: `phase4-01-transport`.
@@ -25,11 +25,11 @@ The v2 addendum is binding and takes precedence over the original v1 auth/contex
 
 ## Changes
 
-Implement the declared reader table and strict parameter/dependency/version checks, `_local` construction and key-leak scan. Add queue reader v2's coverage facts while preserving its v1 samples. Implement the bounded primitive and immediate revalidation; serialize same-target check-and-append; honor spool acknowledgment, hooklog and `YAKKA_BIN` rules. Add the exact opt-in `YAKKA_SPOOL_PRINT=1` success acknowledgment to the fixed `spool.sh` entry point: print only the successful entry name to its private caller, and leave hook stdout unchanged by default. Update the shared reader conformance JSON for queue v2. No generic effect framework, additional actions, arbitrary process/network access, file-content upload, or persistent retry ledger.
+Implement the declared reader table and strict parameter/dependency/version checks, `_local` construction and key-leak scan. Add queue reader v2's coverage facts while preserving its v1 samples. Implement the bounded primitive and immediate revalidation; serialize same-target check-and-append; honor spool acknowledgment, hooklog and `YAKKA_BIN` rules. Add the exact opt-in `YAKKA_SPOOL_PRINT=1` success acknowledgment to the installed `plugins/yakka/script/spool.sh` entry point: print only the successful entry name to its private caller, and leave hook stdout unchanged by default. Update the shared reader conformance JSON for queue v2. No generic effect framework, additional actions, arbitrary process/network access, file-content upload, or persistent retry ledger.
 
 ### Keep untouched
 
-Do not change Go handler/state behavior from Phases 1–3, drain/hooks, queue packet format, REST, or harness launch files. In `spool.sh`, make only the opt-in acknowledgment change above. No MCP direct ingest, worker wake, content scan, or shim-owned drain launcher.
+Do not change Go handler/state behavior from Phases 1–3, drain/hooks, queue packet format, REST, or harness launch files. In `plugins/yakka/script/spool.sh`, make only the opt-in acknowledgment change above. No MCP direct ingest, worker wake, content scan, or shim-owned drain launcher.
 
 ## Done evidence
 
