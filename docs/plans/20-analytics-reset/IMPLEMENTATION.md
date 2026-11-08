@@ -38,6 +38,13 @@ Phase outcome is open for implementation approach, so this run uses the signed o
 - Deviations: none. No contract changed.
 - Verification: `GOMEMLIMIT=8GiB GOMAXPROCS=3 go test -p=3 ./internal/store ./internal/serve -run 'AnalyticsPlan' -count=1` and full bounded store/serve suites passed; `git diff --check` passed. `artifact_feedback` on the amended brief and report returned delivered / screen pass (`jev-1.13.0`), no flags.
 
+### `6-02-cohort-predicates-and-resolution.md`
+
+- Outcome: committed as `147d1f0` (`Add bounded cohort parsing and source resolution`); added canonical bounded predicate parsing and parameterized positive-source SQLite subqueries for session, artifact, execution and plan. Source subtraction retains positive-set semantics. Cohort capabilities remain unpublished.
+- Surfaces: `packages/yakka/internal/serve/` cohort parser, `packages/yakka/internal/store/` source resolver, and focused fixture tests.
+- Deviations / unfinished: report status is done with concerns. Source-specific derived fields/lenses and derivation revisions are incomplete. Contracts 17.3 does not define the shape/semantics of `scope.include` and `scope.exclude`, nor how content source predicates select kind/check; those are recorded as gates. Do not invent those fields or advertise unsupported cohort paths.
+- Verification: the required command passed but initially selected no tests; new fixtures then covered canonicalization, malformed definitions, positive exclusion and four source subqueries. `git diff --check` passed. `artifact_feedback` on the brief and report returned delivered / screen pass (`jev-1.13.0`), no flags.
+
 Tool: Codex execute skill
 Run ID: feat/20-analytics-reset phase 3 execution
 Start time: 2026-11-08 09:10 Australia/Brisbane (2026-11-07 23:10 UTC)
