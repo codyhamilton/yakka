@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"reflect"
 	"strings"
 	"testing"
@@ -481,6 +482,27 @@ func TestAnalyticsQuery(t *testing.T) {
 			t.Fatalf("explicit cell overflow: status=%d body=%v", code, body)
 		}
 	})
+}
+
+func TestAnalyticsCohortFiltersQueryAfterPositiveResolution(t *testing.T) {
+	s, ts := queryTenant(t)
+	base := time.Date(2026, 11, 8, 0, 0, 0, 0, time.UTC)
+	for _, conv := range []string{"selected", "other"} {
+		qadd(t, ts, store.FactRow{Type: "commit", ConversationID: conv, RepoID: "repo", TS: float64(base.Add(time.Hour).Unix())}, nil)
+	}
+	qadd(t, ts, store.FactRow{Type: "commit", ConversationID: "other", RepoID: "repo", TS: float64(base.Add(2 * time.Hour).Unix())}, nil)
+	cohort := `{"v":1,"grain":"session","scope":{"from":"2026-11-08T00:00:00Z","to":"2026-11-08T23:00:00Z","tz":"UTC","include":[],"exclude":[]},"predicate":{"range":{"measure":"commits","lo":1,"hi":1}}}`
+	path := "/v1/analytics/query?measure=conversations&bucket=none&from=2026-11-08T00:00:00Z&to=2026-11-08T23:00:00Z&cohort=" + url.QueryEscape(cohort)
+	got := rowsOf(aok(t, s, path), "rows")
+	if len(got) != 1 || got[0]["v"] != 1.0 {
+		t.Fatalf("positive cohort rows=%v; want one selected session", got)
+	}
+	cohort = strings.Replace(cohort, `"predicate":{"range":{"measure":"commits","lo":1,"hi":1}}`, `"predicate":{"range":{"measure":"commits","lo":1,"hi":1}},"op":"exclude"`, 1)
+	path = "/v1/analytics/query?measure=conversations&bucket=none&from=2026-11-08T00:00:00Z&to=2026-11-08T23:00:00Z&cohort=" + url.QueryEscape(cohort)
+	got = rowsOf(aok(t, s, path), "rows")
+	if len(got) != 1 || got[0]["v"] != 1.0 {
+		t.Fatalf("subtracted cohort rows=%v; want the other session", got)
+	}
 }
 
 func TestAnalyticsQueryPartial(t *testing.T) {

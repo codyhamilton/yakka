@@ -73,8 +73,13 @@ type AnalyticsFilter struct {
 	Tools, Models, Sources         []string
 	ConversationIDs                []string
 	Excludes                       map[string][]string
-	SessionRanges                  []SessionRange
-	TZ                             *time.Location // nil means UTC
+	// CohortSQL is a parameterized positive session subquery produced by CohortSessionSubquery.
+	// CohortExclude subtracts its resolved sessions after source resolution.
+	CohortSQL     string
+	CohortArgs    []any
+	CohortExclude bool
+	SessionRanges []SessionRange
+	TZ            *time.Location // nil means UTC
 }
 
 // SessionRange is an inclusive numeric predicate over a session measure. Nil bounds are open.
@@ -189,6 +194,14 @@ func (f AnalyticsFilter) factWhere() (string, []any) {
 	w += inList("model", f.Models, &args)
 	w += inList("source", f.Sources, &args)
 	w += inList("conversation_id", f.ConversationIDs, &args)
+	if f.CohortSQL != "" {
+		operator := " IN "
+		if f.CohortExclude {
+			operator = " NOT IN "
+		}
+		w += " AND conversation_id" + operator + "(" + f.CohortSQL + ")"
+		args = append(args, f.CohortArgs...)
+	}
 	for dim, values := range f.Excludes {
 		col := map[string]string{"repo_id": "repo_id", "harness": "harness", "kind": "kind", "plan": "plan", "norm_event": "norm_event", "event": "event", "tool": "tool", "model": "model", "source": "source", "conversation_id": "conversation_id"}[dim]
 		if col != "" && len(values) > 0 {
@@ -216,6 +229,14 @@ func (f AnalyticsFilter) rejWhere() (string, []any) {
 		}
 		w += " AND stage NOT IN (?" + strings.Repeat(",?", len(values)-1) + ")"
 	}
+	if f.CohortSQL != "" {
+		operator := " IN "
+		if f.CohortExclude {
+			operator = " NOT IN "
+		}
+		w += " AND conversation_id" + operator + "(" + f.CohortSQL + ")"
+		args = append(args, f.CohortArgs...)
+	}
 	return w, args
 }
 
@@ -242,7 +263,7 @@ func (t *Tenant) strings(ctx context.Context, q string, args ...any) ([]string, 
 func (f AnalyticsFilter) rollupEligible() bool {
 	return len(f.Repos) == 0 && len(f.Harnesses) == 0 && len(f.Kinds) == 0 && len(f.Plans) == 0 &&
 		len(f.NormEvents) == 0 && len(f.Events) == 0 && len(f.Tools) == 0 && len(f.Models) == 0 &&
-		len(f.Sources) == 0 && len(f.ConversationIDs) == 0
+		len(f.Sources) == 0 && len(f.ConversationIDs) == 0 && f.CohortSQL == ""
 }
 
 // Facets lists the distinct dimension values and the tool histogram over the window. With no

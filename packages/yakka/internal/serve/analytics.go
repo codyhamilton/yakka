@@ -258,6 +258,24 @@ func parseFilter(w http.ResponseWriter, r *http.Request, o filterOpts) (store.An
 	f = store.AnalyticsFilter{From: from.UTC(), To: to.UTC(), Repos: q["repo_id"], Harnesses: q["harness"], Kinds: q["kind"], Plans: q["plan"],
 		NormEvents: q["norm_event"], Events: q["event"], Tools: q["tool"], Models: q["model"], Sources: q["source"], ConversationIDs: q["conversation_id"], TZ: loc}
 	f.Excludes = excludes
+	if raw := q.Get("cohort"); raw != "" {
+		cohort, err := store.ParseCohortDefinition([]byte(raw))
+		if err != nil {
+			errCodeJSON(w, 400, "cohort_invalid", err.Error(), nil)
+			return f, false
+		}
+		sql, args, _, err := store.CohortSessionSubquery(cohort)
+		if err != nil {
+			code := "cohort_invalid"
+			if errors.Is(err, store.ErrUnsupportedJoin) {
+				code = "unsupported_join"
+			}
+			errCodeJSON(w, 400, code, err.Error(), map[string]any{"reason": err.Error()})
+			return f, false
+		}
+		f.CohortSQL, f.CohortArgs = sql, args
+		f.CohortExclude = cohort.Definition.Op == "exclude"
+	}
 	if o.scoresKind && len(f.Kinds) != 1 {
 		errJSON(w, 400, "kind required")
 		return f, false
