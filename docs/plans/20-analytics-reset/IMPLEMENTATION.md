@@ -78,6 +78,18 @@ Carried
 - gate: Cody confirm the existing `relation` / `missing_by_reason` response mapping for separate missing and orphan rejection associations, or define the required response placement before cohort publication.
 - gate: implement and verify remaining cohort source measures/lenses, target-route typed population/relation reporting and activity rejection/filter behavior before the Phase 6 outcome can close.
 
+### Phase 6 retry — unsuccessful, not closed
+
+- Run: Codex execute retry on `feat/20-analytics-reset`, 2026-11-08 Australia/Brisbane. The worktree began clean at `0d8097e`; no implementation scope or contract was changed during this retry.
+- Verification: `GOMEMLIMIT=8GiB GOMAXPROCS=3 go test -p=3 ./internal/store ./internal/serve -count=1` passed (store 7.562s; serve 26.797s); `git diff --check` passed. `artifact_feedback` on all eight Phase 6 briefs and eight reports returned delivered / screen pass (`jev-1.13.0`), with no flags.
+- Outcome remains unmet: the contract does not define non-empty `scope.include` / `scope.exclude` elements or a response location for separate missing/orphan rejection counts. Target responses also lack required typed cohort population and relation/expansion metadata; unsupported source predicates and activity filter coverage are not fully verified. Cohort capability remains unpublished. No closing trailer is recorded.
+
+Carried
+
+- gate: Cody define the element grammar and semantics for frozen cohort `scope.include` and `scope.exclude`.
+- gate: Cody confirm where separate missing/orphan rejection association counts belong within the existing `relation` / `missing_by_reason` response contract.
+- gate: implement remaining supported cohort source measures/lenses, typed target population and relation/expansion reporting, and verify activity rejection/filter coverage before publishing cohort capability or closing Phase 6.
+
 Tool: Codex execute skill
 Run ID: feat/20-analytics-reset phase 3 execution
 Start time: 2026-11-08 09:10 Australia/Brisbane (2026-11-07 23:10 UTC)
