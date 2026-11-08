@@ -52,6 +52,13 @@ Phase outcome is open for implementation approach, so this run uses the signed o
 - Deviations / unfinished: report status is done with concerns. Non-entity response shapes do not yet gain typed population metadata. Undefined scope filter elements, content source selection and unsupported derived/time predicates remain gates from 6-02/6-04. The unit commit carried a premature phase trailer; it was removed by amending locally before any push.
 - Verification: the new `/query` red/green test proves one-session inclusion and positive-set exclusion; the required bounded analytics route check and `git diff --check` passed. `artifact_feedback` on the brief and report returned delivered / screen pass (`jev-1.13.0`), no flags.
 
+### `6-04-time-cohorts-and-activity.md`
+
+- Outcome: committed as `e960fa7` (`Add analytics activity feed and time cohort resolver`); added fixture-backed time-source resolution and the authenticated activity list/probe. Activity publishes in `/schema`; cohort remains unpublished.
+- Surfaces: activity route/store reads, time resolver, schema and focused tests.
+- Deviations / unfinished: report status is done with concerns. Time source currently supports only some contributor types, uses UTC rather than the frozen requested timezone, and lacks deduplicated usage identities plus rejection missing/orphan counts. These are required by CONTRACTS.md 17.3; brief 6-04b closes them. Activity reports unsupported shared filters through `ignored_filters` as specified; its compatibility with each consumer is included in phase verification.
+- Verification: focused `GOMEMLIMIT=8GiB GOMAXPROCS=3 go test -p=3 ./internal/store ./internal/serve -run 'Analytics(Activity|Cohort|Entity)' -count=1` and `git diff --check` passed. `artifact_feedback` on the brief and report returned delivered / screen pass (`jev-1.13.0`), no flags.
+
 Tool: Codex execute skill
 Run ID: feat/20-analytics-reset phase 3 execution
 Start time: 2026-11-08 09:10 Australia/Brisbane (2026-11-07 23:10 UTC)

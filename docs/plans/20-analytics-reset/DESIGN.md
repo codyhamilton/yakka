@@ -558,6 +558,7 @@ Refinement verdict: **Proceed**, three sequential units. The fixture ledger and 
 | 6-02 Cohort predicates and resolution | [briefs/6-02-cohort-predicates-and-resolution.md](briefs/6-02-cohort-predicates-and-resolution.md) | 6-01d; Phases 1–5 | Nothing; establishes the shared bounded resolver. |
 | 6-03 Cohort target-route integration | [briefs/6-03-cohort-target-integration.md](briefs/6-03-cohort-target-integration.md) | 6-02; Phases 1–5 | Nothing; applies resolution consistently to every listed target. |
 | 6-04 Time cohorts and activity feed | [briefs/6-04-time-cohorts-and-activity.md](briefs/6-04-time-cohorts-and-activity.md) | 6-01, 6-02, 6-03; Phases 1–5 | Nothing; closes time-source membership and the merged feed/probe. |
+| 6-04b Time-cohort contributor and timezone completion | [briefs/6-04b-time-cohort-completion.md](briefs/6-04b-time-cohort-completion.md) | 6-04; Phases 1–5 | Nothing; completes signed time contributor identities and frozen bucket-grid replay. |
 
 Phase 5 carried items were reviewed. The artifact file-to-time-bucket assignment is unrelated to Phase 6's plan/execution/cohort contract and remains gated: it must be defined before artifact bucket grouping is implemented or advertised. The score-lens memory-growth proof concerns the Phase 5 score aggregation path and is not expanded into Phase 6; it remains for a later bounded-query review. Neither item changes the Phase 6 contract or blocks these units.
 
