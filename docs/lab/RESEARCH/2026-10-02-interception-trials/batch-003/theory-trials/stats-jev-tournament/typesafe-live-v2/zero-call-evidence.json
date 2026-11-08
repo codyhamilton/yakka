@@ -1,0 +1,89 @@
+{
+  "features": {
+    "92a48e004519": {
+      "monitor_count": 0,
+      "reread_max": 13,
+      "compaction_event_count": 20,
+      "no_mutation": true,
+      "thrash_screen_strict": true
+    },
+    "ca977b9ca0dd": {
+      "monitor_count": 0,
+      "reread_max": 14,
+      "compaction_event_count": 16,
+      "no_mutation": true,
+      "thrash_screen_strict": true
+    },
+    "87a380bc64ff": {
+      "monitor_count": 6,
+      "reread_max": 4,
+      "compaction_event_count": 0,
+      "no_mutation": true,
+      "thrash_screen_strict": false
+    },
+    "bb6165018de0": {
+      "monitor_count": 3,
+      "reread_max": 3,
+      "compaction_event_count": 0,
+      "no_mutation": false,
+      "thrash_screen_strict": false
+    },
+    "15f24c7ba18c": {
+      "monitor_count": 28,
+      "reread_max": 0,
+      "compaction_event_count": 2,
+      "no_mutation": false,
+      "thrash_screen_strict": false
+    },
+    "0677f597286e": {
+      "monitor_count": 0,
+      "reread_max": 5,
+      "compaction_event_count": 2,
+      "no_mutation": false,
+      "thrash_screen_strict": false
+    },
+    "074c8cf22927": {
+      "monitor_count": 0,
+      "reread_max": 0,
+      "compaction_event_count": 0,
+      "no_mutation": false,
+      "thrash_screen_strict": false
+    },
+    "daf933273c8f": {
+      "monitor_count": 1,
+      "reread_max": 3,
+      "compaction_event_count": 8,
+      "no_mutation": false,
+      "thrash_screen_strict": false
+    }
+  },
+  "gate": {
+    "criterion": "zero_call_already_separates",
+    "fired": true,
+    "thrash_workers_expected": [
+      "92a48e004519",
+      "ca977b9ca0dd"
+    ],
+    "poll_workers_in_wave": [
+      "15f24c7ba18c",
+      "87a380bc64ff",
+      "bb6165018de0"
+    ],
+    "extreme_workers": [
+      "92a48e004519",
+      "ca977b9ca0dd"
+    ],
+    "poll_overlap": [],
+    "rule": "no Edit/Write and reread_max >= 8 and compaction_event_count >= 8"
+  },
+  "selected_workers": [
+    "92a48e004519",
+    "ca977b9ca0dd",
+    "87a380bc64ff",
+    "bb6165018de0",
+    "15f24c7ba18c",
+    "0677f597286e",
+    "074c8cf22927",
+    "daf933273c8f"
+  ]
+}
