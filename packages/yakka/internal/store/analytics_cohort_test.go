@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestAnalyticsCohortCanonicalizesPredicates(t *testing.T) {
@@ -141,5 +142,99 @@ func TestAnalyticsTimeCohortRequiresAndAcceptsFrozenSource(t *testing.T) {
 	raw := []byte(`{"v":1,"grain":"time","scope":{"from":"2025-01-01T00:00:00Z","to":"2025-01-31T00:00:00Z","tz":"UTC","include":[],"exclude":[]},"predicate":{"range":{"measure":"commits","lo":1,"hi":2}},"source":{"fields":["commits"],"bucket":"day","bucket_step":1}}`)
 	if _, err := ParseCohortDefinition(raw); err != nil {
 		t.Fatalf("parse frozen time source: %v", err)
+	}
+}
+
+func TestAnalyticsTimeCohortReplaysLocalGridAndUsageIdentity(t *testing.T) {
+	tn, _ := fixture(t)
+	defer tn.Close()
+	from := time.Date(2026, 11, 1, 4, 0, 0, 0, time.UTC)
+	to := time.Date(2026, 11, 1, 7, 0, 0, 0, time.UTC)
+	addFacts(t, tn,
+		afx{typ: "commit", conv: "commit-writer", harness: "h", ts: from.Add(30 * time.Minute)},
+		afx{typ: "hook_event", conv: "other-day", harness: "h", event: "hook", ts: from.Add(90 * time.Minute)},
+	)
+	usageRows := []FactRow{
+		ufact(801, "claude", "test-unpriced", "usage-writer", `{"backfill":{"ref":"same-message"},"n":801}`, from.Add(30*time.Minute), 0, 1, 0, 0, 0, nil),
+		ufact(802, "claude", "test-unpriced", "usage-writer", `{"backfill":{"ref":"same-message"},"n":802}`, from.Add(90*time.Minute), 0, 9, 0, 0, 0, nil),
+	}
+	if _, err := tn.Append(context.Background(), usageRows); err != nil {
+		t.Fatal(err)
+	}
+
+	resolve := func(fields, predicate string) []string {
+		t.Helper()
+		raw := fmt.Sprintf(`{"v":1,"grain":"time","scope":{"from":%q,"to":%q,"tz":"America/New_York","include":[],"exclude":[]},"predicate":%s,"source":{"fields":%s,"bucket":"day","bucket_step":1}}`, from.Format(time.RFC3339), to.Format(time.RFC3339), predicate, fields)
+		c, err := ParseCohortDefinition([]byte(raw))
+		if err != nil {
+			t.Fatal(err)
+		}
+		query, args, _, err := CohortSessionSubquery(c)
+		if err != nil {
+			t.Fatal(err)
+		}
+		rows, err := tn.rdb.QueryContext(context.Background(), query, args...)
+		if err != nil {
+			t.Fatalf("resolver SQL: %v\n%s", err, query)
+		}
+		defer rows.Close()
+		var got []string
+		for rows.Next() {
+			var id string
+			if err := rows.Scan(&id); err != nil {
+				t.Fatal(err)
+			}
+			got = append(got, id)
+		}
+		if err := rows.Err(); err != nil {
+			t.Fatal(err)
+		}
+		sort.Strings(got)
+		return got
+	}
+	if got := resolve(` ["commits"] `, `{"range":{"measure":"commits","lo":1,"hi":1}}`); !reflect.DeepEqual(got, []string{"commit-writer"}) {
+		t.Fatalf("New York day cohort contributors=%v, want commit-writer only", got)
+	}
+	if got := resolve(` ["tokens_out"] `, `{"range":{"measure":"tokens_out","lo":9,"hi":9}}`); !reflect.DeepEqual(got, []string{"usage-writer"}) {
+		t.Fatalf("deduplicated usage contributors=%v, want usage-writer", got)
+	}
+}
+
+func TestAnalyticsTimeCohortRejectsUnassociatedRejectionContributors(t *testing.T) {
+	tn, _ := fixture(t)
+	defer tn.Close()
+	from := time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)
+	to := from.Add(time.Hour)
+	for _, conv := range []string{"c1", "orphan"} {
+		mustExec(t, tn, `INSERT INTO rejections (stage,fact_type,conversation_id,path,content_hash,pattern,reason,at) VALUES (?,?,?,?,?,?,?,?)`,
+			"screen", "artifact_version", conv, "", "", "p", "r", from.Add(20*time.Minute).UnixNano())
+	}
+	raw := fmt.Sprintf(`{"v":1,"grain":"time","scope":{"from":%q,"to":%q,"tz":"UTC","include":[],"exclude":[]},"predicate":{"range":{"measure":"rejections","lo":2,"hi":2}},"source":{"fields":["rejections"],"bucket":"hour","bucket_step":1}}`, from.Format(time.RFC3339), to.Format(time.RFC3339))
+	c, err := ParseCohortDefinition([]byte(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	query, args, _, err := CohortSessionSubquery(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows, err := tn.rdb.QueryContext(context.Background(), query, args...)
+	if err != nil {
+		t.Fatalf("resolver SQL: %v\n%s", err, query)
+	}
+	defer rows.Close()
+	var got []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		got = append(got, id)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(got, []string{"c1"}) {
+		t.Fatalf("rejection contributors=%v, want only existing conversation c1", got)
 	}
 }

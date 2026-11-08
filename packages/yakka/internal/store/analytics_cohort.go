@@ -190,7 +190,10 @@ func ParseCohortDefinition(raw []byte) (ParsedCohort, error) {
 }
 
 func validCohortBucket(bucket string, step int) bool {
-	if bucket == "hour" || bucket == "day" || bucket == "week" || bucket == "month" || bucket == "year" {
+	if bucket == "year" {
+		return step > 0 && step <= 100
+	}
+	if bucket == "hour" || bucket == "day" || bucket == "week" || bucket == "month" {
 		return step == 1
 	}
 	if n, ok := multiYearStep(bucket); ok {
@@ -460,75 +463,103 @@ func timeCohortSessionSubquery(c ParsedCohort, from, to time.Time, rel CohortRel
 	}
 	f.TZ = loc
 	args := []any{seconds(from), seconds(to)}
-	// The source and membership use the frozen aggregate bucket rule. Each contributor is
-	// still selected by its existing fact identity; no causal relationship is inferred.
-	bucket := source.Bucket
-	if bucket == "year" && source.BucketStep > 1 {
-		bucket = "year:" + strconv.Itoa(source.BucketStep)
-	}
-	if bucket == "" {
+	// The source and membership use the frozen calendar bucket rule, including local DST
+	// boundaries. Each contributor is still selected by its existing fact/call/rejection identity.
+	if source.Bucket == "" {
 		return "", nil, rel, fmt.Errorf("%w: empty time bucket", ErrCohortInvalid)
 	}
-	measures := map[string]string{
-		"hook_events":       "COUNT(DISTINCT CASE WHEN type='hook_event' THEN row_hash END)",
-		"conversations":     "COUNT(DISTINCT conversation_id)",
-		"artifact_versions": "COUNT(DISTINCT CASE WHEN type='artifact_version' THEN row_hash END)",
-		"distinct_content":  "COUNT(DISTINCT CASE WHEN type='artifact_version' THEN content_hash END)",
-		"commits":           "SUM(CASE WHEN type='commit' THEN 1 ELSE 0 END)",
-	}
-	contributorTypes := map[string][]string{"hook_events": {"hook_event"}, "artifact_versions": {"artifact_version"}, "distinct_content": {"artifact_version"}, "commits": {"commit"}, "conversations": {"hook_event", "artifact_version", "commit"}}
+	columns := []string{"hook_events", "conversations", "artifact_versions", "distinct_content", "commits", "rejections", "model_calls", "unpriced_calls", "tokens_in", "tokens_out", "tokens_cache_read", "tokens_cache_write", "tokens_reasoning", "cost_usd"}
 	for _, m := range source.Fields {
-		if measures[m] == "" || len(contributorTypes[m]) == 0 {
+		if !containsString(columns, m) {
 			return "", nil, rel, fmt.Errorf("%w: time measure %q has no contributor mapping", ErrUnsupportedJoin, m)
 		}
 	}
-	selects := []string{}
-	for name, expr := range measures {
-		selects = append(selects, expr+" AS \""+name+"\"")
-	}
-	if len(selects) == 0 {
-		selects = append(selects, "0 AS hook_events")
-	}
-	timeExpr := bucketExprSQL(measureDef{table: "facts"}, bucket)
 	// Resolve only bucket rows selected by the frozen positive predicate.
 	cond, predicateArgs, err := compileCohortNode("time", c.root)
 	if err != nil {
 		return "", nil, rel, err
 	}
-	args = append(args, predicateArgs...)
-	selectedFields := make([]string, 0, len(source.Fields))
-	types := map[string]bool{}
+	fieldPred := make([]string, 0, len(source.Fields))
+	factTypes := map[string]bool{}
+	includeUsage, includeRejections := false, false
 	for _, field := range source.Fields {
-		if measures[field] != "" {
-			selectedFields = append(selectedFields, field)
-			for _, typ := range contributorTypes[field] {
-				types[typ] = true
+		fieldPred = append(fieldPred, "\""+field+"\" > 0")
+		switch field {
+		case "hook_events":
+			factTypes["hook_event"] = true
+		case "conversations":
+			for _, typ := range []string{"hook_event", "artifact_version", "commit"} {
+				factTypes[typ] = true
 			}
+		case "artifact_versions", "distinct_content":
+			factTypes["artifact_version"] = true
+		case "commits":
+			factTypes["commit"] = true
+		case "rejections":
+			includeRejections = true
+		default:
+			includeUsage = true
 		}
 	}
-	if len(selectedFields) == 0 {
-		return "", nil, rel, fmt.Errorf("%w: rejection-only time cohorts require rejection association counts", ErrUnsupportedJoin)
+	zeroCols := make([]string, len(columns))
+	for i, col := range columns {
+		zeroCols[i] = "0 AS \"" + col + "\""
 	}
-	fieldPred := make([]string, 0, len(selectedFields))
-	for _, field := range selectedFields {
-		fieldPred = append(fieldPred, "\""+field+"\" > 0")
+	factExpr := "wf_cohort_bucket(ts,'" + source.Bucket + "','" + strings.ReplaceAll(c.Definition.Scope.TZ, "'", "''") + "'," + strconv.Itoa(source.BucketStep) + ")"
+	usageCTE, usageArgs := usageRowsWhere(f)
+	args = append(args, usageArgs...)
+	// Rejection timestamps are nanoseconds; the scalar accepts seconds, like the existing
+	// analytics measure. Rejection membership requires a recorded conversation with facts.
+	q := "WITH facts_b AS (SELECT " + factExpr + " bucket,COUNT(DISTINCT CASE WHEN type='hook_event' THEN row_hash END) hook_events,COUNT(DISTINCT conversation_id) conversations,COUNT(DISTINCT CASE WHEN type='artifact_version' THEN row_hash END) artifact_versions,COUNT(DISTINCT CASE WHEN type='artifact_version' THEN content_hash END) distinct_content,SUM(CASE WHEN type='commit' THEN 1 ELSE 0 END) commits," + strings.Join(zeroCols[5:], ",") + " FROM facts WHERE ts>=? AND ts<=? GROUP BY bucket), "
+	q += "usage_b AS (" + usageCTE + " SELECT wf_cohort_bucket(ts,'" + source.Bucket + "','" + strings.ReplaceAll(c.Definition.Scope.TZ, "'", "''") + "'," + strconv.Itoa(source.BucketStep) + ") bucket,0 hook_events,0 conversations,0 artifact_versions,0 distinct_content,0 commits,0 rejections,COUNT(*) model_calls,SUM(1-wf_usage_priced(harness,model,tok_in,tok_out,tok_cache_read,tok_cache_write,tok_reasoning,cost_reported)) unpriced_calls,SUM(tok_in) tokens_in,SUM(tok_out) tokens_out,SUM(tok_cache_read) tokens_cache_read,SUM(tok_cache_write) tokens_cache_write,SUM(tok_reasoning) tokens_reasoning,SUM(wf_usage_cost(harness,model,tok_in,tok_out,tok_cache_read,tok_cache_write,tok_reasoning,cost_reported)) cost_usd FROM kept GROUP BY bucket), "
+	q += "reject_b AS (SELECT wf_cohort_bucket(at/1e9,'" + source.Bucket + "','" + strings.ReplaceAll(c.Definition.Scope.TZ, "'", "''") + "'," + strconv.Itoa(source.BucketStep) + ") bucket,0 hook_events,0 conversations,0 artifact_versions,0 distinct_content,0 commits,COUNT(*) rejections," + strings.Join(zeroCols[6:], ",") + " FROM rejections WHERE at>=? AND at<=? GROUP BY bucket), "
+	q += "all_b AS (SELECT * FROM facts_b UNION ALL SELECT * FROM usage_b UNION ALL SELECT * FROM reject_b), buckets AS (SELECT bucket," + sumColumns(columns) + " FROM all_b GROUP BY bucket), selected AS (SELECT bucket FROM buckets WHERE (" + cond + ") AND (" + strings.Join(fieldPred, " OR ") + ")) "
+	contributors := []string{}
+	if len(factTypes) != 0 {
+		types := make([]string, 0, len(factTypes))
+		for typ := range factTypes {
+			types = append(types, "'"+typ+"'")
+		}
+		sort.Strings(types)
+		contributors = append(contributors, "SELECT f.conversation_id FROM facts f JOIN selected s ON wf_cohort_bucket(f.ts,'"+source.Bucket+"','"+strings.ReplaceAll(c.Definition.Scope.TZ, "'", "''")+"',"+strconv.Itoa(source.BucketStep)+")=s.bucket WHERE f.type IN ("+strings.Join(types, ",")+") AND f.ts>=? AND f.ts<=?")
 	}
-	typeNames := make([]string, 0, len(types))
-	for typ := range types {
-		typeNames = append(typeNames, typ)
+	if includeUsage {
+		contributors = append(contributors, "SELECT u.conversation_id FROM ("+usageCTE+" SELECT conversation_id,ts FROM kept) u JOIN selected s ON wf_cohort_bucket(u.ts,'"+source.Bucket+"','"+strings.ReplaceAll(c.Definition.Scope.TZ, "'", "''")+"',"+strconv.Itoa(source.BucketStep)+")=s.bucket WHERE u.ts>=? AND u.ts<=?")
 	}
-	sort.Strings(typeNames)
-	typeArgs := make([]string, 0, len(typeNames))
-	for range typeNames {
-		typeArgs = append(typeArgs, "?")
+	if includeRejections {
+		contributors = append(contributors, "SELECT r.conversation_id FROM rejections r JOIN facts existing ON existing.conversation_id=r.conversation_id JOIN selected s ON wf_cohort_bucket(r.at/1e9,'"+source.Bucket+"','"+strings.ReplaceAll(c.Definition.Scope.TZ, "'", "''")+"',"+strconv.Itoa(source.BucketStep)+")=s.bucket WHERE r.at>=? AND r.at<=? AND r.conversation_id<>''")
 	}
-	q := "WITH buckets AS (SELECT " + timeExpr + " AS bucket," + strings.Join(selects, ",") + " FROM facts WHERE ts>=? AND ts<=? GROUP BY bucket), selected AS (SELECT bucket FROM buckets WHERE (" + cond + ") AND (" + strings.Join(fieldPred, " OR ") + ")) SELECT DISTINCT f.conversation_id FROM facts f JOIN selected s ON " + bucketExprSQL(measureDef{table: "facts"}, bucket) + "=s.bucket WHERE f.type IN (" + strings.Join(typeArgs, ",") + ") AND f.conversation_id<>'' AND f.ts>=? AND f.ts<=?"
-	for _, typ := range typeNames {
-		args = append(args, typ)
+	q += "SELECT DISTINCT conversation_id FROM (" + strings.Join(contributors, " UNION ") + ") WHERE conversation_id<>''"
+	args = append(args, from.UnixNano(), to.UnixNano())
+	args = append(args, predicateArgs...)
+	if len(factTypes) != 0 {
+		args = append(args, seconds(from), seconds(to))
 	}
-	args = append(args, seconds(from), seconds(to))
+	if includeUsage {
+		args = append(args, usageArgs...)
+		args = append(args, seconds(from), seconds(to))
+	}
+	if includeRejections {
+		args = append(args, from.UnixNano(), to.UnixNano())
+	}
 	rel.Mapping, rel.Unit = "time_bucket_to_contributing_session", "conversation_id"
 	return q, args, rel, nil
+}
+
+func containsString(xs []string, value string) bool {
+	for _, x := range xs {
+		if x == value {
+			return true
+		}
+	}
+	return false
+}
+func sumColumns(columns []string) string {
+	xs := make([]string, len(columns))
+	for i, c := range columns {
+		xs[i] = "SUM(\"" + c + "\") AS \"" + c + "\""
+	}
+	return strings.Join(xs, ",")
 }
 
 func compileCohortNode(grain string, n *cohortNode) (string, []any, error) {

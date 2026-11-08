@@ -54,6 +54,29 @@ func init() {
 			return nil, fmt.Errorf("unknown series bucket %q", unit)
 		}
 	})
+	sqlite.RegisterDeterministicScalarFunction("wf_cohort_bucket", 4, func(_ *sqlite.FunctionContext, args []driver.Value) (driver.Value, error) {
+		seconds, ok := args[0].(float64)
+		if !ok {
+			return nil, fmt.Errorf("cohort timestamp is not numeric")
+		}
+		unit, _ := args[1].(string)
+		zone, _ := args[2].(string)
+		step := 1
+		switch v := args[3].(type) {
+		case int64:
+			step = int(v)
+		case float64:
+			step = int(v)
+		}
+		loc, err := time.LoadLocation(zone)
+		if err != nil {
+			return nil, err
+		}
+		if unit == "year" && step > 1 {
+			unit = "year:" + strconv.Itoa(step)
+		}
+		return localBucket(usageHourKey(seconds), loc, unit), nil
+	})
 }
 
 func planOf(p string) string {
