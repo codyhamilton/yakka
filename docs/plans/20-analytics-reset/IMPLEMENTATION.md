@@ -45,6 +45,13 @@ Phase outcome is open for implementation approach, so this run uses the signed o
 - Deviations / unfinished: report status is done with concerns. Source-specific derived fields/lenses and derivation revisions are incomplete. Contracts 17.3 does not define the shape/semantics of `scope.include` and `scope.exclude`, nor how content source predicates select kind/check; those are recorded as gates. Do not invent those fields or advertise unsupported cohort paths.
 - Verification: the required command passed but initially selected no tests; new fixtures then covered canonicalization, malformed definitions, positive exclusion and four source subqueries. `git diff --check` passed. `artifact_feedback` on the brief and report returned delivered / screen pass (`jev-1.13.0`), no flags.
 
+### `6-03-cohort-target-integration.md`
+
+- Outcome: committed as `755fb65` (`Apply resolved cohorts to analytics filters`); shared filter parsing resolves the cohort once and passes the parameterized positive session predicate through existing fact and rejection reads. Exclusion subtracts the resolved set. Rollups that cannot preserve cohort membership are bypassed; no capability flag is published.
+- Surfaces: shared analytics filter parsing and store query/read paths, plus route regression tests.
+- Deviations / unfinished: report status is done with concerns. Non-entity response shapes do not yet gain typed population metadata. Undefined scope filter elements, content source selection and unsupported derived/time predicates remain gates from 6-02/6-04. The unit commit carried a premature phase trailer; it was removed by amending locally before any push.
+- Verification: the new `/query` red/green test proves one-session inclusion and positive-set exclusion; the required bounded analytics route check and `git diff --check` passed. `artifact_feedback` on the brief and report returned delivered / screen pass (`jev-1.13.0`), no flags.
+
 Tool: Codex execute skill
 Run ID: feat/20-analytics-reset phase 3 execution
 Start time: 2026-11-08 09:10 Australia/Brisbane (2026-11-07 23:10 UTC)
