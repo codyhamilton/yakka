@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"sort"
 	"strings"
 	"testing"
 )
@@ -70,9 +71,14 @@ func TestAnalyticsCohortSourceQueriesStayInSQLiteForSupportedGrains(t *testing.T
 		{"session", `{"not":{"range":{"measure":"commits","lo":0,"hi":10}}}`},
 		{"execution", `{"range":{"measure":"ts","lo":0,"hi":2000000000}}`},
 		{"plan", `{"range":{"measure":"sessions","lo":0,"hi":10}}`},
+		{"time", `{"range":{"measure":"commits","lo":0,"hi":10}}`},
 	} {
 		t.Run(tc.grain, func(t *testing.T) {
-			raw := []byte(fmt.Sprintf(`{"v":1,"grain":%q,"scope":{"from":"2026-09-28T00:00:00Z","to":"2026-10-05T12:00:00Z","tz":"UTC","include":[],"exclude":[]},"predicate":%s}`, tc.grain, tc.predicate))
+			rawText := fmt.Sprintf(`{"v":1,"grain":%q,"scope":{"from":"2026-09-28T00:00:00Z","to":"2026-10-05T12:00:00Z","tz":"UTC","include":[],"exclude":[]},"predicate":%s}`, tc.grain, tc.predicate)
+			if tc.grain == "time" {
+				rawText = strings.TrimSuffix(rawText, "}") + `,"source":{"fields":["commits"],"bucket":"day","bucket_step":1}}`
+			}
+			raw := []byte(rawText)
 			c, err := ParseCohortDefinition(raw)
 			if err != nil {
 				t.Fatal(err)
@@ -85,14 +91,24 @@ func TestAnalyticsCohortSourceQueriesStayInSQLiteForSupportedGrains(t *testing.T
 			if err != nil {
 				t.Fatalf("resolver SQL: %v\n%s", err, query)
 			}
+			got := []string{}
 			for rows.Next() {
 				var id string
 				if err := rows.Scan(&id); err != nil {
 					t.Fatal(err)
 				}
+				if tc.grain == "time" {
+					got = append(got, id)
+				}
 			}
 			if err := rows.Err(); err != nil {
 				t.Fatal(err)
+			}
+			if tc.grain == "time" {
+				sort.Strings(got)
+				if !reflect.DeepEqual(got, []string{"c4", "c5"}) {
+					t.Fatalf("time contributors=%v want [c4 c5]", got)
+				}
 			}
 			rows.Close()
 		})
@@ -110,7 +126,7 @@ func TestAnalyticsCohortRejectsMalformedAndUnsupported(t *testing.T) {
 	}{
 		{"unknown operator", base("session", `{"eq":{"measure":"commits","value":2}}`), ErrCohortInvalid},
 		{"unpublished measure", base("session", `{"range":{"measure":"phase","lo":0,"hi":1}}`), ErrCohortInvalid},
-		{"time join deferred", base("time", `{"range":{"measure":"commits","lo":0,"hi":1}}`), ErrUnsupportedJoin},
+		{"time source metadata required", base("time", `{"range":{"measure":"commits","lo":0,"hi":1}}`), ErrCohortInvalid},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := ParseCohortDefinition(tc.raw)
@@ -118,5 +134,12 @@ func TestAnalyticsCohortRejectsMalformedAndUnsupported(t *testing.T) {
 				t.Fatalf("err=%v want %v", err, tc.want)
 			}
 		})
+	}
+}
+
+func TestAnalyticsTimeCohortRequiresAndAcceptsFrozenSource(t *testing.T) {
+	raw := []byte(`{"v":1,"grain":"time","scope":{"from":"2025-01-01T00:00:00Z","to":"2025-01-31T00:00:00Z","tz":"UTC","include":[],"exclude":[]},"predicate":{"range":{"measure":"commits","lo":1,"hi":2}},"source":{"fields":["commits"],"bucket":"day","bucket_step":1}}`)
+	if _, err := ParseCohortDefinition(raw); err != nil {
+		t.Fatalf("parse frozen time source: %v", err)
 	}
 }

@@ -58,6 +58,7 @@ type cohortNode struct {
 }
 
 var cohortMeasures = map[string]map[string]bool{
+	"time":      {"hook_events": true, "conversations": true, "artifact_versions": true, "distinct_content": true, "commits": true, "rejections": true, "model_calls": true, "unpriced_calls": true, "tokens_in": true, "tokens_out": true, "tokens_cache_read": true, "tokens_cache_write": true, "tokens_reasoning": true, "cost_usd": true},
 	"session":   {"cost_usd": true, "unpriced_calls": true, "model_calls": true, "tokens_in": true, "tokens_out": true, "tokens_cache_read": true, "tokens_cache_write": true, "tokens_reasoning": true, "hook_events": true, "commits": true, "artifact_versions": true, "distinct_content": true, "duration_s": true, "first_ts": true, "last_ts": true},
 	"artifact":  {"versions": true, "distinct_writing_sessions": true, "first_ts": true, "last_ts": true, "content_bytes": true},
 	"content":   {"score": true},
@@ -94,9 +95,6 @@ func ParseCohortDefinition(raw []byte) (ParsedCohort, error) {
 	}
 	if !knownCohortGrain(d.Grain) {
 		return out, fmt.Errorf("%w: unknown grain %q", ErrCohortInvalid, d.Grain)
-	}
-	if d.Grain == "time" {
-		return out, fmt.Errorf("%w: time source resolution is not available in this resolver", ErrUnsupportedJoin)
 	}
 	if d.Op == "" {
 		d.Op = "include"
@@ -148,6 +146,31 @@ func ParseCohortDefinition(raw []byte) (ParsedCohort, error) {
 	if len(d.Source) != 0 && d.Grain != "time" {
 		return out, fmt.Errorf("%w: source metadata is only valid for time", ErrCohortInvalid)
 	}
+	if d.Grain == "time" {
+		var source struct {
+			Fields     []string `json:"fields"`
+			Bucket     string   `json:"bucket"`
+			BucketStep int      `json:"bucket_step"`
+		}
+		if len(d.Source) == 0 || strictObject(d.Source, &source) != nil || len(source.Fields) == 0 || source.Bucket == "" {
+			return out, fmt.Errorf("%w: time source requires fields, bucket and bucket_step", ErrCohortInvalid)
+		}
+		if source.BucketStep == 0 {
+			source.BucketStep = 1
+		}
+		if source.BucketStep < 1 || !validCohortBucket(source.Bucket, source.BucketStep) {
+			return out, fmt.Errorf("%w: unsupported time source bucket", ErrCohortInvalid)
+		}
+		seen := map[string]bool{}
+		for _, field := range source.Fields {
+			if !cohortMeasures["time"][field] || seen[field] {
+				return out, fmt.Errorf("%w: unsupported time source field %q", ErrCohortInvalid, field)
+			}
+			seen[field] = true
+		}
+		sort.Strings(source.Fields)
+		d.Source, _ = json.Marshal(source)
+	}
 	node, err := parseCohortNode(d.Grain, d.Predicate, 1, new(int))
 	if err != nil {
 		return out, err
@@ -164,6 +187,16 @@ func ParseCohortDefinition(raw []byte) (ParsedCohort, error) {
 	h := sha256.Sum256(canonical)
 	out = ParsedCohort{Definition: d, Predicate: pred, Canonical: canonical, Key: hex.EncodeToString(h[:]), root: node}
 	return out, nil
+}
+
+func validCohortBucket(bucket string, step int) bool {
+	if bucket == "hour" || bucket == "day" || bucket == "week" || bucket == "month" || bucket == "year" {
+		return step == 1
+	}
+	if n, ok := multiYearStep(bucket); ok {
+		return n == step
+	}
+	return false
 }
 
 func ensureEOF(d *json.Decoder) error {
@@ -354,7 +387,7 @@ func CohortSessionSubquery(c ParsedCohort) (string, []any, CohortRelation, error
 		return "", nil, r, fmt.Errorf("%w: content requires selected kind/check metadata absent from the definition", ErrCohortInvalid)
 	}
 	if d.Grain == "time" {
-		return "", nil, r, fmt.Errorf("%w: time resolution belongs to the activity unit", ErrUnsupportedJoin)
+		return timeCohortSessionSubquery(c, from, to, r)
 	}
 	start, end := from.UTC().UnixNano(), to.UTC().UnixNano()
 	// facts.ts is stored as Unix seconds (REAL), while time.Parse preserves the contract's
@@ -411,6 +444,93 @@ func CohortSessionSubquery(c ParsedCohort) (string, []any, CohortRelation, error
 	return "", nil, r, ErrUnsupportedJoin
 }
 
+func timeCohortSessionSubquery(c ParsedCohort, from, to time.Time, rel CohortRelation) (string, []any, CohortRelation, error) {
+	var source struct {
+		Fields     []string `json:"fields"`
+		Bucket     string   `json:"bucket"`
+		BucketStep int      `json:"bucket_step"`
+	}
+	if err := json.Unmarshal(c.Definition.Source, &source); err != nil {
+		return "", nil, rel, fmt.Errorf("%w: invalid time source", ErrCohortInvalid)
+	}
+	f := AnalyticsFilter{From: from, To: to}
+	loc, err := time.LoadLocation(c.Definition.Scope.TZ)
+	if err != nil {
+		return "", nil, rel, fmt.Errorf("%w: invalid time zone", ErrCohortInvalid)
+	}
+	f.TZ = loc
+	args := []any{seconds(from), seconds(to)}
+	// The source and membership use the frozen aggregate bucket rule. Each contributor is
+	// still selected by its existing fact identity; no causal relationship is inferred.
+	bucket := source.Bucket
+	if bucket == "year" && source.BucketStep > 1 {
+		bucket = "year:" + strconv.Itoa(source.BucketStep)
+	}
+	if bucket == "" {
+		return "", nil, rel, fmt.Errorf("%w: empty time bucket", ErrCohortInvalid)
+	}
+	measures := map[string]string{
+		"hook_events":       "COUNT(DISTINCT CASE WHEN type='hook_event' THEN row_hash END)",
+		"conversations":     "COUNT(DISTINCT conversation_id)",
+		"artifact_versions": "COUNT(DISTINCT CASE WHEN type='artifact_version' THEN row_hash END)",
+		"distinct_content":  "COUNT(DISTINCT CASE WHEN type='artifact_version' THEN content_hash END)",
+		"commits":           "SUM(CASE WHEN type='commit' THEN 1 ELSE 0 END)",
+	}
+	contributorTypes := map[string][]string{"hook_events": {"hook_event"}, "artifact_versions": {"artifact_version"}, "distinct_content": {"artifact_version"}, "commits": {"commit"}, "conversations": {"hook_event", "artifact_version", "commit"}}
+	for _, m := range source.Fields {
+		if measures[m] == "" || len(contributorTypes[m]) == 0 {
+			return "", nil, rel, fmt.Errorf("%w: time measure %q has no contributor mapping", ErrUnsupportedJoin, m)
+		}
+	}
+	selects := []string{}
+	for name, expr := range measures {
+		selects = append(selects, expr+" AS \""+name+"\"")
+	}
+	if len(selects) == 0 {
+		selects = append(selects, "0 AS hook_events")
+	}
+	timeExpr := bucketExprSQL(measureDef{table: "facts"}, bucket)
+	// Resolve only bucket rows selected by the frozen positive predicate.
+	cond, predicateArgs, err := compileCohortNode("time", c.root)
+	if err != nil {
+		return "", nil, rel, err
+	}
+	args = append(args, predicateArgs...)
+	selectedFields := make([]string, 0, len(source.Fields))
+	types := map[string]bool{}
+	for _, field := range source.Fields {
+		if measures[field] != "" {
+			selectedFields = append(selectedFields, field)
+			for _, typ := range contributorTypes[field] {
+				types[typ] = true
+			}
+		}
+	}
+	if len(selectedFields) == 0 {
+		return "", nil, rel, fmt.Errorf("%w: rejection-only time cohorts require rejection association counts", ErrUnsupportedJoin)
+	}
+	fieldPred := make([]string, 0, len(selectedFields))
+	for _, field := range selectedFields {
+		fieldPred = append(fieldPred, "\""+field+"\" > 0")
+	}
+	typeNames := make([]string, 0, len(types))
+	for typ := range types {
+		typeNames = append(typeNames, typ)
+	}
+	sort.Strings(typeNames)
+	typeArgs := make([]string, 0, len(typeNames))
+	for range typeNames {
+		typeArgs = append(typeArgs, "?")
+	}
+	q := "WITH buckets AS (SELECT " + timeExpr + " AS bucket," + strings.Join(selects, ",") + " FROM facts WHERE ts>=? AND ts<=? GROUP BY bucket), selected AS (SELECT bucket FROM buckets WHERE (" + cond + ") AND (" + strings.Join(fieldPred, " OR ") + ")) SELECT DISTINCT f.conversation_id FROM facts f JOIN selected s ON " + bucketExprSQL(measureDef{table: "facts"}, bucket) + "=s.bucket WHERE f.type IN (" + strings.Join(typeArgs, ",") + ") AND f.conversation_id<>'' AND f.ts>=? AND f.ts<=?"
+	for _, typ := range typeNames {
+		args = append(args, typ)
+	}
+	args = append(args, seconds(from), seconds(to))
+	rel.Mapping, rel.Unit = "time_bucket_to_contributing_session", "conversation_id"
+	return q, args, rel, nil
+}
+
 func compileCohortNode(grain string, n *cohortNode) (string, []any, error) {
 	if n == nil {
 		return "", nil, fmt.Errorf("%w: missing parsed predicate", ErrCohortInvalid)
@@ -437,6 +557,7 @@ func compileCohortNode(grain string, n *cohortNode) (string, []any, error) {
 		return "NOT (" + sql + ")", a, err
 	}
 	columns := map[string]map[string]string{
+		"time":      {"hook_events": "hook_events", "conversations": "conversations", "artifact_versions": "artifact_versions", "distinct_content": "distinct_content", "commits": "commits", "rejections": "rejections", "model_calls": "model_calls", "unpriced_calls": "unpriced_calls", "tokens_in": "tokens_in", "tokens_out": "tokens_out", "tokens_cache_read": "tokens_cache_read", "tokens_cache_write": "tokens_cache_write", "tokens_reasoning": "tokens_reasoning", "cost_usd": "cost_usd"},
 		"session":   {"hook_events": "hook_events", "commits": "commits", "artifact_versions": "artifact_versions", "distinct_content": "distinct_content", "tokens_in": "tokens_in", "tokens_out": "tokens_out", "tokens_cache_read": "tokens_cache_read", "tokens_cache_write": "tokens_cache_write", "tokens_reasoning": "tokens_reasoning", "first_ts": "first_ts", "last_ts": "last_ts", "duration_s": "(last_ts-first_ts)"},
 		"artifact":  {"versions": "versions", "distinct_writing_sessions": "distinct_writing_sessions", "first_ts": "first_ts", "last_ts": "last_ts", "kind": "kind", "plan": "plan", "repo_id": "repo_id", "source": "source"},
 		"execution": {"ts": "ts", "shape": "shape", "plan": "plan", "repo_id": "repo_id", "harness": "harness"},
