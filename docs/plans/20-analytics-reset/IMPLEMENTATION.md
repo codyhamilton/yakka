@@ -59,6 +59,25 @@ Phase outcome is open for implementation approach, so this run uses the signed o
 - Deviations / unfinished: report status is done with concerns. Time source currently supports only some contributor types, uses UTC rather than the frozen requested timezone, and lacks deduplicated usage identities plus rejection missing/orphan counts. These are required by CONTRACTS.md 17.3; brief 6-04b closes them. Activity reports unsupported shared filters through `ignored_filters` as specified; its compatibility with each consumer is included in phase verification.
 - Verification: focused `GOMEMLIMIT=8GiB GOMAXPROCS=3 go test -p=3 ./internal/store ./internal/serve -run 'Analytics(Activity|Cohort|Entity)' -count=1` and `git diff --check` passed. `artifact_feedback` on the brief and report returned delivered / screen pass (`jev-1.13.0`), no flags.
 
+### `6-04b-time-cohort-completion.md`
+
+- Outcome: committed as `e50d5bc` (`Complete time cohort contributor resolution`); the time resolver now replays the frozen calendar unit, step and timezone, including DST and multi-year buckets, and adds deduplicated usage contributors with recorded-session-only rejection membership.
+- Surfaces: time cohort store resolver and focused store/serve fixtures.
+- Deviations / unfinished: report remains done with concerns. It cannot expose separate missing/orphan rejection counts without a defined response mapping, and non-empty source scope include/exclude lists remain unsupported because their element semantics are unspecified. Cohort remains unpublished.
+- Verification: focused and full bounded store/serve suites passed (store 6.916s, serve 25.562s); `git diff --check` passed. `artifact_feedback` on the brief and report returned delivered / screen pass (`jev-1.13.0`), no flags.
+
+### Phase 6 integrated verification — unsuccessful, not closed
+
+- Entry point checks: fixture-backed `/schema` and `/entities` cover plan/execution; `/activity` list/probe pages equal-time identities and reports receive-watermark arrivals; `/query` proves positive cohort inclusion and subtraction. Time-cohort fixtures cover deduplicated usage and timezone boundaries. Activity is published; cohort remains unpublished.
+- Final integrated check on this tree: `GOMEMLIMIT=8GiB GOMAXPROCS=3 go test -p=3 ./internal/store ./internal/serve -count=1` passed (store 6.977s; serve 25.459s). `git diff --check` is run before recording. No live deploy, production data, credentials, secrets, or migrations were used.
+- The signed Phase 6 outcome is not met: scope include/exclude source element semantics and a response mapping for separate missing/orphan rejection association counts remain unresolved, several cohort source predicates are explicitly unsupported, and cross-grain cohort relation/typed population reporting is incomplete. The cohort capability is not advertised. No closing trailer is recorded.
+
+Carried
+
+- gate: Cody define the element shape and semantics of `scope.include` and `scope.exclude` in a cohort definition before non-empty frozen source filters can be supported.
+- gate: Cody confirm the existing `relation` / `missing_by_reason` response mapping for separate missing and orphan rejection associations, or define the required response placement before cohort publication.
+- gate: implement and verify remaining cohort source measures/lenses, target-route typed population/relation reporting and activity rejection/filter behavior before the Phase 6 outcome can close.
+
 Tool: Codex execute skill
 Run ID: feat/20-analytics-reset phase 3 execution
 Start time: 2026-11-08 09:10 Australia/Brisbane (2026-11-07 23:10 UTC)
