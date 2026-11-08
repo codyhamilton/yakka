@@ -1,0 +1,184 @@
+{
+  "model": "jev-1.13.0",
+  "state": {
+    "question_id": "session-checkout",
+    "jev_model": "jev-1.13.0",
+    "worker_id": "92a48e004519",
+    "checkpoint_turn": 90,
+    "prior_checkpoint_turn": 75,
+    "schedule": {
+      "first_at": 75,
+      "interval": 15
+    },
+    "brief_anchor": "[REDACTED]:2368",
+    "cumulative": {
+      "api_turns": 90,
+      "peak_ctx_tokens": 129961,
+      "prefix_bytes": 226088,
+      "tool_histogram": {
+        "Bash": 70,
+        "Read": 34
+      },
+      "reread_paths": [],
+      "distinct_read_paths": 0,
+      "compaction_event_count": 0,
+      "assistant_text_chars": 26
+    },
+    "delta_since_prior": {
+      "new_read_paths": [],
+      "tool_histogram_delta": {
+        "Bash": 15,
+        "Read": 3
+      }
+    },
+    "tail": [
+      {
+        "turn": 83,
+        "excerpt": "",
+        "tool_names": [
+          "Bash",
+          "Bash"
+        ]
+      },
+      {
+        "turn": 84,
+        "excerpt": "",
+        "tool_names": [
+          "Bash"
+        ]
+      },
+      {
+        "turn": 85,
+        "excerpt": "",
+        "tool_names": [
+          "Bash"
+        ]
+      },
+      {
+        "turn": 86,
+        "excerpt": "",
+        "tool_names": [
+          "Bash",
+          "Bash"
+        ]
+      },
+      {
+        "turn": 87,
+        "excerpt": "",
+        "tool_names": [
+          "Bash"
+        ]
+      },
+      {
+        "turn": 88,
+        "excerpt": "",
+        "tool_names": [
+          "Read"
+        ]
+      },
+      {
+        "turn": 89,
+        "excerpt": "",
+        "tool_names": [
+          "Bash"
+        ]
+      },
+      {
+        "turn": 90,
+        "excerpt": "",
+        "tool_names": [
+          "Bash",
+          "Bash"
+        ]
+      }
+    ],
+    "evidence_class": "trial-prefix-v1",
+    "prior_prefix_projection": {
+      "checkpoint_turn": 75,
+      "evidence_class": "prior_prefix_projection",
+      "cumulative": {
+        "api_turns": 75,
+        "peak_ctx_tokens": 129961,
+        "prefix_bytes": 188528,
+        "tool_histogram": {
+          "Bash": 55,
+          "Read": 31
+        },
+        "reread_paths": [],
+        "distinct_read_paths": 0,
+        "compaction_event_count": 0,
+        "assistant_text_chars": 26
+      },
+      "tail": [
+        {
+          "turn": 72,
+          "excerpt": "",
+          "tool_names": [
+            "Read"
+          ]
+        },
+        {
+          "turn": 73,
+          "excerpt": "",
+          "tool_names": [
+            "Bash"
+          ]
+        },
+        {
+          "turn": 74,
+          "excerpt": "",
+          "tool_names": [
+            "Read",
+            "Read",
+            "Read"
+          ]
+        },
+        {
+          "turn": 75,
+          "excerpt": "",
+          "tool_names": [
+            "Read"
+          ]
+        }
+      ]
+    },
+    "elapsed_turns_since_prior": 15
+  },
+  "questions": {
+    "response": {
+      "type": "choice",
+      "instructions": "From the supplied prefix only, choose exactly one response label. Fire only for likely avoidable low-value continuation; otherwise choose the most specific defer label.",
+      "criteria": {
+        "fire_now": "Fire now: likely avoidable low-value continuation.",
+        "defer_recheck": "Defer and re-check: concern is not persistent or evidence is insufficient.",
+        "defer_closing": "Defer: concrete completion, validation, or delivery value remains.",
+        "defer_productive": "Defer: checkable productive progress remains.",
+        "defer_insufficient": "Defer: evidence is too weak to justify firing."
+      }
+    },
+    "reread_cluster": {
+      "type": "choice",
+      "instructions": "Does any single read path appear at least three times in cumulative.reread_paths?",
+      "criteria": {
+        "yes": "Yes",
+        "no": "No"
+      }
+    },
+    "thrash_bundle": {
+      "type": "choice",
+      "instructions": "Binary: does compaction slope plus high reread counts match a frozen-narration thrash bundle?",
+      "criteria": {
+        "yes": "Yes",
+        "no": "No"
+      }
+    },
+    "poll_monitor": {
+      "type": "choice",
+      "instructions": "Binary: does Monitor tool presence dominate over compaction churn?",
+      "criteria": {
+        "yes": "Yes",
+        "no": "No"
+      }
+    }
+  }
+}
