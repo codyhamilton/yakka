@@ -1,0 +1,114 @@
+{
+  "model": "jev-1.13.0",
+  "state": {
+    "scenario_id": "case.PR-VALIDATION-PHASE|worker.15f24c7ba18c|checkpoint.50",
+    "checkpoint_turn": 50,
+    "evidence_class": "validation-phase-earlycps-prefix",
+    "snapshot": {
+      "question_id": "PR-VALIDATION-PHASE",
+      "worker_id": "15f24c7ba18c",
+      "checkpoint_turn": 50,
+      "prior_checkpoint_turn": null,
+      "evidence_class": "validation-phase-earlycps-prefix",
+      "brief_anchor": "Invoke the Skill `workflow:execute` and run exactly ONE phase — Phase 2 of docs/plans/03-map-layer-parity-remediation/DESIGN.md (repo <REPO>, branch master). This is a RESTART: a first attempt did not close (see IMPLEMENTATION.md Phase 2 sections, EVIDENCE-2-03.json, WORD7-ANALYSIS.md). Follow the skill's rules; append to IMPLEMENTATION.md, commit and push (project CLAUDE.md; no large binaries; update docs/provenance.md for new untracked material). Close with a co",
+      "cumulative": {
+        "api_turns": 50,
+        "peak_ctx_tokens": 93883,
+        "prefix_bytes": 585117,
+        "tool_histogram": {
+          "Monitor": 26,
+          "Bash": 11,
+          "Read": 8,
+          "Edit": 2,
+          "Agent": 1,
+          "Skill": 1,
+          "ToolSearch": 1
+        },
+        "reread_paths": [],
+        "distinct_read_paths": 8,
+        "compaction_event_count": 0,
+        "assistant_text_chars": 737
+      },
+      "delta_since_prior": {},
+      "thrash_top_rereads": [],
+      "tail": [
+        {
+          "turn": 43,
+          "excerpt": "",
+          "tool_names": [
+            "Bash"
+          ]
+        },
+        {
+          "turn": 44,
+          "excerpt": "`refine` is still running (no briefs committed yet). Continuing to wait.",
+          "tool_names": [
+            "Monitor"
+          ]
+        },
+        {
+          "turn": 45,
+          "excerpt": "",
+          "tool_names": [
+            "Monitor"
+          ]
+        },
+        {
+          "turn": 46,
+          "excerpt": "",
+          "tool_names": [
+            "Monitor"
+          ]
+        },
+        {
+          "turn": 47,
+          "excerpt": "",
+          "tool_names": [
+            "Monitor"
+          ]
+        },
+        {
+          "turn": 48,
+          "excerpt": "",
+          "tool_names": [
+            "Monitor"
+          ]
+        },
+        {
+          "turn": 49,
+          "excerpt": "",
+          "tool_names": [
+            "Monitor"
+          ]
+        },
+        {
+          "turn": 50,
+          "excerpt": "",
+          "tool_names": [
+            "Monitor"
+          ]
+        }
+      ]
+    }
+  },
+  "questions": {
+    "response": {
+      "type": "choice",
+      "instructions": "Is this worker already in validation (reactive read/fix/test loop) versus forward build? Answer exactly one of in_validation, building, or inconclusive from the supplied prefix only.",
+      "criteria": {
+        "in_validation": "A reactive read/fix/test loop is already the dominant pattern in this prefix.",
+        "building": "Forward implementation or construction is the dominant pattern in this prefix.",
+        "inconclusive": "The prefix does not distinguish validation from forward build with adequate confidence."
+      }
+    },
+    "pattern_note": {
+      "type": "choice",
+      "instructions": "Add one concise pattern note by choosing the best label from the prefix only.",
+      "criteria": {
+        "test_fix_loop": "Reactive tests, reads, fixes, retries, or verification dominate the recent pattern.",
+        "forward_edit": "Forward edits or implementation construction dominate the recent pattern.",
+        "mixed_or_unclear": "The pattern is mixed or cannot be distinguished from the prefix."
+      }
+    }
+  }
+}
