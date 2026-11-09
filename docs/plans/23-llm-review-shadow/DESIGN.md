@@ -273,6 +273,20 @@ Exactly **three new, amendment-local phases**, in the order below. Original phas
 - Surfaces: `packages/yakka/internal/serve/{tokens,registry,session,serve,admin,device,device_grants}.go`, new owner lifecycle routes, origin/credential precedence and API-origin profile serving; tenant store lifecycle, worker/rescore coordination; `internal/review/availability.go` ownership/spend accounting; `internal/store` close/evict/generation/storage; `packages/yakka-analytics/src/routes/profile/+page.svelte`, `src/lib/{api,session-gate}.ts` and selection state, bounded collector-served profile lifecycle view and production packaging as needed; tenant isolation/lifecycle/restart and UI fixtures; `docs/design/{03-remote-service,07-analytics-site,08-server-mcp-contract,system-architecture}.md`, agent advisory and `tools/shadow-review-trial/README.md` operator instructions. No paused-plan dependency or MCP lifecycle tool.
 - Approach: **Known** (ownership-marked tenants only; no legacy attribution migration).
 - Depends on: Phase 1 controls/usage ownership surfaces; final eligibility/ownership schema must land before any trial tenant is provisioned.
+- Units:
+  - **2-01 Registry lifecycle foundation and `/me` recovery fields** — `briefs/phase2-01-registry-lifecycle-foundation.md`; depends on nothing; runs alongside 2-02.
+  - **2-02 Claim and reservation ownership plus anonymous spend transfer** — `briefs/phase2-02-reservation-claim-ownership.md`; depends on nothing; runs alongside 2-01.
+  - **2-03 Reset/delete execution engine, quiescence and crash-safe resume** — `briefs/phase2-03-reset-delete-execution-engine.md`; depends on 2-01 and 2-02; runs alongside nothing.
+  - **2-04 Owner lifecycle HTTP contract and refusal ordering** — `briefs/phase2-04-lifecycle-http-contract.md`; depends on 2-01 and 2-03; runs alongside nothing.
+  - **2-05 Reset-generation cursor invalidation for REST and MCP review walks** — `briefs/phase2-05-reset-generation-cursor-invalidation.md`; depends on 2-01 and 2-04; runs alongside 2-08.
+  - **2-06 API-origin bounded profile lifecycle view** — `briefs/phase2-06-api-origin-profile-lifecycle-view.md`; depends on 2-04; runs after 2-05 because both edit `serve.go`; runs alongside 2-08.
+  - **2-07 Synthetic isolation and lifecycle conformance fixtures** — `briefs/phase2-07-isolation-lifecycle-conformance.md`; depends on 2-04, 2-05 and 2-06; runs alongside 2-08.
+  - **2-08 Pages profile lifecycle link and cross-origin selection revalidation** — `briefs/phase2-08-pages-selection-revalidation.md`; depends on 2-04; runs alongside 2-05, 2-06 and 2-07.
+  - **2-09 Stable docs and operator instructions for owner lifecycle** — `briefs/phase2-09-stable-docs-operator-instructions.md`; depends on 2-04, 2-05, 2-06, 2-07 and 2-08; runs alongside nothing.
+
+**Phase 2 refinement verdict (2026-11-10): Proceed — nine units.** Wave 1 runs 2-01 and 2-02 in parallel (disjoint packages). Wave 2 is 2-03; wave 3 is 2-04. After 2-04, 2-05 → 2-06 → 2-07 serialize on `serve.go` while 2-08 runs in parallel in `packages/yakka-analytics`; 2-09 is last. No unit needs a live provider, deployed server, credential, deployment or paid trial, and no unit touches Phase 3. 2-07 may repair defects only in the lifecycle implementation paths named in its brief; anything wider is a `blocked` report. Contract gap: none found; no design bounce. Open Questions are unchanged.
+
+Carried placement from Phase 1: the historical canonical-row duplicate-cache gate remains a Phase 1 owner-confirmation gate and is not Phase 2 scope (no Phase 2 contract depends on it); the cursor-is-not-a-MAC limitation is preserved, with 2-05 adding generation invalidation only; the pending Phase 2/3 statement is discharged for Phase 2 by these units, while Phase 3 stays out of scope. Artifact feedback: all nine briefs returned `delivered` / screen `pass` (2-05 recorded content version 2); no rejections or flagged outliers. Refinement made no code change and used no live server, provider, secret, deployment or `/tmp`.
 
 ### Phase 3 — Real-server trial workflow has complete evidence and an explicit spend gate
 

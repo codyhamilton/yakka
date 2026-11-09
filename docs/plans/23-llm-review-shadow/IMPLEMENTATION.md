@@ -32,3 +32,21 @@ Run identity: Codex; current API session; started 2026-11-09 12:48 UTC (22:48 Au
 - Historical canonical review rows have no recoverable public review ID; duplicate requests against rows without `review_id` return `cache_unavailable` without provider replay. `gate: owner confirmation of this compatibility behavior for pre-upgrade canonical rows`.
 - Cursor checksums bind tenant/filter state but are not MACs; same-tenant cursor edits remain possible as described in the phase1-05 report.
 - Phase 2 synthetic tenant disposal and Phase 3 real-server paid trial remain pending. No live-trial result is claimed.
+
+## Phase 2
+
+### Refine handoff
+
+- Refine sub-run: opencode; harness selected DeepSeek Flash (`deepseek/deepseek-flash`); current API session; 2026-11-10. Refined only Phase 2 of `DESIGN.md` from the committed Phase 1 artifacts; no Phase 3 work.
+- Outcome: Proceed with nine units, dependency and parallel order recorded under Phase 2 in `DESIGN.md`; briefs `phase2-01` through `phase2-09` written from `templates/brief.md`. Refinement wrote no implementation code, ran no tests, and used no live provider/server, secret, deploy, Fly/Wrangler command or `/tmp`.
+- Feedback, exact results:
+  - `phase2-01-registry-lifecycle-foundation.md`: `delivered`, screen `pass by jev-1.13.0`, versions 1.
+  - `phase2-02-reservation-claim-ownership.md`: `delivered`, screen `pass by jev-1.13.0`, versions 1.
+  - `phase2-03-reset-delete-execution-engine.md`: `delivered`, screen `pass by jev-1.13.0`, versions 1.
+  - `phase2-04-lifecycle-http-contract.md`: `delivered`, screen `pass by jev-1.13.0`, versions 1.
+  - `phase2-05-reset-generation-cursor-invalidation.md`: `delivered`, screen `pass by jev-1.13.0`, versions 2.
+  - `phase2-06-api-origin-profile-lifecycle-view.md`: `delivered`, screen `pass by jev-1.13.0`, versions 1.
+  - `phase2-07-isolation-lifecycle-conformance.md`: `delivered`, screen `pass by jev-1.13.0`, versions 1.
+  - `phase2-08-pages-selection-revalidation.md`: `delivered`, screen `pass by jev-1.13.0`, versions 1.
+  - `phase2-09-stable-docs-operator-instructions.md`: `delivered`, screen `pass by jev-1.13.0`, versions 1.
+- No rejections or flagged outliers. Carried placement: the Phase 1 historical canonical-row cache gate remains an owner-confirmation gate (not Phase 2 scope); the non-MAC cursor limitation is preserved with 2-05 adding generation invalidation only; Phase 3 remains out of scope.
