@@ -187,24 +187,25 @@ compaction takes it exclusively. Serve refuses to start on a tenant that compact
 compaction refuses while serve runs, so SQLite never has two writers.
 
 Per-tenant files mean writes for different tenants never share a lock. Deleting the directory
-removes tenant-local storage, but is not a complete tenant deletion: `registry.json` lives
-alongside tenant directories and retains tokens, owner/name entries and user-global sessions;
-review reservations/claims also live outside the tenant directory. There is currently no
-DeleteTenant API or registry method. Raw directory deletion leaves orphaned registry entries,
-and a still-valid token can lazily recreate the directory.
+removes tenant-local storage, but is not a complete tenant deletion on its own: `registry.json`
+lives alongside tenant directories and retains tokens, owner/name entries and user-global sessions;
+review reservations/claims also live outside the tenant directory. Raw directory deletion therefore
+leaves orphaned registry entries, and a still-valid token can lazily recreate the directory. The
+owner lifecycle routes below are the complete-cleanup path: they coordinate tenant storage with the
+registry, global claims/reservations and the cleanup journal.
 
-The [Plan 23 follow-up amendment](../plans/23-llm-review-shadow/DESIGN.md) designs owner
-self-serve reset and delete with complete tenant/global cleanup; these remain pending
-implementation (Phase 2). Its per-call effort/tags/store controls, removal of the trial env gate,
-and complete paged review reads are now implemented and described above.
+The [Plan 23 follow-up amendment](../plans/23-llm-review-shadow/DESIGN.md) landed owner
+self-serve reset and delete with complete tenant/global cleanup. Its per-call effort/tags/store
+controls, removal of the trial env gate, and complete paged review reads are also implemented and
+described above.
 
-### Pending owner tenant lifecycle API (Plan 23 Phase 2)
+### Owner tenant lifecycle API
 
 Only the human owner may reset or delete a tenant. Agents must not perform or attempt this on a user's behalf.
 This language is required in both endpoint descriptions and their UI confirmations. No reset/delete
-MCP tool, CLI command or admin alias is added.
+MCP tool, CLI command or admin alias exists.
 
-| Endpoint (pending) | Description / success |
+| Endpoint | Description / success |
 | --- | --- |
 | `POST /v1/tenants/<tenant-id>/reset` | Only the human owner may reset or delete a tenant. Agents must not perform or attempt this on a user's behalf. `204` wipes all assets and revokes all keys/grants, retaining tenant id/name/owner/trustworthy marker and a fresh store generation for explicit re-selection and rekeying. |
 | `DELETE /v1/tenants/<tenant-id>` | Only the human owner may reset or delete a tenant. Agents must not perform or attempt this on a user's behalf. `204` removes the entire tenant: storage, reviews, usage, tokens, tenant-bound sessions if any, owner/name/marker, grants, attributed claims/reservations and cleanup journal. |
@@ -214,8 +215,8 @@ Both require a valid owner `workflow_session` cookie, JSON body
 `Sec-Fetch-Site: same-origin` when present, and **`X-Yakka-UI: tenant-lifecycle`**. Missing/null or
 other Origin, conflicting Fetch-Site or missing/wrong UI header is `403 tenant_lifecycle_ui_only`.
 These routes tighten the admin JSON/Origin pattern: Pages and configured CORS origins cannot call
-them cross-origin. Phase 2 must serve a bounded profile lifecycle UI at the API origin, including
-production; Pages navigates the person there. This does not change other routes' browser policy.
+them cross-origin. The API origin serves a bounded profile lifecycle UI, including production;
+Pages navigates the person there. This does not change other routes' browser policy.
 
 Reject **any** supplied Authorization/API-key/token credential first with
 `403` JSON `{"error":"tenant_lifecycle_ui_only","message":"Only the human owner may reset or delete a tenant. Agents must not perform or attempt this on a user's behalf. Open the profile UI."}`, even when a valid owner
@@ -236,7 +237,7 @@ profile clears its selection/caches/cursors, refreshes owned tenants and require
 re-selection or creation; it preserves global login and other tenants. Reset retains only the
 listed identity metadata; delete leaves zero target references. Old credentials, cursors, queued
 work and restarts cannot resurrect erased assets. Anonymous provider safety exposure remains,
-without target identity or tenant analytics residue. Phase 2 also extends each owned `/v1/me` tenant with `lifecycle_state`
+without target identity or tenant analytics residue. Each owned `/v1/me` tenant carries `lifecycle_state`
 (`active`, `resetting`, `deleting`, `unsupported`) and `lifecycle_generation` (opaque string, null
 for unsupported legacy). Read from registry/journal metadata without lazy-open; disable lifecycle actions while recovery is
 unresolved. Pending entries remain owner-visible until completion; reset changes

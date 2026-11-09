@@ -57,7 +57,7 @@ that lacks a tool's scope gets a `200` JSON-RPC error `-32003` with data
 `{"code":"insufficient_scope","need":"read_write"}`, which the shim relays unchanged.
 
 Only the human owner may reset or delete a tenant. Agents must not perform or attempt this on a user's behalf.
-There is no reset/delete MCP tool. The [pending owner lifecycle API](03-remote-service.md#pending-owner-tenant-lifecycle-api-plan-23-phase-2)
+There is no reset/delete MCP tool. The [owner lifecycle API](03-remote-service.md#owner-tenant-lifecycle-api)
 is cookie-session/profile-UI-only, with same-origin and dedicated UI-header guards; keys never
 qualify, even beside an owner cookie. Agents must not try REST, browser automation or header
 spoofing to bypass that boundary. The guards are spoofable, not proof of a human; a future
@@ -140,7 +140,8 @@ but the server trusts neither place.
 The [Plan 23 follow-up amendment](../plans/23-llm-review-shadow/DESIGN.md) added full cached
 duplicate replies, effort/tags/store call controls and tenant-bound cursor paging through a
 `list_reviews` tool. They are implemented and preserve server-owned definitions and
-credential-derived tenancy; the amendment's bounded tenant reset remains pending (Phase 2).
+credential-derived tenancy. The amendment's owner-only tenant reset/delete is also implemented, but
+it is cookie-session/profile-UI-only and has no MCP surface, so it adds no tool authority.
 
 `_local` and `arguments` are claims by the caller. A handler may use them to word an answer, to select
 a row inside the caller's own tenant (for example `(repo_id, rel_path)`), or to compare hashes. It must

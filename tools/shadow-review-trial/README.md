@@ -2,14 +2,14 @@
 
 Local tools for freezing Phase 6 historical cases, running the Phase 7 trial, and building its alignment report. The `manifest` command uses local Git objects and the Phase 1 `CaptureChange` range API; it makes no network or provider calls and needs no credentials. The `run` command talks only to the configured Yakka REST endpoint. Tests and `smoke` use loopback fake endpoints and synthetic fixture auth; they never call a provider.
 
-## Pending owner-only trial cleanup (Plan 23 follow-up)
+## Owner-only trial cleanup (Plan 23 follow-up)
 
 Only the human owner may reset or delete a tenant. Agents must not perform or attempt this on a user's behalf.
-The [amended Phase 2](../../docs/plans/23-llm-review-shadow/DESIGN.md) designs these operations;
-this documentation does not claim they are implemented. There is no lifecycle MCP tool or runner
-cleanup command. The trial's `wk_` key is for reviews, never reset/delete.
+The [amended Phase 2](../../docs/plans/23-llm-review-shadow/DESIGN.md) implements these operations
+through the API-origin profile UI. There is no lifecycle MCP tool or runner cleanup command. The
+trial's `wk_` key is for reviews, never reset/delete.
 
-Recommended operator path after implementation: preserve needed trial exports/evidence, then the
+Recommended operator path: preserve needed trial exports/evidence, then the
 human opens the API-origin profile UI (navigate there from Pages), chooses the disposable trial
 tenant, selects **Delete**, types its immutable id and confirms. Delete removes the entire tenant
 and all assets. Optional **Reset** keeps id/name/ownership but wipes data and revokes all old keys;

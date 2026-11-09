@@ -48,7 +48,7 @@ readers or actions. Maintainer operations (defining checks, rescoring, rating) a
 only.
 
 Only the human owner may reset or delete a tenant. Agents must not perform or attempt this on a user's behalf.
-There is no reset/delete MCP tool. The [pending owner lifecycle API](03-remote-service.md#pending-owner-tenant-lifecycle-api-plan-23-phase-2)
+There is no reset/delete MCP tool. The [owner lifecycle API](03-remote-service.md#owner-tenant-lifecycle-api)
 is cookie-session/profile-UI-only, with same-origin and dedicated UI-header guards; keys never
 qualify, even beside an owner cookie. Agents must not try REST, browser automation or header
 spoofing to bypass that boundary. The guards are spoofable, not proof of a human; a future
@@ -58,7 +58,8 @@ human-verification/captcha step is out of scope for this amendment.
 
 The [Plan 23 follow-up amendment](../plans/23-llm-review-shadow/DESIGN.md) added per-call
 effort/tags/store controls, full cached duplicate replies and a paged `list_reviews` tool. All three
-are implemented; the same amendment's bounded tenant reset remains pending (Phase 2).
+are implemented. The same amendment's owner-only tenant reset/delete is also implemented, but it is
+cookie-session/profile-UI-only and adds no MCP tool or key path.
 
 The server owns the tool definition, prompt and exclusion policy, stored brief or plan/phase criteria
 resolution, provider call, validation, spend limits and tenant-local review record. It uses the same
