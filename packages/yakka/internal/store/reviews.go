@@ -150,6 +150,127 @@ func (t *Tenant) ReviewPage(ctx context.Context, f ReviewRecordFilter, highWater
 	return out, hasMore, nil
 }
 
+// reviewExecutionIndex supports direct execution-key lookup. The partial predicate keeps malformed
+// JSON rows out of the index (evaluating json_extract on them would fail the write).
+const reviewExecutionIndex = `CREATE INDEX IF NOT EXISTS review_runs_execution_key ON review_runs(repo_id, json_extract(raw,'$.key')) WHERE json_valid(raw)`
+
+// ensureReviewExecutionIndex creates the lookup index for tables that predate it. The writer owns
+// schema changes; a lookup only submits work when the index is actually missing.
+func (t *Tenant) ensureReviewExecutionIndex(ctx context.Context) error {
+	var n int
+	if err := t.rdb.QueryRowContext(ctx, `SELECT count(*) FROM sqlite_master WHERE type='index' AND name='review_runs_execution_key'`).Scan(&n); err != nil {
+		return err
+	}
+	if n > 0 {
+		return nil
+	}
+	return t.submit(ctx, func(tx *sql.Tx) error {
+		_, err := tx.Exec(reviewExecutionIndex)
+		return err
+	})
+}
+
+// ReviewByExecutionKey returns the canonical completed review stored for repo and execution key,
+// without a bounded table scan. Rows whose own status is skipped_duplicate are audit references:
+// they are skipped, or their canonical pointer is followed once when the original lives under a
+// different key (legacy adapter records). An audit row never satisfies the lookup itself.
+func (t *Tenant) ReviewByExecutionKey(ctx context.Context, repo, key string) (ReviewRecord, bool, error) {
+	if key == "" {
+		return ReviewRecord{}, false, nil
+	}
+	exists, err := t.reviewRunsExist(ctx)
+	if err != nil {
+		return ReviewRecord{}, false, err
+	}
+	if !exists {
+		return ReviewRecord{}, false, nil
+	}
+	if err := t.ensureReviewExecutionIndex(ctx); err != nil {
+		return ReviewRecord{}, false, err
+	}
+	field, value := "key", key
+	var audit *ReviewRecord
+	for hop := 0; hop < 2; hop++ {
+		rows, err := t.reviewRowsByJSONField(ctx, repo, field, value)
+		if err != nil {
+			return ReviewRecord{}, false, err
+		}
+		if len(rows) == 0 && field == "review_id" {
+			// Compatibility for pre-canonical fixtures or stored rows that retained id.
+			rows, err = t.reviewRowsByJSONField(ctx, repo, "id", value)
+			if err != nil {
+				return ReviewRecord{}, false, err
+			}
+		}
+		pointer := ""
+		for _, row := range rows {
+			var m struct {
+				Status           string            `json:"status"`
+				ReviewID         string            `json:"review_id"`
+				OriginalReviewID string            `json:"original_review_id"`
+				Reason           string            `json:"reason"`
+				Attempts         []json.RawMessage `json:"attempts"`
+			}
+			if err := json.Unmarshal(row.Raw, &m); err != nil {
+				// Cannot classify the row. Return it so the caller reports cache_unavailable
+				// instead of inventing an empty successful cache hit.
+				return row, true, nil
+			}
+			if m.Status == "skipped_duplicate" {
+				if audit == nil {
+					copy := row
+					audit = &copy
+				}
+				if m.OriginalReviewID != "" {
+					pointer = m.OriginalReviewID
+				} else if m.Reason != "" {
+					pointer = m.Reason
+				}
+				continue
+			}
+			// Preflight and budget refusals are persisted for audit, but no review
+			// call ran. They must not turn a later eligible request into a cache hit.
+			if len(m.Attempts) == 0 {
+				continue
+			}
+			return row, true, nil
+		}
+		if pointer == "" {
+			if audit != nil {
+				return *audit, true, nil
+			}
+			return ReviewRecord{}, false, nil
+		}
+		// keys.Canonical strips the reserved top-level id, so new rows retain the
+		// public receipt id in review_id for this pointer lookup.
+		field, value = "review_id", pointer
+	}
+	if audit != nil {
+		return *audit, true, nil
+	}
+	return ReviewRecord{}, false, nil
+}
+
+// reviewRowsByJSONField returns every row for repo whose JSON field equals value, newest first.
+// field is always an internal constant, never caller input.
+func (t *Tenant) reviewRowsByJSONField(ctx context.Context, repo, field, value string) ([]ReviewRecord, error) {
+	q := `SELECT conversation_id,repo_id,ts,raw,rowid FROM review_runs WHERE repo_id=? AND json_valid(raw) AND json_extract(raw,'$.` + field + `')=? ORDER BY ts DESC,rowid DESC`
+	rows, err := t.rdb.QueryContext(ctx, q, repo, value)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []ReviewRecord{}
+	for rows.Next() {
+		var r ReviewRecord
+		if err := rows.Scan(&r.ConversationID, &r.RepoID, &r.TS, &r.Raw, &r.InsertionID); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
 // AppendReviewRuns writes accepted review facts through the tenant's serialized writer without
 // adding them to conversation, hook-event, or facet aggregates. Duplicate row hashes are ignored,
 // matching Tenant.Append semantics. The caller is ingest, which owns fact validation and hashing.
@@ -167,6 +288,9 @@ func (t *Tenant) AppendReviewRuns(ctx context.Context, rows []FactRow) ([]bool, 
 		if _, err := tx.Exec(`CREATE TABLE IF NOT EXISTS review_runs (
 			row_hash TEXT PRIMARY KEY, conversation_id TEXT NOT NULL, repo_id TEXT NOT NULL,
 			ts REAL NOT NULL, raw BLOB NOT NULL)`); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(reviewExecutionIndex); err != nil {
 			return err
 		}
 		st, err := tx.Prepare(`INSERT OR IGNORE INTO review_runs(row_hash,conversation_id,repo_id,ts,raw) VALUES(?,?,?,?,?)`)

@@ -209,6 +209,47 @@ func TestReviewPageWalkIsFixedAtHighWaterAndComplete(t *testing.T) {
 	}
 }
 
+func TestReviewByExecutionKeyFindsOldRowAndCreatesIndex(t *testing.T) {
+	tn := openReviewTenant(t, t.TempDir())
+	ctx := context.Background()
+	rows := make([]FactRow, 601)
+	for i := range rows {
+		id := fmt.Sprintf("review-%03d", i)
+		key := fmt.Sprintf("key-%03d", i)
+		ts := float64(2000 + i)
+		if i == 0 {
+			ts = 1 // This original is older than the newest 500 rows.
+		}
+		obj := map[string]any{
+			"id": id, "review_id": id, "key": key, "type": "review_run", "repo_id": "r",
+			"kind": "adhoc", "capture_id": id, "status": "ok", "attempts": []any{map[string]any{"status": "ok"}}, "ts": ts,
+			"conversation_id": "review:" + id,
+		}
+		raw, _ := json.Marshal(obj)
+		rows[i] = FactRow{RowHash: fmt.Sprintf("hash-%03d", i), Type: "review_run", ConversationID: "review:" + id, RepoID: "r", TS: ts, Raw: raw}
+	}
+	if _, err := tn.AppendReviewRuns(ctx, rows); err != nil {
+		t.Fatal(err)
+	}
+	page, err := tn.ReviewRecords(ctx, ReviewRecordFilter{RepoID: "r", Limit: 500})
+	if err != nil || len(page) != 500 {
+		t.Fatalf("legacy bounded page=%d err=%v", len(page), err)
+	}
+	for _, row := range page {
+		if strings.Contains(string(row.Raw), `"key":"key-000"`) {
+			t.Fatal("target unexpectedly appears in the newest 500")
+		}
+	}
+	got, found, err := tn.ReviewByExecutionKey(ctx, "r", "key-000")
+	if err != nil || !found || !strings.Contains(string(got.Raw), `"review_id":"review-000"`) {
+		t.Fatalf("direct lookup found=%v raw=%s err=%v", found, got.Raw, err)
+	}
+	var indexes int
+	if err := tn.rdb.QueryRowContext(ctx, `SELECT count(*) FROM sqlite_master WHERE type='index' AND name='review_runs_execution_key'`).Scan(&indexes); err != nil || indexes != 1 {
+		t.Fatalf("execution index count=%d err=%v", indexes, err)
+	}
+}
+
 func TestReviewPageTagFiltersAreConjunctive(t *testing.T) {
 	tn := openReviewTenant(t, filepath.Join(t.TempDir(), "a"))
 	ctx := context.Background()

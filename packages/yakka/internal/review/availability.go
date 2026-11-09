@@ -60,6 +60,16 @@ type spendEntry struct {
 	Attempt int       `json:"attempt"`
 }
 
+// claimStatus distinguishes an in-process call from a claim restored after a
+// restart. Only the former may still produce a provider outcome.
+type claimStatus int
+
+const (
+	claimAbsent claimStatus = iota
+	claimActive
+	claimDurable
+)
+
 // Reservations serializes claims and budget reservations for this server.
 // A started claim is deliberately retained after completion or timeout.
 type Reservations struct {
@@ -67,6 +77,7 @@ type Reservations struct {
 	cap      float64
 	spent    []spendEntry
 	claimed  map[string]string
+	active   map[string]bool
 	inflight map[string]int
 	limit    int
 	path     string
@@ -77,7 +88,7 @@ func NewReservations(capUSD float64, perTenant int) *Reservations {
 	if perTenant < 1 {
 		perTenant = 2
 	}
-	return &Reservations{cap: capUSD, claimed: map[string]string{}, inflight: map[string]int{}, limit: perTenant}
+	return &Reservations{cap: capUSD, claimed: map[string]string{}, active: map[string]bool{}, inflight: map[string]int{}, limit: perTenant}
 }
 
 func NewUnavailableReservations() *Reservations {
@@ -172,15 +183,31 @@ func (r *Reservations) begin(key, id, tenant string, amount float64) error {
 		return ErrBudget
 	}
 	r.claimed[key] = id
+	r.active[key] = true
 	r.inflight[tenant]++
 	r.spent = append(r.spent, spendEntry{At: time.Now(), Amount: amount, Key: key, Attempt: 1})
 	if err := r.save(); err != nil {
 		delete(r.claimed, key)
+		delete(r.active, key)
 		r.spent = r.spent[:len(r.spent)-1]
 		r.inflight[tenant]--
 		return fmt.Errorf("reservation persistence failed")
 	}
 	return nil
+}
+
+// claimState reports a durable claim and whether an in-process call still owns it.
+func (r *Reservations) claimState(key string) (string, claimStatus) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	id, ok := r.claimed[key]
+	if !ok {
+		return "", claimAbsent
+	}
+	if r.active[key] {
+		return id, claimActive
+	}
+	return id, claimDurable
 }
 
 // beginEphemeral reserves spend and an in-flight slot under a fresh non-cache
@@ -246,6 +273,17 @@ func (r *Reservations) settle(key string, attempt int, actual float64) {
 func (r *Reservations) finish(tenant string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.inflight[tenant] > 0 {
+		r.inflight[tenant]--
+	}
+}
+
+// finishClaim ends an in-process call while keeping the durable claim so a
+// later equal request resolves to the stored original or outcome_unknown.
+func (r *Reservations) finishClaim(key, tenant string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.active, key)
 	if r.inflight[tenant] > 0 {
 		r.inflight[tenant]--
 	}

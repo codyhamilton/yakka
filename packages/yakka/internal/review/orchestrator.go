@@ -161,18 +161,27 @@ type Attempt struct {
 }
 
 type Receipt struct {
-	ID            string          `json:"id,omitempty"`
-	Status        string          `json:"status"`
-	Reason        string          `json:"reason,omitempty"`
-	CaptureID     string          `json:"capture_id,omitempty"`
-	FindingCounts map[string]int  `json:"finding_counts,omitempty"`
-	Coverage      Coverage        `json:"coverage,omitempty"`
-	CostUSD       float64         `json:"cost_usd,omitempty"`
-	EstimatedUSD  float64         `json:"estimated_usd,omitempty"`
-	Manifest      []ManifestEntry `json:"manifest,omitempty"`
-	Ignored       []string        `json:"ignored,omitempty"`
-	Result        *Result         `json:"result,omitempty"`
+	ID               string          `json:"id,omitempty"`
+	Status           string          `json:"status"`
+	Reason           string          `json:"reason,omitempty"`
+	CaptureID        string          `json:"capture_id,omitempty"`
+	FindingCounts    map[string]int  `json:"finding_counts,omitempty"`
+	Coverage         Coverage        `json:"coverage,omitempty"`
+	CostUSD          float64         `json:"cost_usd,omitempty"`
+	EstimatedUSD     float64         `json:"estimated_usd,omitempty"`
+	Manifest         []ManifestEntry `json:"manifest,omitempty"`
+	Ignored          []string        `json:"ignored,omitempty"`
+	Result           *Result         `json:"result,omitempty"`
+	Cached           *bool           `json:"cached,omitempty"`
+	OriginalReviewID string          `json:"original_review_id,omitempty"`
+	OriginalStatus   string          `json:"original_status,omitempty"`
+	Model            string          `json:"model,omitempty"`
+	Effort           string          `json:"effort,omitempty"`
+	Tags             []string        `json:"tags,omitempty"`
+	Attempts         []Attempt       `json:"attempts,omitempty"`
 }
+
+func boolPtr(b bool) *bool { return &b }
 
 type RunConfig struct {
 	Availability   Availability
@@ -300,11 +309,37 @@ func Run(ctx context.Context, tenant *store.Tenant, tenantID string, req Request
 		key = executionKey(req, tenantID, repo, packet, resolved.Record, cfg.Availability.Model, controls.effective, controls.profile, controls.tags)
 	}
 	id := makeID()
+	var release func()
 	if controls.store {
-		if first, err := persistedClaim(ctx, tenant, repo, key); err != nil {
+		hitRow, found, lookupErr := tenant.ReviewByExecutionKey(ctx, repo, key)
+		if lookupErr != nil {
 			status, reason = "unavailable", "review record lookup failed"
-		} else if first != "" {
-			status, reason = "skipped_duplicate", first
+		} else if found {
+			cached, usable := cachedReceipt(hitRow)
+			if !usable {
+				return cached, nil
+			}
+			if _, err := persistRecord(ctx, tenant, tenantID, req, repo, makeID(), "skipped_duplicate", cached.OriginalReviewID, Result{}, nil, packet, resolved.Record, inputHash, cfg, controls, key, true); err != nil {
+				return Receipt{}, err
+			}
+			return cached, nil
+		} else if controls.legacyFallback {
+			legacyKey := PreUpgradeExecutionKey(req, tenantID, repo, packet, resolved.Record, cfg.Availability.Model, controls.effective, controls.profile)
+			if legacyKey != key {
+				legacyRow, legacyFound, legacyErr := tenant.ReviewByExecutionKey(ctx, repo, legacyKey)
+				if legacyErr != nil {
+					status, reason = "unavailable", "review record lookup failed"
+				} else if legacyFound && legacyIdentityMatches(legacyRow, req.Trial) {
+					cached, usable := cachedReceipt(legacyRow)
+					if !usable {
+						return cached, nil
+					}
+					if _, err := persistRecord(ctx, tenant, tenantID, req, repo, makeID(), "skipped_duplicate", cached.OriginalReviewID, Result{}, nil, packet, resolved.Record, inputHash, cfg, controls, key, true); err != nil {
+						return Receipt{}, err
+					}
+					return cached, nil
+				}
+			}
 		}
 	}
 	spendKey := key
@@ -321,12 +356,18 @@ func Run(ctx context.Context, tenant *store.Tenant, tenantID string, req Request
 		} else if controls.store {
 			if err := cfg.Reservations.begin(key, id, tenantID, reservation); err != nil {
 				if first, dup := duplicateReview(err); dup {
-					status, reason = "skipped_duplicate", first
+					originalID := first
+					if stateID, state := cfg.Reservations.claimState(key); state == claimActive && stateID != "" {
+						return Receipt{Status: "in_progress", Reason: originalID, Cached: boolPtr(false), OriginalReviewID: originalID}, nil
+					}
+					return Receipt{Status: "outcome_unknown", Reason: originalID, Cached: boolPtr(false), OriginalReviewID: originalID}, nil
 				} else if errors.Is(err, ErrReservationState) {
 					status, reason = "unavailable", "review reservation state unavailable"
 				} else {
 					status, reason = "skipped_budget", "spend cap or in-flight limit"
 				}
+			} else {
+				release = func() { cfg.Reservations.finishClaim(key, tenantID) }
 			}
 		} else if err := cfg.Reservations.beginEphemeral(spendKey, tenantID, reservation); err != nil {
 			if errors.Is(err, ErrReservationState) {
@@ -334,12 +375,16 @@ func Run(ctx context.Context, tenant *store.Tenant, tenantID string, req Request
 			} else {
 				status, reason = "skipped_budget", "spend cap or in-flight limit"
 			}
+		} else {
+			release = func() { cfg.Reservations.finish(tenantID) }
 		}
 	}
 	var result Result
 	var attempts []Attempt
 	if status == "" {
-		defer cfg.Reservations.finish(tenantID)
+		if release != nil {
+			defer release()
+		}
 		reviewer := NewReviewer(cfg.Availability.Token, cfg.Availability.Model, controls.effective, cfg.Endpoint)
 		reviewCtx, cancelReview := context.WithTimeout(ctx, reviewWallTime)
 		defer cancelReview()
@@ -556,6 +601,9 @@ type callControls struct {
 	tags                             []string
 	store                            bool
 	legacy                           bool
+	// legacyFallback is true only for a pure legacy-adapter request: the merged
+	// canonical tag set is exactly the three deterministic adapter tags.
+	legacyFallback bool
 }
 
 func resolveCallControls(r Request, availabilityEffort string) (callControls, error) {
@@ -572,6 +620,7 @@ func resolveCallControls(r Request, availabilityEffort string) (callControls, er
 	profile := "shadow"
 	canonical := canonicalTags(submitted)
 	legacy := r.Trial != nil
+	legacyFallback := false
 	if legacy {
 		if r.Capture.Mode != "range" {
 			return callControls{}, errors.New("trial requires range mode")
@@ -587,11 +636,13 @@ func resolveCallControls(r Request, availabilityEffort string) (callControls, er
 		}
 		requested = r.Trial.Effort
 		profile = "historical_trial"
-		merged := append(append([]string{}, canonical...), "effort:"+r.Trial.Effort, "manifest:"+r.Trial.ManifestHash, caseTag(r.Trial.CaseID))
+		adapterTags := canonicalTags([]string{"effort:" + r.Trial.Effort, "manifest:" + r.Trial.ManifestHash, caseTag(r.Trial.CaseID)})
+		merged := append(append([]string{}, canonical...), adapterTags...)
 		canonical = canonicalTags(merged)
 		if len(canonical) > maxReviewTags {
 			return callControls{}, errors.New("tags must contain at most 16 entries")
 		}
+		legacyFallback = sameTags(canonical, adapterTags)
 	}
 	if requested == "" {
 		requested = "high"
@@ -604,7 +655,19 @@ func resolveCallControls(r Request, availabilityEffort string) (callControls, er
 		configured = "high"
 	}
 	store := r.Store == nil || *r.Store
-	return callControls{configured: configured, requested: requested, effective: requested, profile: profile, tags: canonical, store: store, legacy: legacy}, nil
+	return callControls{configured: configured, requested: requested, effective: requested, profile: profile, tags: canonical, store: store, legacy: legacy, legacyFallback: legacyFallback}, nil
+}
+
+func sameTags(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 func safeReason(err error) string {
 	var a *AvailabilityError
@@ -667,22 +730,96 @@ func legacyExecutionKey(r Request, tenant, repo string, p Packet, c CriteriaReco
 func PreUpgradeExecutionKey(r Request, tenant, repo string, p Packet, c CriteriaRecord, model, effort, profile string) string {
 	return legacyExecutionKey(r, tenant, repo, p, c, model, effort, profile)
 }
-func persistedClaim(ctx context.Context, t *store.Tenant, repo, key string) (string, error) {
-	rows, err := t.ReviewRecords(ctx, store.ReviewRecordFilter{RepoID: repo, Limit: 500})
-	if err != nil {
-		return "", err
+
+// storedReview is the subset of a stored review_run used to build a cache-hit
+// receipt. Captured input is never part of it.
+type storedReview struct {
+	ID              string          `json:"review_id"`
+	LegacyID        string          `json:"id"`
+	Status          string          `json:"status"`
+	CaptureID       string          `json:"capture_id"`
+	ConfiguredModel string          `json:"configured_model"`
+	ReturnedModel   string          `json:"returned_model"`
+	EffectiveEffort string          `json:"effective_effort"`
+	Tags            []string        `json:"tags"`
+	Attempts        []Attempt       `json:"attempts"`
+	Payload         json.RawMessage `json:"payload"`
+	Coverage        Coverage        `json:"coverage"`
+	Manifest        []ManifestEntry `json:"manifest"`
+	CostUSD         float64         `json:"cost_usd"`
+}
+
+// cachedReceipt projects a completed stored original into the fresh response
+// shape. The second return value is false when the original is unusable; the
+// returned receipt then reports cache_unavailable and never a fabricated result.
+func cachedReceipt(row store.ReviewRecord) (Receipt, bool) {
+	var rec storedReview
+	if err := json.Unmarshal(row.Raw, &rec); err != nil {
+		return Receipt{Status: "cache_unavailable", Reason: "cache_unavailable", Cached: boolPtr(false)}, false
 	}
-	for _, row := range rows {
-		var m struct {
-			Key      string            `json:"key"`
-			ID       string            `json:"id"`
-			Attempts []json.RawMessage `json:"attempts"`
+	if rec.ID == "" {
+		rec.ID = rec.LegacyID
+	}
+	if rec.ID == "" || rec.Status == "" || rec.Status == "skipped_duplicate" {
+		return Receipt{Status: "cache_unavailable", Reason: "cache_unavailable", Cached: boolPtr(false), OriginalReviewID: rec.ID}, false
+	}
+	out := Receipt{
+		ID:               rec.ID,
+		Status:           "skipped_duplicate",
+		Reason:           rec.ID,
+		CaptureID:        rec.CaptureID,
+		Coverage:         rec.Coverage,
+		CostUSD:          rec.CostUSD,
+		Manifest:         rec.Manifest,
+		Cached:           boolPtr(true),
+		OriginalReviewID: rec.ID,
+		OriginalStatus:   rec.Status,
+		Model:            rec.ReturnedModel,
+		Effort:           rec.EffectiveEffort,
+		Tags:             rec.Tags,
+		Attempts:         rec.Attempts,
+	}
+	if out.Model == "" {
+		out.Model = rec.ConfiguredModel
+	}
+	if rec.Status == "ok" || rec.Status == "ok_partial" {
+		if len(rec.Payload) == 0 || string(rec.Payload) == "null" {
+			return Receipt{Status: "cache_unavailable", Reason: "cache_unavailable", Cached: boolPtr(false), OriginalReviewID: rec.ID}, false
 		}
-		if json.Unmarshal(row.Raw, &m) == nil && m.Key == key && len(m.Attempts) > 0 {
-			return m.ID, nil
+		var result Result
+		if err := json.Unmarshal(rec.Payload, &result); err != nil {
+			return Receipt{Status: "cache_unavailable", Reason: "cache_unavailable", Cached: boolPtr(false), OriginalReviewID: rec.ID}, false
+		}
+		out.Result = &result
+		counts := map[string]int{}
+		for _, f := range result.Findings {
+			counts[f.Severity]++
+		}
+		if len(counts) > 0 {
+			out.FindingCounts = counts
 		}
 	}
-	return "", nil
+	return out, true
+}
+
+// legacyIdentityMatches verifies the stored legacy record would have produced
+// the pre-upgrade key for this adapter request. Key equality already covers the
+// other identity fields.
+func legacyIdentityMatches(row store.ReviewRecord, trial *Trial) bool {
+	if trial == nil {
+		return false
+	}
+	var rec struct {
+		ManifestHash    string `json:"manifest_hash"`
+		CaseID          string `json:"case_id"`
+		EffectiveEffort string `json:"effective_effort"`
+		Profile         string `json:"profile"`
+	}
+	if json.Unmarshal(row.Raw, &rec) != nil {
+		return false
+	}
+	return rec.ManifestHash == trial.ManifestHash && rec.CaseID == trial.CaseID &&
+		rec.EffectiveEffort == trial.Effort && rec.Profile == "historical_trial"
 }
 func trialManifest(t *Trial) string {
 	if t == nil {
@@ -724,6 +861,15 @@ func persistRecord(ctx context.Context, t *store.Tenant, tenant string, r Reques
 	if c.Ignored != "" {
 		out.Ignored = []string{c.Ignored}
 	}
+	if r.Detail == "full" || !write {
+		out.Model = result.Model
+		if out.Model == "" {
+			out.Model = cfg.Availability.Model
+		}
+		out.Effort = ctl.effective
+		out.Tags = ctl.tags
+		out.Attempts = attempts
+	}
 	for _, a := range attempts {
 		out.CostUSD += a.CostUSD
 	}
@@ -744,7 +890,10 @@ func persistRecord(ctx context.Context, t *store.Tenant, tenant string, r Reques
 	if tags == nil {
 		tags = []string{}
 	}
-	rec := map[string]any{"id": id, "type": "review_run", "repo_id": repo, "kind": r.Kind, "plan": r.Plan, "phase": r.Phase, "pr": r.PR, "capture_id": p.CaptureID, "input_hash": inputHash, "criteria": c, "configured_model": model, "returned_model": result.Model, "configured_effort": ctl.configured, "requested_effort": ctl.requested, "effective_effort": ctl.effective, "profile": ctl.profile, "tags": tags, "prompt_policy_version": p.PromptPolicyVersion, "exclusion_policy_version": p.ExclusionPolicyVersion, "status": status, "attempts": attempts, "payload": result, "build_models": r.BuildModels, "session_binding": "unbound", "session_binding_reason": "Plan 22 session resolver is unavailable", "conversation_id": conv, "coverage": p.Coverage, "manifest": p.Manifest, "key": key, "ts": float64(now.Unix())}
+	rec := map[string]any{"id": id, "review_id": id, "type": "review_run", "repo_id": repo, "kind": r.Kind, "plan": r.Plan, "phase": r.Phase, "pr": r.PR, "capture_id": p.CaptureID, "input_hash": inputHash, "criteria": c, "configured_model": model, "returned_model": result.Model, "configured_effort": ctl.configured, "requested_effort": ctl.requested, "effective_effort": ctl.effective, "profile": ctl.profile, "tags": tags, "prompt_policy_version": p.PromptPolicyVersion, "exclusion_policy_version": p.ExclusionPolicyVersion, "status": status, "attempts": attempts, "payload": result, "build_models": r.BuildModels, "session_binding": "unbound", "session_binding_reason": "Plan 22 session resolver is unavailable", "conversation_id": conv, "coverage": p.Coverage, "manifest": p.Manifest, "key": key, "ts": float64(now.Unix())}
+	if status == "skipped_duplicate" && reason != "" {
+		rec["original_review_id"] = reason
+	}
 	if r.Capture.Mode == "range" {
 		rec["base_sha"] = r.Capture.Base
 		rec["head_sha"] = r.Capture.Head

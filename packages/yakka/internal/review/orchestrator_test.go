@@ -149,7 +149,13 @@ func TestRunRetriesThenDuplicateAndChangedBuildModel(t *testing.T) {
 			w.WriteHeader(500)
 			return
 		}
-		io.WriteString(w, providerReply([]any{}, []any{}, []any{}, "complete"))
+		findings := []any{map[string]any{
+			"id": "F1", "severity": "high", "lens": "security", "title": "Missing validation",
+			"path": "pkg/a.go", "line_start": 1, "line_end": 1,
+			"evidence": "safe changed implementation", "criterion_ids": []any{}, "confidence": 0.9,
+			"rationale": "The changed code accepts unchecked input.",
+		}}
+		io.WriteString(w, providerReply([]any{}, findings, []any{}, "complete"))
 	}))
 	defer srv.Close()
 	tenant := reviewTenant(t)
@@ -160,13 +166,257 @@ func TestRunRetriesThenDuplicateAndChangedBuildModel(t *testing.T) {
 		t.Fatalf("retry=%+v calls=%d err=%v", out, calls.Load(), err)
 	}
 	dup, err := Run(context.Background(), tenant, "tenant", req, cfg)
-	if err != nil || dup.Status != "skipped_duplicate" || dup.Reason == "" || calls.Load() != 2 {
+	if err != nil || dup.Status != "skipped_duplicate" || dup.Reason != out.ID || calls.Load() != 2 {
 		t.Fatalf("duplicate=%+v calls=%d err=%v", dup, calls.Load(), err)
+	}
+	if dup.Cached == nil || !*dup.Cached || dup.ID != out.ID || dup.OriginalReviewID != out.ID || dup.OriginalStatus != "ok" ||
+		dup.Result == nil || len(dup.Result.Findings) != 1 || dup.FindingCounts["high"] != 1 ||
+		dup.Model != LiveModel || dup.Effort != "high" || len(dup.Attempts) != 2 || dup.CostUSD != out.CostUSD {
+		t.Fatalf("duplicate did not return the full cached original: out=%+v dup=%+v", out, dup)
+	}
+	rows, err := tenant.ReviewRecords(context.Background(), store.ReviewRecordFilter{RepoID: "repo-sentinel", Limit: 10})
+	if err != nil || len(rows) != 2 {
+		t.Fatalf("expected original plus one audit row, rows=%d err=%v", len(rows), err)
+	}
+	var audit map[string]any
+	if err := json.Unmarshal(rows[0].Raw, &audit); err != nil {
+		t.Fatal(err)
+	}
+	if audit["status"] != "skipped_duplicate" || audit["original_review_id"] != out.ID || audit["cost_usd"] != nil || audit["attempts"] != nil {
+		t.Fatalf("duplicate audit row added attempts/cost or lost its pointer: %s", rows[0].Raw)
 	}
 	req.BuildModels = []BuildModel{{ID: "different-build-model"}}
 	changed, err := Run(context.Background(), tenant, "tenant", req, cfg)
 	if err != nil || changed.Status != "ok" || calls.Load() != 3 {
 		t.Fatalf("changed key=%+v calls=%d err=%v", changed, calls.Load(), err)
+	}
+}
+
+func reviewCacheFixture(id, key string, ts float64) map[string]any {
+	return map[string]any{
+		"id": id, "review_id": id, "type": "review_run", "repo_id": "repo-sentinel",
+		"kind": "adhoc", "capture_id": "capture-" + id, "status": "ok", "key": key,
+		"configured_model": LiveModel, "returned_model": LiveModel, "effective_effort": "high",
+		"tags": []string{}, "attempts": []any{map[string]any{"number": 1, "status": "ok", "cost_usd": 0.001}},
+		"payload":  map[string]any{"model": LiveModel, "findings": []any{}, "coverage": "complete"},
+		"coverage": map[string]any{"state": "complete", "included": 1}, "cost_usd": 0.001,
+		"conversation_id": "review:" + id, "ts": ts,
+	}
+}
+
+func appendReviewCacheFixtures(t *testing.T, tenant *store.Tenant, fixtures ...map[string]any) {
+	t.Helper()
+	facts := make([]json.RawMessage, len(fixtures))
+	for i, fixture := range fixtures {
+		b, err := json.Marshal(fixture)
+		if err != nil {
+			t.Fatal(err)
+		}
+		facts[i] = b
+	}
+	results, err := ingest.IngestReviewRuns(context.Background(), tenant, facts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, result := range results {
+		if result.Status != ingest.Accepted {
+			t.Fatalf("review fixture rejected: %+v", result)
+		}
+	}
+}
+
+func executionKeyForTest(t *testing.T, tenant *store.Tenant, req Request, cfg RunConfig) string {
+	t.Helper()
+	repo := req.Capture.RepoID
+	if repo == "" {
+		repo = req.RepoID
+	}
+	controls, err := resolveCallControls(req, cfg.Availability.Effort)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := ResolveCriteria(context.Background(), tenant, CriteriaRequest{RepoID: repo, Plan: req.Plan})
+	if err != nil {
+		t.Fatal(err)
+	}
+	packet, err := Build(Input{Capture: req.Capture, Criteria: resolved.Criteria, CriteriaText: resolved.CriteriaText})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return executionKey(req, "tenant", repo, packet, resolved.Record, cfg.Availability.Model, controls.effective, controls.profile, controls.tags)
+}
+
+func TestDuplicateClaimsReportActiveAndDurableWithoutReplay(t *testing.T) {
+	t.Run("active", func(t *testing.T) {
+		var calls atomic.Int32
+		started, release := make(chan struct{}), make(chan struct{})
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			calls.Add(1)
+			close(started)
+			<-release
+			io.WriteString(w, providerReply([]any{}, []any{}, []any{}, "complete"))
+		}))
+		defer srv.Close()
+		tenant, req, cfg := reviewTenant(t), reviewRequest(true), availableConfig(srv.URL)
+		type outcome struct {
+			receipt Receipt
+			err     error
+		}
+		first := make(chan outcome, 1)
+		go func() { r, err := Run(context.Background(), tenant, "tenant", req, cfg); first <- outcome{r, err} }()
+		select {
+		case <-started:
+		case <-time.After(5 * time.Second):
+			t.Fatal("first provider call did not start")
+		}
+		dup, err := Run(context.Background(), tenant, "tenant", req, cfg)
+		if err != nil || dup.Status != "in_progress" || dup.Cached == nil || *dup.Cached || dup.OriginalReviewID == "" || dup.Result != nil || calls.Load() != 1 {
+			t.Fatalf("active duplicate=%+v calls=%d err=%v", dup, calls.Load(), err)
+		}
+		close(release)
+		got := <-first
+		if got.err != nil || got.receipt.Status != "ok" {
+			t.Fatalf("first result=%+v err=%v", got.receipt, got.err)
+		}
+	})
+
+	t.Run("durable after restart", func(t *testing.T) {
+		var calls atomic.Int32
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			calls.Add(1)
+			io.WriteString(w, providerReply([]any{}, []any{}, []any{}, "complete"))
+		}))
+		defer srv.Close()
+		tenant := reviewTenant(t)
+		req := reviewRequest(true)
+		cfg := availableConfig(srv.URL)
+		key := executionKeyForTest(t, tenant, req, cfg)
+		path := filepath.Join(t.TempDir(), "reservations.json")
+		before, err := NewPersistentReservations(5, 2, path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := before.begin(key, "original-id", "tenant", reservationAmount(LiveModel)); err != nil {
+			t.Fatal(err)
+		}
+		after, err := NewPersistentReservations(5, 2, path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		cfg.Reservations = after
+		out, err := Run(context.Background(), tenant, "tenant", req, cfg)
+		if err != nil || out.Status != "outcome_unknown" || out.Cached == nil || *out.Cached || out.OriginalReviewID != "original-id" || out.Result != nil || calls.Load() != 0 {
+			t.Fatalf("durable duplicate=%+v calls=%d err=%v", out, calls.Load(), err)
+		}
+	})
+}
+
+func TestCacheUnavailableForCorruptOriginalDoesNotReplay(t *testing.T) {
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
+		io.WriteString(w, providerReply([]any{}, []any{}, []any{}, "complete"))
+	}))
+	defer srv.Close()
+	tenant := reviewTenant(t)
+	req := reviewRequest(true)
+	cfg := availableConfig(srv.URL)
+	key := executionKeyForTest(t, tenant, req, cfg)
+	fixture := reviewCacheFixture("corrupt-original", key, 100)
+	fixture["payload"] = "not-a-review-result"
+	appendReviewCacheFixtures(t, tenant, fixture)
+	out, err := Run(context.Background(), tenant, "tenant", req, cfg)
+	if err != nil || out.Status != "cache_unavailable" || out.Cached == nil || *out.Cached || out.Result != nil || calls.Load() != 0 {
+		t.Fatalf("corrupt cache=%+v calls=%d err=%v", out, calls.Load(), err)
+	}
+}
+
+func TestCompletedOriginalBeyond500FoundAfterTenantRestart(t *testing.T) {
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
+		io.WriteString(w, providerReply([]any{}, []any{}, []any{}, "complete"))
+	}))
+	defer srv.Close()
+	dir := t.TempDir()
+	tenant, err := store.Open(dir, store.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req, cfg := reviewRequest(true), availableConfig(srv.URL)
+	cfg.Now = func() time.Time { return time.Unix(1000, 0) }
+	original, err := Run(context.Background(), tenant, "tenant", req, cfg)
+	if err != nil || original.Status != "ok" {
+		t.Fatalf("original=%+v err=%v", original, err)
+	}
+	noise := make([]map[string]any, 600)
+	for i := range noise {
+		id := fmt.Sprintf("noise-%d", i)
+		noise[i] = reviewCacheFixture(id, "unrelated-"+id, float64(2000+i))
+	}
+	appendReviewCacheFixtures(t, tenant, noise...)
+	page, err := tenant.ReviewRecords(context.Background(), store.ReviewRecordFilter{RepoID: "repo-sentinel", Limit: 500})
+	if err != nil || len(page) != 500 {
+		t.Fatalf("newest records=%d err=%v", len(page), err)
+	}
+	for _, row := range page {
+		if strings.Contains(string(row.Raw), `"review_id":"`+original.ID+`"`) {
+			t.Fatal("original unexpectedly appears among newest 500 rows")
+		}
+	}
+	if err := tenant.Close(); err != nil {
+		t.Fatal(err)
+	}
+	tenant, err = store.Open(dir, store.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = tenant.Close() })
+	cfg = availableConfig(srv.URL) // Simulate a new server process with fresh reservations.
+	dup, err := Run(context.Background(), tenant, "tenant", req, cfg)
+	if err != nil || dup.Status != "skipped_duplicate" || dup.ID != original.ID || dup.OriginalReviewID != original.ID || dup.Cached == nil || !*dup.Cached || dup.Result == nil || calls.Load() != 1 {
+		t.Fatalf("old original after restart=%+v calls=%d err=%v", dup, calls.Load(), err)
+	}
+}
+
+func TestLegacyAdapterFindsOldKeyAndAdditionalTagBypassesFallback(t *testing.T) {
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
+		io.WriteString(w, providerReply([]any{}, []any{}, []any{}, "complete"))
+	}))
+	defer srv.Close()
+	tenant, req, cfg := reviewTenant(t), reviewRequest(true), availableConfig(srv.URL)
+	req.Capture.Mode = "range"
+	req.Trial = &Trial{ManifestHash: strings.Repeat("a", 64), CaseID: "case-one", Effort: "high"}
+	resolved, err := ResolveCriteria(context.Background(), tenant, CriteriaRequest{RepoID: "repo-sentinel", Plan: req.Plan})
+	if err != nil {
+		t.Fatal(err)
+	}
+	packet, err := Build(Input{Capture: req.Capture, Criteria: resolved.Criteria, CriteriaText: resolved.CriteriaText})
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacyKey := PreUpgradeExecutionKey(req, "tenant", "repo-sentinel", packet, resolved.Record, cfg.Availability.Model, "high", "historical_trial")
+	old := reviewCacheFixture("old-legacy-review", legacyKey, 100)
+	delete(old, "review_id") // Pre-upgrade canonical records lost the reserved top-level id.
+	delete(old, "tags")
+	old["conversation_id"] = "review:0123456789ab" // Existing rows use a capture-derived conversation id.
+	old["profile"] = "historical_trial"
+	old["manifest_hash"] = req.Trial.ManifestHash
+	old["case_id"] = req.Trial.CaseID
+	old["effective_effort"] = req.Trial.Effort
+	appendReviewCacheFixtures(t, tenant, old)
+
+	cached, err := Run(context.Background(), tenant, "tenant", req, cfg)
+	if err != nil || cached.Status != "cache_unavailable" || cached.Cached == nil || *cached.Cached || calls.Load() != 0 {
+		t.Fatalf("legacy fallback=%+v calls=%d err=%v", cached, calls.Load(), err)
+	}
+
+	req.Tags = []string{"run:independent"}
+	independent, err := Run(context.Background(), tenant, "tenant", req, cfg)
+	if err != nil || independent.Status != "ok" || calls.Load() != 1 {
+		t.Fatalf("tagged legacy request reused old key: receipt=%+v calls=%d err=%v", independent, calls.Load(), err)
 	}
 }
 
