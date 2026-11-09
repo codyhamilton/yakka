@@ -13,5 +13,5 @@ Run identity: Codex; current API session; started 2026-11-09 12:48 UTC (22:48 Au
 
 ### Unit outcomes
 
-- None landed yet.
+- `phase1-02-paged-review-store-reads.md` — complete, commit `1fc0ec9`. Added conjunctive tag filtering and complete fixed high-water keyset reads ordered by `(ts,insertion_id)`; preserved the legacy `ReviewRecords` behavior. Store tests cover 1,001-row exact-once traversal with interleaved late/backdated appends, tenant filtering, ALL tags, exact/empty terminal pages, and corrupt-row errors. Checks passed: focused and full `internal/store` Go tests under 8 GiB / `-p=3`, plus `git diff --check`. No departure from brief; report names follow-up transport concerns as out of scope. Artifact feedback: delivered, screen pass (`/home/codyh/workspace/yakka-build/23b/docs/plans/23-llm-review-shadow/reports/phase1-02-paged-review-store-reads.md`). Harness selected DeepSeek Flash; launcher provided no turn-count or final-context metric, and the report did not include either.
 
