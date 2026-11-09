@@ -15,6 +15,16 @@ Run: Codex execute, harness-dispatched unit 3-01; session: hlaunch build on feat
 - Feedback: brief and report delivered, Jev screening pass. Harness reported 108,937 tokens; no turn/final-context figures were available.
 - Deviations, unfinished work, known problems: only the pytest-to-unittest runner adjustment; none unfinished.
 
+### 4-02-review-record-persistence
+
+- Status: done; committed with report in `dbd0ab4` (`Persist review records and captured inputs`).
+- Brief: `briefs/4-02-review-record-persistence.md`.
+- Report: `reports/4-02-review-record-persistence.md`.
+- Built: added ingest validation and secret prechecks for `review_run`, deduplicated tenant-local record storage, filtered review reads, and tenant-local hash-verified atomic `review-inputs/` storage outside blob screening. Fact storage remains outside conversation, hook-event and facet aggregates. The reader API is `Tenant.ReviewRecords(ctx, ReviewRecordFilter)`; captured input uses `WriteReviewInput`/`ReadReviewInput`.
+- Checks: with `ulimit -v 8388608` and `-p=3`, `go test ./internal/ingest ./internal/store` passed (`ingest 0.306s`, `store 6.673s`); `git diff --check` passed.
+- Feedback: brief and report delivered, Jev screening pass. Harness reported 77,658 tokens; no turn/final-context figures were available.
+- Deviations, unfinished work, known problems: none.
+
 ## Phase 3 — Criteria resolution from the artifact store
 
 ### 3-01-criteria-resolution
