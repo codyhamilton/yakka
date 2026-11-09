@@ -3,8 +3,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 import pathlib
+import re
 import tempfile
 import time
 import urllib.error
@@ -12,9 +14,17 @@ import urllib.parse
 import urllib.request
 from typing import Any, Callable
 
+import approval
+
 EFFORTS = ("high", "xhigh", "max")
 RETRY_EXPOSURE = 2  # Phase 4 reserves one bounded retry per started review.
 VALID_COMPLETION = {"ok", "ok_partial"}
+RUN_ID = re.compile(r"[A-Za-z0-9_-]{1,32}")
+TAG = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/=-]{0,95}")
+MAX_TAGS = 16
+EVIDENCE_PAGE_SIZE = 500
+EVIDENCE_MAX_PAGES = 10000
+EVIDENCE_MAX_ROWS = 1000000
 
 
 class RunnerError(RuntimeError):
@@ -33,6 +43,55 @@ def _sha(value: bytes) -> str:
     return hashlib.sha256(value).hexdigest()
 
 
+def _case_tag(case_id: str) -> str:
+    return "case:" + _sha(case_id.encode("utf-8"))
+
+
+def _canonical_tags(run_id: str, effort: str, manifest_hash: str, case_id: str) -> list[str]:
+    if not isinstance(run_id, str) or not RUN_ID.fullmatch(run_id):
+        raise RunnerError("run id must be 1-32 characters from [A-Za-z0-9_-]")
+    return ["trial:" + run_id, "effort:" + effort, "manifest:" + manifest_hash, _case_tag(case_id)]
+
+
+def _validate_tag(tag: Any) -> None:
+    if not isinstance(tag, str) or not tag.isascii() or not TAG.fullmatch(tag):
+        raise RunnerError(f"tag is not 1-96 ASCII bytes from the allowed set: {tag!r}")
+
+
+def _merge_tags(canonical: list[str], supplied: Any) -> list[str]:
+    if supplied is None:
+        supplied = []
+    if not isinstance(supplied, list) or not all(isinstance(tag, str) for tag in supplied):
+        raise RunnerError("tags must be an array of strings")
+    expected = {tag.split(":", 1)[0]: tag for tag in canonical}
+    for tag in supplied:
+        _validate_tag(tag)
+        prefix = tag.partition(":")[0]
+        if prefix in expected and tag != expected[prefix]:
+            raise RunnerError(f"supplied {prefix} tag disagrees with the request: {tag!r}")
+    merged = sorted(dict.fromkeys(list(supplied) + list(canonical)))
+    if len(merged) > MAX_TAGS:
+        raise RunnerError(f"more than {MAX_TAGS} tags")
+    for tag in merged:
+        _validate_tag(tag)
+    return merged
+
+
+def _certified_history(data: dict[str, Any]) -> None:
+    history = data.get("history")
+    if not isinstance(history, dict):
+        raise RunnerError("manifest has no certified full-history evidence")
+    if history.get("shallow") is not False or history.get("object_complete") is not True:
+        raise RunnerError("manifest history is not certified complete")
+    if not history.get("repository") or not history.get("tip_sha"):
+        raise RunnerError("manifest history has no verified repository or tip")
+    verified = history.get("verified_count")
+    enumerated = history.get("enumerated_commits")
+    if (not isinstance(verified, int) or isinstance(verified, bool) or verified < 0
+            or not isinstance(enumerated, int) or isinstance(enumerated, bool) or enumerated != verified):
+        raise RunnerError("manifest history commit counts are not certified")
+
+
 def _manifest(path: pathlib.Path) -> dict[str, Any]:
     data = json.loads(path.read_text(encoding="utf-8"))
     claimed = data.get("manifest_sha256")
@@ -43,6 +102,7 @@ def _manifest(path: pathlib.Path) -> dict[str, Any]:
         raise RunnerError("manifest has no frozen cases or run order")
     if data.get("settings", {}).get("efforts") != list(EFFORTS):
         raise RunnerError("manifest effort set must be high, xhigh, max")
+    _certified_history(data)
     return data
 
 
@@ -58,7 +118,8 @@ def _case_map(manifest: dict[str, Any]) -> dict[str, dict[str, Any]]:
     return result
 
 
-def build_request(manifest: dict[str, Any], case: dict[str, Any], effort: str, dry_run: bool) -> dict[str, Any]:
+def build_request(manifest: dict[str, Any], case: dict[str, Any], effort: str, dry_run: bool,
+                  run_id: str, tags: Any = None) -> dict[str, Any]:
     if effort not in EFFORTS:
         raise RunnerError(f"unsupported effort: {effort}")
     if not case.get("eligible") or not isinstance(case.get("case_id"), str):
@@ -100,7 +161,9 @@ def build_request(manifest: dict[str, Any], case: dict[str, Any], effort: str, d
         "allow_superseded": True,
         "build_models": build_models,
         "dry_run": dry_run,
-        "trial": {"manifest_hash": manifest["manifest_sha256"], "case_id": case["case_id"], "effort": effort},
+        "effort": effort,
+        "tags": _merge_tags(_canonical_tags(run_id, effort, manifest["manifest_sha256"], case["case_id"]), tags),
+        "store": True,
     }
     return request
 
@@ -143,27 +206,109 @@ class TrialRunner:
         except (TypeError, json.JSONDecodeError) as exc:
             raise RunnerError(f"REST {method} {path} returned invalid JSON") from exc
 
+    def whoami(self) -> dict[str, Any]:
+        result = self._request("GET", "/v1/whoami")
+        if not isinstance(result, dict) or not isinstance(result.get("tenant"), str):
+            raise RunnerError("whoami returned no tenant identity")
+        return result
+
+    def verify_identity(self, expected_tenant: str) -> dict[str, Any]:
+        identity = self.whoami()
+        if identity.get("tenant") != expected_tenant or identity.get("scope") != "read_write":
+            raise RunnerError(
+                f"key identity {identity.get('tenant')!r}/{identity.get('scope')!r} is not the dedicated "
+                f"tenant {expected_tenant!r} with read_write scope")
+        return identity
+
     def post_review(self, request: dict[str, Any]) -> dict[str, Any]:
         result = self._request("POST", "/v1/reviews", request)
         if not isinstance(result, dict) or not isinstance(result.get("status"), str):
             raise RunnerError("review receipt has no status")
         return result
 
-    def get_reviews(self, manifest_hash: str) -> list[dict[str, Any]]:
-        query = urllib.parse.urlencode({"profile": "historical_trial", "manifest_hash": manifest_hash, "limit": 500})
-        result = self._request("GET", "/v1/reviews?" + query)
-        rows = result.get("reviews") if isinstance(result, dict) else None
+    @staticmethod
+    def _review_page(result: Any) -> tuple[list[dict[str, Any]], str | None, bool]:
+        """Validate one cursor page's protocol fields before any row is trusted."""
+        if not isinstance(result, dict):
+            raise RunnerError("review read page is not an object")
+        rows = result.get("reviews")
         if not isinstance(rows, list):
-            raise RunnerError("review read has no reviews array")
-        return [r for r in rows if isinstance(r, dict)]
+            raise RunnerError("review read page has no reviews array")
+        for row in rows:
+            if not isinstance(row, dict):
+                raise RunnerError("review read page has a malformed review row")
+            # Stored rows keep the receipt id in review_id. keys.Canonical strips the
+            # reserved top-level id, so a real server page may not have "id" at all.
+            identity = row.get("id")
+            if not isinstance(identity, str) or not identity:
+                identity = row.get("review_id")
+                if isinstance(identity, str) and identity:
+                    row["id"] = identity
+                else:
+                    raise RunnerError("review read page row has no identity")
+        cursor = result.get("next_cursor")
+        if cursor is not None and not isinstance(cursor, str):
+            raise RunnerError("review read page cursor is not a string or null")
+        complete = result.get("complete")
+        if not isinstance(complete, bool):
+            raise RunnerError("review read page has no boolean complete field")
+        if complete and cursor is not None:
+            raise RunnerError("complete review page still carries a cursor")
+        if not complete and cursor is None:
+            raise RunnerError("nonterminal review page has no advancing cursor")
+        return rows, cursor, complete
+
+    def get_reviews(self, manifest_hash: str, run_id: str, tenant_id: str | None = None,
+                    *, limit: int = EVIDENCE_PAGE_SIZE) -> dict[str, Any]:
+        """Follow full-detail cursor pages to exhaustion and return saved-export evidence."""
+        if not isinstance(limit, int) or isinstance(limit, bool) or limit < 1 or limit > 500:
+            raise RunnerError("review page size must be between 1 and 500")
+        tags = sorted(["manifest:" + manifest_hash, "trial:" + run_id])
+        rows: list[dict[str, Any]] = []
+        pages: list[dict[str, Any]] = []
+        seen_ids: set[str] = set()
+        seen_cursors: set[str] = set()
+        cursor: str | None = None
+        while True:
+            if len(pages) >= EVIDENCE_MAX_PAGES:
+                raise RunnerError("review read exceeded the evidence page safety ceiling")
+            query: list[tuple[str, str]] = [("tag", tag) for tag in tags]
+            query += [("detail", "full"), ("limit", str(limit))]
+            if cursor is not None:
+                query.append(("cursor", cursor))
+            result = self._request("GET", "/v1/reviews?" + urllib.parse.urlencode(query))
+            page_rows, next_cursor, complete = self._review_page(result)
+            for row in page_rows:
+                identity = row["id"]
+                if identity in seen_ids:
+                    raise RunnerError(f"duplicate review identity across pages: {identity}")
+                seen_ids.add(identity)
+            rows.extend(page_rows)
+            pages.append({"cursor_in": cursor, "cursor_out": next_cursor, "complete": complete,
+                          "row_count": len(page_rows),
+                          "row_ids_sha256": _sha(_canonical([row["id"] for row in page_rows]))})
+            if len(rows) > EVIDENCE_MAX_ROWS:
+                raise RunnerError("review read exceeded the evidence row safety ceiling")
+            if complete:
+                break
+            if next_cursor is None or next_cursor == cursor or next_cursor in seen_cursors:
+                raise RunnerError("review read cursor did not advance (cycle or missing cursor)")
+            seen_cursors.add(next_cursor)
+            cursor = next_cursor
+        return {"schema_version": 1, "manifest_sha256": manifest_hash, "run_id": run_id,
+                "tenant_id": tenant_id, "filters": {"tags": tags}, "detail": "full", "limit": limit,
+                "pages": pages, "complete": True, "reviews": rows}
 
 
-def _load_ledger(path: pathlib.Path, manifest_hash: str) -> dict[str, Any]:
+def _load_ledger(path: pathlib.Path, manifest_hash: str, run_id: str, tenant_id: str) -> dict[str, Any]:
     if not path.exists():
-        return {"schema_version": 1, "manifest_hash": manifest_hash, "entries": {}}
+        return {"schema_version": 1, "manifest_hash": manifest_hash, "run_id": run_id,
+                "tenant_id": tenant_id, "entries": {}}
     data = json.loads(path.read_text(encoding="utf-8"))
-    if data.get("schema_version") != 1 or data.get("manifest_hash") != manifest_hash or not isinstance(data.get("entries"), dict):
-        raise RunnerError("ledger is not bound to this manifest")
+    if (data.get("schema_version") != 1 or data.get("manifest_hash") != manifest_hash
+            or data.get("run_id") != run_id or data.get("tenant_id") != tenant_id
+            or not isinstance(data.get("entries"), dict)):
+        raise RunnerError("ledger is not bound to this manifest, run id and tenant")
     return data
 
 
@@ -186,35 +331,108 @@ def _entry_key(case_id: str, effort: str, request: dict[str, Any]) -> str:
     return _sha(_canonical({"case_id": case_id, "effort": effort, "request": request}))
 
 
-def _record_matches(row: dict[str, Any], manifest_hash: str, case_id: str, effort: str,
-                    reviewer_model: str) -> bool:
-    return (row.get("manifest_hash") == manifest_hash and row.get("case_id") == case_id
-            and row.get("effective_effort") == effort and row.get("returned_model") == reviewer_model
-            and row.get("status") in VALID_COMPLETION)
+def _row_has_identity(row: dict[str, Any], tags: frozenset[str]) -> bool:
+    row_tags = row.get("tags")
+    return isinstance(row_tags, list) and tags.issubset(set(row_tags))
 
 
-def _completion(records: list[dict[str, Any]], manifest_hash: str, case_id: str, effort: str,
+def _record_matches(row: dict[str, Any], tags: frozenset[str], effort: str, reviewer_model: str) -> bool:
+    return (_row_has_identity(row, tags) and row.get("effective_effort") == effort
+            and row.get("returned_model") == reviewer_model and row.get("status") in VALID_COMPLETION)
+
+
+def _completion(records: list[dict[str, Any]], tags: frozenset[str], effort: str,
                 reviewer_model: str) -> dict[str, Any] | None:
-    return next((r for r in records if _record_matches(r, manifest_hash, case_id, effort, reviewer_model)), None)
+    return next((r for r in records if _record_matches(r, tags, effort, reviewer_model)), None)
+
+
+def _duplicate_body(receipt: dict[str, Any]) -> dict[str, Any] | None:
+    original_id = receipt.get("original_review_id") or receipt.get("reason")
+    if not isinstance(original_id, str) or not original_id:
+        return None
+    return {"id": original_id, "status": receipt.get("original_status"), "result": receipt.get("result"),
+            "coverage": receipt.get("coverage"), "finding_counts": receipt.get("finding_counts"),
+            "returned_model": receipt.get("model"), "effective_effort": receipt.get("effort"),
+            "tags": receipt.get("tags"), "attempts": receipt.get("attempts")}
+
+
+def _receipt_cost(receipt: Any) -> float:
+    """Sum recorded attempt charges, never inventing a price for a missing cost."""
+    if not isinstance(receipt, dict):
+        return 0.0
+    total = 0.0
+    attempts = receipt.get("attempts")
+    if isinstance(attempts, list) and attempts:
+        for attempt in attempts:
+            if not isinstance(attempt, dict):
+                continue
+            value = attempt.get("cost_usd")
+            if isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value):
+                total += float(value)
+    else:
+        value = receipt.get("cost_usd")
+        if isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value):
+            total += float(value)
+    return total
+
+
+def _prior_spend(ledger: dict[str, Any]) -> float:
+    """Charges already recorded by real run attempts, excluding dry-run estimates."""
+    total = 0.0
+    for entry in ledger.get("entries", {}).values():
+        if not isinstance(entry, dict):
+            continue
+        for attempt in entry.get("attempts", []):
+            if isinstance(attempt, dict) and attempt.get("kind") == "run":
+                total += _receipt_cost(attempt.get("receipt"))
+    return total
+
+
+def _unknown_reservations(ledger: dict[str, Any], retry_by_arm: dict[tuple[Any, Any], float]) -> float:
+    """Conservatively reserve the retry-inclusive estimate for unfinished claims."""
+    total = 0.0
+    for entry in ledger.get("entries", {}).values():
+        if not isinstance(entry, dict):
+            continue
+        if entry.get("state") in {"started", "started_unknown"}:
+            total += retry_by_arm.get((entry.get("case_id"), entry.get("effort")), 0.0)
+    return total
 
 
 def run(manifest_path: pathlib.Path, ledger_path: pathlib.Path, runner: TrialRunner,
-        cap_usd: float, reviewer_model: str, *, execute: bool = False,
-        config_id: str = "default") -> dict[str, Any]:
-    """Preflight all arms; optionally run valid, under-cap requests and persist each transition."""
+        cap_usd: float, reviewer_model: str, *, run_id: str, tenant_id: str,
+        execute: bool = False, config_id: str = "default",
+        approval_path: pathlib.Path | None = None,
+        clock: Callable[[], float] | None = None) -> dict[str, Any]:
+    """Preflight all arms; optionally run valid, under-cap, approved requests."""
     if cap_usd < 0 or not reviewer_model:
         raise RunnerError("a non-negative cap and reviewer model id are required")
+    if not isinstance(run_id, str) or not RUN_ID.fullmatch(run_id):
+        raise RunnerError("run id must be 1-32 characters from [A-Za-z0-9_-]")
+    if not isinstance(tenant_id, str) or not tenant_id:
+        raise RunnerError("an expected dedicated tenant id is required")
     manifest = _manifest(pathlib.Path(manifest_path))
     cases = _case_map(manifest)
+    manifest_hash = manifest["manifest_sha256"]
+    now = (clock or time.time)()
+    record = None
+    if execute:
+        if approval_path is None:
+            raise approval.ApprovalError("--execute requires an explicit approval record")
+        record = approval.load(approval_path, now=now)
+        # Identity/expiry mismatches abort before any request, including resume.
+        approval.check_binding(record, endpoint=runner.base_url, tenant_id=tenant_id,
+                               manifest_sha256=manifest_hash, run_id=run_id)
+    runner.verify_identity(tenant_id)  # refuse a mismatched key before any review POST
     ledger_path = pathlib.Path(ledger_path)
-    ledger = _load_ledger(ledger_path, manifest["manifest_sha256"])
+    ledger = _load_ledger(ledger_path, manifest_hash, run_id, tenant_id)
     cfg = _sha(_canonical({"reviewer_model": reviewer_model, "cap_usd": cap_usd, "config_id": config_id}))
     estimate_rows = []
     projection = 0.0
     for case_id in manifest["run_order"]:
         case = cases[case_id]
         for effort in EFFORTS:
-            req = build_request(manifest, case, effort, True)
+            req = build_request(manifest, case, effort, True, run_id)
             key = _entry_key(case_id, effort, {**req, "dry_run": False})
             entry = ledger["entries"].setdefault(key, {"case_id": case_id, "effort": effort,
                 "request_identity": key, "attempts": [], "state": "new"})
@@ -234,22 +452,35 @@ def run(manifest_path: pathlib.Path, ledger_path: pathlib.Path, runner: TrialRun
             estimate_rows.append({"case_id": case_id, "effort": effort, "estimated_usd": estimate,
                                   "retry_inclusive_usd": retry_total, "status": entry.get("preflight_status")})
     _save_ledger(ledger_path, ledger)
-    summary = {"manifest_hash": manifest["manifest_sha256"], "estimates": estimate_rows,
-               "retry_exposure_per_review": RETRY_EXPOSURE, "projected_usd": projection,
-               "cap_usd": cap_usd, "refused_over_cap": projection > cap_usd}
+    blocked_efforts = sorted({row["effort"] for row in estimate_rows
+                              if row["status"] in {"unavailable", "skipped_budget"}})
+    retry_by_arm = {(row["case_id"], row["effort"]): row["retry_inclusive_usd"] for row in estimate_rows}
+    summary = {"manifest_hash": manifest_hash, "run_id": run_id, "tenant_id": tenant_id,
+               "estimates": estimate_rows, "retry_exposure_per_review": RETRY_EXPOSURE,
+               "projected_usd": projection, "cap_usd": cap_usd, "refused_over_cap": projection > cap_usd,
+               "readiness": {"ready": projection <= cap_usd and not blocked_efforts,
+                             "refused_over_cap": projection > cap_usd,
+                             "blocked_efforts": blocked_efforts}}
     if projection > cap_usd:
         return summary
     if not execute:
         return summary
 
-    # Reconcile existing server records first, including canonical references for duplicate receipts.
-    records = runner.get_reviews(manifest["manifest_sha256"])
+    approval.check_preflight(record, summary)
+    required = _prior_spend(ledger) + _unknown_reservations(ledger, retry_by_arm) + projection
+    summary["approval_required_usd"] = required
+    summary["authorized_max_usd"] = record["authorized_max_usd"]
+    approval.check_ceiling(record, required)
+
+    # Reconcile existing server records first; duplicate receipts carry their own canonical body.
+    records = runner.get_reviews(manifest_hash, run_id, tenant_id)["reviews"]
     for case_id in manifest["run_order"]:
         for effort in EFFORTS:
-            req = build_request(manifest, cases[case_id], effort, False)
+            req = build_request(manifest, cases[case_id], effort, False, run_id)
+            tags = frozenset(req["tags"])
             key = _entry_key(case_id, effort, req)
             entry = ledger["entries"][key]
-            matched = _completion(records, manifest["manifest_sha256"], case_id, effort, reviewer_model)
+            matched = _completion(records, tags, effort, reviewer_model)
             if matched:
                 entry["state"] = "complete"
                 entry["canonical_review_id"] = matched.get("id")
@@ -279,38 +510,39 @@ def run(manifest_path: pathlib.Path, ledger_path: pathlib.Path, runner: TrialRun
                 entry["preflight_config_seen"] = cfg
             elif receipt["status"] == "skipped_duplicate":
                 entry["duplicate_receipt"] = receipt
-                canonical_id = receipt.get("reason")
-                canonical = next((r for r in records if r.get("id") == canonical_id), None)
-                if canonical is None:
-                    records = runner.get_reviews(manifest["manifest_sha256"])
-                    canonical = next((r for r in records if r.get("id") == canonical_id), None)
-                entry["canonical_review_id"] = canonical_id
-                entry["duplicate_resolved"] = bool(canonical)
-                entry["state"] = "complete" if canonical and _record_matches(canonical, manifest["manifest_sha256"], case_id, effort, reviewer_model) else "duplicate_unresolved"
+                canonical = _duplicate_body(receipt)
+                entry["canonical_review_id"] = canonical.get("id") if canonical else None
+                resolved = canonical is not None and _record_matches(canonical, tags, effort, reviewer_model)
+                entry["duplicate_resolved"] = resolved
+                entry["state"] = "complete" if resolved else "duplicate_unresolved"
             else:
                 entry["state"] = "awaiting_record" if receipt["status"] in VALID_COMPLETION else "finished_incomplete"
+                records = runner.get_reviews(manifest_hash, run_id, tenant_id)["reviews"]
             _save_ledger(ledger_path, ledger)
-            records = runner.get_reviews(manifest["manifest_sha256"])
 
     # Final reconciliation is authoritative; status receipts alone never fill an arm.
-    records = runner.get_reviews(manifest["manifest_sha256"])
+    evidence = runner.get_reviews(manifest_hash, run_id, tenant_id)
+    records = evidence["reviews"]
     arm = {}
     completed = {}
     for effort in EFFORTS:
-        ids = [cid for cid in manifest["run_order"] if _completion(records, manifest["manifest_sha256"], cid, effort, reviewer_model)]
+        ids = [cid for cid in manifest["run_order"]
+               if _completion(records, frozenset(_canonical_tags(run_id, effort, manifest_hash, cid)),
+                              effort, reviewer_model)]
         completed[effort] = set(ids)
         target = int(manifest.get("target_per_effort", 50))
         arm[effort] = {"eligible": len(cases), "completed": len(ids), "shortfall": max(0, target - len(ids))}
         for cid in manifest["run_order"]:
-            req = build_request(manifest, cases[cid], effort, False)
+            req = build_request(manifest, cases[cid], effort, False, run_id)
+            tags = frozenset(req["tags"])
             entry = ledger["entries"][_entry_key(cid, effort, req)]
-            matched = _completion(records, manifest["manifest_sha256"], cid, effort, reviewer_model)
+            matched = _completion(records, tags, effort, reviewer_model)
             if matched:
                 entry["state"] = "complete"
                 entry["canonical_review_id"] = matched.get("id")
             elif entry.get("state") in {"awaiting_record", "complete", "complete_mismatch"}:
-                identity_records = [r for r in records if r.get("manifest_hash") == manifest["manifest_sha256"]
-                                    and r.get("case_id") == cid and r.get("effective_effort") == effort]
+                identity_records = [r for r in records if _row_has_identity(r, tags)
+                                    and r.get("effective_effort") == effort]
                 entry["state"] = "model_mismatch" if any(r.get("returned_model") != reviewer_model for r in identity_records) else "record_missing"
     paired = set.intersection(*completed.values()) if completed else set()
     _save_ledger(ledger_path, ledger)

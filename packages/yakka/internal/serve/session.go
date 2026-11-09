@@ -108,7 +108,18 @@ func (r *Registry) tenantsOwnedBy(githubID int64) []TenantInfo {
 	out := []TenantInfo{}
 	for id, owner := range r.owners {
 		if owner == want {
-			out = append(out, TenantInfo{ID: id, Name: r.tenantNameLocked(id)})
+			info := TenantInfo{ID: id, Name: r.tenantNameLocked(id)}
+			if rec, ok := r.lifecycle[id]; ok && rec.Marker != "" {
+				info.LifecycleState = rec.State
+				if info.LifecycleState == "" {
+					info.LifecycleState = lifecycleStateActive
+				}
+				generation := rec.Generation
+				info.LifecycleGeneration = &generation
+			} else {
+				info.LifecycleState = lifecycleStateUnsupported
+			}
+			out = append(out, info)
 		}
 	}
 	sort.Slice(out, func(i, j int) bool {

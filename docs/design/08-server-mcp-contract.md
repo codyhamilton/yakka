@@ -57,7 +57,7 @@ that lacks a tool's scope gets a `200` JSON-RPC error `-32003` with data
 `{"code":"insufficient_scope","need":"read_write"}`, which the shim relays unchanged.
 
 Only the human owner may reset or delete a tenant. Agents must not perform or attempt this on a user's behalf.
-There is no reset/delete MCP tool. The [pending owner lifecycle API](03-remote-service.md#pending-owner-tenant-lifecycle-api-plan-23-phase-2)
+There is no reset/delete MCP tool. The [owner lifecycle API](03-remote-service.md#owner-tenant-lifecycle-api)
 is cookie-session/profile-UI-only, with same-origin and dedicated UI-header guards; keys never
 qualify, even beside an owner cookie. Agents must not try REST, browser automation or header
 spoofing to bypass that boundary. The guards are spoofable, not proof of a human; a future
@@ -67,8 +67,9 @@ human-verification/captcha step is out of scope for this amendment.
 
 Each tool declares `read` (the default) or `read_write`. The registry enforces it before the handler
 runs, and `tools/list` lists only the tools the caller's scope satisfies. A `read_write` tool sets
-`readOnlyHint` to false. `artifact_feedback`, `list_checks` and `search_artifacts` are `read`;
-`review_change` is `read_write` because it spends on a provider call and stores a review record.
+`readOnlyHint` to false. `artifact_feedback`, `list_checks`, `search_artifacts` and `list_reviews`
+are `read`; `review_change` is `read_write` because it spends on a provider call and stores a review
+record.
 
 ### Tool definition (the registration seam)
 
@@ -136,10 +137,11 @@ but the server trusts neither place.
 
 ### Trust
 
-The [Plan 23 follow-up amendment](../plans/23-llm-review-shadow/DESIGN.md) designs full cached
-duplicate replies, effort/tags/store call controls and tenant-bound cursor paging through a new
-`list_reviews` tool. It preserves server-owned definitions and credential-derived tenancy.
-These are pending contracts; the reference-only duplicate behavior below is the landed baseline.
+The [Plan 23 follow-up amendment](../plans/23-llm-review-shadow.md) added full cached
+duplicate replies, effort/tags/store call controls and tenant-bound cursor paging through a
+`list_reviews` tool. They are implemented and preserve server-owned definitions and
+credential-derived tenancy. The amendment's owner-only tenant reset/delete is also implemented, but
+it is cookie-session/profile-UI-only and has no MCP surface, so it adds no tool authority.
 
 `_local` and `arguments` are claims by the caller. A handler may use them to word an answer, to select
 a row inside the caller's own tenant (for example `(repo_id, rel_path)`), or to compare hashes. It must
@@ -147,8 +149,13 @@ not use them to choose a tenant, open a path, run a command, build a URL or SQL 
 authorization. The server never touches a filesystem path that arrives in `_local`.
 
 A direct authenticated call with the same `_local` uses the same handler as the call through the shim
-and cannot reach another tenant's data. Repeating a review capture can yield `skipped_duplicate`
-referring to the earlier receipt, rather than a byte-identical answer. Absolute paths in `_local` (`cwd`, `project_dir`,
+and cannot reach another tenant's data. Repeating a `store=true` review capture returns the earlier
+completed review in the full fresh response shape, with `cached=true`, `original_review_id`,
+`original_status` and the original findings even at receipt detail. A still-running or unknown
+original returns `in_progress` or `outcome_unknown` with `cached=false` and no second provider call,
+and a missing or corrupt original returns `cache_unavailable`. `store=false` calls are independent
+paid work and are never deduplicated, so `review_change` no longer promises unconditional
+idempotency. Captured content is never returned. Absolute paths in `_local` (`cwd`, `project_dir`,
 `resolved_path`) are transient: the registry and handlers neither log nor store them. Server request
 logs hold method, tool name, tenant id, status and duration, and never arguments, `_local` or tokens.
 
@@ -174,6 +181,14 @@ per-tool rate limits, and registering tool handlers from outside the Go binary.
 - `list_checks` and `search_artifacts` declare no context. Their names, descriptions, schemas,
   annotations and result text are the server's own. They read the functions behind `/v1/checks` and
   `/v1/search` in process.
+- `list_reviews` is `read`, `readOnlyHint` true, declares no context and has no local readers or
+  actions. It validates a closed schema of the existing review filters (`repo_id`, `plan`, `phase`,
+  `kind`, `status`, `effort`, `profile`, `manifest_hash`, `since`), repeated `tags` (at most 16 exact
+  strings, conjunctive/ALL), `detail=full`, `limit` (default 100, range 1–500) and `cursor`, and
+  returns the same `{reviews, next_cursor, complete}` data object as `GET /v1/reviews`. Cursors are
+  bound to the authenticated tenant, route, filters, detail and fixed high-water mark; malformed,
+  mismatched or foreign-tenant cursors are tool errors. The shim learns the tool through the
+  registry; no tool-name or schema logic is added to the client.
 - `artifact_feedback` is `read`, `readOnlyHint` true, and makes no service write, ingest or worker
   wake. It declares `cwd` (optional, used only to word an error), `resolved_path` with
   `path_arg:"path"` and `bases:["cwd"]`, `file` of `resolved_path`, `git` of `resolved_path`,
@@ -185,7 +200,11 @@ per-tool rate limits, and registering tool handlers from outside the Go binary.
   Registration requires review model configuration and a server call ceiling of at
   least 150 seconds. Required arguments are `mode` (`uncommitted` or `range`) and `build_models`;
   a range uses `base` and `head`. Optional `kind`, `plan`, `phase`, `pr` and `brief` supply review
-  identity and stored criteria references; `detail:full` includes validated findings. The declaration
+  identity and stored criteria references; `detail:full` includes validated findings. Optional
+  `effort` (default `high`; `high`, `xhigh` or `max` only), `tags` (at most 16 exact strings) and
+  `store` (default `true`; `false` skips all dedupe, cache, input and review-record writes and
+  returns the full review) are validated before any spend or storage, and a valid per-call effort is
+  never capped by the server's high-only default. The declaration
   orders optional `project_dir`, `cwd`, `git` of `project_dir`, then `change`. All are optional at
   the registry gate so the handler can translate a missing/unsupported capture to
   `capture_unsupported`; an actual capture is mandatory to review. No `session_hint` is declared.
@@ -193,7 +212,9 @@ per-tool rate limits, and registering tool handlers from outside the Go binary.
   and argument-fed capture settings. The shim overwrites agent-supplied `_local` and alone performs
   local capture. The server owns criteria resolution, prompt policy, provider credential/call,
   validation, spend and tenant-local records, sharing the `POST /v1/reviews` orchestrator. Machines
-  need no provider key. Receipts never return captured diff content.
+  need no provider key. Fresh receipts never return captured diff content, and a completed duplicate
+  returns the original review's full fresh-shape content with `cached`, `original_review_id` and
+  `original_status`; `store=false` is never deduplicated.
 
 Stage calls are advisory: one non-gating range invocation per phase close in `execute`, and one at
 the reviewed/candidate PR head in each of `comprehensive-review` and `post-build`. They use explicit

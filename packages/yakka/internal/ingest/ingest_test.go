@@ -185,3 +185,54 @@ func TestReviewRunAcceptanceValidationAndIdempotency(t *testing.T) {
 		t.Fatalf("review_run altered facets: %+v, %v", facets, err)
 	}
 }
+
+func usageFact(id string) map[string]any {
+	return map[string]any{"id": id, "type": "review_usage", "usage_id": "usage-1",
+		"configured_model": "claude-haiku-5-5", "returned_model": "claude-haiku-5-5-20261101",
+		"configured_effort": "high", "requested_effort": "xhigh", "effective_effort": "xhigh",
+		"input_tokens": 100, "output_tokens": 50, "cost_usd": 0.0018, "pricing_table_id": "table-1",
+		"ts": 10.0, "tags": []string{"run:alpha"}, "store": false, "status": "ok",
+		"attempts": []any{}, "reservation_outcome": "settled", "reservation_usd": 0.0018}
+}
+
+func TestReviewUsageAcceptanceValidationAndIsolation(t *testing.T) {
+	tn := open(t)
+	ctx := context.Background()
+	public, err := Ingest(ctx, tn, marshal(t, usageFact("q#0")))
+	if err != nil || public[0].Status != Rejected || !strings.Contains(public[0].Reason, "server-authored") {
+		t.Fatalf("public ingest = %+v, %v", public, err)
+	}
+	first, err := IngestReviewUsage(ctx, tn, marshal(t, usageFact("q#0")))
+	if err != nil || first[0].Status != Accepted {
+		t.Fatalf("first = %+v, %v", first, err)
+	}
+	second, err := IngestReviewUsage(ctx, tn, marshal(t, usageFact("q#1")))
+	if err != nil || second[0].Status != Duplicate {
+		t.Fatalf("duplicate = %+v, %v", second, err)
+	}
+	bad := usageFact("q#2")
+	bad["repo_id"] = "repo"
+	if got, err := IngestReviewUsage(ctx, tn, marshal(t, bad)); err != nil || got[0].Status != Rejected || !strings.Contains(got[0].Reason, "must not contain repo_id") {
+		t.Fatalf("forbidden key = %+v, %v", got, err)
+	}
+	badStore := usageFact("q#3")
+	badStore["store"] = true
+	if got, err := IngestReviewUsage(ctx, tn, marshal(t, badStore)); err != nil || got[0].Status != Rejected {
+		t.Fatalf("store=true = %+v, %v", got, err)
+	}
+	if rows, err := tn.ReviewUsageRecords(ctx); err != nil || len(rows) != 1 {
+		t.Fatalf("usage rows=%d err=%v", len(rows), err)
+	}
+	if reviews, err := tn.ReviewRecords(ctx, store.ReviewRecordFilter{Limit: 10}); err != nil || len(reviews) != 0 {
+		t.Fatalf("review rows=%d err=%v", len(reviews), err)
+	}
+	window := store.AnalyticsFilter{From: time.Unix(0, 0), To: time.Unix(20, 0)}
+	summary, err := tn.Summary(ctx, window)
+	if err != nil || summary.Conversations != 0 || summary.HookEvents != 0 || summary.ArtifactVersions != 0 {
+		t.Fatalf("summary=%+v err=%v", summary, err)
+	}
+	facets, err := tn.Facets(ctx, window)
+	if err != nil || len(facets.Repos)+len(facets.Harnesses)+len(facets.Kinds)+len(facets.Plans)+len(facets.Events) != 0 {
+		t.Fatalf("facets=%+v err=%v", facets, err)
+	}
+}

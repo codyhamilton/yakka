@@ -40,9 +40,18 @@ func TestFirstLoginCreatesDefaultTenant(t *testing.T) {
 	s2 := remoteTestConfig(t, dir, gh.URL)
 	sess = loginRemote(t, s2.Handler(), origin)
 	again := getTenants(t, s2, origin, sess)
-	if len(again) != 1 || again[0] != got[0] {
+	if len(again) != 1 || again[0].ID != got[0].ID || again[0].Name != got[0].Name ||
+		again[0].LifecycleState != got[0].LifecycleState ||
+		!sameGeneration(again[0].LifecycleGeneration, got[0].LifecycleGeneration) {
 		t.Fatalf("after re-login: %+v, was %+v", again, got)
 	}
+}
+
+func sameGeneration(a, b *string) bool {
+	if a == nil || b == nil {
+		return a == nil && b == nil
+	}
+	return *a == *b
 }
 
 func TestBackfillDefaultTenantForExistingUser(t *testing.T) {

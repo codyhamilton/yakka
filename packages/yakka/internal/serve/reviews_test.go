@@ -54,9 +54,22 @@ func TestReviewRESTRoutesAuthTenantAndReceipt(t *testing.T) {
 	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"status":"ok"`) || strings.Contains(rec.Body.String(), "new code") {
 		t.Fatalf("POST status=%d body=%s", rec.Code, rec.Body.String())
 	}
+	var posted review.Receipt
+	if err := json.Unmarshal(rec.Body.Bytes(), &posted); err != nil || posted.ID == "" {
+		t.Fatalf("receipt id: %v %s", err, rec.Body.String())
+	}
 	code, body := do(t, h, "GET", "/v1/reviews?repo_id=repo-a&kind=adhoc&status=ok&effort=high&profile=shadow&limit=10", "ka", "")
 	if code != 200 || !strings.Contains(body, `"reviews":[{`) || strings.Contains(body, `"payload"`) {
 		t.Fatalf("receipt GET=%d %s", code, body)
+	}
+	var listed struct {
+		Reviews []map[string]any `json:"reviews"`
+	}
+	if err := json.Unmarshal([]byte(body), &listed); err != nil || len(listed.Reviews) != 1 {
+		t.Fatalf("listed reviews: %v %s", err, body)
+	}
+	if listed.Reviews[0]["id"] != posted.ID || listed.Reviews[0]["review_id"] != posted.ID {
+		t.Fatalf("listed id=%v review_id=%v want %s", listed.Reviews[0]["id"], listed.Reviews[0]["review_id"], posted.ID)
 	}
 	code, body = do(t, h, "GET", "/v1/reviews?repo_id=repo-a&detail=full", "ka", "")
 	if code != 200 || !strings.Contains(body, `"payload"`) {
@@ -109,11 +122,11 @@ func TestReviewRESTReadTokenCanReadButCannotPost(t *testing.T) {
 
 func TestReviewEnvironmentConfigValidation(t *testing.T) {
 	env := func(m map[string]string) func(string) string { return func(k string) string { return m[k] } }
-	c, err := ConfigFromEnv(env(map[string]string{"CLAUDE_API_TOKEN": "private-value", "YAKKA_REVIEW_MODEL": "claude-haiku-5-5", "YAKKA_REVIEW_EFFORT": "high", "YAKKA_REVIEW_TRIAL_ENABLED": "true", "YAKKA_REVIEW_USD_CAP": "2.5", "YAKKA_REVIEW_REPOS": "tenant/github.com/org/repo,other/r"}))
-	if err != nil || c.ReviewToken != "private-value" || c.ReviewUSDCap != 2.5 || !c.ReviewTrialEnabled || !c.ReviewRepositories["tenant/github.com/org/repo"] {
+	c, err := ConfigFromEnv(env(map[string]string{"CLAUDE_API_TOKEN": "private-value", "YAKKA_REVIEW_MODEL": "claude-haiku-5-5", "YAKKA_REVIEW_EFFORT": "high", "YAKKA_REVIEW_USD_CAP": "2.5", "YAKKA_REVIEW_REPOS": "tenant/github.com/org/repo,other/r"}))
+	if err != nil || c.ReviewToken != "private-value" || c.ReviewUSDCap != 2.5 || !c.ReviewRepositories["tenant/github.com/org/repo"] {
 		t.Fatalf("config=%+v err=%v", c, err)
 	}
-	for _, m := range []map[string]string{{"YAKKA_REVIEW_USD_CAP": "zero"}, {"YAKKA_REVIEW_TRIAL_ENABLED": "sometimes"}, {"YAKKA_REVIEW_REPOS": "not-qualified"}} {
+	for _, m := range []map[string]string{{"YAKKA_REVIEW_USD_CAP": "zero"}, {"YAKKA_REVIEW_REPOS": "not-qualified"}} {
 		if _, err := ConfigFromEnv(env(m)); err == nil || strings.Contains(err.Error(), "private-value") {
 			t.Fatalf("invalid review config accepted or leaked: %v", err)
 		}

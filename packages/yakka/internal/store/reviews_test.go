@@ -2,8 +2,11 @@ package store
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/codyhamilton/yakka/packages/yakka/internal/keys"
@@ -83,5 +86,274 @@ func TestReviewRecordFiltersAreTenantScopedAndBounded(t *testing.T) {
 	other, err := b.ReviewRecords(context.Background(), ReviewRecordFilter{})
 	if err != nil || len(other) != 0 {
 		t.Fatalf("tenant b records = %+v, %v", other, err)
+	}
+}
+
+func openReviewTenant(t *testing.T, dir string) *Tenant {
+	t.Helper()
+	tn, err := Open(dir, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = tn.Close() })
+	return tn
+}
+
+func reviewFactRow(hash, conv string, ts float64, tags []string) FactRow {
+	obj := map[string]any{
+		"repo_id": "r", "plan": "p", "kind": "phase", "status": "ok",
+		"effective_effort": "high", "profile": "shadow", "manifest_hash": "mh",
+		"conversation_id": conv,
+	}
+	if tags != nil {
+		obj["tags"] = tags
+	}
+	b, _ := json.Marshal(obj)
+	return FactRow{RowHash: hash, Type: "review_run", ConversationID: conv, RepoID: "r", TS: ts, Raw: b}
+}
+
+func reviewConversations(rows []ReviewRecord) []string {
+	out := make([]string, len(rows))
+	for i, r := range rows {
+		out[i] = r.ConversationID
+	}
+	return out
+}
+
+func TestReviewPageWalkIsFixedAtHighWaterAndComplete(t *testing.T) {
+	root := t.TempDir()
+	a := openReviewTenant(t, filepath.Join(root, "a"))
+	b := openReviewTenant(t, filepath.Join(root, "b"))
+	ctx := context.Background()
+
+	var rowsA []FactRow
+	for i := 0; i < 1001; i++ {
+		rowsA = append(rowsA, reviewFactRow(fmt.Sprintf("a-%04d", i), fmt.Sprintf("a-conv-%04d", i), 100, nil))
+	}
+	if _, err := a.AppendReviewRuns(ctx, rowsA); err != nil {
+		t.Fatal(err)
+	}
+	var rowsB []FactRow
+	for i := 0; i < 25; i++ {
+		rowsB = append(rowsB, reviewFactRow(fmt.Sprintf("b-%04d", i), fmt.Sprintf("b-conv-%04d", i), 100, nil))
+	}
+	if _, err := b.AppendReviewRuns(ctx, rowsB); err != nil {
+		t.Fatal(err)
+	}
+
+	hw, err := a.BeginReviewWalk(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hw != 1001 {
+		t.Fatalf("high water = %d, want 1001", hw)
+	}
+
+	seen := map[int64]string{}
+	var after *ReviewPageKey
+	appended := 0
+	for page := 0; ; page++ {
+		if page > 20 {
+			t.Fatal("walk did not terminate")
+		}
+		records, more, err := a.ReviewPage(ctx, ReviewRecordFilter{}, hw, after, 100)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, r := range records {
+			if _, dup := seen[r.InsertionID]; dup {
+				t.Fatalf("rowid %d returned twice", r.InsertionID)
+			}
+			seen[r.InsertionID] = r.ConversationID
+			if strings.HasPrefix(r.ConversationID, "late-") {
+				t.Fatalf("late row %s entered the fixed walk", r.ConversationID)
+			}
+		}
+		if !more {
+			break
+		}
+		if len(records) != 100 {
+			t.Fatalf("nonterminal page of %d rows", len(records))
+		}
+		last := records[len(records)-1]
+		after = &ReviewPageKey{TS: last.TS, InsertionID: last.InsertionID}
+		if page == 0 {
+			late := []FactRow{
+				reviewFactRow("late-1", "late-conv-1", 50, nil),
+				reviewFactRow("late-2", "late-conv-2", 1, nil),
+			}
+			if _, err := a.AppendReviewRuns(ctx, late); err != nil {
+				t.Fatal(err)
+			}
+			appended = len(late)
+		}
+	}
+	if appended != 2 {
+		t.Fatal("late rows were not appended after the first page")
+	}
+	if len(seen) != 1001 {
+		t.Fatalf("walk returned %d rows, want 1001", len(seen))
+	}
+	for _, conv := range seen {
+		if strings.HasPrefix(conv, "b-conv-") {
+			t.Fatalf("tenant b row %s leaked into tenant a walk", conv)
+		}
+	}
+
+	hwb, err := b.BeginReviewWalk(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hwb != 25 {
+		t.Fatalf("tenant b high water = %d, want 25", hwb)
+	}
+}
+
+func TestReviewByExecutionKeyFindsOldRowAndCreatesIndex(t *testing.T) {
+	tn := openReviewTenant(t, t.TempDir())
+	ctx := context.Background()
+	rows := make([]FactRow, 601)
+	for i := range rows {
+		id := fmt.Sprintf("review-%03d", i)
+		key := fmt.Sprintf("key-%03d", i)
+		ts := float64(2000 + i)
+		if i == 0 {
+			ts = 1 // This original is older than the newest 500 rows.
+		}
+		obj := map[string]any{
+			"id": id, "review_id": id, "key": key, "type": "review_run", "repo_id": "r",
+			"kind": "adhoc", "capture_id": id, "status": "ok", "attempts": []any{map[string]any{"status": "ok"}}, "ts": ts,
+			"conversation_id": "review:" + id,
+		}
+		raw, _ := json.Marshal(obj)
+		rows[i] = FactRow{RowHash: fmt.Sprintf("hash-%03d", i), Type: "review_run", ConversationID: "review:" + id, RepoID: "r", TS: ts, Raw: raw}
+	}
+	if _, err := tn.AppendReviewRuns(ctx, rows); err != nil {
+		t.Fatal(err)
+	}
+	page, err := tn.ReviewRecords(ctx, ReviewRecordFilter{RepoID: "r", Limit: 500})
+	if err != nil || len(page) != 500 {
+		t.Fatalf("legacy bounded page=%d err=%v", len(page), err)
+	}
+	for _, row := range page {
+		if strings.Contains(string(row.Raw), `"key":"key-000"`) {
+			t.Fatal("target unexpectedly appears in the newest 500")
+		}
+	}
+	got, found, err := tn.ReviewByExecutionKey(ctx, "r", "key-000")
+	if err != nil || !found || !strings.Contains(string(got.Raw), `"review_id":"review-000"`) {
+		t.Fatalf("direct lookup found=%v raw=%s err=%v", found, got.Raw, err)
+	}
+	var indexes int
+	if err := tn.rdb.QueryRowContext(ctx, `SELECT count(*) FROM sqlite_master WHERE type='index' AND name='review_runs_execution_key'`).Scan(&indexes); err != nil || indexes != 1 {
+		t.Fatalf("execution index count=%d err=%v", indexes, err)
+	}
+}
+
+func TestReviewPageTagFiltersAreConjunctive(t *testing.T) {
+	tn := openReviewTenant(t, filepath.Join(t.TempDir(), "a"))
+	ctx := context.Background()
+	rows := []FactRow{
+		reviewFactRow("t1", "conv-ab", 10, []string{"a", "b"}),
+		reviewFactRow("t2", "conv-a", 20, []string{"a"}),
+		reviewFactRow("t3", "conv-bc", 30, []string{"b", "c"}),
+		reviewFactRow("t4", "conv-none", 40, nil),
+		reviewFactRow("t5", "conv-empty", 50, []string{}),
+	}
+	if _, err := tn.AppendReviewRuns(ctx, rows); err != nil {
+		t.Fatal(err)
+	}
+	hw, err := tn.BeginReviewWalk(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	page := func(f ReviewRecordFilter) []string {
+		t.Helper()
+		got, more, err := tn.ReviewPage(ctx, f, hw, nil, 100)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if more {
+			t.Fatalf("single page reported more rows for %+v", f.Tags)
+		}
+		return reviewConversations(got)
+	}
+
+	if got := page(ReviewRecordFilter{}); len(got) != 5 {
+		t.Fatalf("empty filter conversations = %v, want all 5", got)
+	}
+	if got := page(ReviewRecordFilter{Tags: []string{}}); len(got) != 5 {
+		t.Fatalf("empty tag list conversations = %v, want all 5", got)
+	}
+	if got := page(ReviewRecordFilter{Tags: []string{"a", "b"}}); len(got) != 1 || got[0] != "conv-ab" {
+		t.Fatalf("tags a AND b = %v, want [conv-ab]", got)
+	}
+	if got := page(ReviewRecordFilter{Tags: []string{"a"}}); len(got) != 2 || got[1] != "conv-ab" || got[0] != "conv-a" {
+		t.Fatalf("tags a = %v, want [conv-a conv-ab]", got)
+	}
+	if got := page(ReviewRecordFilter{Tags: []string{"missing"}}); len(got) != 0 {
+		t.Fatalf("unknown tag = %v, want none", got)
+	}
+}
+
+func TestReviewPageCompletesOnExactMultipleAndEmpty(t *testing.T) {
+	root := t.TempDir()
+	exact := openReviewTenant(t, filepath.Join(root, "exact"))
+	empty := openReviewTenant(t, filepath.Join(root, "empty"))
+	ctx := context.Background()
+
+	var rows []FactRow
+	for i := 0; i < 200; i++ {
+		rows = append(rows, reviewFactRow(fmt.Sprintf("e-%03d", i), fmt.Sprintf("conv-%03d", i), 100, nil))
+	}
+	if _, err := exact.AppendReviewRuns(ctx, rows); err != nil {
+		t.Fatal(err)
+	}
+	hw, err := exact.BeginReviewWalk(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, more, err := exact.ReviewPage(ctx, ReviewRecordFilter{}, hw, nil, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(first) != 100 || !more {
+		t.Fatalf("first page = %d rows, more=%v, want 100, true", len(first), more)
+	}
+	after := &ReviewPageKey{TS: first[99].TS, InsertionID: first[99].InsertionID}
+	second, more, err := exact.ReviewPage(ctx, ReviewRecordFilter{}, hw, after, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(second) != 100 || more {
+		t.Fatalf("second page = %d rows, more=%v, want 100, false", len(second), more)
+	}
+
+	hwEmpty, err := empty.BeginReviewWalk(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, more, err := empty.ReviewPage(ctx, ReviewRecordFilter{}, hwEmpty, nil, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 0 || more {
+		t.Fatalf("empty population = %d rows, more=%v, want 0, false", len(got), more)
+	}
+}
+
+func TestReviewPageRejectsCorruptRaw(t *testing.T) {
+	tn := openReviewTenant(t, filepath.Join(t.TempDir(), "a"))
+	ctx := context.Background()
+	bad := FactRow{RowHash: "bad", Type: "review_run", ConversationID: "conv-bad", RepoID: "r", TS: 1, Raw: []byte(`{"tags":`)}
+	if _, err := tn.AppendReviewRuns(ctx, []FactRow{bad}); err != nil {
+		t.Fatal(err)
+	}
+	hw, err := tn.BeginReviewWalk(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := tn.ReviewPage(ctx, ReviewRecordFilter{}, hw, nil, 10); err == nil {
+		t.Fatal("corrupt raw row did not fail the page")
 	}
 }

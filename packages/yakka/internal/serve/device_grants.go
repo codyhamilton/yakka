@@ -24,18 +24,19 @@ const (
 
 // deviceGrant is one pending device authorization. It lives in memory only and never holds a token.
 type deviceGrant struct {
-	userCode  string // normalised
-	host      string // host name the device reported, the default token name; may be empty
-	status    grantStatus
-	tenant    string
-	scope     string
-	name      string    // token name chosen on approval
-	expiresAt time.Time // token expiry, set on approval from the chosen lifetime
-	githubID  int64
-	expiry    time.Time // grant expiry
-	clientIP  string
-	lastPoll  time.Time
-	interval  time.Duration
+	userCode   string // normalised
+	host       string // host name the device reported, the default token name; may be empty
+	status     grantStatus
+	tenant     string
+	scope      string
+	name       string    // token name chosen on approval
+	expiresAt  time.Time // token expiry, set on approval from the chosen lifetime
+	githubID   int64
+	generation string    // lifecycle generation observed at approval; empty for legacy tenants
+	expiry     time.Time // grant expiry
+	clientIP   string
+	lastPoll   time.Time
+	interval   time.Duration
 }
 
 // deviceGrants is the in-memory grant table, keyed by the SHA-256 of device_code and by user code.
@@ -95,6 +96,33 @@ func (g *deviceGrants) sweepLocked(now time.Time) {
 func (g *deviceGrants) dropLocked(hash string, gr *deviceGrant) {
 	delete(g.byHash, hash)
 	delete(g.byUser, gr.userCode)
+}
+
+// grantGenerationCurrent reports whether an approval is still for the tenant's
+// current lifecycle generation. Reset advances that generation and delete
+// removes the record, so either must refuse a grant approved beforehand.
+// Legacy tenants have no record: an empty approval stays valid only while
+// they still have none.
+func grantGenerationCurrent(approved, current string, ok bool) bool {
+	if !ok {
+		return approved == ""
+	}
+	return approved != "" && approved == current
+}
+
+// purgeTenant drops every grant already attributed to tenant. Pending grants
+// carry no tenant identity and are left alone rather than guessed at.
+func (g *deviceGrants) purgeTenant(tenant string) {
+	if tenant == "" {
+		return
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	for hash, gr := range g.byHash {
+		if gr.tenant == tenant {
+			g.dropLocked(hash, gr)
+		}
+	}
 }
 
 // create adds a pending grant for deviceCode and returns its formatted user code.

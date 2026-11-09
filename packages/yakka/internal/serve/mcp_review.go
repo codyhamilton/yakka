@@ -20,7 +20,7 @@ func (s *Server) RegisterReviewMCPTool() error {
 		Name:        "review_change",
 		Description: "Review a local uncommitted change or git range against optional plan, brief or explicit criteria. Returns a receipt; detail=full adds only validated findings. Advisory only.",
 		InputSchema: reviewMCPInputSchema(),
-		Annotations: map[string]any{"readOnlyHint": false, "destructiveHint": false, "idempotentHint": true, "openWorldHint": false},
+		Annotations: map[string]any{"readOnlyHint": false, "destructiveHint": false, "idempotentHint": false, "openWorldHint": false},
 		Scope:       TokenScopeReadWrite,
 		TimeoutS:    150,
 		Instruction: reviewMCPInstruction,
@@ -64,12 +64,15 @@ func reviewMCPInputSchema() map[string]any {
 		"allow_superseded": map[string]any{"type": "boolean"}, "build_models": map[string]any{"type": "array", "minItems": 1, "items": map[string]any{"type": "object", "properties": map[string]any{"id": str("Build model identifier."), "role": str("Optional role.")}, "required": []string{"id"}, "additionalProperties": false}},
 		"repo_id": str("Expected repository identity."), "session_id": str("Optional explicit session identity."),
 		"detail": map[string]any{"type": "string", "enum": []string{"receipt", "full"}}, "dry_run": map[string]any{"type": "boolean"},
-		"trial": map[string]any{"type": "object", "properties": map[string]any{"manifest_hash": str("Frozen manifest SHA-256."), "case_id": str("Historical case id."), "effort": map[string]any{"type": "string", "enum": []string{"high", "xhigh", "max"}}}, "required": []string{"manifest_hash", "case_id", "effort"}, "additionalProperties": false},
+		"effort": map[string]any{"type": "string", "enum": []string{"high", "xhigh", "max"}},
+		"tags":   map[string]any{"type": "array", "maxItems": 16, "items": str("Case-sensitive review tag.")},
+		"store":  map[string]any{"type": "boolean"},
+		"trial":  map[string]any{"type": "object", "properties": map[string]any{"manifest_hash": str("Frozen manifest SHA-256."), "case_id": str("Historical case id."), "effort": map[string]any{"type": "string", "enum": []string{"high", "xhigh", "max"}}}, "required": []string{"manifest_hash", "case_id", "effort"}, "additionalProperties": false},
 	}
 	return map[string]any{"type": "object", "properties": properties, "required": []string{"mode", "build_models"}, "additionalProperties": false}
 }
 
-var reviewMCPAllowed = map[string]bool{"mode": true, "view": true, "include_untracked": true, "base": true, "head": true, "merge_base": true, "kind": true, "plan": true, "phase": true, "pr": true, "brief": true, "content_hash": true, "criteria_text": true, "allow_superseded": true, "build_models": true, "repo_id": true, "session_id": true, "detail": true, "dry_run": true, "trial": true}
+var reviewMCPAllowed = map[string]bool{"mode": true, "view": true, "include_untracked": true, "base": true, "head": true, "merge_base": true, "kind": true, "plan": true, "phase": true, "pr": true, "brief": true, "content_hash": true, "criteria_text": true, "allow_superseded": true, "build_models": true, "repo_id": true, "session_id": true, "detail": true, "dry_run": true, "trial": true, "effort": true, "tags": true, "store": true}
 
 func validateReviewMCPArgs(args map[string]any) string {
 	for k := range args {
@@ -90,6 +93,34 @@ func validateReviewMCPArgs(args map[string]any) string {
 	if v, ok := args["trial"]; ok {
 		if !reviewMCPObjectKeys(v, "manifest_hash", "case_id", "effort") {
 			return "trial must contain manifest_hash, case_id and effort"
+		}
+	}
+	if v, ok := args["effort"]; ok {
+		effort, valid := v.(string)
+		if !valid {
+			return "effort must be a string"
+		}
+		if effort != "high" && effort != "xhigh" && effort != "max" {
+			return "effort must be high, xhigh or max"
+		}
+	}
+	if v, ok := args["tags"]; ok {
+		tags, valid := v.([]any)
+		if !valid {
+			return "tags must be an array of strings"
+		}
+		if len(tags) > 16 {
+			return "tags must contain at most 16 entries"
+		}
+		for _, tag := range tags {
+			if _, valid := tag.(string); !valid {
+				return "tags must be an array of strings"
+			}
+		}
+	}
+	if v, ok := args["store"]; ok {
+		if _, valid := v.(bool); !valid {
+			return "store must be a boolean"
 		}
 	}
 	if v, ok := args["build_models"]; ok {
@@ -151,7 +182,16 @@ func reviewMCPObjectKeys(v any, allowed ...string) bool {
 }
 
 func decodeReviewMCPArgs(args map[string]any, req *review.Request) error {
-	b, err := json.Marshal(args)
+	top := make(map[string]any, len(args))
+	for key, value := range args {
+		// Capture-reader keys are decoded separately into req.Capture.
+		switch key {
+		case "mode", "view", "include_untracked", "base", "head", "merge_base":
+			continue
+		}
+		top[key] = value
+	}
+	b, err := json.Marshal(top)
 	if err != nil {
 		return errors.New("invalid review arguments")
 	}

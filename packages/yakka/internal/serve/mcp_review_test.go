@@ -39,10 +39,27 @@ func TestReviewMCPRegistrationContract(t *testing.T) {
 	if err := validateReviewMCPArgs(map[string]any{"mode": "range", "base": "a", "head": "b", "build_models": []any{map[string]any{"id": "unknown"}}}); err != "" {
 		t.Fatal(err)
 	}
+	if idempotent, ok := tool.Annotations["idempotentHint"].(bool); ok && idempotent {
+		t.Fatal("review_change must not promise unconditional idempotency")
+	}
+	properties, _ := tool.InputSchema["properties"].(map[string]any)
+	for _, key := range []string{"effort", "tags", "store"} {
+		if properties[key] == nil {
+			t.Fatalf("review schema missing %s", key)
+		}
+	}
+	if err := validateReviewMCPArgs(map[string]any{"mode": "uncommitted", "build_models": []any{map[string]any{"id": "unknown"}}, "effort": "max", "tags": []any{"run:1"}, "store": false}); err != "" {
+		t.Fatalf("valid call controls rejected: %s", err)
+	}
 	for _, args := range []map[string]any{
 		{"mode": "range", "build_models": []any{map[string]any{"id": "unknown"}}},
 		{"mode": "uncommitted", "build_models": []any{map[string]any{"id": "unknown"}}, "surprise": true},
 		{"mode": "uncommitted", "build_models": []any{map[string]any{"id": "unknown"}}, "include_untracked": "yes"},
+		{"mode": "uncommitted", "build_models": []any{map[string]any{"id": "unknown"}}, "effort": "min"},
+		{"mode": "uncommitted", "build_models": []any{map[string]any{"id": "unknown"}}, "tags": "run"},
+		{"mode": "uncommitted", "build_models": []any{map[string]any{"id": "unknown"}}, "tags": []any{"ok", 5}},
+		{"mode": "uncommitted", "build_models": []any{map[string]any{"id": "unknown"}}, "tags": make([]any, 17)},
+		{"mode": "uncommitted", "build_models": []any{map[string]any{"id": "unknown"}}, "store": "yes"},
 	} {
 		if err := validateReviewMCPArgs(args); err == "" {
 			t.Fatalf("invalid args accepted: %#v", args)
@@ -127,6 +144,18 @@ func TestReviewMCPAndRESTShareOrchestrationAndReceipt(t *testing.T) {
 			t.Fatalf("MCP result %s", rec.Body.String())
 		}
 		mcpReceipt := rpc.Result
+		// A second call through MCP exercises the same complete cache response
+		// that REST receives, including the original review payload.
+		req = httptest.NewRequest(http.MethodPost, "/v1/mcp", strings.NewReader(string(callBody)))
+		req.Header.Set("Authorization", "Bearer ka")
+		rec = httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		var mcpDuplicate struct {
+			Result review.Receipt `json:"result"`
+		}
+		if rec.Code != 200 || json.Unmarshal(rec.Body.Bytes(), &mcpDuplicate) != nil || mcpDuplicate.Result.Status != "skipped_duplicate" || mcpDuplicate.Result.Result == nil || mcpDuplicate.Result.OriginalReviewID != mcpReceipt.ID {
+			t.Fatalf("MCP duplicate parity status=%d body=%s MCP=%+v", rec.Code, rec.Body.String(), mcpReceipt)
+		}
 		restReq := review.Request{Capture: capture, Kind: "adhoc", BuildModels: []review.BuildModel{{ID: "unknown"}}, Detail: "full"}
 		restBody, _ := json.Marshal(restReq)
 		req = httptest.NewRequest(http.MethodPost, "/v1/reviews", strings.NewReader(string(restBody)))
@@ -137,6 +166,11 @@ func TestReviewMCPAndRESTShareOrchestrationAndReceipt(t *testing.T) {
 		var restReceipt review.Receipt
 		if rec.Code != 200 || json.Unmarshal(rec.Body.Bytes(), &restReceipt) != nil || restReceipt.Reason != mcpReceipt.ID || restReceipt.CaptureID != mcpReceipt.CaptureID || restReceipt.Status != "skipped_duplicate" {
 			t.Fatalf("REST parity status=%d body=%s MCP=%+v", rec.Code, rec.Body.String(), mcpReceipt)
+		}
+		mcpJSON, _ := json.Marshal(mcpDuplicate.Result)
+		restJSON, _ := json.Marshal(restReceipt)
+		if string(mcpJSON) != string(restJSON) {
+			t.Fatalf("REST and MCP cached receipts differ: MCP=%s REST=%s", mcpJSON, restJSON)
 		}
 		if strings.Contains(rec.Body.String(), diff) || mcpReceipt.Result == nil {
 			t.Fatalf("receipt exposed capture/full input: %s", rec.Body.String())

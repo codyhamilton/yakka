@@ -44,7 +44,6 @@ type Config struct {
 	// ignores it and allows loopback origins.
 	CORSOrigins                            []string
 	ReviewToken, ReviewModel, ReviewEffort string
-	ReviewTrialEnabled                     bool
 	ReviewUSDCap                           float64
 	ReviewRepositories                     map[string]bool
 }
@@ -92,13 +91,6 @@ func ConfigFromEnv(getenv func(string) string) (Config, error) {
 			return Config{}, errors.New("YAKKA_REVIEW_USD_CAP must be a positive number")
 		}
 		c.ReviewUSDCap = v
-	}
-	if raw := strings.TrimSpace(getenv("YAKKA_REVIEW_TRIAL_ENABLED")); raw != "" {
-		v, err := strconv.ParseBool(raw)
-		if err != nil {
-			return Config{}, errors.New("YAKKA_REVIEW_TRIAL_ENABLED must be true or false")
-		}
-		c.ReviewTrialEnabled = v
 	}
 	c.ReviewRepositories = map[string]bool{}
 	for _, entry := range strings.Split(getenv("YAKKA_REVIEW_REPOS"), ",") {
@@ -247,6 +239,10 @@ type Options struct {
 	GitHubHTTPBase     string         // tests: mock GitHub authorize/token/api base URL
 	ReviewEndpoint     string         // tests: fake provider endpoint; production uses the fixed URL
 	ReviewReservations *review.Reservations
+	// LifecycleFault is a test-only seam that stops a reset/delete at a named
+	// cleanup stage so crash/restart resume can be exercised. Production leaves
+	// it nil; there is no configuration or CLI for it.
+	LifecycleFault func(stage string) error
 }
 
 // ScreenFunc is the screen step applied to one pending hash. Phase 3 replaces it.
@@ -263,6 +259,10 @@ type tenantState struct {
 	gaps    atomic.Int64            // screen gaps counted at worker start
 	fails   map[string]*hashFailure // worker-only: pending hashes whose screen step keeps failing
 	rescore rescoreState            // the admin rescore job
+
+	stop        chan struct{} // closed to stop this tenant's worker and rescore
+	workerDone  chan struct{} // closed when the worker exits; nil while not started
+	rescoreDone chan struct{} // closed when the current rescore exits; nil when none
 }
 
 // hashFailure is the in-memory retry state of one pending hash. A restart forgets it, which gives
@@ -284,6 +284,7 @@ type Server struct {
 
 	mu      sync.Mutex
 	tenants map[string]*tenantState
+	gates   map[string]*sync.RWMutex // per-tenant admission gate; write side only by cleanup
 	closed  bool
 	stop    chan struct{}
 	ctx     context.Context // cancelled by Close, so an in-flight screen does not hold up shutdown
@@ -307,7 +308,7 @@ func New(cfg Config, opts Options) *Server {
 	if err != nil {
 		panic("serve: registry: " + err.Error())
 	}
-	s := &Server{cfg: cfg, opts: opts, registry: reg, mcpTools: mcpTools, grants: newDeviceGrants(), tenants: map[string]*tenantState{}, stop: make(chan struct{}), screen: opts.ScreenStep}
+	s := &Server{cfg: cfg, opts: opts, registry: reg, mcpTools: mcpTools, grants: newDeviceGrants(), tenants: map[string]*tenantState{}, gates: map[string]*sync.RWMutex{}, stop: make(chan struct{}), screen: opts.ScreenStep}
 	// A review tool is advertised only when its declared 150-second contract
 	// fits this server's configured MCP call ceiling and review is configured.
 	// This keeps an unavailable optional capability out of minimal/local servers.
@@ -328,6 +329,8 @@ func New(cfg Config, opts Options) *Server {
 	if s.screen == nil {
 		s.screen = unscreened
 	}
+	// A journaled reset/delete is already authorized; finish it before serving.
+	s.resumeTenantLifecycles()
 	if cfg.Remote() {
 		if err := reg.Persist(); err != nil {
 			panic("serve: registry: " + err.Error())
@@ -348,20 +351,23 @@ func (s *Server) StartWorker() {
 }
 
 func (s *Server) startWorkerLocked(ts *tenantState) {
-	if s.opts.DisableWorker || ts.started {
+	if s.opts.DisableWorker || ts.started || ts.stop == nil {
 		return
 	}
 	ts.started = true
+	done := make(chan struct{})
+	ts.workerDone = done
 	s.wg.Add(1)
-	go s.worker(ts)
+	go s.worker(ts, ts.stop, done)
 }
 
 const maxBackoff = 5 * time.Minute
 
 const maxScreenAttempts = 5
 
-func (s *Server) worker(ts *tenantState) {
+func (s *Server) worker(ts *tenantState, stop <-chan struct{}, done chan struct{}) {
 	defer s.wg.Done()
+	defer close(done)
 	tick := time.NewTicker(s.opts.PollInterval)
 	defer tick.Stop()
 	reconciled := false
@@ -369,9 +375,9 @@ func (s *Server) worker(ts *tenantState) {
 	for {
 		unreachable := false
 		if !reconciled {
-			var done bool
-			done, unreachable = s.reconcile(ts)
-			reconciled = done
+			var ready bool
+			ready, unreachable = s.reconcile(ts)
+			reconciled = ready
 		}
 		if !unreachable {
 			unreachable = s.drainPending(ts)
@@ -385,6 +391,8 @@ func (s *Server) worker(ts *tenantState) {
 			select { // wakes are ignored while backing off
 			case <-s.stop:
 				return
+			case <-stop:
+				return
 			case <-time.After(backoff):
 			}
 			continue
@@ -392,6 +400,8 @@ func (s *Server) worker(ts *tenantState) {
 		backoff = 0
 		select {
 		case <-s.stop:
+			return
+		case <-stop:
 			return
 		case <-ts.wake:
 		case <-tick.C:
@@ -501,6 +511,16 @@ func (s *Server) tenant(name string) (*tenantState, error) {
 	if s.closed {
 		return nil, store.ErrClosed
 	}
+	if s.cfg.Remote() {
+		if !s.registry.tenantRegistered(name) {
+			return nil, ErrTenantNotFound
+		}
+		if rec, ok := s.registry.TenantLifecycle(name); ok {
+			if rec.State == lifecycleStateResetting || rec.State == lifecycleStateDeleting {
+				return nil, ErrTenantLifecycleBusy
+			}
+		}
+	}
 	if ts, ok := s.tenants[name]; ok {
 		return ts, nil
 	}
@@ -508,7 +528,7 @@ func (s *Server) tenant(name string) (*tenantState, error) {
 	if err != nil {
 		return nil, err
 	}
-	ts := &tenantState{t: t, wake: make(chan struct{}, 1)}
+	ts := &tenantState{t: t, wake: make(chan struct{}, 1), stop: make(chan struct{})}
 	s.tenants[name] = ts
 	s.startWorkerLocked(ts) // the worker's first pass handles leftover pending files
 	return ts, nil
@@ -566,6 +586,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/v1/analytics/score-series", s.method(http.MethodGet, s.auth(s.analyticsScoreSeries)))
 	mux.HandleFunc("/v1/me", s.method(http.MethodGet, s.sessionOnly(s.handleMe)))
 	mux.HandleFunc("/v1/tenants", s.handleTenantsRoute)
+	mux.HandleFunc("/v1/tenants/", s.handleTenantLifecycleRoute)
 	mux.HandleFunc("/v1/tokens", s.handleTokensRoute)
 	mux.HandleFunc("/v1/tokens/", s.handleTokensSubpath)
 	mux.HandleFunc("/v1/admin/tokens", s.method(http.MethodGet, s.sessionOnly(s.handleAdminListTokens)))
@@ -581,6 +602,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/oauth/login", s.method(http.MethodGet, s.oauthLogin))
 	mux.HandleFunc("/oauth/callback", s.method(http.MethodGet, s.oauthCallback))
 	mux.HandleFunc("/logout", s.method(http.MethodPost, s.originGuard(s.logout)))
+	// Bounded API-origin lifecycle view. It must be registered before the site
+	// fallback and does not depend on the analytics bundle being embedded.
+	mux.HandleFunc("/profile/lifecycle", s.method(http.MethodGet, s.handleLifecycleProfile))
 	mux.HandleFunc("/", siteHandler(siteFS))
 	h := s.withSession(s.cors(mux))
 	if s.cfg.Local() {
@@ -659,7 +683,7 @@ func localGuard(h http.Handler) http.Handler {
 			writeJSON(w, 403, map[string]string{"error": "local mode accepts only loopback hosts"})
 			return
 		}
-		if r.Method == http.MethodPost {
+		if r.Method == http.MethodPost && !tenantLifecyclePath(r.URL.Path) {
 			mt, _, _ := strings.Cut(r.Header.Get("Content-Type"), ";")
 			if !strings.EqualFold(strings.TrimSpace(mt), "application/json") {
 				writeJSON(w, 415, map[string]string{"error": "content type must be application/json"})
@@ -668,6 +692,13 @@ func localGuard(h http.Handler) http.Handler {
 		}
 		h.ServeHTTP(w, r)
 	})
+}
+
+// tenantLifecyclePath reports the lifecycle route subtree. Those routes enforce
+// their own method, credential and local-mode refusals, so the generic local
+// POST content-type check must not answer first.
+func tenantLifecyclePath(path string) bool {
+	return strings.HasPrefix(path, "/v1/tenants/")
 }
 
 func writeJSON(w http.ResponseWriter, code int, v any) {
@@ -709,6 +740,12 @@ func (s *Server) auth(h tenantHandler) http.HandlerFunc {
 			return
 		}
 		name := res.tenant
+		release, err := s.beginTenantUse(name)
+		if err != nil {
+			writeTenantUseError(w, err)
+			return
+		}
+		defer release()
 		ts, err := s.tenant(name)
 		if err != nil {
 			if errors.Is(err, store.ErrLocked) {
@@ -723,7 +760,7 @@ func (s *Server) auth(h tenantHandler) http.HandlerFunc {
 }
 
 func (s *Server) reviewAvailability() review.Availability {
-	return review.Availability{Token: s.cfg.ReviewToken, Model: s.cfg.ReviewModel, Effort: s.cfg.ReviewEffort, TrialEnabled: s.cfg.ReviewTrialEnabled, USDCap: s.cfg.ReviewUSDCap, Repositories: s.cfg.ReviewRepositories, Local: s.cfg.Local()}
+	return review.Availability{Token: s.cfg.ReviewToken, Model: s.cfg.ReviewModel, Effort: s.cfg.ReviewEffort, USDCap: s.cfg.ReviewUSDCap, Repositories: s.cfg.ReviewRepositories, Local: s.cfg.Local()}
 }
 
 func (s *Server) reviewsRoute(w http.ResponseWriter, r *http.Request) {
@@ -784,6 +821,12 @@ func (s *Server) reviewsPostRoute(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 400, map[string]string{"error": "invalid review arguments"})
 		return
 	}
+	release, uerr := s.beginTenantUse(res.tenant)
+	if uerr != nil {
+		writeTenantUseError(w, uerr)
+		return
+	}
+	defer release()
 	ts, err := s.tenant(res.tenant)
 	if err != nil {
 		writeJSON(w, 503, map[string]string{"error": "tenant unavailable"})
@@ -830,10 +873,10 @@ func (s *Server) reviewsGetRoute(w http.ResponseWriter, r *http.Request) {
 		}
 		since = v
 	}
-	limit := 0
+	limit := defaultReviewPage
 	if raw := q.Get("limit"); raw != "" {
 		n, err := strconv.Atoi(raw)
-		if err != nil || n < 1 || n > 500 {
+		if err != nil || n < 1 || n > maxReviewPageSize {
 			writeJSON(w, 400, map[string]string{"error": "limit must be between 1 and 500"})
 			return
 		}
@@ -844,12 +887,46 @@ func (s *Server) reviewsGetRoute(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 400, map[string]string{"error": "detail must be full"})
 		return
 	}
+	tags, err := reviewFilterTags(q["tag"])
+	if err != nil {
+		writeJSON(w, 400, map[string]string{"error": err.Error()})
+		return
+	}
+	filters := reviewCursorFilter{RepoID: q.Get("repo_id"), Plan: q.Get("plan"), Phase: phase, Kind: q.Get("kind"), Status: q.Get("status"), Effort: q.Get("effort"), Profile: q.Get("profile"), ManifestHash: q.Get("manifest_hash"), Since: since, Tags: tags, Detail: detail}
+	release, uerr := s.beginTenantUse(res.tenant)
+	if uerr != nil {
+		writeTenantUseError(w, uerr)
+		return
+	}
+	defer release()
 	ts, err := s.tenant(res.tenant)
 	if err != nil {
 		writeJSON(w, 503, map[string]string{"error": "tenant unavailable"})
 		return
 	}
-	rows, err := ts.t.ReviewRecords(r.Context(), store.ReviewRecordFilter{RepoID: q.Get("repo_id"), Plan: q.Get("plan"), Phase: phase, Kind: q.Get("kind"), Status: q.Get("status"), Effort: q.Get("effort"), Profile: q.Get("profile"), ManifestHash: q.Get("manifest_hash"), Since: since, Limit: limit})
+	generation := s.tenantReviewGeneration(res.tenant)
+	highWater := int64(0)
+	var after *store.ReviewPageKey
+	if raw := q.Get("cursor"); raw != "" {
+		payload, err := decodeReviewCursor(raw)
+		if err != nil {
+			writeJSON(w, 400, map[string]string{"error": err.Error()})
+			return
+		}
+		if err := payload.validate(res.tenant, filters, generation); err != nil {
+			writeJSON(w, 400, map[string]string{"error": err.Error()})
+			return
+		}
+		highWater = payload.HighWater
+		after = &store.ReviewPageKey{TS: payload.LastTS, InsertionID: payload.LastID}
+	} else {
+		highWater, err = ts.t.BeginReviewWalk(r.Context())
+		if err != nil {
+			writeJSON(w, 500, map[string]string{"error": "review read failed"})
+			return
+		}
+	}
+	rows, hasMore, err := ts.t.ReviewPage(r.Context(), store.ReviewRecordFilter{RepoID: filters.RepoID, Plan: filters.Plan, Phase: filters.Phase, Kind: filters.Kind, Status: filters.Status, Effort: filters.Effort, Profile: filters.Profile, ManifestHash: filters.ManifestHash, Since: filters.Since, Tags: filters.Tags}, highWater, after, limit)
 	if err != nil {
 		writeJSON(w, 500, map[string]string{"error": "review read failed"})
 		return
@@ -858,14 +935,26 @@ func (s *Server) reviewsGetRoute(w http.ResponseWriter, r *http.Request) {
 	for _, row := range rows {
 		var item map[string]any
 		if json.Unmarshal(row.Raw, &item) != nil {
-			continue
+			writeJSON(w, 500, map[string]string{"error": "review read failed"})
+			return
 		}
+		restoreReviewID(item)
 		if detail != "full" {
 			delete(item, "payload")
 		}
 		items = append(items, item)
 	}
-	writeJSON(w, 200, map[string]any{"reviews": items})
+	var nextCursor any
+	if hasMore {
+		last := rows[len(rows)-1]
+		encoded, err := encodeReviewCursor(reviewCursorPayload{Version: reviewCursorVersion, Tenant: res.tenant, Route: reviewCursorRoute, Filters: filters, Generation: generation, HighWater: highWater, LastTS: last.TS, LastID: last.InsertionID})
+		if err != nil {
+			writeJSON(w, 500, map[string]string{"error": "review read failed"})
+			return
+		}
+		nextCursor = encoded
+	}
+	writeJSON(w, 200, map[string]any{"reviews": items, "next_cursor": nextCursor, "complete": !hasMore})
 }
 
 // whoami answers which tenant and scope a bearer token is bound to, so `yakka sync` can confirm its

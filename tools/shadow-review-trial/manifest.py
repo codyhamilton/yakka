@@ -20,6 +20,10 @@ class ManifestFrozenError(RuntimeError):
     pass
 
 
+class HistoryPreparationError(RuntimeError):
+    pass
+
+
 def _git(repo: pathlib.Path, *args: str, text: bool = True) -> str | bytes:
     result = subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True)
     return result.stdout.decode("utf-8", "replace").strip() if text else result.stdout
@@ -167,19 +171,76 @@ def load_pr_export(repo: pathlib.Path, path: pathlib.Path, candidate_strata: dic
     return {"sha256": _sha(raw), "by_head": by_head}
 
 
+def _repository_identity(url: str) -> str:
+    value = url.strip().rstrip("/")
+    if value.startswith("file://"):
+        value = value[len("file://"):]
+    elif "://" in value:
+        value = value.split("://", 1)[1]
+        if "@" in value.split("/", 1)[0]:
+            value = value.split("@", 1)[1]
+        value = value.split("/", 1)[1] if "/" in value else value
+    elif ":" in value and not value.startswith("/"):
+        value = value.split(":", 1)[1]
+    if value.endswith(".git"):
+        value = value[:-4]
+    return value.rstrip("/") if value.startswith("/") else value.strip("/")
+
+
+def prepare_history(repo: pathlib.Path, remote: str = "origin",
+                    expected_repository: str = "codyhamilton/yakka", run=None) -> dict[str, Any]:
+    """Fetch and verify complete, non-shallow history from the configured remote."""
+    run = run or _git
+    try:
+        remote_url = str(run(repo, "remote", "get-url", remote)).strip()
+        identity = _repository_identity(remote_url)
+        expected = _repository_identity(expected_repository)
+        if identity != expected:
+            raise HistoryPreparationError(
+                f"remote repository identity {identity!r} does not match expected {expected!r}")
+        shallow = str(run(repo, "rev-parse", "--is-shallow-repository")).strip() == "true"
+        run(repo, *(("fetch", "--unshallow", remote) if shallow else ("fetch", remote)))
+        run(repo, "fetch", remote, "HEAD")
+        if str(run(repo, "rev-parse", "--is-shallow-repository")).strip() == "true":
+            raise HistoryPreparationError("history is still shallow after fetching the remote")
+        fetched_refs = [line for line in str(
+            run(repo, "for-each-ref", "--format=%(refname)", f"refs/remotes/{remote}")).splitlines() if line]
+        tip = str(run(repo, "rev-parse", "HEAD")).strip()
+        object_listing = str(run(repo, "rev-list", "--objects", "--missing=print", tip))
+        if any(line.startswith(("?", "!")) for line in object_listing.splitlines()):
+            raise HistoryPreparationError("repository has missing objects after fetching the remote")
+        raw_count = str(run(repo, "rev-list", "--count", tip)).strip()
+        if not raw_count.isdigit():
+            raise HistoryPreparationError("verified commit count is missing")
+        verified_count = int(raw_count)
+        enumerated_commits = len([line for line in str(run(repo, "rev-list", tip)).splitlines() if line])
+        if enumerated_commits != verified_count:
+            raise HistoryPreparationError(
+                f"verified count {verified_count} disagrees with enumeration {enumerated_commits}")
+    except subprocess.CalledProcessError as exc:
+        raise HistoryPreparationError(f"history preparation failed: {' '.join(exc.cmd)}") from exc
+    return {"repository": identity, "remote": remote, "remote_url": remote_url, "tip_sha": tip,
+            "fetched_refs": fetched_refs, "shallow": False, "object_complete": True,
+            "enumerated_commits": enumerated_commits, "verified_count": verified_count}
+
+
 def create_manifest(repo: pathlib.Path, output: pathlib.Path, seed: int = 1, target: int = 50,
-                    comparator_path: pathlib.Path | None = None, pr_export_path: pathlib.Path | None = None) -> dict[str, Any]:
+                    comparator_path: pathlib.Path | None = None, pr_export_path: pathlib.Path | None = None,
+                    remote: str = "origin", expected_repository: str = "codyhamilton/yakka",
+                    run=None) -> dict[str, Any]:
     repo, output = repo.resolve(), output.resolve()
     if target < 1:
         raise ValueError("target must be a positive integer")
     if output.exists():
         raise ManifestFrozenError(f"manifest already exists; refusing to refresh: {output}")
-    revs = str(_git(repo, "rev-list", "--reverse", "--parents", "HEAD")).splitlines()
-    shallow = str(_git(repo, "rev-parse", "--is-shallow-repository")) == "true"
-    shallow_file = pathlib.Path(str(_git(repo, "rev-parse", "--git-path", "shallow")))
-    if not shallow_file.is_absolute():
-        shallow_file = repo / shallow_file
-    boundaries = shallow_file.read_text().splitlines() if shallow and shallow_file.exists() else []
+    evidence = prepare_history(repo, remote=remote, expected_repository=expected_repository, run=run)
+    git = run or _git
+    revs = str(git(repo, "rev-list", "--reverse", "--parents", evidence["tip_sha"])).splitlines()
+    if len(revs) != evidence["enumerated_commits"]:
+        raise HistoryPreparationError(
+            f"verified count {evidence['verified_count']} disagrees with manifest enumeration {len(revs)}")
+    shallow = False
+    boundaries: list[str] = []
     policy = json.loads((ROOT / "packages/yakka/internal/review/policy.json").read_text())
     candidates = []
     for row in revs:
@@ -263,8 +324,14 @@ def create_manifest(repo: pathlib.Path, output: pathlib.Path, seed: int = 1, tar
     if pr_export_path:
         exported = load_pr_export(repo, pr_export_path, {c["head_sha"]: c["stratum"] for c in candidates})
         comparators.update(pr_export_sha256=exported["sha256"], pr_export_by_head=exported["by_head"])
-    frozen = {"schema_version": 1, "repository": str(repo), "history": {"shallow": shallow,
-               "shallow_boundary_shas": boundaries, "enumerated_commits": len(revs), "oldest_enumerated_sha": revs[0].split()[0] if revs else None},
+    frozen = {"schema_version": 1, "repository": str(repo),
+               "history": {"repository": evidence["repository"], "remote": evidence["remote"],
+                           "remote_url": evidence["remote_url"], "tip_sha": evidence["tip_sha"],
+                           "fetched_refs": evidence["fetched_refs"], "shallow": shallow,
+                           "object_complete": evidence["object_complete"],
+                           "enumerated_commits": len(revs), "verified_count": evidence["verified_count"],
+                           "shallow_boundary_shas": boundaries,
+                           "oldest_enumerated_sha": revs[0].split()[0] if revs else None},
                "seed": seed, "target_per_effort": target, "candidates": candidates, "cases": eligible,
                "strata": strata, "shortages": shortages, "run_order": order,
                "settings": {"shared_case_set": True, "non_effort": {"kind": "range", "review_profile": "historical_trial",

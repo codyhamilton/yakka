@@ -32,7 +32,9 @@ TypeSafe's choice and is not part of any contract here.
 2. **Advisory reads help the agent decide; shadow review supplies comparison evidence.** The
    original advisory tools retain read scope. Server-owned `review_change` is the explicit
    `read_write` exception: it spends on a provider call and stores a tenant-local review record,
-   with `readOnlyHint:false`. It never feeds a workflow gate or decision.
+   with `readOnlyHint:false`. Its `store=false` form spends without storing, so its annotation no
+   longer promises unconditional idempotency. The read-only `list_reviews` tool lists stored reviews
+   without spending. Neither review path feeds a workflow gate or decision.
 3. **Capture never mutates what the agent wrote.** No hook edits a file, a commit message or any
    other agent output. Correlation lives in the envelope, not in the artifact.
 4. **Relationships are edges, not fields.** A conversation, an artifact version, a commit and an
@@ -68,15 +70,20 @@ Only the shim captures local content, in uncommitted or explicit range mode, usi
 policy values; it scans before egress and the server rescans. Machines need no provider key.
 The tool declares a 150-second timeout and no local actions; local capture is read-only.
 Registration depends on review model configuration and a sufficient MCP timeout ceiling, without
-claiming deployment or live availability.
+claiming deployment or live availability. Optional per-call `effort`, `tags` and `store` are
+validated server-side before spend or storage, and `YAKKA_REVIEW_EFFORT` is a high-only default that
+never caps a valid override. A `store=true` duplicate returns the earlier review in full with
+`cached`, `original_review_id` and `original_status`; `store=false` calls are never deduplicated and
+can spend independently, so `review_change` does not promise unconditional idempotency. The separate
+read-only `list_reviews` tool serves the same tenant-bound cursor pages as `GET /v1/reviews`.
 
 `execute` makes one non-gating range call after each phase closes; `comprehensive-review` and
 `post-build` each make one at their reviewed/candidate PR head, beside existing reviews. Calls use
 explicit base/head SHAs, available stored criteria references and `build_models` from the run record
 or `unknown`, without `trial`. Receipt summaries and findings stay in session output, never gates,
 verdicts, commits, trailers, exit codes or plan-folder files. Absence, unavailability and failure
-leave stage decisions unchanged. A repeated capture may return `skipped_duplicate` referring to
-earlier evidence, not a new review. Receipts never return captured diff content.
+leave stage decisions unchanged. A repeated `store=true` capture may return the earlier review in
+full with `skipped_duplicate`, not a new review. Receipts never return captured diff content.
 
 ## What is retired
 

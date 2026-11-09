@@ -71,8 +71,7 @@ Server configuration is environment only:
 | `TYPESAFE_API_KEY` | scorer credential; server side only, never in any client config |
 | `CLAUDE_API_TOKEN` | optional review provider credential; server side only, sent only in the provider authentication header |
 | `YAKKA_REVIEW_MODEL` | exact live review model id; availability requires `claude-haiku-5-5` |
-| `YAKKA_REVIEW_EFFORT` | live review effort; unset means `high`, any configured value other than `high` disables calls |
-| `YAKKA_REVIEW_TRIAL_ENABLED` | historical trial effort override gate; defaults to `false` |
+| `YAKKA_REVIEW_EFFORT` | high-only server default and validation setting for review effort; unset means `high`, and any configured value other than `high` disables calls. It never caps a valid per-call `high`, `xhigh` or `max` override. |
 | `YAKKA_REVIEW_USD_CAP` | positive server-wide rolling 24-hour USD spend cap; unset disables calls |
 | `YAKKA_REVIEW_REPOS` | comma-separated `<tenant>/<repo_id>` allowlist; unset enables no repositories |
 
@@ -112,6 +111,8 @@ endpoints. Unknown fields in a fact are kept in its raw payload, never rejected.
 |---|---|---|
 | `GET /v1/health` | none | liveness, version, pending count, screen gaps, `compaction` (`complete` or `required`) |
 | `POST /v1/ingest` | local: none; remote: bearer `read_write` | a batch of facts from a drain |
+| `POST /v1/reviews` | local: none; remote: bearer `read_write` (JSON body) | one advisory review call with optional `effort`, `tags` and `store`; returns the review receipt or a full cached duplicate receipt |
+| `GET /v1/reviews` | local: none; remote: bearer `read` or `read_write`, or session with `?tenant=` for an owned tenant | complete cursor-paged listing with `repo_id`, `plan`, `phase`, `kind`, `status`, `effort`, `profile`, `manifest_hash` and `since` filters, repeated conjunctive `tag`, `detail=full`, `limit` (default 100, range 1–500) and `cursor`; returns `reviews`, `next_cursor` and `complete` |
 | advisory reads (`/v1/artifacts`, `/v1/checks`, `/v1/baselines`, `/v1/search`) | local: none; remote: bearer `read` or `read_write`, or session with `?tenant=` for an owned tenant | defined by [design 4](04-advisory-surface.md#api) |
 | analytics reads (`/v1/analytics/*`) | same as advisory reads | defined by [design 7](07-analytics-site.md#analytics-reads) |
 | `GET /v1/whoami` | bearer only (local: none) | the tenant, scope and `expires_at` (Unix seconds, 0 for none) a bearer token resolves to; no cookie, never opens the tenant. `yakka sync` calls it before sending to check the target tenant and `read_write` scope. A 404 means a collector too old to be a sync target |
@@ -186,25 +187,25 @@ compaction takes it exclusively. Serve refuses to start on a tenant that compact
 compaction refuses while serve runs, so SQLite never has two writers.
 
 Per-tenant files mean writes for different tenants never share a lock. Deleting the directory
-removes tenant-local storage, but is not a complete tenant deletion: `registry.json` lives
-alongside tenant directories and retains tokens, owner/name entries and user-global sessions;
-review reservations/claims also live outside the tenant directory. There is currently no
-DeleteTenant API or registry method. Raw directory deletion leaves orphaned registry entries,
-and a still-valid token can lazily recreate the directory.
+removes tenant-local storage, but is not a complete tenant deletion on its own: `registry.json`
+lives alongside tenant directories and retains tokens, owner/name entries and user-global sessions;
+review reservations/claims also live outside the tenant directory. Raw directory deletion therefore
+leaves orphaned registry entries, and a still-valid token can lazily recreate the directory. The
+owner lifecycle routes below are the complete-cleanup path: they coordinate tenant storage with the
+registry, global claims/reservations and the cleanup journal.
 
-The [Plan 23 follow-up amendment](../plans/23-llm-review-shadow/DESIGN.md) designs owner
-self-serve reset and delete with complete tenant/global cleanup, plus per-call effort/tags/store
-controls and complete paged review reads. These are **pending implementation**; PR #218 changed
-docs only and did not ship an admin reset. The API/configuration table above remains the landed
-baseline.
+The [Plan 23 follow-up amendment](../plans/23-llm-review-shadow.md) landed owner
+self-serve reset and delete with complete tenant/global cleanup. Its per-call effort/tags/store
+controls, removal of the trial env gate, and complete paged review reads are also implemented and
+described above.
 
-### Pending owner tenant lifecycle API (Plan 23 Phase 2)
+### Owner tenant lifecycle API
 
 Only the human owner may reset or delete a tenant. Agents must not perform or attempt this on a user's behalf.
 This language is required in both endpoint descriptions and their UI confirmations. No reset/delete
-MCP tool, CLI command or admin alias is added.
+MCP tool, CLI command or admin alias exists.
 
-| Endpoint (pending) | Description / success |
+| Endpoint | Description / success |
 | --- | --- |
 | `POST /v1/tenants/<tenant-id>/reset` | Only the human owner may reset or delete a tenant. Agents must not perform or attempt this on a user's behalf. `204` wipes all assets and revokes all keys/grants, retaining tenant id/name/owner/trustworthy marker and a fresh store generation for explicit re-selection and rekeying. |
 | `DELETE /v1/tenants/<tenant-id>` | Only the human owner may reset or delete a tenant. Agents must not perform or attempt this on a user's behalf. `204` removes the entire tenant: storage, reviews, usage, tokens, tenant-bound sessions if any, owner/name/marker, grants, attributed claims/reservations and cleanup journal. |
@@ -214,8 +215,8 @@ Both require a valid owner `workflow_session` cookie, JSON body
 `Sec-Fetch-Site: same-origin` when present, and **`X-Yakka-UI: tenant-lifecycle`**. Missing/null or
 other Origin, conflicting Fetch-Site or missing/wrong UI header is `403 tenant_lifecycle_ui_only`.
 These routes tighten the admin JSON/Origin pattern: Pages and configured CORS origins cannot call
-them cross-origin. Phase 2 must serve a bounded profile lifecycle UI at the API origin, including
-production; Pages navigates the person there. This does not change other routes' browser policy.
+them cross-origin. The API origin serves a bounded profile lifecycle UI, including production;
+Pages navigates the person there. This does not change other routes' browser policy.
 
 Reject **any** supplied Authorization/API-key/token credential first with
 `403` JSON `{"error":"tenant_lifecycle_ui_only","message":"Only the human owner may reset or delete a tenant. Agents must not perform or attempt this on a user's behalf. Open the profile UI."}`, even when a valid owner
@@ -236,7 +237,7 @@ profile clears its selection/caches/cursors, refreshes owned tenants and require
 re-selection or creation; it preserves global login and other tenants. Reset retains only the
 listed identity metadata; delete leaves zero target references. Old credentials, cursors, queued
 work and restarts cannot resurrect erased assets. Anonymous provider safety exposure remains,
-without target identity or tenant analytics residue. Phase 2 also extends each owned `/v1/me` tenant with `lifecycle_state`
+without target identity or tenant analytics residue. Each owned `/v1/me` tenant carries `lifecycle_state`
 (`active`, `resetting`, `deleting`, `unsupported`) and `lifecycle_generation` (opaque string, null
 for unsupported legacy). Read from registry/journal metadata without lazy-open; disable lifecycle actions while recovery is
 unresolved. Pending entries remain owner-visible until completion; reset changes
@@ -247,7 +248,6 @@ remembered selection lacking a generation requires explicit re-selection. Failed
 show completion unknown and never trigger automatic mutation replay. The gate is a **spoofable guardrail, not proof
 of a human**; future human verification/captcha is explicitly out of scope. Detailed concurrency,
 recovery and no-cross-tenant proofs are in the plan's Phase 2.
-
 ### Writer
 
 Each open tenant has one writer goroutine. Ingest requests hand their facts to it and wait. The

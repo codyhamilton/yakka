@@ -1,14 +1,23 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
 	decideAfterMeFetch,
 	currentTenantFromMe,
 	initialTenantChoice,
+	INVALIDATED_TENANT,
+	invalidateTenantSelection,
+	readRememberedGeneration,
+	readRememberedTenant,
+	readSelectionInvalidated,
+	rememberTenant,
 	routeAllowsChildren,
+	selectionReadBlock,
 	shouldNavigateToProfile,
 	showsTenantChoice,
 	tenantIdFromMe,
+	validateSelection,
 	type MeFetchResult
 } from './session-gate';
+import type { Tenant } from './api';
 
 const me401: MeFetchResult = { kind: 'http', status: 401, message: 'unauthorized' };
 const me200Empty: MeFetchResult = {
@@ -188,5 +197,148 @@ describe('tenant choice UI', () => {
 		expect(initialTenantChoice(two, 't-a', 't-b')).toBe('t-a');
 		expect(initialTenantChoice(two, '', '')).toBe('');
 		expect(initialTenantChoice(two, 'gone', 'gone')).toBe('');
+	});
+});
+
+const active = (id: string, generation: string | null): Tenant => ({
+	id,
+	name: id,
+	lifecycle_state: 'active',
+	lifecycle_generation: generation
+});
+const lifecycleMe = (...tenants: Tenant[]): MeFetchResult => ({
+	kind: 'ok',
+	body: { github_id: 1, github_login: 'u', admin: false, tenants }
+});
+
+describe('selection revalidation', () => {
+	it('keeps a matching id and generation selected', () => {
+		expect(
+			validateSelection({
+				me: lifecycleMe(active('t-1', 'gen-1'), active('t-2', 'gen-2')),
+				rememberedId: 't-2',
+				rememberedGeneration: 'gen-2',
+				invalidated: false
+			})
+		).toMatchObject({ kind: 'selected' });
+	});
+
+	it('invalidates an absent remembered id and suppresses the first-tenant fallback', () => {
+		const outcome = validateSelection({
+			me: lifecycleMe(active('t-1', 'gen-1')),
+			rememberedId: 't-gone',
+			rememberedGeneration: 'gen-1',
+			invalidated: false
+		});
+		expect(outcome).toEqual({ kind: 'invalidate', reason: 'absent' });
+		expect(currentTenantFromMe(lifecycleMe(active('t-1', 'gen-1')), INVALIDATED_TENANT)).toBeNull();
+	});
+
+	it('invalidates a changed generation even with one remaining tenant', () => {
+		expect(
+			validateSelection({
+				me: lifecycleMe(active('t-1', 'gen-2')),
+				rememberedId: 't-1',
+				rememberedGeneration: 'gen-1',
+				invalidated: false
+			})
+		).toEqual({ kind: 'invalidate', reason: 'changed' });
+	});
+
+	it('requires explicit re-selection when a remembered eligible tenant has no generation', () => {
+		expect(
+			validateSelection({
+				me: lifecycleMe(active('t-1', 'gen-1')),
+				rememberedId: 't-1',
+				rememberedGeneration: '',
+				invalidated: false
+			})
+		).toEqual({ kind: 'invalidate', reason: 'needs-generation' });
+	});
+
+	it('does not fall back to the only tenant after invalidation', () => {
+		const me = lifecycleMe(active('t-1', 'gen-1'));
+		expect(
+			validateSelection({ me, rememberedId: '', rememberedGeneration: '', invalidated: true })
+		).toEqual({ kind: 'unselected' });
+		expect(
+			validateSelection({
+				me,
+				rememberedId: INVALIDATED_TENANT,
+				rememberedGeneration: '',
+				invalidated: true
+			})
+		).toEqual({ kind: 'unselected' });
+	});
+
+	it('suspends reads while a tenant is resetting or deleting', () => {
+		for (const state of ['resetting', 'deleting'] as const) {
+			const tenant: Tenant = { id: 't-1', name: 't-1', lifecycle_state: state, lifecycle_generation: 'gen-1' };
+			const outcome = validateSelection({
+				me: lifecycleMe(tenant),
+				rememberedId: 't-1',
+				rememberedGeneration: 'gen-1',
+				invalidated: false
+			});
+			expect(outcome.kind).toBe('pending');
+			expect(selectionReadBlock(outcome)).toBeTruthy();
+		}
+		expect(selectionReadBlock({ kind: 'selected', tenant: active('t-1', 'gen-1') })).toBeNull();
+	});
+
+	it('keeps a usable selection from a pre-lifecycle /me payload', () => {
+		const legacyTenant: Tenant = { id: 't-1', name: 'legacy' };
+		const outcome = validateSelection({
+			me: lifecycleMe(legacyTenant),
+			rememberedId: 't-1',
+			rememberedGeneration: '',
+			invalidated: false
+		});
+		expect(outcome).toMatchObject({ kind: 'selected', tenant: legacyTenant });
+	});
+
+	it('retains the legacy first-tenant fallback before any invalidation', () => {
+		expect(
+			validateSelection({
+				me: lifecycleMe(active('t-1', 'gen-1'), active('t-2', 'gen-2')),
+				rememberedId: '',
+				rememberedGeneration: '',
+				invalidated: false
+			})
+		).toMatchObject({ kind: 'selected', tenant: { id: 't-1' } });
+	});
+});
+
+describe('remembered selection storage', () => {
+	let store: Record<string, string>;
+
+	beforeEach(() => {
+		store = {};
+		vi.stubGlobal('localStorage', {
+			getItem: (k: string) => (k in store ? store[k] : null),
+			setItem: (k: string, v: string) => void (store[k] = v),
+			removeItem: (k: string) => void delete store[k]
+		});
+	});
+	afterEach(() => vi.unstubAllGlobals());
+
+	it('persists the id and generation, then clears both on invalidation', () => {
+		rememberTenant('t-1', 'gen-1');
+		expect(readRememberedTenant()).toBe('t-1');
+		expect(readRememberedGeneration()).toBe('gen-1');
+		expect(readSelectionInvalidated()).toBe(false);
+
+		invalidateTenantSelection();
+		expect(readRememberedTenant()).toBe('');
+		expect(readRememberedGeneration()).toBe('');
+		expect(readSelectionInvalidated()).toBe(true);
+	});
+
+	it('clears invalidation on an explicit re-selection', () => {
+		invalidateTenantSelection();
+		rememberTenant('t-2', 'gen-2');
+		expect(readSelectionInvalidated()).toBe(false);
+		expect(readRememberedTenant()).toBe('t-2');
+		expect(readRememberedGeneration()).toBe('gen-2');
 	});
 });

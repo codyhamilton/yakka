@@ -11,7 +11,7 @@
 		type ThemePreference
 	} from '$lib/charts/theme';
 	import Notices from '$lib/components/Notices.svelte';
-	import { ApiError, fetchMe, isCollectorMode, safeReturnPath } from '$lib/api';
+	import { ApiError, fetchMe, isCollectorMode, safeReturnPath, setTenantReadGuard } from '$lib/api';
 	import {
 		decideAfterMeFetch,
 		readBearer,
@@ -26,8 +26,12 @@
 	import {
 		beginSessionGate,
 		chooseTenant,
+		ensureTenantReadable,
 		finishSessionGate,
-		sessionGate
+		markTenantReadsDirty,
+		revalidateTenantSelection,
+		sessionGate,
+		startSelectionSync
 	} from '$lib/session-gate.svelte';
 	import { isInvestigationQuery } from '$lib/investigation/request-url';
 	import { clearError, fetchError, pruneNotices, setNoticeView } from '$lib/state.svelte';
@@ -114,6 +118,34 @@
 		return () => {
 			live = false;
 		};
+	});
+
+	$effect(() => {
+		setTenantReadGuard(ensureTenantReadable);
+		return () => setTenantReadGuard(null);
+	});
+
+	$effect(() => startSelectionSync());
+
+	$effect(() => {
+		const invalidate = () => {
+			markTenantReadsDirty();
+			void revalidateTenantSelection();
+		};
+		window.addEventListener('focus', invalidate);
+		window.addEventListener('pageshow', invalidate);
+		return () => {
+			window.removeEventListener('focus', invalidate);
+			window.removeEventListener('pageshow', invalidate);
+		};
+	});
+
+	$effect(() => {
+		const path = page.url.pathname;
+		const ready = sessionGate.ready;
+		if (path !== '/profile' || !ready) return;
+		markTenantReadsDirty();
+		void revalidateTenantSelection();
 	});
 
 	$effect(() => {

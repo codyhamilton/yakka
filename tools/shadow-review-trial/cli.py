@@ -12,6 +12,7 @@ import urllib.request
 
 from manifest import ManifestFrozenError, create_manifest
 from runner import RunnerError, TrialRunner, run as run_trial
+import approval
 import report as alignment_report
 
 
@@ -102,6 +103,9 @@ def _parser():
     manifest.add_argument("--target", type=int, default=50)
     manifest.add_argument("--comparators", type=pathlib.Path)
     manifest.add_argument("--pr-export", type=pathlib.Path)
+    manifest.add_argument("--remote", default="origin", help="configured Git remote to fetch and verify")
+    manifest.add_argument("--expected-repository", default="codyhamilton/yakka",
+                          help="expected remote repository identity (owner/repo or fixture path)")
 
     run = commands.add_parser("run", help="estimate or run a frozen historical trial")
     run.add_argument("--manifest", type=pathlib.Path, required=True)
@@ -110,17 +114,22 @@ def _parser():
     run.add_argument("--auth-token", required=True, help="Yakka bearer token; never printed or saved")
     run.add_argument("--cap-usd", type=float, required=True)
     run.add_argument("--reviewer-model", required=True)
+    run.add_argument("--run-id", required=True, help="frozen trial run id (1-32 chars, [A-Za-z0-9_-])")
+    run.add_argument("--tenant-id", required=True, help="expected dedicated tenant id confirmed via /v1/whoami")
     run_mode = run.add_mutually_exclusive_group()
     run_mode.add_argument("--dry-run", dest="execute", action="store_false",
                           help="estimate all three effort arms without model calls (default)")
     run_mode.add_argument("--execute", dest="execute", action="store_true",
-                          help="run reviews after dry-run preflight")
+                          help="run reviews after dry-run preflight and a valid approval record")
     run.set_defaults(execute=False)
+    run.add_argument("--approval", type=pathlib.Path,
+                     help="local Cody spend-approval JSON required by --execute")
     run.add_argument("--config-id", default="default")
 
     report = commands.add_parser("report", help="build a deterministic alignment report from saved inputs")
     report.add_argument("--manifest", type=pathlib.Path, required=True)
-    report.add_argument("--records", type=pathlib.Path, required=True, help="saved GET /v1/reviews response or reviews array")
+    report.add_argument("--records", type=pathlib.Path, required=True, help="certified saved trial export from the paged reader")
+    report.add_argument("--ledger", type=pathlib.Path, required=True, help="frozen run ledger/journal")
     report.add_argument("--adjudication", type=pathlib.Path, required=True)
     report.add_argument("--output", type=pathlib.Path, required=True)
     report.add_argument("--comparators", type=pathlib.Path, help="optional saved comparator evidence JSON")
@@ -135,31 +144,33 @@ def main(argv=None):
     args = parser.parse_args(argv)
     try:
         if args.command == "manifest":
-            frozen = create_manifest(args.repo, args.output, args.seed, args.target, args.comparators, args.pr_export)
+            frozen = create_manifest(args.repo, args.output, args.seed, args.target, args.comparators, args.pr_export,
+                                     remote=args.remote, expected_repository=args.expected_repository)
             print(json.dumps({"manifest": str(args.output.resolve()), "manifest_sha256": frozen["manifest_sha256"],
                               "candidates": len(frozen["candidates"]), "eligible": len(frozen["cases"]),
                               "shortages": frozen["shortages"]}, sort_keys=True))
         elif args.command == "run":
             client = TrialRunner(args.base_url, lambda: args.auth_token)
             summary = run_trial(args.manifest, args.ledger, client, args.cap_usd, args.reviewer_model,
-                                execute=args.execute, config_id=args.config_id)
+                                run_id=args.run_id, tenant_id=args.tenant_id,
+                                execute=args.execute, config_id=args.config_id,
+                                approval_path=args.approval)
             print(json.dumps(summary, sort_keys=True))
         elif args.command == "report":
             frozen = _json_file(args.manifest, "manifest")
-            raw_records = _json_file(args.records, "review records")
-            records = raw_records.get("reviews") if isinstance(raw_records, dict) else raw_records
-            if not isinstance(records, list):
-                raise ValueError("review records must be a list or an object with a reviews list")
+            export = _json_file(args.records, "review export")
+            ledger = _json_file(args.ledger, "run ledger")
             adjudication = _json_file(args.adjudication, "adjudication")
             comparators = _json_file(args.comparators, "comparators") if args.comparators else {}
-            result = alignment_report.build_report(frozen, records, comparators, adjudication, args.cap_usd)
+            result = alignment_report.build_report(frozen, export, ledger, comparators, adjudication, args.cap_usd)
             _write_json(args.output, result)
             print(json.dumps({"report": str(args.output.resolve()), "manifest_sha256": frozen["manifest_sha256"],
                               "arms": result["arms"], "usage": result["usage"]}, sort_keys=True))
         elif args.command == "smoke":
             print(json.dumps(smoke_record(), sort_keys=True))
         return 0
-    except (ManifestFrozenError, RunnerError, ValueError, OSError, KeyError, RuntimeError) as exc:
+    except (ManifestFrozenError, RunnerError, approval.ApprovalError, ValueError, OSError, KeyError,
+            RuntimeError) as exc:
         parser.error(str(exc))
 
 
