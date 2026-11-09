@@ -481,15 +481,6 @@ class CaptureError(ValueError):
         super().__init__(code + (":" + argument if argument else ""))
 
 
-_CAPTURE_EXCLUDED = (
-    re.compile(r"(^|/)(vendor|node_modules|third_party|dist|build|coverage)(/|$)"),
-    re.compile(r"(^|/)(package-lock\.json|yarn\.lock|pnpm-lock\.yaml|Cargo\.lock|go\.sum)$"),
-    re.compile(r"\.(min\.js|min\.css|map|png|jpe?g|gif|webp|ico|pdf|zip|gz|wasm)$", re.I),
-    re.compile(r"(^|/)(snapshots?|__snapshots__)(/|$)"),
-)
-_CAPTURE_CLASSES = ("code", "tests", "config", "docs")
-
-
 def _capture_class(path: str) -> str:
     if path.startswith("docs/") or path.lower().endswith((".md", ".rst", ".txt")):
         return "docs"
@@ -501,21 +492,27 @@ def _capture_class(path: str) -> str:
 
 
 def _capture_policy(policy: Optional[dict[str, Any]]) -> dict[str, Any]:
-    if policy is not None and not isinstance(policy, dict):
+    if not isinstance(policy, dict):
         raise CaptureError("bad_argument", "policy")
-    p = dict(policy or {})
+    required = ("exclude", "max_file_bytes", "max_total_bytes", "max_files", "context_lines", "truncation_order")
+    if any(key not in policy for key in required):
+        raise CaptureError("bad_argument", "policy")
+    p = dict(policy)
     out = {
-        "exclude": tuple(p.get("exclude", ())),
-        "max_file_bytes": p.get("max_file_bytes", 256 * 1024),
-        "max_total_bytes": p.get("max_total_bytes", 2 * 1024 * 1024),
-        "max_files": p.get("max_files", 200),
-        "context_lines": p.get("context_lines", 3),
+        "exclude": tuple(p["exclude"]),
+        "max_file_bytes": p["max_file_bytes"],
+        "max_total_bytes": p["max_total_bytes"],
+        "max_files": p["max_files"],
+        "context_lines": p["context_lines"],
+        "truncation_order": tuple(p["truncation_order"]),
     }
     for key in ("max_file_bytes", "max_total_bytes", "max_files", "context_lines"):
         if type(out[key]) is not int or out[key] < (0 if key == "context_lines" else 1):
             raise CaptureError("bad_argument", key)
     if not isinstance(out["exclude"], (list, tuple)) or any(not isinstance(x, str) for x in out["exclude"]):
         raise CaptureError("bad_argument", "exclude")
+    if (len(out["truncation_order"]) != 4 or set(out["truncation_order"]) != {"code", "tests", "config", "docs"}):
+        raise CaptureError("bad_argument", "truncation_order")
     return out
 
 
@@ -737,7 +734,7 @@ def _capture_change_once(project_dir: Optional[str], mode: str = "uncommitted", 
         if path.startswith("docs/"):
             excluded = False
         else:
-            excluded = any(rx.search(path) for rx in _CAPTURE_EXCLUDED) or any(fnmatch.fnmatchcase(path, x) for x in p["exclude"])
+            excluded = any(fnmatch.fnmatchcase(path, x) for x in p["exclude"])
         is_untracked = path in untracked
         if not is_untracked and _capture_is_symlink(root, path, mode, view, resolved_head):
             manifest.append({"path": path, "reason": "symlink", "added": 0, "removed": 0, "blob_sha256": None})
@@ -795,7 +792,7 @@ def _capture_change_once(project_dir: Optional[str], mode: str = "uncommitted", 
             manifest.append(entry)
             continue
         included.append((path, diff))
-    included.sort(key=lambda pair: (_CAPTURE_CLASSES.index(_capture_class(pair[0])), pair[0]))
+    included.sort(key=lambda pair: (p["truncation_order"].index(_capture_class(pair[0])), pair[0]))
     selected: list[tuple[str, bytes]] = []
     total = 0
     for path, diff in included:

@@ -18,8 +18,18 @@ def git(path, *args, env=None):
 
 
 class CaptureFixtures(unittest.TestCase):
+    POLICY = {
+        "exclude": ("vendor/**", "package-lock.json", "**/*.map", "**/__snapshots__/**"),
+        "max_file_bytes": 256 * 1024,
+        "max_total_bytes": 2 * 1024 * 1024,
+        "max_files": 200,
+        "context_lines": 3,
+        "truncation_order": ("code", "tests", "config", "docs"),
+    }
+
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
+        # Keep fixture files inside this checkout; the build run must not use /tmp.
+        self.tmp = tempfile.TemporaryDirectory(dir=pathlib.Path(__file__).resolve().parents[3])
         self.repo = pathlib.Path(self.tmp.name) / "repo"
         self.repo.mkdir()
         git(self.repo, "init", "-q")
@@ -34,6 +44,9 @@ class CaptureFixtures(unittest.TestCase):
         self.tmp.cleanup()
 
     def capture(self, **kwargs):
+        policy = dict(self.POLICY)
+        policy.update(kwargs.pop("policy", {}))
+        kwargs["policy"] = policy
         return yakka.CaptureChange(str(self.repo), **kwargs)
 
     def test_combined_staged_net_and_staged_only(self):
@@ -76,9 +89,11 @@ class CaptureFixtures(unittest.TestCase):
         self.assertEqual(result["base"], self.head)
         self.assertEqual(result["resolved_head"], second)
         self.assertNotIn("worktree secret-ish", result["diff"])
+        merged = self.capture(mode="range", base=self.head, head=second, merge_base=True)
+        self.assertEqual(merged["base"], self.head)
 
     def test_bad_refs_and_arguments_are_structured(self):
-        for ref in ("-bad", "has space", "not-a-ref"):
+        for ref in ("-bad", "has space", "line\nbreak", "tab\tbreak", "not-a-ref"):
             with self.assertRaises(yakka.CaptureError) as caught:
                 self.capture(mode="range", base=ref, head=self.head)
             self.assertEqual(caught.exception.code, "bad_ref")
@@ -127,6 +142,12 @@ class CaptureFixtures(unittest.TestCase):
         self.assertEqual(len(result["files"]), 0)
         self.assertIn("truncated_budget", [x["reason"] for x in result["manifest"]])
 
+    def test_exclusions_are_declaration_supplied(self):
+        (self.repo / "package-lock.json").write_text("lock data\n", encoding="utf-8")
+        git(self.repo, "add", "package-lock.json")
+        result = self.capture(policy={"exclude": ()})
+        self.assertIn("package-lock.json", result["files"])
+
     def test_binary_and_symlink_are_manifest_only(self):
         (self.repo / "binary.dat").write_bytes(b"\xff\xfe\x00")
         git(self.repo, "add", "binary.dat")
@@ -159,10 +180,10 @@ class CaptureFixtures(unittest.TestCase):
     def test_linked_worktree_and_detached_identity(self):
         wt = pathlib.Path(self.tmp.name) / "linked"
         git(self.repo, "worktree", "add", "-q", "-b", "linked", str(wt), self.head)
-        got = yakka.CaptureChange(str(wt))
+        got = yakka.CaptureChange(str(wt), policy=self.POLICY)
         self.assertTrue(got["linked_worktree"])
         git(wt, "checkout", "--detach", "-q")
-        self.assertEqual(yakka.CaptureChange(str(wt))["branch"], "detached")
+        self.assertEqual(yakka.CaptureChange(str(wt), policy=self.POLICY)["branch"], "detached")
 
     def test_no_network_and_fixed_no_shell_subprocesses(self):
         seen = []
