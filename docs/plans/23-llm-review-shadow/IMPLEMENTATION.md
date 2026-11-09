@@ -2,6 +2,26 @@ Run: Codex execute, harness-dispatched unit 3-01; session: hlaunch build on feat
 
 # Implementation
 
+## Phase 3 — Criteria resolution from the artifact store
+
+### 3-01-criteria-resolution
+
+- Status: done; committed with this unit's report.
+- Brief: `briefs/3-01-criteria-resolution.md`.
+- Report: `reports/3-01-criteria-resolution.md`.
+- Built: added `internal/review.ResolveCriteria`, deterministic design/brief section parsing, stable criteria IDs, explicit/no-criteria output and code-bearing refusal errors. Added bounded `Tenant.PlanDesignPaths` and `Tenant.ArtifactVersions` reads scoped to repo and path, with exact held bodies, screen state and rejection metadata. Added ingest-populated two-tenant/version/screen-state fixtures.
+- Checks: from `packages/yakka`, `TMPDIR="$PWD/internal/review/.test-tmp" prlimit --as=8589934592 -- go test -count=1 -p=3 ./internal/review ./internal/store ./internal/ingest` passed (`review 0.872s`, `store 6.676s`, `ingest 0.306s`); `git diff --check` and `git diff --cached --check` passed. One initial fixture run expected `phase_not_found` before storing the design; after correcting fixture order, the exact suite passed.
+- Deviation: added bounded `PlanDesignPaths` because slug matching and its required ambiguity check need the repo's stored design paths. Contradiction: the design outcome mentions ambiguity across two repositories, while this brief requires every lookup to use the supplied repo id and forbids cross-repository resolution; implementation follows the brief. Unfinished work and known problems: none.
+- Brief feedback: delivered, Jev screening pass. Report feedback: delivered, Jev screening pass.
+
+### Phase 3 verification
+
+The fixture entry point `ResolveCriteria` → tenant-scoped design-path/version reads → exact section extraction and version record was exercised. Tests cover pass, pending, unscreened, flagged and rejected content; historical exact-hash selection and stale refusal; design/brief IDs and text; missing/ambiguous/forbidden sources; all refusal codes; explicit-text precedence and hashing; no-criteria marker; missing held body; and two independent tenants. The required capped review/store/ingest suite passed, and both working and staged diffs passed whitespace checks.
+
+### Carried
+
+- During Phase 4 refinement, clarify whether the design's two-repository ambiguity case applies only when no captured `repo_id` exists; Phase 3 keeps all reads scoped to the supplied repository.
+
 ## Phase 2 — Review packet and prompt policy
 
 ### 2-01-review-packet-prompt
