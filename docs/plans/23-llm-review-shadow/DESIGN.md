@@ -420,6 +420,8 @@ Headless: no human sign-off checkpoint. The six earlier additions and two Cody q
 - Does the Fly proxy or any harness's MCP tool timeout cut a call of about two minutes? Settled by the smoke test; Assumption 7 holds the fallback.
 - Will the operator deepen history or supply a PR-review export before the manifest is frozen? Affects reaching ≥50 completed reviews at each effort, not any build phase; report shortfalls.
 - Does plan 22's session binding land, and which candidate? Affects only how often `session_binding` reads `bound`.
+- **Phase 6 refinement bounced (2026-11-09):** Phase 5 carried an unresolved contract question: does REST/MCP parity mean an identical receipt payload or a receipt that points to the same underlying review? The landed REST replay returns `skipped_duplicate` with a reference, while Phase 5's outcome says the same arguments and capture yield “the same receipt.” Resolve this wording against the Phase 4 idempotency contract before refining Phase 7, whose runner must account for duplicate receipts and resume behavior. Preserve the landed behavior until then; this question does not change Phase 6's manifest contract.
+- Phase 5's `_capture_blob` per-file-cap memory issue remains unallocated: it belongs with a future refinement of the Phase 1 capture contract and is not folded into Phase 6's history-manifest work. The Phase 5 static no-network/environment guarantee remains scoped to `internal/review/build.go`; this refinement makes no change to that boundary.
 
 ## Phases
 
