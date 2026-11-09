@@ -47,6 +47,10 @@ only.
 
 ## `review_change`
 
+The [Plan 23 follow-up amendment](../plans/23-llm-review-shadow/DESIGN.md) designs per-call
+effort/tags/store controls, full cached duplicate replies and a paged `list_reviews` tool.
+Those contracts are pending implementation; the description below is the landed baseline.
+
 The server owns the tool definition, prompt and exclusion policy, stored brief or plan/phase criteria
 resolution, provider call, validation, spend limits and tenant-local review record. It uses the same
 orchestrator as authenticated `POST /v1/reviews`; records are read through `GET /v1/reviews`.

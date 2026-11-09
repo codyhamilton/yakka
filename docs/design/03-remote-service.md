@@ -185,8 +185,18 @@ One directory per tenant: `<data>/<tenant>/`.
 compaction takes it exclusively. Serve refuses to start on a tenant that compaction holds, and
 compaction refuses while serve runs, so SQLite never has two writers.
 
-Per-tenant files mean writes for different tenants never share a lock, and deleting a tenant is
-deleting a directory.
+Per-tenant files mean writes for different tenants never share a lock. Deleting the directory
+removes tenant-local storage, but is not a complete tenant deletion: `registry.json` lives
+alongside tenant directories and retains tokens, owner/name entries and user-global sessions;
+review reservations/claims also live outside the tenant directory. There is currently no
+DeleteTenant API or registry method. Raw directory deletion leaves orphaned registry entries,
+and a still-valid token can lazily recreate the directory.
+
+The [Plan 23 follow-up amendment](../plans/23-llm-review-shadow/DESIGN.md) designs a bounded,
+authenticated reset for freshly provisioned synthetic tenants, including registry and global
+asset cleanup. It also designs per-call effort/tags/store controls, removal of the trial env
+gate and complete paged review reads. These follow-up contracts are not implemented by that
+design PR; the configuration/API descriptions above describe the landed implementation.
 
 ### Writer
 
