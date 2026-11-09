@@ -1,6 +1,18 @@
-Run: Codex execute, harness refine/build sub-runs; branch `feat/23-llm-review-shadow`; started 2026-11-09 08:03 UTC.
+Run: Codex execute `p23-phase6-2026-11-09`; harness refine/build sub-runs; branch `feat/23-llm-review-shadow`; started 2026-11-09 09:03 UTC.
 
 # Implementation
+
+## Phase 6 — Historical case manifest and comparators
+
+### 6-01-historical-manifest-comparators
+
+- Status: done with concerns; report included with this unit.
+- Brief: `briefs/6-01-historical-manifest-comparators.md`.
+- Report: `reports/6-01-historical-manifest-comparators.md`.
+- Depends on: Phase 1.
+- Built: added `tools/shadow-review-trial/` with the offline `manifest` CLI, immutable historical manifest builder, phase/PR comparator pointers, curated citation validation and hashing, separately hashed local PR export, and fixture tests. Indexed the tool and documented its required README fields in `tools/README.md` and the tool README.
+- Checks: 5 manifest fixtures passed; Python compilation passed; the tool README layout/required-fields scan passed; `git diff --check` passed. The whole-repository `python3 -m unittest tools.release.test_layout` reports 6 passed and one existing unrelated violation at `packages/yakka-analytics/src/lib/investigation/InvestigationShell.svelte: tools/ConversationsTool.svelte`.
+- Deviations/concerns: the first full layout-suite run used Python's default temporary directory before `TMPDIR` was redirected; the temporary fixture directory was automatically removed. The rerun used and removed a fixture directory under the owned tool path. Left the unrelated layout violation untouched. No contract contradiction or unfinished work for Phase 7; no paid/live calls, credentials, deploys, Fly or Wrangler actions.
 
 ## Phase 5 — The MCP tool, shim registration and stage wiring
 
