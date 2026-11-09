@@ -63,7 +63,23 @@ _RATE_KEY = {
 
 
 def _cost(tokens: dict, rates: dict) -> dict:
-    return {k: tokens[k] * rates[_RATE_KEY[k]] / 1_000_000 for k in _COMPONENTS}
+    rows = tokens.get("usage_rows")
+    if rows and rates.get("tiers"):
+        total = dict.fromkeys(_COMPONENTS, 0.0)
+        for row in rows:
+            row_split = _cost(row, rates)
+            for key in _COMPONENTS:
+                total[key] += row_split[key]
+        return total
+    input_size = sum(tokens.get(k, 0) for k in ("fresh_in", "cache_write", "cache_read"))
+    applicable = rates
+    for tier in rates.get("tiers", []):
+        minimum = tier.get("min_input_tokens", 0)
+        maximum = tier.get("max_input_tokens")
+        if input_size >= minimum and (maximum is None or input_size <= maximum):
+            applicable = tier
+            break
+    return {k: tokens[k] * applicable[_RATE_KEY[k]] / 1_000_000 for k in _COMPONENTS}
 
 
 def _row_matches_filters(
@@ -106,6 +122,7 @@ def compute(
             "cache_write": 0,
             "fresh_in": 0,
             "events": 0,
+            "usage_rows": [],
         }
     )
     in_window = 0
@@ -143,6 +160,12 @@ def compute(
             b["cache_write"] += _to_int(r.get("Input (w/ Cache Write)", ""))
             b["fresh_in"] += _to_int(r.get("Input (w/o Cache Write)", ""))
             b["events"] += 1
+            b["usage_rows"].append({
+                "fresh_in": _to_int(r.get("Input (w/o Cache Write)", "")),
+                "cache_write": _to_int(r.get("Input (w/ Cache Write)", "")),
+                "cache_read": _to_int(r.get("Cache Read", "")),
+                "output": _to_int(r.get("Output Tokens", "")),
+            })
             cost_labels[r.get("Cost", "") or "(blank)"] += 1
 
     cost = None
