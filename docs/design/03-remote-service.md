@@ -71,8 +71,7 @@ Server configuration is environment only:
 | `TYPESAFE_API_KEY` | scorer credential; server side only, never in any client config |
 | `CLAUDE_API_TOKEN` | optional review provider credential; server side only, sent only in the provider authentication header |
 | `YAKKA_REVIEW_MODEL` | exact live review model id; availability requires `claude-haiku-5-5` |
-| `YAKKA_REVIEW_EFFORT` | live review effort; unset means `high`, any configured value other than `high` disables calls |
-| `YAKKA_REVIEW_TRIAL_ENABLED` | historical trial effort override gate; defaults to `false` |
+| `YAKKA_REVIEW_EFFORT` | high-only server default and validation setting for review effort; unset means `high`, and any configured value other than `high` disables calls. It never caps a valid per-call `high`, `xhigh` or `max` override. |
 | `YAKKA_REVIEW_USD_CAP` | positive server-wide rolling 24-hour USD spend cap; unset disables calls |
 | `YAKKA_REVIEW_REPOS` | comma-separated `<tenant>/<repo_id>` allowlist; unset enables no repositories |
 
@@ -112,6 +111,8 @@ endpoints. Unknown fields in a fact are kept in its raw payload, never rejected.
 |---|---|---|
 | `GET /v1/health` | none | liveness, version, pending count, screen gaps, `compaction` (`complete` or `required`) |
 | `POST /v1/ingest` | local: none; remote: bearer `read_write` | a batch of facts from a drain |
+| `POST /v1/reviews` | local: none; remote: bearer `read_write` (JSON body) | one advisory review call with optional `effort`, `tags` and `store`; returns the review receipt or a full cached duplicate receipt |
+| `GET /v1/reviews` | local: none; remote: bearer `read` or `read_write`, or session with `?tenant=` for an owned tenant | complete cursor-paged listing with `repo_id`, `plan`, `phase`, `kind`, `status`, `effort`, `profile`, `manifest_hash` and `since` filters, repeated conjunctive `tag`, `detail=full`, `limit` (default 100, range 1–500) and `cursor`; returns `reviews`, `next_cursor` and `complete` |
 | advisory reads (`/v1/artifacts`, `/v1/checks`, `/v1/baselines`, `/v1/search`) | local: none; remote: bearer `read` or `read_write`, or session with `?tenant=` for an owned tenant | defined by [design 4](04-advisory-surface.md#api) |
 | analytics reads (`/v1/analytics/*`) | same as advisory reads | defined by [design 7](07-analytics-site.md#analytics-reads) |
 | `GET /v1/whoami` | bearer only (local: none) | the tenant, scope and `expires_at` (Unix seconds, 0 for none) a bearer token resolves to; no cookie, never opens the tenant. `yakka sync` calls it before sending to check the target tenant and `read_write` scope. A 404 means a collector too old to be a sync target |
@@ -193,10 +194,9 @@ DeleteTenant API or registry method. Raw directory deletion leaves orphaned regi
 and a still-valid token can lazily recreate the directory.
 
 The [Plan 23 follow-up amendment](../plans/23-llm-review-shadow/DESIGN.md) designs owner
-self-serve reset and delete with complete tenant/global cleanup, plus per-call effort/tags/store
-controls and complete paged review reads. These are **pending implementation**; PR #218 changed
-docs only and did not ship an admin reset. The API/configuration table above remains the landed
-baseline.
+self-serve reset and delete with complete tenant/global cleanup; these remain pending
+implementation (Phase 2). Its per-call effort/tags/store controls, removal of the trial env gate,
+and complete paged review reads are now implemented and described above.
 
 ### Pending owner tenant lifecycle API (Plan 23 Phase 2)
 
@@ -247,7 +247,6 @@ remembered selection lacking a generation requires explicit re-selection. Failed
 show completion unknown and never trigger automatic mutation replay. The gate is a **spoofable guardrail, not proof
 of a human**; future human verification/captcha is explicitly out of scope. Detailed concurrency,
 recovery and no-cross-tenant proofs are in the plan's Phase 2.
-
 ### Writer
 
 Each open tenant has one writer goroutine. Ingest requests hand their facts to it and wait. The

@@ -48,10 +48,13 @@ The server-owned `review_change` MCP tool supplies a single-call shadow review b
 reviews. `execute` calls once after each phase closes; `comprehensive-review` and `post-build` each
 call once at their reviewed/candidate PR head. Each call uses an explicit Git range, available
 stored brief or plan criteria, and contributor `build_models` from the run record or `unknown`.
-Stages send no `trial` argument. This is non-gating advisory evidence: receipt summaries and findings
-stay in session output and never enter gates, verdicts, commits, trailers, exit codes or plan-folder
-files, or trigger fixes. Absent, unavailable and failed calls leave existing decisions unchanged;
-`skipped_duplicate` refers to earlier evidence rather than a new independent review.
+Stages send no `trial` argument. Calls may set `effort`/`tags`/`store`; a `store=true` duplicate
+returns the earlier review in full (`cached`, `original_review_id`, `original_status`) rather than a
+new independent review, while `store=false` is independent paid work. A read-only `list_reviews`
+tool serves the same cursor-paged listing as `GET /v1/reviews`. This is non-gating advisory
+evidence: receipt summaries and findings stay in session output and never enter gates, verdicts,
+commits, trailers, exit codes or plan-folder files, or trigger fixes. Absent, unavailable and failed
+calls leave existing decisions unchanged.
 
 The Go server owns the definition, prompt/policy, criteria resolution, provider call, validation,
 spend limits and tenant-local records, through the same orchestrator as `POST /v1/reviews`. The
@@ -59,8 +62,10 @@ Python shim alone captures a bounded diff and omission manifest, scans before eg
 declared local context; the server rescans. Machines use their existing Yakka login and need no
 provider key. `read_write` scope and `readOnlyHint:false` disclose the server spend-and-record
 boundary; the tool declares 150 seconds and no local actions. Receipts omit captured diff content;
-`detail=full` includes validated findings. Registration depends on server review model configuration
-and a sufficient MCP timeout ceiling; deployment and live availability require separate evidence.
+`detail=full` includes validated findings, and a completed duplicate carries the original findings.
+The `read`-only `list_reviews` tool declares no local readers or actions. Registration depends on
+server review model configuration and a sufficient MCP timeout ceiling; deployment and live
+availability require separate evidence.
 See [architecture](ARCHITECTURE.md#advisory-change-review) and
 [the advisory surface](design/04-advisory-surface.md#review_change).
 

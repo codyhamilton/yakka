@@ -21,14 +21,19 @@ Everything is a recorded fact with a join key. State is a view over facts.
 | Hook event | harness hook → spool | conversation ID, harness, event, normalised event, tool, timing, model, token usage and cost where the payload has them |
 | Artifact version | write hook → drain reads file | `repo_id`, `path`, content hash, content, conversation ID, source (`worktree` or `commit`) |
 | Commit | hook on `git commit` | SHA, touched paths, rename pairs, conversation ID |
-| Review run | authenticated review handler | tenant-bound repo, capture and criteria hashes, reviewer/build models, effort, status, attempts, validated result and cost; captured input is stored separately by content hash |
+| Review run | authenticated review handler | tenant-bound repo, capture and criteria hashes, reviewer/build models, tags, configured/requested/effective effort, status, attempts, validated result and cost; captured input is stored separately by content hash. A `store=false` call writes no review fact |
+| Review usage | authenticated review handler | content-free `store=false` spend: random usage id, configured/returned model, configured/requested/effective effort, tokens, estimated cost and pricing identity, timestamp, validated tags, attempt/status and reservation accounting; no content-derived identity |
 
 Gaps (a brief whose design has no version, a write with no artifact version) are computed by the
 view, not submitted.
 
 `review_run` is appended through the in-process ingest path after review argument and capture
-validation. It remains outside conversation, hook-event and facet counts; captured review input is
-kept outside the artifact blob and screening areas.
+validation. A `store=false` call instead writes one content-free `review_usage` fact to the caller's
+tenant: it carries no repo, plan, session or capture identity, prompt, criteria, findings, error body
+or content-derived hash, and `dry_run` writes neither fact. Both `review_run` and `review_usage`
+remain outside conversation, hook-event and facet counts and work/quality aggregates;
+`review_usage` also stays outside `review_run` and feeds only the tenant review-spend measure.
+Captured review input is kept outside the artifact blob and screening areas.
 
 ### Keys
 

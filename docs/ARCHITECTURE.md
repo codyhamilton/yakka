@@ -82,7 +82,13 @@ uncommitted or explicit Git range mode. The server rescans and alone holds the p
 machines use their existing Yakka login and need no provider key. The tool is `read_write`,
 `readOnlyHint:false`: its effect is server spend and record. Its declaration allows 150 seconds and
 no local actions. Registration requires review model configuration and a sufficient MCP timeout
-ceiling; source integration does not establish deployed availability.
+ceiling; source integration does not establish deployed availability. Per-call `effort`, `tags` and
+`store` are validated on the server; `YAKKA_REVIEW_EFFORT` is a high-only default that never caps a
+valid override. A completed `store=true` duplicate returns the earlier review in full, with
+`cached`, `original_review_id` and `original_status`, not fresh evidence; `store=false` skips dedupe
+and records, so `review_change` does not promise unconditional idempotency. The separate `read`-only
+`list_reviews` tool returns the same tenant-bound cursor pages as `GET /v1/reviews` and declares no
+local readers or actions.
 
 Beside existing reviews, `execute` makes one non-gating range call after each phase closing commit;
 `comprehensive-review` and `post-build` each make one at their reviewed/candidate PR head. Explicit
@@ -91,7 +97,8 @@ base/head SHAs select the change, available stored criteria references select th
 output carries receipt summaries and validated findings (`detail=full`), never captured diff content.
 Results never enter gates, verdicts, commits, trailers, exit codes or plan-folder files, and never
 trigger fixes or dispatch. Absent, unavailable or failed calls leave existing decisions unchanged.
-Repeated captures may yield `skipped_duplicate` referring to an earlier receipt, not fresh evidence.
+Repeated `store=true` captures return the earlier review in full as `skipped_duplicate`, not fresh
+evidence; `store=false` calls are never deduplicated.
 See [the advisory surface](design/04-advisory-surface.md#review_change) and
 [MCP contract](design/08-server-mcp-contract.md#the-shipped-tools).
 
