@@ -97,6 +97,21 @@ func (g *deviceGrants) dropLocked(hash string, gr *deviceGrant) {
 	delete(g.byUser, gr.userCode)
 }
 
+// purgeTenant drops every grant already attributed to tenant. Pending grants
+// carry no tenant identity and are left alone rather than guessed at.
+func (g *deviceGrants) purgeTenant(tenant string) {
+	if tenant == "" {
+		return
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	for hash, gr := range g.byHash {
+		if gr.tenant == tenant {
+			g.dropLocked(hash, gr)
+		}
+	}
+}
+
 // create adds a pending grant for deviceCode and returns its formatted user code.
 func (g *deviceGrants) create(deviceCode, clientIP, host string) (string, error) {
 	g.mu.Lock()
