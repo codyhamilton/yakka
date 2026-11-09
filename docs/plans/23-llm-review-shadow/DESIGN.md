@@ -466,6 +466,11 @@ All seven phases are provable offline against local fixtures and an injected fak
 - Surfaces: `packages/yakka/internal/serve/mcp.go`, `mcp_stateless.go` and `testdata/mcp-readers.json`, `internal/serve` (MCP route body cap, long-call handling), `plugins/yakka/client/yakka.py` (typed-parameter validation and reader registration), `plugins/yakka/skills/execute/SKILL.md`, `plugins/yakka/skills/post-build/SKILL.md` and its briefs, `plugins/yakka/skills/comprehensive-review/SKILL.md`, `plugins/yakka/.claude-plugin/plugin.json`, `docs/ARCHITECTURE.md`, `docs/OVERVIEW.md`, `docs/design/04`, `08` and `system-architecture.md`, `tools/driver/check_skills.py` where its checks apply.
 - Approach: known
 - Depends on: Phases 1 and 4; Plan 24 foundation already satisfied on master. No Plan 22 or Plan 21 build dependency.
+- Units:
+  - **5-01 — Typed `change` reader declaration** — `briefs/5-01-typed-change-declaration.md`; no dependencies; may run alongside 5-02.
+  - **5-02 — Shim `change` capture reader** — `briefs/5-02-shim-change-reader.md`; no dependencies; may run alongside 5-01.
+  - **5-03 — MCP review registration and transport proof** — `briefs/5-03-mcp-review-integration.md`; depends on 5-01 and 5-02; runs after both.
+  - **5-04 — Advisory stage wiring and stable docs** — `briefs/5-04-stage-wiring-docs.md`; depends on 5-03; runs after it.
 
 ### Phase 6 — Historical case manifest and comparators
 
