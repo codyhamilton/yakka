@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -367,6 +368,79 @@ func TestMCPRegistrationAndBudgets(t *testing.T) {
 	if rec.Code != 401 || body.read {
 		t.Fatalf("unauthenticated body read: %d %v", rec.Code, body.read)
 	}
+}
+
+func TestMCPChangeReaderTypedDeclaration(t *testing.T) {
+	s, _ := newServer(t, true)
+	params := map[string]any{
+		"exclusion_policy_version": "review-exclusions-v1",
+		"change_max_file_bytes":    262144,
+		"change_max_total_bytes":   2097152,
+		"change_max_files":         200,
+		"context_lines":            20,
+		"docs_never_noise":         true,
+		"change_exclude":           []any{"vendor/**", "**/*.map", "package-lock.json"},
+		"excluded_files":           []any{"*.png", "*.min.js"},
+		"excluded_directories":     []any{"vendor/", "dist/"},
+		"lockfiles":                []any{"package-lock.json", "go.sum"},
+		"truncation_order":         []any{"code", "tests", "config", "docs"},
+		"budget_bytes":             2097152,
+	}
+	optional := false
+	tool := MCPTool{Name: "change", Context: []MCPReader{{Reader: "change", Version: 1, Required: &optional, Bulk: true, Params: params}}, Handler: mcpNoop}
+	if err := s.RegisterMCPTool(tool); err != nil {
+		t.Fatalf("legal change declaration rejected: %v", err)
+	}
+	if got, want := s.mcpTool("change").bodyCap, (64<<10)+2097152; got != want {
+		t.Fatalf("body cap = %d, want %d", got, want)
+	}
+
+	mutations := []struct {
+		name  string
+		key   string
+		value any
+	}{
+		{"wrong boolean type", "docs_never_noise", "true"},
+		{"wrong numeric type", "context_lines", "20"},
+		{"fractional numeric", "change_max_files", 2.5},
+		{"wrong array type", "change_exclude", "vendor/**"},
+		{"wrong array item", "excluded_files", []any{"*.png", 4}},
+		{"unknown field", "command", "git"},
+		{"unsafe path", "change_exclude", []any{"https://example.com/**"}},
+		{"unsafe traversal", "excluded_directories", []any{"../outside/"}},
+		{"invalid range", "context_lines", 101},
+		{"invalid enum value", "truncation_order", []any{"code", "docs", "tests", "config"}},
+		{"oversized budget", "budget_bytes", 2097153},
+	}
+	for i, tc := range mutations {
+		bad := map[string]any{}
+		for key, value := range params {
+			bad[key] = value
+		}
+		bad[tc.key] = tc.value
+		candidate := MCPTool{Name: fmt.Sprintf("bad-%d", i), Handler: mcpNoop, Context: []MCPReader{{Reader: "change", Version: 1, Required: &optional, Bulk: true, Params: bad}}}
+		if err := s.RegisterMCPTool(candidate); err == nil {
+			t.Errorf("accepted %s", tc.name)
+		}
+	}
+	for i, key := range []string{"change_max_file_bytes", "change_exclude", "budget_bytes"} {
+		missing := map[string]any{}
+		for k, value := range params {
+			missing[k] = value
+		}
+		delete(missing, key)
+		candidate := MCPTool{Name: fmt.Sprintf("missing-%d", i), Handler: mcpNoop, Context: []MCPReader{{Reader: "change", Version: 1, Required: &optional, Bulk: true, Params: missing}}}
+		if err := s.RegisterMCPTool(candidate); err == nil {
+			t.Errorf("accepted declaration missing %s", key)
+		}
+	}
+
+	// The typed extension leaves the pre-existing string, enum, dependency and
+	// bulk declarations on their original validation path.
+	mcpRegister(t, s, MCPTool{Name: "existing", Handler: mcpNoop, Context: []MCPReader{
+		{Reader: "resolved_path", Version: 1, Params: map[string]any{"path_arg": "path", "bases": []any{"cwd"}}},
+		{Reader: "file", Version: 1, Params: map[string]any{"of": "resolved_path"}},
+	}})
 }
 
 type mcpReadSpy struct{ read bool }
