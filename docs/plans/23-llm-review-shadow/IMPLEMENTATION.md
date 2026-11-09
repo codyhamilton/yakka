@@ -25,6 +25,18 @@ The entry point `tools/shadow-review-trial manifest` → local-history enumerati
 - Keep the `_capture_blob` per-file-cap memory issue assigned to a future Phase 1 refinement.
 - Keep the static no-network/environment guarantee scoped to `internal/review/build.go`.
 
+## Phase 7 — Trial run, dry run and alignment report
+
+### 7-01-trial-runner
+
+- Status: done with concerns; committed as `c88b2eb` (`Add historical trial runner`).
+- Brief: `briefs/7-01-trial-runner.md`.
+- Report: `reports/7-01-trial-runner.md`.
+- Built: added the frozen-manifest runner with injected endpoint, transport and auth; three-effort dry-run estimates with retry exposure and cap preflight; atomic resume ledger; duplicate reconciliation against canonical review records; per-arm counts and paired completion intersection.
+- Checks: before implementation, `python3 -m unittest tools/shadow-review-trial/test_runner.py` failed because the module did not exist. After implementation, the same command passed all 8 tests; `git diff --check` passed. Fixture evidence covers dry-run zero calls, cap refusal, invariant requests except effort, 50/49 targets, asymmetric arms, partial/failure/model mismatch, duplicate reconciliation, changed-budget preflight resume and no replay after ambiguous started requests.
+- Deviations/concerns: the REST request requires non-empty `build_models`; the runner sends the manifest's explicit `unknown` sentinel when provenance is unavailable. No design contradiction or unfinished integration work reported. No credential or live provider call was used.
+- Feedback: brief and report delivered; Jev 1.13.0 screening pass.
+
 ## Phase 5 — The MCP tool, shim registration and stage wiring
 
 ### 5-04-stage-wiring-docs
