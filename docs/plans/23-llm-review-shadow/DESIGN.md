@@ -258,6 +258,14 @@ Exactly **three new, amendment-local phases**, in the order below. Original phas
 - Surfaces: `packages/yakka/internal/review/{orchestrator,availability}.go`, review result/persistence and tests; `internal/store/reviews.go`, shared review-usage reads and `internal/ingest`; `internal/serve/{serve,mcp_review,mcp_stateless}.go` and REST/MCP tests; `docs/design/{01-event-model-and-ingest,03-remote-service,04-advisory-surface,08-server-mcp-contract}.md`, architecture/overview where their response/annotation statements change. Preserve registry/shim ownership; bump plugin only if edited.
 - Approach: **Known**.
 - Depends on: landed Plan 23 only.
+- Units:
+  - **1-01 Call controls and execution identity** — `briefs/phase1-01-call-controls-identity.md`; depends on nothing; runs alongside 1-02.
+  - **1-02 Paged review store reads** — `briefs/phase1-02-paged-review-store-reads.md`; depends on nothing; runs alongside 1-01.
+  - **1-03 Cached duplicate responses** — `briefs/phase1-03-cached-duplicate-responses.md`; depends on 1-01 and 1-02; runs alongside 1-05.
+  - **1-04 Ephemeral usage and dry-run readiness** — `briefs/phase1-04-ephemeral-usage-dry-run.md`; depends on 1-01 and 1-03; runs alongside 1-06.
+  - **1-05 REST complete paged reads** — `briefs/phase1-05-rest-paged-reads.md`; depends on 1-01 and 1-02; runs alongside 1-03.
+  - **1-06 MCP list_reviews and transport parity** — `briefs/phase1-06-mcp-list-reviews.md`; depends on 1-05; runs alongside 1-04.
+  - **1-07 Stable documentation promotion** — `briefs/phase1-07-stable-docs.md`; depends on 1-03, 1-04, 1-05 and 1-06; runs alongside nothing.
 
 ### Phase 2 — Synthetic activity is isolated and completely disposable
 
