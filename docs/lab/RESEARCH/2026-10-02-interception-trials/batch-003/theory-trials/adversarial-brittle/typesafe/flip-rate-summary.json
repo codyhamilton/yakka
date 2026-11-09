@@ -1,0 +1,246 @@
+{
+  "by_perturbation": {
+    "drop-brief_anchor": {
+      "arm": null,
+      "cell_ids": [
+        "13ad08e55a4a0225",
+        "5e4533c4d8d96c81",
+        "dbc25ea96e9681a2",
+        "d899c720e72575e3"
+      ],
+      "n_compared": 4,
+      "perturbation": "drop-brief_anchor",
+      "question_flip_rates": {
+        "early_signals": {
+          "flips": 0,
+          "n": 4,
+          "rate": 0.0
+        },
+        "inflection_points": {
+          "flips": 0,
+          "n": 4,
+          "rate": 0.0
+        },
+        "recommended_exit_earliness": {
+          "flips": 0,
+          "n": 4,
+          "rate": 0.0
+        },
+        "shape": {
+          "flips": 0,
+          "n": 4,
+          "rate": 0.0
+        },
+        "why_T_large": {
+          "flips": 0,
+          "n": 4,
+          "rate": 0.0
+        }
+      },
+      "shape_flip_count": 0,
+      "shape_flip_rate": 0.0
+    },
+    "excerpt-length-extremes:max": {
+      "arm": "max",
+      "cell_ids": [
+        "68fd57f5dd629e0d",
+        "a23ec147ea0061ef",
+        "d33802a7ce54fff9",
+        "4c85b8a44379feb9"
+      ],
+      "n_compared": 4,
+      "perturbation": "excerpt-length-extremes",
+      "question_flip_rates": {
+        "early_signals": {
+          "flips": 0,
+          "n": 4,
+          "rate": 0.0
+        },
+        "inflection_points": {
+          "flips": 0,
+          "n": 4,
+          "rate": 0.0
+        },
+        "recommended_exit_earliness": {
+          "flips": 0,
+          "n": 4,
+          "rate": 0.0
+        },
+        "shape": {
+          "flips": 1,
+          "n": 4,
+          "rate": 0.25
+        },
+        "why_T_large": {
+          "flips": 0,
+          "n": 4,
+          "rate": 0.0
+        }
+      },
+      "shape_flip_count": 1,
+      "shape_flip_rate": 0.25
+    },
+    "excerpt-length-extremes:near-empty": {
+      "arm": "near-empty",
+      "cell_ids": [
+        "92dc0a0fd917497b",
+        "b262b94ef02e3871",
+        "8e24123cf94d4660",
+        "35509baeedf7873e"
+      ],
+      "n_compared": 4,
+      "perturbation": "excerpt-length-extremes",
+      "question_flip_rates": {
+        "early_signals": {
+          "flips": 0,
+          "n": 4,
+          "rate": 0.0
+        },
+        "inflection_points": {
+          "flips": 0,
+          "n": 4,
+          "rate": 0.0
+        },
+        "recommended_exit_earliness": {
+          "flips": 0,
+          "n": 4,
+          "rate": 0.0
+        },
+        "shape": {
+          "flips": 3,
+          "n": 4,
+          "rate": 0.75
+        },
+        "why_T_large": {
+          "flips": 0,
+          "n": 4,
+          "rate": 0.0
+        }
+      },
+      "shape_flip_count": 3,
+      "shape_flip_rate": 0.75
+    },
+    "false-progress-inject": {
+      "arm": null,
+      "cell_ids": [
+        "451e159d1284c95c",
+        "ee575e4036ec4065",
+        "854a3f4a09710162",
+        "36d0de5dc8fe6d63"
+      ],
+      "n_compared": 4,
+      "perturbation": "false-progress-inject",
+      "question_flip_rates": {
+        "early_signals": {
+          "flips": 0,
+          "n": 4,
+          "rate": 0.0
+        },
+        "inflection_points": {
+          "flips": 0,
+          "n": 4,
+          "rate": 0.0
+        },
+        "recommended_exit_earliness": {
+          "flips": 0,
+          "n": 4,
+          "rate": 0.0
+        },
+        "shape": {
+          "flips": 1,
+          "n": 4,
+          "rate": 0.25
+        },
+        "why_T_large": {
+          "flips": 0,
+          "n": 4,
+          "rate": 0.0
+        }
+      },
+      "shape_flip_count": 1,
+      "shape_flip_rate": 0.25
+    },
+    "order-swap": {
+      "arm": null,
+      "cell_ids": [
+        "9c55f5309ad6bbe2",
+        "f6ac190b537ec718",
+        "0fd411c1ddbd4630",
+        "1d29e828b284e236"
+      ],
+      "n_compared": 4,
+      "perturbation": "order-swap",
+      "question_flip_rates": {
+        "early_signals": {
+          "flips": 0,
+          "n": 4,
+          "rate": 0.0
+        },
+        "inflection_points": {
+          "flips": 0,
+          "n": 4,
+          "rate": 0.0
+        },
+        "recommended_exit_earliness": {
+          "flips": 0,
+          "n": 4,
+          "rate": 0.0
+        },
+        "shape": {
+          "flips": 0,
+          "n": 4,
+          "rate": 0.0
+        },
+        "why_T_large": {
+          "flips": 0,
+          "n": 4,
+          "rate": 0.0
+        }
+      },
+      "shape_flip_count": 0,
+      "shape_flip_rate": 0.0
+    },
+    "prose-rewrite-stats": {
+      "arm": null,
+      "cell_ids": [
+        "f6228c4ef20a9631",
+        "b12daa4ebc721f88",
+        "bf28fb4086ffc340",
+        "e0744beaffbe103b"
+      ],
+      "n_compared": 4,
+      "perturbation": "prose-rewrite-stats",
+      "question_flip_rates": {
+        "early_signals": {
+          "flips": 0,
+          "n": 4,
+          "rate": 0.0
+        },
+        "inflection_points": {
+          "flips": 0,
+          "n": 4,
+          "rate": 0.0
+        },
+        "recommended_exit_earliness": {
+          "flips": 0,
+          "n": 4,
+          "rate": 0.0
+        },
+        "shape": {
+          "flips": 0,
+          "n": 4,
+          "rate": 0.0
+        },
+        "why_T_large": {
+          "flips": 0,
+          "n": 4,
+          "rate": 0.0
+        }
+      },
+      "shape_flip_count": 0,
+      "shape_flip_rate": 0.0
+    }
+  },
+  "comparison_rule": "exact response_label comparison",
+  "primary_metric": "shape choice flip against same-worker baseline"
+}

@@ -1,0 +1,710 @@
+{
+  "model": "jev-1.13.0",
+  "state": {
+    "evidence_class": "hybrid_v0",
+    "scenario_id": "shape-signal|excerpt-length-extremes|max",
+    "framing": "EX-SHAPE-SIGNAL",
+    "snapshot": {
+      "worker_id": "036ff3ed4a89",
+      "T": 161,
+      "checkpoints": [
+        {
+          "worker_id": "036ff3ed4a89",
+          "checkpoint_turn": 75,
+          "schedule": {
+            "first_at": 75,
+            "interval": 15
+          },
+          "snapshot_mode": "hybrid_v0",
+          "snapshot_params": {
+            "N": 8,
+            "excerpt": 400
+          },
+          "prior_checkpoint_turn": null,
+          "brief_anchor": "Repo: <REPO> (branch: master, clean at commit 2112510).\n\nYour task is fully specified in this brief file \u2014 read it first, in full, before doing anything else:\ndocs/plans/01-eval-harness-and-map-layer/briefs/15b-full-build-verify-and-record.md\n\nContext you need that isn't in the brief: a prior unit-15b agent attempt was abandoned (it stalled itself waiting rather than blocking on the wait; per the plan's Long-Running Work rule it was not resumed). The orchestrator ",
+          "api_turns_note": "api_turns = 75",
+          "cumulative": {
+            "api_turns": 75,
+            "peak_ctx_tokens": 97368,
+            "prefix_bytes": 588016,
+            "tool_histogram": {
+              "Bash": 70,
+              "Read": 6,
+              "Monitor": 2,
+              "ToolSearch": 1
+            },
+            "reread_paths": [],
+            "distinct_read_paths": 6,
+            "compaction_event_count": 0,
+            "assistant_text_chars": 3114
+          },
+          "delta_since_prior": {},
+          "thrash_top_rereads": [],
+          "tail": [
+            {
+              "turn": 68,
+              "excerpt": "Observed prefix activity. [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padd",
+              "tool_names": [
+                "Bash"
+              ]
+            },
+            {
+              "turn": 69,
+              "excerpt": "Observed prefix activity. [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padd",
+              "tool_names": [
+                "Bash"
+              ]
+            },
+            {
+              "turn": 70,
+              "excerpt": "Observed prefix activity. [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padd",
+              "tool_names": [
+                "Bash"
+              ]
+            },
+            {
+              "turn": 71,
+              "excerpt": "I've started the necessary background waits (compare_disc.py run, and monitors watching for its completion). I will not poll further \u2014 stopping tool calls now and waiting for the notification to arrive before resuming verification. [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding",
+              "tool_names": [
+                "Bash"
+              ]
+            },
+            {
+              "turn": 72,
+              "excerpt": "Observed prefix activity. [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padd",
+              "tool_names": [
+                "Bash"
+              ]
+            },
+            {
+              "turn": 73,
+              "excerpt": "Observed prefix activity. [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padd",
+              "tool_names": [
+                "Bash"
+              ]
+            },
+            {
+              "turn": 74,
+              "excerpt": "Observed prefix activity. [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padd",
+              "tool_names": [
+                "Bash"
+              ]
+            },
+            {
+              "turn": 75,
+              "excerpt": "Observed prefix activity. [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padd",
+              "tool_names": [
+                "Bash"
+              ]
+            }
+          ],
+          "gold_bundle_status": "ok",
+          "shrink_steps": [],
+          "pack_meta": {
+            "source_run": "20261001-202909",
+            "sources": [
+              "036ff3ed4a89-gold-bundles-20261001-202909.jsonl (tail+brief+cumulative)",
+              "036ff3ed4a89-dry-run-thrash-table-20261001-202909.json (top rereads)",
+              "036ff3ed4a89-dry-run-checkpoints-20261001-202909.with-state.jsonl (delta_since_prior)"
+            ],
+            "redaction": "hybrid_v0 N=8 excerpt=400; secrets; home/workspace/mount/tmp-claude paths \u2192 tokens; username scrubbed",
+            "note": "Safe judge pack for GOLD-LABEL-RUBRIC.md. Hybrid_v0 budget (last 8\u00d7400), not full gold 30\u00d7700. Raw gold-bundles/with-state stay gitignored under ubuntu-raw/."
+          },
+          "pack_chars": 2343
+        },
+        {
+          "worker_id": "036ff3ed4a89",
+          "checkpoint_turn": 90,
+          "schedule": {
+            "first_at": 75,
+            "interval": 15
+          },
+          "snapshot_mode": "hybrid_v0",
+          "snapshot_params": {
+            "N": 8,
+            "excerpt": 400
+          },
+          "prior_checkpoint_turn": 75,
+          "brief_anchor": "Repo: <REPO> (branch: master, clean at commit 2112510).\n\nYour task is fully specified in this brief file \u2014 read it first, in full, before doing anything else:\ndocs/plans/01-eval-harness-and-map-layer/briefs/15b-full-build-verify-and-record.md\n\nContext you need that isn't in the brief: a prior unit-15b agent attempt was abandoned (it stalled itself waiting rather than blocking on the wait; per the plan's Long-Running Work rule it was not resumed). The orchestrator ",
+          "api_turns_note": "api_turns = 90",
+          "cumulative": {
+            "api_turns": 90,
+            "peak_ctx_tokens": 102247,
+            "prefix_bytes": 661028,
+            "tool_histogram": {
+              "Bash": 85,
+              "Read": 6,
+              "Monitor": 2,
+              "ToolSearch": 1
+            },
+            "reread_paths": [],
+            "distinct_read_paths": 6,
+            "compaction_event_count": 0,
+            "assistant_text_chars": 3410
+          },
+          "delta_since_prior": {
+            "new_read_paths": [],
+            "tool_histogram_delta": {
+              "Bash": 15
+            }
+          },
+          "thrash_top_rereads": [],
+          "tail": [
+            {
+              "turn": 83,
+              "excerpt": "Observed prefix activity. [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padd",
+              "tool_names": [
+                "Bash"
+              ]
+            },
+            {
+              "turn": 84,
+              "excerpt": "Observed prefix activity. [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padd",
+              "tool_names": [
+                "Bash"
+              ]
+            },
+            {
+              "turn": 85,
+              "excerpt": "Observed prefix activity. [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padd",
+              "tool_names": [
+                "Bash"
+              ]
+            },
+            {
+              "turn": 86,
+              "excerpt": "Observed prefix activity. [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padd",
+              "tool_names": [
+                "Bash"
+              ]
+            },
+            {
+              "turn": 87,
+              "excerpt": "Observed prefix activity. [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padd",
+              "tool_names": [
+                "Bash"
+              ]
+            },
+            {
+              "turn": 88,
+              "excerpt": "Observed prefix activity. [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padd",
+              "tool_names": [
+                "Bash"
+              ]
+            },
+            {
+              "turn": 89,
+              "excerpt": "Observed prefix activity. [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padd",
+              "tool_names": [
+                "Bash"
+              ]
+            },
+            {
+              "turn": 90,
+              "excerpt": "compare_disc.py finished (exit 0). Let's look at the report. [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding",
+              "tool_names": [
+                "Bash"
+              ]
+            }
+          ],
+          "gold_bundle_status": "ok",
+          "shrink_steps": [],
+          "pack_meta": {
+            "source_run": "20261001-202909",
+            "sources": [
+              "036ff3ed4a89-gold-bundles-20261001-202909.jsonl (tail+brief+cumulative)",
+              "036ff3ed4a89-dry-run-thrash-table-20261001-202909.json (top rereads)",
+              "036ff3ed4a89-dry-run-checkpoints-20261001-202909.with-state.jsonl (delta_since_prior)"
+            ],
+            "redaction": "hybrid_v0 N=8 excerpt=400; secrets; home/workspace/mount/tmp-claude paths \u2192 tokens; username scrubbed",
+            "note": "Safe judge pack for GOLD-LABEL-RUBRIC.md. Hybrid_v0 budget (last 8\u00d7400), not full gold 30\u00d7700. Raw gold-bundles/with-state stay gitignored under ubuntu-raw/."
+          },
+          "pack_chars": 2229
+        },
+        {
+          "worker_id": "036ff3ed4a89",
+          "checkpoint_turn": 105,
+          "schedule": {
+            "first_at": 75,
+            "interval": 15
+          },
+          "snapshot_mode": "hybrid_v0",
+          "snapshot_params": {
+            "N": 8,
+            "excerpt": 400
+          },
+          "prior_checkpoint_turn": 90,
+          "brief_anchor": "Repo: <REPO> (branch: master, clean at commit 2112510).\n\nYour task is fully specified in this brief file \u2014 read it first, in full, before doing anything else:\ndocs/plans/01-eval-harness-and-map-layer/briefs/15b-full-build-verify-and-record.md\n\nContext you need that isn't in the brief: a prior unit-15b agent attempt was abandoned (it stalled itself waiting rather than blocking on the wait; per the plan's Long-Running Work rule it was not resumed). The orchestrator ",
+          "api_turns_note": "api_turns = 105",
+          "cumulative": {
+            "api_turns": 105,
+            "peak_ctx_tokens": 128951,
+            "prefix_bytes": 837019,
+            "tool_histogram": {
+              "Bash": 96,
+              "Read": 9,
+              "Monitor": 3,
+              "ToolSearch": 1
+            },
+            "reread_paths": [],
+            "distinct_read_paths": 9,
+            "compaction_event_count": 0,
+            "assistant_text_chars": 3638
+          },
+          "delta_since_prior": {
+            "new_read_paths": [
+              "<REPO>/output/report.json",
+              "<REPO>/parser/harness/checks/envelope.py",
+              "<REPO>/parser/harness/checks/container.py"
+            ],
+            "tool_histogram_delta": {
+              "Bash": 11,
+              "Read": 3,
+              "Monitor": 1
+            }
+          },
+          "thrash_top_rereads": [],
+          "tail": [
+            {
+              "turn": 98,
+              "excerpt": "Observed prefix activity. [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padd",
+              "tool_names": [
+                "Bash"
+              ]
+            },
+            {
+              "turn": 99,
+              "excerpt": "Observed prefix activity. [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padd",
+              "tool_names": [
+                "Bash"
+              ]
+            },
+            {
+              "turn": 100,
+              "excerpt": "Observed prefix activity. [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padd",
+              "tool_names": [
+                "Bash"
+              ]
+            },
+            {
+              "turn": 101,
+              "excerpt": "Observed prefix activity. [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padd",
+              "tool_names": [
+                "Bash"
+              ]
+            },
+            {
+              "turn": 102,
+              "excerpt": "Observed prefix activity. [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padd",
+              "tool_names": [
+                "Bash"
+              ]
+            },
+            {
+              "turn": 103,
+              "excerpt": "Observed prefix activity. [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padd",
+              "tool_names": [
+                "Monitor"
+              ]
+            },
+            {
+              "turn": 104,
+              "excerpt": "While that runs, let me investigate the vocab offender \"578\" and the container/mfde findings a bit more, and check DESIGN.md sections referenced for record-keeping. [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerp",
+              "tool_names": [
+                "Bash"
+              ]
+            },
+            {
+              "turn": 105,
+              "excerpt": "Observed prefix activity. [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padd",
+              "tool_names": [
+                "Bash"
+              ]
+            }
+          ],
+          "gold_bundle_status": "ok",
+          "shrink_steps": [],
+          "pack_meta": {
+            "source_run": "20261001-202909",
+            "sources": [
+              "036ff3ed4a89-gold-bundles-20261001-202909.jsonl (tail+brief+cumulative)",
+              "036ff3ed4a89-dry-run-thrash-table-20261001-202909.json (top rereads)",
+              "036ff3ed4a89-dry-run-checkpoints-20261001-202909.with-state.jsonl (delta_since_prior)"
+            ],
+            "redaction": "hybrid_v0 N=8 excerpt=400; secrets; home/workspace/mount/tmp-claude paths \u2192 tokens; username scrubbed",
+            "note": "Safe judge pack for GOLD-LABEL-RUBRIC.md. Hybrid_v0 budget (last 8\u00d7400), not full gold 30\u00d7700. Raw gold-bundles/with-state stay gitignored under ubuntu-raw/."
+          },
+          "pack_chars": 2488
+        },
+        {
+          "worker_id": "036ff3ed4a89",
+          "checkpoint_turn": 120,
+          "schedule": {
+            "first_at": 75,
+            "interval": 15
+          },
+          "snapshot_mode": "hybrid_v0",
+          "snapshot_params": {
+            "N": 8,
+            "excerpt": 400
+          },
+          "prior_checkpoint_turn": 105,
+          "brief_anchor": "Repo: <REPO> (branch: master, clean at commit 2112510).\n\nYour task is fully specified in this brief file \u2014 read it first, in full, before doing anything else:\ndocs/plans/01-eval-harness-and-map-layer/briefs/15b-full-build-verify-and-record.md\n\nContext you need that isn't in the brief: a prior unit-15b agent attempt was abandoned (it stalled itself waiting rather than blocking on the wait; per the plan's Long-Running Work rule it was not resumed). The orchestrator ",
+          "api_turns_note": "api_turns = 120",
+          "cumulative": {
+            "api_turns": 120,
+            "peak_ctx_tokens": 135047,
+            "prefix_bytes": 911719,
+            "tool_histogram": {
+              "Bash": 111,
+              "Read": 9,
+              "Monitor": 3,
+              "ToolSearch": 1
+            },
+            "reread_paths": [],
+            "distinct_read_paths": 9,
+            "compaction_event_count": 0,
+            "assistant_text_chars": 3958
+          },
+          "delta_since_prior": {
+            "new_read_paths": [],
+            "tool_histogram_delta": {
+              "Bash": 15
+            }
+          },
+          "thrash_top_rereads": [],
+          "tail": [
+            {
+              "turn": 113,
+              "excerpt": "Observed prefix activity. [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padd",
+              "tool_names": [
+                "Bash"
+              ]
+            },
+            {
+              "turn": 114,
+              "excerpt": "Observed prefix activity. [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padd",
+              "tool_names": [
+                "Bash"
+              ]
+            },
+            {
+              "turn": 115,
+              "excerpt": "Observed prefix activity. [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padd",
+              "tool_names": [
+                "Bash"
+              ]
+            },
+            {
+              "turn": 116,
+              "excerpt": "Observed prefix activity. [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padd",
+              "tool_names": [
+                "Bash"
+              ]
+            },
+            {
+              "turn": 117,
+              "excerpt": "Observed prefix activity. [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padd",
+              "tool_names": [
+                "Bash"
+              ]
+            },
+            {
+              "turn": 118,
+              "excerpt": "Observed prefix activity. [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padd",
+              "tool_names": [
+                "Bash"
+              ]
+            },
+            {
+              "turn": 119,
+              "excerpt": "Observed prefix activity. [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padd",
+              "tool_names": [
+                "Bash"
+              ]
+            },
+            {
+              "turn": 120,
+              "excerpt": "Still running. I'll wait for it via a real blocking wait. [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  ",
+              "tool_names": [
+                "Bash"
+              ]
+            }
+          ],
+          "gold_bundle_status": "ok",
+          "shrink_steps": [],
+          "pack_meta": {
+            "source_run": "20261001-202909",
+            "sources": [
+              "036ff3ed4a89-gold-bundles-20261001-202909.jsonl (tail+brief+cumulative)",
+              "036ff3ed4a89-dry-run-thrash-table-20261001-202909.json (top rereads)",
+              "036ff3ed4a89-dry-run-checkpoints-20261001-202909.with-state.jsonl (delta_since_prior)"
+            ],
+            "redaction": "hybrid_v0 N=8 excerpt=400; secrets; home/workspace/mount/tmp-claude paths \u2192 tokens; username scrubbed",
+            "note": "Safe judge pack for GOLD-LABEL-RUBRIC.md. Hybrid_v0 budget (last 8\u00d7400), not full gold 30\u00d7700. Raw gold-bundles/with-state stay gitignored under ubuntu-raw/."
+          },
+          "pack_chars": 2239
+        },
+        {
+          "worker_id": "036ff3ed4a89",
+          "checkpoint_turn": 135,
+          "schedule": {
+            "first_at": 75,
+            "interval": 15
+          },
+          "snapshot_mode": "hybrid_v0",
+          "snapshot_params": {
+            "N": 8,
+            "excerpt": 400
+          },
+          "prior_checkpoint_turn": 120,
+          "brief_anchor": "Repo: <REPO> (branch: master, clean at commit 2112510).\n\nYour task is fully specified in this brief file \u2014 read it first, in full, before doing anything else:\ndocs/plans/01-eval-harness-and-map-layer/briefs/15b-full-build-verify-and-record.md\n\nContext you need that isn't in the brief: a prior unit-15b agent attempt was abandoned (it stalled itself waiting rather than blocking on the wait; per the plan's Long-Running Work rule it was not resumed). The orchestrator ",
+          "api_turns_note": "api_turns = 135",
+          "cumulative": {
+            "api_turns": 135,
+            "peak_ctx_tokens": 137282,
+            "prefix_bytes": 960413,
+            "tool_histogram": {
+              "Bash": 126,
+              "Read": 9,
+              "Monitor": 3,
+              "ToolSearch": 1
+            },
+            "reread_paths": [],
+            "distinct_read_paths": 9,
+            "compaction_event_count": 0,
+            "assistant_text_chars": 3990
+          },
+          "delta_since_prior": {
+            "new_read_paths": [],
+            "tool_histogram_delta": {
+              "Bash": 15
+            }
+          },
+          "thrash_top_rereads": [],
+          "tail": [
+            {
+              "turn": 128,
+              "excerpt": "Observed prefix activity. [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padd",
+              "tool_names": [
+                "Bash"
+              ]
+            },
+            {
+              "turn": 129,
+              "excerpt": "Observed prefix activity. [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padd",
+              "tool_names": [
+                "Bash"
+              ]
+            },
+            {
+              "turn": 130,
+              "excerpt": "Observed prefix activity. [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padd",
+              "tool_names": [
+                "Bash"
+              ]
+            },
+            {
+              "turn": 131,
+              "excerpt": "Observed prefix activity. [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padd",
+              "tool_names": [
+                "Bash"
+              ]
+            },
+            {
+              "turn": 132,
+              "excerpt": "Observed prefix activity. [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padd",
+              "tool_names": [
+                "Bash"
+              ]
+            },
+            {
+              "turn": 133,
+              "excerpt": "Observed prefix activity. [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padd",
+              "tool_names": [
+                "Bash"
+              ]
+            },
+            {
+              "turn": 134,
+              "excerpt": "Observed prefix activity. [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padd",
+              "tool_names": [
+                "Bash"
+              ]
+            },
+            {
+              "turn": 135,
+              "excerpt": "Observed prefix activity. [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padd",
+              "tool_names": [
+                "Bash"
+              ]
+            }
+          ],
+          "gold_bundle_status": "ok",
+          "shrink_steps": [],
+          "pack_meta": {
+            "source_run": "20261001-202909",
+            "sources": [
+              "036ff3ed4a89-gold-bundles-20261001-202909.jsonl (tail+brief+cumulative)",
+              "036ff3ed4a89-dry-run-thrash-table-20261001-202909.json (top rereads)",
+              "036ff3ed4a89-dry-run-checkpoints-20261001-202909.with-state.jsonl (delta_since_prior)"
+            ],
+            "redaction": "hybrid_v0 N=8 excerpt=400; secrets; home/workspace/mount/tmp-claude paths \u2192 tokens; username scrubbed",
+            "note": "Safe judge pack for GOLD-LABEL-RUBRIC.md. Hybrid_v0 budget (last 8\u00d7400), not full gold 30\u00d7700. Raw gold-bundles/with-state stay gitignored under ubuntu-raw/."
+          },
+          "pack_chars": 2182
+        },
+        {
+          "worker_id": "036ff3ed4a89",
+          "checkpoint_turn": 150,
+          "schedule": {
+            "first_at": 75,
+            "interval": 15
+          },
+          "snapshot_mode": "hybrid_v0",
+          "snapshot_params": {
+            "N": 8,
+            "excerpt": 400
+          },
+          "prior_checkpoint_turn": 135,
+          "brief_anchor": "Repo: <REPO> (branch: master, clean at commit 2112510).\n\nYour task is fully specified in this brief file \u2014 read it first, in full, before doing anything else:\ndocs/plans/01-eval-harness-and-map-layer/briefs/15b-full-build-verify-and-record.md\n\nContext you need that isn't in the brief: a prior unit-15b agent attempt was abandoned (it stalled itself waiting rather than blocking on the wait; per the plan's Long-Running Work rule it was not resumed). The orchestrator ",
+          "api_turns_note": "api_turns = 150",
+          "cumulative": {
+            "api_turns": 150,
+            "peak_ctx_tokens": 149921,
+            "prefix_bytes": 1076083,
+            "tool_histogram": {
+              "Bash": 136,
+              "Read": 12,
+              "Monitor": 3,
+              "Edit": 2,
+              "ToolSearch": 1
+            },
+            "reread_paths": [
+              {
+                "path": "<REPO>/docs/plans/01-eval-harness-and-map-layer/PLAN.md",
+                "count": 3
+              }
+            ],
+            "distinct_read_paths": 9,
+            "compaction_event_count": 0,
+            "assistant_text_chars": 4732
+          },
+          "delta_since_prior": {
+            "new_read_paths": [],
+            "tool_histogram_delta": {
+              "Bash": 10,
+              "Read": 3,
+              "Edit": 2
+            }
+          },
+          "thrash_top_rereads": [
+            {
+              "path": "<REPO>/docs/plans/01-eval-harness-and-map-layer/PLAN.md",
+              "count": 3
+            }
+          ],
+          "tail": [
+            {
+              "turn": 143,
+              "excerpt": "Exit code 1 confirmed for compare_disc.py (non-zero, correctly reflecting the FAIL checks \u2014 no exit-code masking issue in the actual harness, only in my earlier test which used a `| tail` pipe). Let's verify the second run's report matches the first for consistency. [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  ",
+              "tool_names": [
+                "Bash"
+              ]
+            },
+            {
+              "turn": 144,
+              "excerpt": "Report is deterministic. Now let's clean up the extra run artifacts and write the documentation. First, clean up output directory back to canonical state. [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]",
+              "tool_names": [
+                "Bash"
+              ]
+            },
+            {
+              "turn": 145,
+              "excerpt": "Good, everything confirmed. Now let's write the documentation. First PLAN.md build record. [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [exce",
+              "tool_names": [
+                "Read"
+              ]
+            },
+            {
+              "turn": 146,
+              "excerpt": "Observed prefix activity. [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padd",
+              "tool_names": [
+                "Read"
+              ]
+            },
+            {
+              "turn": 147,
+              "excerpt": "Now let's append the \"Build record\" section to PLAN.md. [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [e",
+              "tool_names": [
+                "Edit"
+              ]
+            },
+            {
+              "turn": 148,
+              "excerpt": "Now let's update `docs/design/target-disc.md`: add a Deviations column to the file table (WP1 rows only) and update the capacity paragraph. [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padd",
+              "tool_names": [
+                "Read"
+              ]
+            },
+            {
+              "turn": 149,
+              "excerpt": "Observed prefix activity. [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padd",
+              "tool_names": [
+                "Edit"
+              ]
+            },
+            {
+              "turn": 150,
+              "excerpt": "Now the capacity accounting paragraph. [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  [excerpt-padding]  ",
+              "tool_names": [
+                "Bash"
+              ]
+            }
+          ],
+          "gold_bundle_status": "ok",
+          "shrink_steps": [],
+          "pack_meta": {
+            "source_run": "20261001-202909",
+            "sources": [
+              "036ff3ed4a89-gold-bundles-20261001-202909.jsonl (tail+brief+cumulative)",
+              "036ff3ed4a89-dry-run-thrash-table-20261001-202909.json (top rereads)",
+              "036ff3ed4a89-dry-run-checkpoints-20261001-202909.with-state.jsonl (delta_since_prior)"
+            ],
+            "redaction": "hybrid_v0 N=8 excerpt=400; secrets; home/workspace/mount/tmp-claude paths \u2192 tokens; username scrubbed",
+            "note": "Safe judge pack for GOLD-LABEL-RUBRIC.md. Hybrid_v0 budget (last 8\u00d7400), not full gold 30\u00d7700. Raw gold-bundles/with-state stay gitignored under ubuntu-raw/."
+          },
+          "pack_chars": 3119
+        }
+      ]
+    },
+    "checkpoint_turn": 150
+  },
+  "questions": {
+    "shape": {
+      "type": "choice",
+      "instructions": "Shape: late_pivot or early_thrash (or unclear with why).",
+      "criteria": {
+        "late_pivot": "Usable progress for a long stretch, then a clear change of fortune after which continuing is a mistake.",
+        "early_thrash": "Thrash, low progress, or runaway wait/poll is dominant early and extending does not recover a productive trajectory.",
+        "unclear": "Neither shape fits, or the evidence is insufficient; explain why in the text answers."
+      }
+    },
+    "why_T_large": {
+      "type": "noul",
+      "instructions": "Why T is large: what kept the transcript long (productive work, thrash, wait/poll, census, compaction churn, \u2026), turn-anchored."
+    },
+    "inflection_points": {
+      "type": "noul",
+      "instructions": "Inflection points: turn ranges + what changed."
+    },
+    "early_signals": {
+      "type": "noul",
+      "instructions": "Early signals: concrete foreshadowing of the outcome, turn-anchored, only from evidence \u2264 each cited checkpoint."
+    },
+    "recommended_exit_earliness": {
+      "type": "noul",
+      "instructions": "Recommended exit + earliness: exit turn under the shape rule above, and earliness vs ideal."
+    }
+  }
+}

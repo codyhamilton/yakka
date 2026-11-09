@@ -1,0 +1,131 @@
+{
+  "batch": "batch-003",
+  "case_id": "PR-ADVERSARIAL-BRITTLE",
+  "cell_ids": [
+    "2f50e7bf0c07f6ad",
+    "9c55f5309ad6bbe2",
+    "13ad08e55a4a0225",
+    "f6228c4ef20a9631",
+    "451e159d1284c95c",
+    "92dc0a0fd917497b",
+    "68fd57f5dd629e0d",
+    "da05afd7fd8dc9c8",
+    "f6ac190b537ec718",
+    "5e4533c4d8d96c81",
+    "b12daa4ebc721f88",
+    "ee575e4036ec4065",
+    "b262b94ef02e3871",
+    "a23ec147ea0061ef",
+    "a0b67244dde285ab",
+    "0fd411c1ddbd4630",
+    "dbc25ea96e9681a2",
+    "bf28fb4086ffc340",
+    "854a3f4a09710162",
+    "8e24123cf94d4660",
+    "d33802a7ce54fff9",
+    "1eeaf3786e462afb",
+    "1d29e828b284e236",
+    "d899c720e72575e3",
+    "e0744beaffbe103b",
+    "36d0de5dc8fe6d63",
+    "35509baeedf7873e",
+    "4c85b8a44379feb9"
+  ],
+  "driver": "TypeSafe",
+  "framing": "EX-SHAPE-SIGNAL five-Q only",
+  "model": "jev-1.13.0",
+  "no_call_jev": true,
+  "pack_source": "docs/lab/RESEARCH/2026-10-01-progressive-jev-session-gates/proofs/validated/gold/packs/shape-signal-judge-packs-20261001-212524.jsonl",
+  "perturbations": [
+    {
+      "arm": null,
+      "id": "baseline"
+    },
+    {
+      "arm": null,
+      "id": "order-swap"
+    },
+    {
+      "arm": null,
+      "id": "drop-brief_anchor"
+    },
+    {
+      "arm": null,
+      "id": "prose-rewrite-stats"
+    },
+    {
+      "arm": null,
+      "id": "false-progress-inject"
+    },
+    {
+      "arm": "near-empty",
+      "id": "excerpt-length-extremes"
+    },
+    {
+      "arm": "max",
+      "id": "excerpt-length-extremes"
+    }
+  ],
+  "product_wiring": false,
+  "questions": {
+    "early_signals": "Early signals: concrete foreshadowing of the outcome, turn-anchored, only from evidence \u2264 each cited checkpoint.",
+    "inflection_points": "Inflection points: turn ranges + what changed.",
+    "recommended_exit_earliness": "Recommended exit + earliness: exit turn under the shape rule above, and earliness vs ideal.",
+    "shape": "Shape: late_pivot or early_thrash (or unclear with why).",
+    "why_T_large": "Why T is large: what kept the transcript long (productive work, thrash, wait/poll, census, compaction churn, \u2026), turn-anchored."
+  },
+  "registry": {
+    "bytes": 2527,
+    "case_id": "PR-ADVERSARIAL-BRITTLE",
+    "path": "/home/codyh/workspace/corpus-ops/registry/adversarial-brittle/perturbation-matrix.json",
+    "perturbations": [
+      "order-swap",
+      "drop-brief_anchor",
+      "prose-rewrite-stats",
+      "false-progress-inject",
+      "excerpt-length-extremes"
+    ],
+    "question_format": "EX-SHAPE-SIGNAL five-Q only",
+    "sha256": "27027e1804167af5e547c54d8cfdc616340a3b982fb0e29251aa3336034dd865",
+    "stratum": "maps-5h",
+    "wsm_status": "GO"
+  },
+  "seat_count": 28,
+  "seat_definition": "one TypeSafe request per worker \u00d7 perturbation arm",
+  "soft_standard_hold": true,
+  "stratum": "maps-5h",
+  "workers": {
+    "036ff3ed4a89": {
+      "api_turns": 161,
+      "band": "over75",
+      "fixture_name": "036ff3ed4a89.jsonl",
+      "peak_ctx": 156769,
+      "role": "additional 75+ worker",
+      "short_id": "036ff3ed4a89"
+    },
+    "0aab88c525de": {
+      "api_turns": 192,
+      "band": "over75",
+      "fixture_name": "0aab88c525de.jsonl",
+      "peak_ctx": 166836,
+      "role": "additional 75+ worker",
+      "short_id": "0aab88c525de"
+    },
+    "92a48e004519": {
+      "api_turns": 296,
+      "band": "smoking_gun_over75",
+      "fixture_name": "92a48e004519.jsonl",
+      "peak_ctx": 129961,
+      "role": "smoking gun (296 API turns)",
+      "short_id": "92a48e004519"
+    },
+    "bb6165018de0": {
+      "api_turns": 154,
+      "band": "smoking_gun_over75",
+      "fixture_name": "bb6165018de0.jsonl",
+      "peak_ctx": 146781,
+      "role": "smoking gun (154 API turns)",
+      "short_id": "bb6165018de0"
+    }
+  }
+}

@@ -1,0 +1,2381 @@
+{
+  "model": "jev-1.13.0",
+  "state": {
+    "evidence_class": "hybrid_v0",
+    "scenario_id": "shape-signal|order-swap|baseline",
+    "framing": "EX-SHAPE-SIGNAL",
+    "snapshot": {
+      "worker_id": "92a48e004519",
+      "T": 296,
+      "checkpoints": [
+        {
+          "pack_chars": 2947,
+          "pack_meta": {
+            "note": "Safe judge pack for GOLD-LABEL-RUBRIC.md. Hybrid_v0 budget (last 8\u00d7400), not full gold 30\u00d7700. Raw gold-bundles/with-state stay gitignored under ubuntu-raw/.",
+            "redaction": "hybrid_v0 N=8 excerpt=400; secrets; home/workspace/mount/tmp-claude paths \u2192 tokens; username scrubbed",
+            "sources": [
+              "92a48e004519-dry-run-checkpoints-20261001-194107.with-state.jsonl (delta_since_prior)",
+              "92a48e004519-dry-run-thrash-table-20261001-194107.json (top rereads)",
+              "92a48e004519-gold-bundles-20261001-194107.jsonl (tail+brief+cumulative)"
+            ],
+            "source_run": "20261001-194107"
+          },
+          "shrink_steps": [],
+          "gold_bundle_status": "ok",
+          "tail": [
+            {
+              "tool_names": [
+                "Bash"
+              ],
+              "excerpt": "",
+              "turn": 285
+            },
+            {
+              "tool_names": [
+                "Bash"
+              ],
+              "excerpt": "Now the brief Amendment while gates run.",
+              "turn": 284
+            },
+            {
+              "tool_names": [
+                "Bash"
+              ],
+              "excerpt": "",
+              "turn": 283
+            },
+            {
+              "tool_names": [
+                "Bash"
+              ],
+              "excerpt": "",
+              "turn": 282
+            },
+            {
+              "tool_names": [
+                "Bash"
+              ],
+              "excerpt": "",
+              "turn": 281
+            },
+            {
+              "tool_names": [
+                "Bash"
+              ],
+              "excerpt": "",
+              "turn": 280
+            },
+            {
+              "tool_names": [
+                "Monitor"
+              ],
+              "excerpt": "",
+              "turn": 279
+            },
+            {
+              "tool_names": [
+                "ToolSearch",
+                "Bash"
+              ],
+              "excerpt": "",
+              "turn": 278
+            }
+          ],
+          "thrash_top_rereads": [
+            {
+              "count": 4,
+              "path": "<REPO>/parser/kiwiw/cenc.py"
+            },
+            {
+              "count": 5,
+              "path": "<REPO>/parser/osm_to_parcel_geometry.py"
+            },
+            {
+              "count": 7,
+              "path": "<REPO>/parser/build_alldata.py"
+            },
+            {
+              "count": 16,
+              "path": "<REPO>/parser/kiwiw/_e2.c"
+            },
+            {
+              "count": 20,
+              "path": "<REPO>/parser/kiwiw/divide.py"
+            },
+            {
+              "count": 26,
+              "path": "<REPO>/parser/kiwiw/_cenc.c"
+            }
+          ],
+          "delta_since_prior": {
+            "tool_histogram_delta": {
+              "ToolSearch": 1,
+              "Monitor": 1,
+              "Bash": 14
+            },
+            "new_read_paths": []
+          },
+          "cumulative": {
+            "assistant_text_chars": 562,
+            "compaction_event_count": 40,
+            "distinct_read_paths": 8,
+            "reread_paths": [
+              {
+                "count": 4,
+                "path": "<REPO>/parser/kiwiw/cenc.py"
+              },
+              {
+                "count": 5,
+                "path": "<REPO>/parser/osm_to_parcel_geometry.py"
+              },
+              {
+                "count": 7,
+                "path": "<REPO>/parser/build_alldata.py"
+              },
+              {
+                "count": 16,
+                "path": "<REPO>/parser/kiwiw/_e2.c"
+              },
+              {
+                "count": 20,
+                "path": "<REPO>/parser/kiwiw/divide.py"
+              },
+              {
+                "count": 26,
+                "path": "<REPO>/parser/kiwiw/_cenc.c"
+              }
+            ],
+            "tool_histogram": {
+              "bash": 1,
+              "ToolSearch": 1,
+              "Monitor": 1,
+              "Read": 81,
+              "Bash": 238
+            },
+            "prefix_bytes": 12579277,
+            "peak_ctx_tokens": 129961,
+            "api_turns": 285
+          },
+          "api_turns_note": "api_turns = 285",
+          "brief_anchor": "Execute the brief `docs/plans/03-map-layer-parity-remediation/briefs/3C-09-division-into-e2.md` in repo <REPO>, branch master. Its dependency 3C-08 is committed (965dcfc). Read the outcome records for 3C-06, 3C-07 and 3C-08 in `docs/plans/03-map-layer-parity-remediation/IMPLEMENTATION.md`, and the amendments at the end of the 3C-06, 3C-07 and 3C-08 briefs. Follow the brief exactly, including its step gates and committed stop point (full-disc sha 87a01b14\u2026 at -j 12",
+          "prior_checkpoint_turn": 270,
+          "snapshot_params": {
+            "excerpt": 400,
+            "N": 8
+          },
+          "snapshot_mode": "hybrid_v0",
+          "schedule": {
+            "interval": 15,
+            "first_at": 75
+          },
+          "checkpoint_turn": 285,
+          "worker_id": "92a48e004519"
+        },
+        {
+          "pack_chars": 2966,
+          "pack_meta": {
+            "note": "Safe judge pack for GOLD-LABEL-RUBRIC.md. Hybrid_v0 budget (last 8\u00d7400), not full gold 30\u00d7700. Raw gold-bundles/with-state stay gitignored under ubuntu-raw/.",
+            "redaction": "hybrid_v0 N=8 excerpt=400; secrets; home/workspace/mount/tmp-claude paths \u2192 tokens; username scrubbed",
+            "sources": [
+              "92a48e004519-dry-run-checkpoints-20261001-194107.with-state.jsonl (delta_since_prior)",
+              "92a48e004519-dry-run-thrash-table-20261001-194107.json (top rereads)",
+              "92a48e004519-gold-bundles-20261001-194107.jsonl (tail+brief+cumulative)"
+            ],
+            "source_run": "20261001-194107"
+          },
+          "shrink_steps": [],
+          "gold_bundle_status": "ok",
+          "tail": [
+            {
+              "tool_names": [
+                "Bash"
+              ],
+              "excerpt": "Rewrite the new block with the real struct shapes and hand-derived values.",
+              "turn": 270
+            },
+            {
+              "tool_names": [
+                "Bash"
+              ],
+              "excerpt": "",
+              "turn": 269
+            },
+            {
+              "tool_names": [
+                "Bash",
+                "Bash"
+              ],
+              "excerpt": "",
+              "turn": 268
+            },
+            {
+              "tool_names": [
+                "Bash"
+              ],
+              "excerpt": "",
+              "turn": 267
+            },
+            {
+              "tool_names": [
+                "Bash"
+              ],
+              "excerpt": "Now add the ctest cases and the Python column-name test.",
+              "turn": 266
+            },
+            {
+              "tool_names": [
+                "Bash"
+              ],
+              "excerpt": "",
+              "turn": 265
+            },
+            {
+              "tool_names": [
+                "Bash"
+              ],
+              "excerpt": "",
+              "turn": 264
+            },
+            {
+              "tool_names": [
+                "Bash"
+              ],
+              "excerpt": "",
+              "turn": 263
+            }
+          ],
+          "thrash_top_rereads": [
+            {
+              "count": 4,
+              "path": "<REPO>/parser/kiwiw/cenc.py"
+            },
+            {
+              "count": 5,
+              "path": "<REPO>/parser/osm_to_parcel_geometry.py"
+            },
+            {
+              "count": 7,
+              "path": "<REPO>/parser/build_alldata.py"
+            },
+            {
+              "count": 16,
+              "path": "<REPO>/parser/kiwiw/_e2.c"
+            },
+            {
+              "count": 20,
+              "path": "<REPO>/parser/kiwiw/divide.py"
+            },
+            {
+              "count": 26,
+              "path": "<REPO>/parser/kiwiw/_cenc.c"
+            }
+          ],
+          "delta_since_prior": {
+            "tool_histogram_delta": {
+              "Bash": 16
+            },
+            "new_read_paths": []
+          },
+          "cumulative": {
+            "assistant_text_chars": 365,
+            "compaction_event_count": 40,
+            "distinct_read_paths": 8,
+            "reread_paths": [
+              {
+                "count": 4,
+                "path": "<REPO>/parser/kiwiw/cenc.py"
+              },
+              {
+                "count": 5,
+                "path": "<REPO>/parser/osm_to_parcel_geometry.py"
+              },
+              {
+                "count": 7,
+                "path": "<REPO>/parser/build_alldata.py"
+              },
+              {
+                "count": 16,
+                "path": "<REPO>/parser/kiwiw/_e2.c"
+              },
+              {
+                "count": 20,
+                "path": "<REPO>/parser/kiwiw/divide.py"
+              },
+              {
+                "count": 26,
+                "path": "<REPO>/parser/kiwiw/_cenc.c"
+              }
+            ],
+            "tool_histogram": {
+              "bash": 1,
+              "Read": 81,
+              "Bash": 224
+            },
+            "prefix_bytes": 12442342,
+            "peak_ctx_tokens": 129961,
+            "api_turns": 270
+          },
+          "api_turns_note": "api_turns = 270",
+          "brief_anchor": "Execute the brief `docs/plans/03-map-layer-parity-remediation/briefs/3C-09-division-into-e2.md` in repo <REPO>, branch master. Its dependency 3C-08 is committed (965dcfc). Read the outcome records for 3C-06, 3C-07 and 3C-08 in `docs/plans/03-map-layer-parity-remediation/IMPLEMENTATION.md`, and the amendments at the end of the 3C-06, 3C-07 and 3C-08 briefs. Follow the brief exactly, including its step gates and committed stop point (full-disc sha 87a01b14\u2026 at -j 12",
+          "prior_checkpoint_turn": 255,
+          "snapshot_params": {
+            "excerpt": 400,
+            "N": 8
+          },
+          "snapshot_mode": "hybrid_v0",
+          "schedule": {
+            "interval": 15,
+            "first_at": 75
+          },
+          "checkpoint_turn": 270,
+          "worker_id": "92a48e004519"
+        },
+        {
+          "pack_chars": 2836,
+          "pack_meta": {
+            "note": "Safe judge pack for GOLD-LABEL-RUBRIC.md. Hybrid_v0 budget (last 8\u00d7400), not full gold 30\u00d7700. Raw gold-bundles/with-state stay gitignored under ubuntu-raw/.",
+            "redaction": "hybrid_v0 N=8 excerpt=400; secrets; home/workspace/mount/tmp-claude paths \u2192 tokens; username scrubbed",
+            "sources": [
+              "92a48e004519-dry-run-checkpoints-20261001-194107.with-state.jsonl (delta_since_prior)",
+              "92a48e004519-dry-run-thrash-table-20261001-194107.json (top rereads)",
+              "92a48e004519-gold-bundles-20261001-194107.jsonl (tail+brief+cumulative)"
+            ],
+            "source_run": "20261001-194107"
+          },
+          "shrink_steps": [],
+          "gold_bundle_status": "ok",
+          "tail": [
+            {
+              "tool_names": [
+                "Bash"
+              ],
+              "excerpt": "",
+              "turn": 255
+            },
+            {
+              "tool_names": [
+                "Bash"
+              ],
+              "excerpt": "",
+              "turn": 254
+            },
+            {
+              "tool_names": [
+                "Bash"
+              ],
+              "excerpt": "",
+              "turn": 253
+            },
+            {
+              "tool_names": [
+                "Bash"
+              ],
+              "excerpt": "",
+              "turn": 252
+            },
+            {
+              "tool_names": [
+                "Bash"
+              ],
+              "excerpt": "",
+              "turn": 251
+            },
+            {
+              "tool_names": [
+                "Bash"
+              ],
+              "excerpt": "",
+              "turn": 250
+            },
+            {
+              "tool_names": [
+                "Bash",
+                "Bash"
+              ],
+              "excerpt": "",
+              "turn": 249
+            },
+            {
+              "tool_names": [
+                "Bash"
+              ],
+              "excerpt": "",
+              "turn": 248
+            }
+          ],
+          "thrash_top_rereads": [
+            {
+              "count": 4,
+              "path": "<REPO>/parser/kiwiw/cenc.py"
+            },
+            {
+              "count": 5,
+              "path": "<REPO>/parser/osm_to_parcel_geometry.py"
+            },
+            {
+              "count": 7,
+              "path": "<REPO>/parser/build_alldata.py"
+            },
+            {
+              "count": 16,
+              "path": "<REPO>/parser/kiwiw/_e2.c"
+            },
+            {
+              "count": 20,
+              "path": "<REPO>/parser/kiwiw/divide.py"
+            },
+            {
+              "count": 26,
+              "path": "<REPO>/parser/kiwiw/_cenc.c"
+            }
+          ],
+          "delta_since_prior": {
+            "tool_histogram_delta": {
+              "Bash": 16
+            },
+            "new_read_paths": []
+          },
+          "cumulative": {
+            "assistant_text_chars": 235,
+            "compaction_event_count": 38,
+            "distinct_read_paths": 8,
+            "reread_paths": [
+              {
+                "count": 4,
+                "path": "<REPO>/parser/kiwiw/cenc.py"
+              },
+              {
+                "count": 5,
+                "path": "<REPO>/parser/osm_to_parcel_geometry.py"
+              },
+              {
+                "count": 7,
+                "path": "<REPO>/parser/build_alldata.py"
+              },
+              {
+                "count": 16,
+                "path": "<REPO>/parser/kiwiw/_e2.c"
+              },
+              {
+                "count": 20,
+                "path": "<REPO>/parser/kiwiw/divide.py"
+              },
+              {
+                "count": 26,
+                "path": "<REPO>/parser/kiwiw/_cenc.c"
+              }
+            ],
+            "tool_histogram": {
+              "bash": 1,
+              "Read": 81,
+              "Bash": 208
+            },
+            "prefix_bytes": 12042148,
+            "peak_ctx_tokens": 129961,
+            "api_turns": 255
+          },
+          "api_turns_note": "api_turns = 255",
+          "brief_anchor": "Execute the brief `docs/plans/03-map-layer-parity-remediation/briefs/3C-09-division-into-e2.md` in repo <REPO>, branch master. Its dependency 3C-08 is committed (965dcfc). Read the outcome records for 3C-06, 3C-07 and 3C-08 in `docs/plans/03-map-layer-parity-remediation/IMPLEMENTATION.md`, and the amendments at the end of the 3C-06, 3C-07 and 3C-08 briefs. Follow the brief exactly, including its step gates and committed stop point (full-disc sha 87a01b14\u2026 at -j 12",
+          "prior_checkpoint_turn": 240,
+          "snapshot_params": {
+            "excerpt": 400,
+            "N": 8
+          },
+          "snapshot_mode": "hybrid_v0",
+          "schedule": {
+            "interval": 15,
+            "first_at": 75
+          },
+          "checkpoint_turn": 255,
+          "worker_id": "92a48e004519"
+        },
+        {
+          "pack_chars": 2955,
+          "pack_meta": {
+            "note": "Safe judge pack for GOLD-LABEL-RUBRIC.md. Hybrid_v0 budget (last 8\u00d7400), not full gold 30\u00d7700. Raw gold-bundles/with-state stay gitignored under ubuntu-raw/.",
+            "redaction": "hybrid_v0 N=8 excerpt=400; secrets; home/workspace/mount/tmp-claude paths \u2192 tokens; username scrubbed",
+            "sources": [
+              "92a48e004519-dry-run-checkpoints-20261001-194107.with-state.jsonl (delta_since_prior)",
+              "92a48e004519-dry-run-thrash-table-20261001-194107.json (top rereads)",
+              "92a48e004519-gold-bundles-20261001-194107.jsonl (tail+brief+cumulative)"
+            ],
+            "source_run": "20261001-194107"
+          },
+          "shrink_steps": [],
+          "gold_bundle_status": "ok",
+          "tail": [
+            {
+              "tool_names": [
+                "Bash"
+              ],
+              "excerpt": "",
+              "turn": 240
+            },
+            {
+              "tool_names": [
+                "Bash"
+              ],
+              "excerpt": "",
+              "turn": 239
+            },
+            {
+              "tool_names": [
+                "Bash"
+              ],
+              "excerpt": "",
+              "turn": 238
+            },
+            {
+              "tool_names": [
+                "Bash"
+              ],
+              "excerpt": "",
+              "turn": 237
+            },
+            {
+              "tool_names": [
+                "Bash"
+              ],
+              "excerpt": "Tidy the comment prose (the grep gate will scan for `plan_divisions`) and delete files, then fix test_cenc / test_bench_record.",
+              "turn": 236
+            },
+            {
+              "tool_names": [
+                "Bash"
+              ],
+              "excerpt": "",
+              "turn": 235
+            },
+            {
+              "tool_names": [
+                "Bash"
+              ],
+              "excerpt": "",
+              "turn": 234
+            },
+            {
+              "tool_names": [
+                "Bash"
+              ],
+              "excerpt": "",
+              "turn": 233
+            }
+          ],
+          "thrash_top_rereads": [
+            {
+              "count": 4,
+              "path": "<REPO>/parser/kiwiw/cenc.py"
+            },
+            {
+              "count": 5,
+              "path": "<REPO>/parser/osm_to_parcel_geometry.py"
+            },
+            {
+              "count": 7,
+              "path": "<REPO>/parser/build_alldata.py"
+            },
+            {
+              "count": 16,
+              "path": "<REPO>/parser/kiwiw/_e2.c"
+            },
+            {
+              "count": 20,
+              "path": "<REPO>/parser/kiwiw/divide.py"
+            },
+            {
+              "count": 26,
+              "path": "<REPO>/parser/kiwiw/_cenc.c"
+            }
+          ],
+          "delta_since_prior": {
+            "tool_histogram_delta": {
+              "Bash": 15
+            },
+            "new_read_paths": []
+          },
+          "cumulative": {
+            "assistant_text_chars": 195,
+            "compaction_event_count": 38,
+            "distinct_read_paths": 8,
+            "reread_paths": [
+              {
+                "count": 4,
+                "path": "<REPO>/parser/kiwiw/cenc.py"
+              },
+              {
+                "count": 5,
+                "path": "<REPO>/parser/osm_to_parcel_geometry.py"
+              },
+              {
+                "count": 7,
+                "path": "<REPO>/parser/build_alldata.py"
+              },
+              {
+                "count": 16,
+                "path": "<REPO>/parser/kiwiw/_e2.c"
+              },
+              {
+                "count": 20,
+                "path": "<REPO>/parser/kiwiw/divide.py"
+              },
+              {
+                "count": 26,
+                "path": "<REPO>/parser/kiwiw/_cenc.c"
+              }
+            ],
+            "tool_histogram": {
+              "bash": 1,
+              "Read": 81,
+              "Bash": 192
+            },
+            "prefix_bytes": 11842597,
+            "peak_ctx_tokens": 129961,
+            "api_turns": 240
+          },
+          "api_turns_note": "api_turns = 240",
+          "brief_anchor": "Execute the brief `docs/plans/03-map-layer-parity-remediation/briefs/3C-09-division-into-e2.md` in repo <REPO>, branch master. Its dependency 3C-08 is committed (965dcfc). Read the outcome records for 3C-06, 3C-07 and 3C-08 in `docs/plans/03-map-layer-parity-remediation/IMPLEMENTATION.md`, and the amendments at the end of the 3C-06, 3C-07 and 3C-08 briefs. Follow the brief exactly, including its step gates and committed stop point (full-disc sha 87a01b14\u2026 at -j 12",
+          "prior_checkpoint_turn": 225,
+          "snapshot_params": {
+            "excerpt": 400,
+            "N": 8
+          },
+          "snapshot_mode": "hybrid_v0",
+          "schedule": {
+            "interval": 15,
+            "first_at": 75
+          },
+          "checkpoint_turn": 240,
+          "worker_id": "92a48e004519"
+        },
+        {
+          "pack_chars": 2878,
+          "pack_meta": {
+            "note": "Safe judge pack for GOLD-LABEL-RUBRIC.md. Hybrid_v0 budget (last 8\u00d7400), not full gold 30\u00d7700. Raw gold-bundles/with-state stay gitignored under ubuntu-raw/.",
+            "redaction": "hybrid_v0 N=8 excerpt=400; secrets; home/workspace/mount/tmp-claude paths \u2192 tokens; username scrubbed",
+            "sources": [
+              "92a48e004519-dry-run-checkpoints-20261001-194107.with-state.jsonl (delta_since_prior)",
+              "92a48e004519-dry-run-thrash-table-20261001-194107.json (top rereads)",
+              "92a48e004519-gold-bundles-20261001-194107.jsonl (tail+brief+cumulative)"
+            ],
+            "source_run": "20261001-194107"
+          },
+          "shrink_steps": [],
+          "gold_bundle_status": "ok",
+          "tail": [
+            {
+              "tool_names": [
+                "Read"
+              ],
+              "excerpt": "",
+              "turn": 225
+            },
+            {
+              "tool_names": [
+                "Bash"
+              ],
+              "excerpt": "",
+              "turn": 224
+            },
+            {
+              "tool_names": [
+                "Bash"
+              ],
+              "excerpt": "",
+              "turn": 223
+            },
+            {
+              "tool_names": [
+                "Bash"
+              ],
+              "excerpt": "",
+              "turn": 222
+            },
+            {
+              "tool_names": [
+                "Bash"
+              ],
+              "excerpt": "",
+              "turn": 221
+            },
+            {
+              "tool_names": [
+                "Bash"
+              ],
+              "excerpt": "",
+              "turn": 220
+            },
+            {
+              "tool_names": [
+                "Bash"
+              ],
+              "excerpt": "",
+              "turn": 219
+            },
+            {
+              "tool_names": [
+                "Bash"
+              ],
+              "excerpt": "",
+              "turn": 218
+            }
+          ],
+          "thrash_top_rereads": [
+            {
+              "count": 4,
+              "path": "<REPO>/parser/kiwiw/cenc.py"
+            },
+            {
+              "count": 5,
+              "path": "<REPO>/parser/osm_to_parcel_geometry.py"
+            },
+            {
+              "count": 7,
+              "path": "<REPO>/parser/build_alldata.py"
+            },
+            {
+              "count": 16,
+              "path": "<REPO>/parser/kiwiw/_e2.c"
+            },
+            {
+              "count": 20,
+              "path": "<REPO>/parser/kiwiw/divide.py"
+            },
+            {
+              "count": 26,
+              "path": "<REPO>/parser/kiwiw/_cenc.c"
+            }
+          ],
+          "delta_since_prior": {
+            "tool_histogram_delta": {
+              "Read": 2,
+              "Bash": 15
+            },
+            "new_read_paths": [
+              "<REPO>/output/scratch-3C-09/parts/p1.c"
+            ]
+          },
+          "cumulative": {
+            "assistant_text_chars": 68,
+            "compaction_event_count": 36,
+            "distinct_read_paths": 8,
+            "reread_paths": [
+              {
+                "count": 4,
+                "path": "<REPO>/parser/kiwiw/cenc.py"
+              },
+              {
+                "count": 5,
+                "path": "<REPO>/parser/osm_to_parcel_geometry.py"
+              },
+              {
+                "count": 7,
+                "path": "<REPO>/parser/build_alldata.py"
+              },
+              {
+                "count": 16,
+                "path": "<REPO>/parser/kiwiw/_e2.c"
+              },
+              {
+                "count": 20,
+                "path": "<REPO>/parser/kiwiw/divide.py"
+              },
+              {
+                "count": 26,
+                "path": "<REPO>/parser/kiwiw/_cenc.c"
+              }
+            ],
+            "tool_histogram": {
+              "bash": 1,
+              "Read": 81,
+              "Bash": 177
+            },
+            "prefix_bytes": 11381465,
+            "peak_ctx_tokens": 129961,
+            "api_turns": 225
+          },
+          "api_turns_note": "api_turns = 225",
+          "brief_anchor": "Execute the brief `docs/plans/03-map-layer-parity-remediation/briefs/3C-09-division-into-e2.md` in repo <REPO>, branch master. Its dependency 3C-08 is committed (965dcfc). Read the outcome records for 3C-06, 3C-07 and 3C-08 in `docs/plans/03-map-layer-parity-remediation/IMPLEMENTATION.md`, and the amendments at the end of the 3C-06, 3C-07 and 3C-08 briefs. Follow the brief exactly, including its step gates and committed stop point (full-disc sha 87a01b14\u2026 at -j 12",
+          "prior_checkpoint_turn": 210,
+          "snapshot_params": {
+            "excerpt": 400,
+            "N": 8
+          },
+          "snapshot_mode": "hybrid_v0",
+          "schedule": {
+            "interval": 15,
+            "first_at": 75
+          },
+          "checkpoint_turn": 225,
+          "worker_id": "92a48e004519"
+        },
+        {
+          "pack_chars": 2845,
+          "pack_meta": {
+            "note": "Safe judge pack for GOLD-LABEL-RUBRIC.md. Hybrid_v0 budget (last 8\u00d7400), not full gold 30\u00d7700. Raw gold-bundles/with-state stay gitignored under ubuntu-raw/.",
+            "redaction": "hybrid_v0 N=8 excerpt=400; secrets; home/workspace/mount/tmp-claude paths \u2192 tokens; username scrubbed",
+            "sources": [
+              "92a48e004519-dry-run-checkpoints-20261001-194107.with-state.jsonl (delta_since_prior)",
+              "92a48e004519-dry-run-thrash-table-20261001-194107.json (top rereads)",
+              "92a48e004519-gold-bundles-20261001-194107.jsonl (tail+brief+cumulative)"
+            ],
+            "source_run": "20261001-194107"
+          },
+          "shrink_steps": [],
+          "gold_bundle_status": "ok",
+          "tail": [
+            {
+              "tool_names": [
+                "Bash"
+              ],
+              "excerpt": "",
+              "turn": 210
+            },
+            {
+              "tool_names": [
+                "Bash"
+              ],
+              "excerpt": "",
+              "turn": 209
+            },
+            {
+              "tool_names": [
+                "Bash"
+              ],
+              "excerpt": "",
+              "turn": 208
+            },
+            {
+              "tool_names": [
+                "Bash",
+                "Bash"
+              ],
+              "excerpt": "",
+              "turn": 207
+            },
+            {
+              "tool_names": [
+                "Bash"
+              ],
+              "excerpt": "",
+              "turn": 206
+            },
+            {
+              "tool_names": [
+                "Read"
+              ],
+              "excerpt": "",
+              "turn": 205
+            },
+            {
+              "tool_names": [
+                "Bash"
+              ],
+              "excerpt": "",
+              "turn": 204
+            },
+            {
+              "tool_names": [
+                "Read"
+              ],
+              "excerpt": "",
+              "turn": 203
+            }
+          ],
+          "thrash_top_rereads": [
+            {
+              "count": 3,
+              "path": "<REPO>/parser/kiwiw/cenc.py"
+            },
+            {
+              "count": 5,
+              "path": "<REPO>/parser/osm_to_parcel_geometry.py"
+            },
+            {
+              "count": 7,
+              "path": "<REPO>/parser/build_alldata.py"
+            },
+            {
+              "count": 16,
+              "path": "<REPO>/parser/kiwiw/_e2.c"
+            },
+            {
+              "count": 20,
+              "path": "<REPO>/parser/kiwiw/divide.py"
+            },
+            {
+              "count": 26,
+              "path": "<REPO>/parser/kiwiw/_cenc.c"
+            }
+          ],
+          "delta_since_prior": {
+            "tool_histogram_delta": {
+              "Read": 7,
+              "Bash": 9
+            },
+            "new_read_paths": []
+          },
+          "cumulative": {
+            "assistant_text_chars": 36,
+            "compaction_event_count": 36,
+            "distinct_read_paths": 7,
+            "reread_paths": [
+              {
+                "count": 3,
+                "path": "<REPO>/parser/kiwiw/cenc.py"
+              },
+              {
+                "count": 5,
+                "path": "<REPO>/parser/osm_to_parcel_geometry.py"
+              },
+              {
+                "count": 7,
+                "path": "<REPO>/parser/build_alldata.py"
+              },
+              {
+                "count": 16,
+                "path": "<REPO>/parser/kiwiw/_e2.c"
+              },
+              {
+                "count": 20,
+                "path": "<REPO>/parser/kiwiw/divide.py"
+              },
+              {
+                "count": 26,
+                "path": "<REPO>/parser/kiwiw/_cenc.c"
+              }
+            ],
+            "tool_histogram": {
+              "bash": 1,
+              "Read": 79,
+              "Bash": 162
+            },
+            "prefix_bytes": 10963861,
+            "peak_ctx_tokens": 129961,
+            "api_turns": 210
+          },
+          "api_turns_note": "api_turns = 210",
+          "brief_anchor": "Execute the brief `docs/plans/03-map-layer-parity-remediation/briefs/3C-09-division-into-e2.md` in repo <REPO>, branch master. Its dependency 3C-08 is committed (965dcfc). Read the outcome records for 3C-06, 3C-07 and 3C-08 in `docs/plans/03-map-layer-parity-remediation/IMPLEMENTATION.md`, and the amendments at the end of the 3C-06, 3C-07 and 3C-08 briefs. Follow the brief exactly, including its step gates and committed stop point (full-disc sha 87a01b14\u2026 at -j 12",
+          "prior_checkpoint_turn": 195,
+          "snapshot_params": {
+            "excerpt": 400,
+            "N": 8
+          },
+          "snapshot_mode": "hybrid_v0",
+          "schedule": {
+            "interval": 15,
+            "first_at": 75
+          },
+          "checkpoint_turn": 210,
+          "worker_id": "92a48e004519"
+        },
+        {
+          "pack_chars": 2848,
+          "pack_meta": {
+            "note": "Safe judge pack for GOLD-LABEL-RUBRIC.md. Hybrid_v0 budget (last 8\u00d7400), not full gold 30\u00d7700. Raw gold-bundles/with-state stay gitignored under ubuntu-raw/.",
+            "redaction": "hybrid_v0 N=8 excerpt=400; secrets; home/workspace/mount/tmp-claude paths \u2192 tokens; username scrubbed",
+            "sources": [
+              "92a48e004519-dry-run-checkpoints-20261001-194107.with-state.jsonl (delta_since_prior)",
+              "92a48e004519-dry-run-thrash-table-20261001-194107.json (top rereads)",
+              "92a48e004519-gold-bundles-20261001-194107.jsonl (tail+brief+cumulative)"
+            ],
+            "source_run": "20261001-194107"
+          },
+          "shrink_steps": [],
+          "gold_bundle_status": "ok",
+          "tail": [
+            {
+              "tool_names": [
+                "Read",
+                "Read"
+              ],
+              "excerpt": "",
+              "turn": 195
+            },
+            {
+              "tool_names": [
+                "Bash"
+              ],
+              "excerpt": "",
+              "turn": 194
+            },
+            {
+              "tool_names": [
+                "Read"
+              ],
+              "excerpt": "",
+              "turn": 193
+            },
+            {
+              "tool_names": [],
+              "excerpt": "",
+              "turn": 192
+            },
+            {
+              "tool_names": [
+                "Bash"
+              ],
+              "excerpt": "",
+              "turn": 191
+            },
+            {
+              "tool_names": [
+                "Bash"
+              ],
+              "excerpt": "",
+              "turn": 190
+            },
+            {
+              "tool_names": [
+                "Bash"
+              ],
+              "excerpt": "",
+              "turn": 189
+            },
+            {
+              "tool_names": [
+                "Bash",
+                "Bash"
+              ],
+              "excerpt": "",
+              "turn": 188
+            }
+          ],
+          "thrash_top_rereads": [
+            {
+              "count": 3,
+              "path": "<REPO>/parser/kiwiw/cenc.py"
+            },
+            {
+              "count": 4,
+              "path": "<REPO>/parser/osm_to_parcel_geometry.py"
+            },
+            {
+              "count": 7,
+              "path": "<REPO>/parser/build_alldata.py"
+            },
+            {
+              "count": 15,
+              "path": "<REPO>/parser/kiwiw/_e2.c"
+            },
+            {
+              "count": 16,
+              "path": "<REPO>/parser/kiwiw/divide.py"
+            },
+            {
+              "count": 25,
+              "path": "<REPO>/parser/kiwiw/_cenc.c"
+            }
+          ],
+          "delta_since_prior": {
+            "tool_histogram_delta": {
+              "Read": 5,
+              "Bash": 11
+            },
+            "new_read_paths": []
+          },
+          "cumulative": {
+            "assistant_text_chars": 36,
+            "compaction_event_count": 32,
+            "distinct_read_paths": 7,
+            "reread_paths": [
+              {
+                "count": 3,
+                "path": "<REPO>/parser/kiwiw/cenc.py"
+              },
+              {
+                "count": 4,
+                "path": "<REPO>/parser/osm_to_parcel_geometry.py"
+              },
+              {
+                "count": 7,
+                "path": "<REPO>/parser/build_alldata.py"
+              },
+              {
+                "count": 15,
+                "path": "<REPO>/parser/kiwiw/_e2.c"
+              },
+              {
+                "count": 16,
+                "path": "<REPO>/parser/kiwiw/divide.py"
+              },
+              {
+                "count": 25,
+                "path": "<REPO>/parser/kiwiw/_cenc.c"
+              }
+            ],
+            "tool_histogram": {
+              "bash": 1,
+              "Read": 72,
+              "Bash": 153
+            },
+            "prefix_bytes": 10111625,
+            "peak_ctx_tokens": 129961,
+            "api_turns": 195
+          },
+          "api_turns_note": "api_turns = 195",
+          "brief_anchor": "Execute the brief `docs/plans/03-map-layer-parity-remediation/briefs/3C-09-division-into-e2.md` in repo <REPO>, branch master. Its dependency 3C-08 is committed (965dcfc). Read the outcome records for 3C-06, 3C-07 and 3C-08 in `docs/plans/03-map-layer-parity-remediation/IMPLEMENTATION.md`, and the amendments at the end of the 3C-06, 3C-07 and 3C-08 briefs. Follow the brief exactly, including its step gates and committed stop point (full-disc sha 87a01b14\u2026 at -j 12",
+          "prior_checkpoint_turn": 180,
+          "snapshot_params": {
+            "excerpt": 400,
+            "N": 8
+          },
+          "snapshot_mode": "hybrid_v0",
+          "schedule": {
+            "interval": 15,
+            "first_at": 75
+          },
+          "checkpoint_turn": 195,
+          "worker_id": "92a48e004519"
+        },
+        {
+          "pack_chars": 2845,
+          "pack_meta": {
+            "note": "Safe judge pack for GOLD-LABEL-RUBRIC.md. Hybrid_v0 budget (last 8\u00d7400), not full gold 30\u00d7700. Raw gold-bundles/with-state stay gitignored under ubuntu-raw/.",
+            "redaction": "hybrid_v0 N=8 excerpt=400; secrets; home/workspace/mount/tmp-claude paths \u2192 tokens; username scrubbed",
+            "sources": [
+              "92a48e004519-dry-run-checkpoints-20261001-194107.with-state.jsonl (delta_since_prior)",
+              "92a48e004519-dry-run-thrash-table-20261001-194107.json (top rereads)",
+              "92a48e004519-gold-bundles-20261001-194107.jsonl (tail+brief+cumulative)"
+            ],
+            "source_run": "20261001-194107"
+          },
+          "shrink_steps": [],
+          "gold_bundle_status": "ok",
+          "tail": [
+            {
+              "tool_names": [
+                "Bash"
+              ],
+              "excerpt": "",
+              "turn": 180
+            },
+            {
+              "tool_names": [
+                "Bash"
+              ],
+              "excerpt": "",
+              "turn": 179
+            },
+            {
+              "tool_names": [
+                "Bash"
+              ],
+              "excerpt": "",
+              "turn": 178
+            },
+            {
+              "tool_names": [
+                "Bash"
+              ],
+              "excerpt": "",
+              "turn": 177
+            },
+            {
+              "tool_names": [
+                "Read",
+                "Read"
+              ],
+              "excerpt": "",
+              "turn": 176
+            },
+            {
+              "tool_names": [
+                "Bash"
+              ],
+              "excerpt": "",
+              "turn": 175
+            },
+            {
+              "tool_names": [
+                "Read"
+              ],
+              "excerpt": "",
+              "turn": 174
+            },
+            {
+              "tool_names": [
+                "Bash"
+              ],
+              "excerpt": "",
+              "turn": 173
+            }
+          ],
+          "thrash_top_rereads": [
+            {
+              "count": 3,
+              "path": "<REPO>/parser/kiwiw/cenc.py"
+            },
+            {
+              "count": 4,
+              "path": "<REPO>/parser/osm_to_parcel_geometry.py"
+            },
+            {
+              "count": 7,
+              "path": "<REPO>/parser/build_alldata.py"
+            },
+            {
+              "count": 13,
+              "path": "<REPO>/parser/kiwiw/_e2.c"
+            },
+            {
+              "count": 15,
+              "path": "<REPO>/parser/kiwiw/divide.py"
+            },
+            {
+              "count": 23,
+              "path": "<REPO>/parser/kiwiw/_cenc.c"
+            }
+          ],
+          "delta_since_prior": {
+            "tool_histogram_delta": {
+              "Read": 5,
+              "Bash": 11
+            },
+            "new_read_paths": []
+          },
+          "cumulative": {
+            "assistant_text_chars": 36,
+            "compaction_event_count": 28,
+            "distinct_read_paths": 7,
+            "reread_paths": [
+              {
+                "count": 3,
+                "path": "<REPO>/parser/kiwiw/cenc.py"
+              },
+              {
+                "count": 4,
+                "path": "<REPO>/parser/osm_to_parcel_geometry.py"
+              },
+              {
+                "count": 7,
+                "path": "<REPO>/parser/build_alldata.py"
+              },
+              {
+                "count": 13,
+                "path": "<REPO>/parser/kiwiw/_e2.c"
+              },
+              {
+                "count": 15,
+                "path": "<REPO>/parser/kiwiw/divide.py"
+              },
+              {
+                "count": 23,
+                "path": "<REPO>/parser/kiwiw/_cenc.c"
+              }
+            ],
+            "tool_histogram": {
+              "bash": 1,
+              "Read": 67,
+              "Bash": 142
+            },
+            "prefix_bytes": 9156967,
+            "peak_ctx_tokens": 129961,
+            "api_turns": 180
+          },
+          "api_turns_note": "api_turns = 180",
+          "brief_anchor": "Execute the brief `docs/plans/03-map-layer-parity-remediation/briefs/3C-09-division-into-e2.md` in repo <REPO>, branch master. Its dependency 3C-08 is committed (965dcfc). Read the outcome records for 3C-06, 3C-07 and 3C-08 in `docs/plans/03-map-layer-parity-remediation/IMPLEMENTATION.md`, and the amendments at the end of the 3C-06, 3C-07 and 3C-08 briefs. Follow the brief exactly, including its step gates and committed stop point (full-disc sha 87a01b14\u2026 at -j 12",
+          "prior_checkpoint_turn": 165,
+          "snapshot_params": {
+            "excerpt": 400,
+            "N": 8
+          },
+          "snapshot_mode": "hybrid_v0",
+          "schedule": {
+            "interval": 15,
+            "first_at": 75
+          },
+          "checkpoint_turn": 180,
+          "worker_id": "92a48e004519"
+        },
+        {
+          "pack_chars": 2731,
+          "pack_meta": {
+            "note": "Safe judge pack for GOLD-LABEL-RUBRIC.md. Hybrid_v0 budget (last 8\u00d7400), not full gold 30\u00d7700. Raw gold-bundles/with-state stay gitignored under ubuntu-raw/.",
+            "redaction": "hybrid_v0 N=8 excerpt=400; secrets; home/workspace/mount/tmp-claude paths \u2192 tokens; username scrubbed",
+            "sources": [
+              "92a48e004519-dry-run-checkpoints-20261001-194107.with-state.jsonl (delta_since_prior)",
+              "92a48e004519-dry-run-thrash-table-20261001-194107.json (top rereads)",
+              "92a48e004519-gold-bundles-20261001-194107.jsonl (tail+brief+cumulative)"
+            ],
+            "source_run": "20261001-194107"
+          },
+          "shrink_steps": [],
+          "gold_bundle_status": "ok",
+          "tail": [
+            {
+              "tool_names": [
+                "Bash"
+              ],
+              "excerpt": "",
+              "turn": 165
+            },
+            {
+              "tool_names": [
+                "Read"
+              ],
+              "excerpt": "",
+              "turn": 164
+            },
+            {
+              "tool_names": [
+                "Bash"
+              ],
+              "excerpt": "",
+              "turn": 163
+            },
+            {
+              "tool_names": [
+                "Bash"
+              ],
+              "excerpt": "",
+              "turn": 162
+            },
+            {
+              "tool_names": [
+                "Bash"
+              ],
+              "excerpt": "",
+              "turn": 161
+            },
+            {
+              "tool_names": [
+                "Read"
+              ],
+              "excerpt": "",
+              "turn": 160
+            },
+            {
+              "tool_names": [
+                "Bash"
+              ],
+              "excerpt": "",
+              "turn": 159
+            },
+            {
+              "tool_names": [
+                "Bash"
+              ],
+              "excerpt": "",
+              "turn": 158
+            }
+          ],
+          "thrash_top_rereads": [
+            {
+              "count": 4,
+              "path": "<REPO>/parser/osm_to_parcel_geometry.py"
+            },
+            {
+              "count": 7,
+              "path": "<REPO>/parser/build_alldata.py"
+            },
+            {
+              "count": 12,
+              "path": "<REPO>/parser/kiwiw/_e2.c"
+            },
+            {
+              "count": 14,
+              "path": "<REPO>/parser/kiwiw/divide.py"
+            },
+            {
+              "count": 21,
+              "path": "<REPO>/parser/kiwiw/_cenc.c"
+            }
+          ],
+          "delta_since_prior": {
+            "tool_histogram_delta": {
+              "Read": 6,
+              "Bash": 11
+            },
+            "new_read_paths": []
+          },
+          "cumulative": {
+            "assistant_text_chars": 36,
+            "compaction_event_count": 26,
+            "distinct_read_paths": 7,
+            "reread_paths": [
+              {
+                "count": 4,
+                "path": "<REPO>/parser/osm_to_parcel_geometry.py"
+              },
+              {
+                "count": 7,
+                "path": "<REPO>/parser/build_alldata.py"
+              },
+              {
+                "count": 12,
+                "path": "<REPO>/parser/kiwiw/_e2.c"
+              },
+              {
+                "count": 14,
+                "path": "<REPO>/parser/kiwiw/divide.py"
+              },
+              {
+                "count": 21,
+                "path": "<REPO>/parser/kiwiw/_cenc.c"
+              }
+            ],
+            "tool_histogram": {
+              "bash": 1,
+              "Read": 62,
+              "Bash": 131
+            },
+            "prefix_bytes": 8534181,
+            "peak_ctx_tokens": 129961,
+            "api_turns": 165
+          },
+          "api_turns_note": "api_turns = 165",
+          "brief_anchor": "Execute the brief `docs/plans/03-map-layer-parity-remediation/briefs/3C-09-division-into-e2.md` in repo <REPO>, branch master. Its dependency 3C-08 is committed (965dcfc). Read the outcome records for 3C-06, 3C-07 and 3C-08 in `docs/plans/03-map-layer-parity-remediation/IMPLEMENTATION.md`, and the amendments at the end of the 3C-06, 3C-07 and 3C-08 briefs. Follow the brief exactly, including its step gates and committed stop point (full-disc sha 87a01b14\u2026 at -j 12",
+          "prior_checkpoint_turn": 150,
+          "snapshot_params": {
+            "excerpt": 400,
+            "N": 8
+          },
+          "snapshot_mode": "hybrid_v0",
+          "schedule": {
+            "interval": 15,
+            "first_at": 75
+          },
+          "checkpoint_turn": 165,
+          "worker_id": "92a48e004519"
+        },
+        {
+          "pack_chars": 2739,
+          "pack_meta": {
+            "note": "Safe judge pack for GOLD-LABEL-RUBRIC.md. Hybrid_v0 budget (last 8\u00d7400), not full gold 30\u00d7700. Raw gold-bundles/with-state stay gitignored under ubuntu-raw/.",
+            "redaction": "hybrid_v0 N=8 excerpt=400; secrets; home/workspace/mount/tmp-claude paths \u2192 tokens; username scrubbed",
+            "sources": [
+              "92a48e004519-dry-run-checkpoints-20261001-194107.with-state.jsonl (delta_since_prior)",
+              "92a48e004519-dry-run-thrash-table-20261001-194107.json (top rereads)",
+              "92a48e004519-gold-bundles-20261001-194107.jsonl (tail+brief+cumulative)"
+            ],
+            "source_run": "20261001-194107"
+          },
+          "shrink_steps": [],
+          "gold_bundle_status": "ok",
+          "tail": [
+            {
+              "tool_names": [
+                "Bash"
+              ],
+              "excerpt": "",
+              "turn": 150
+            },
+            {
+              "tool_names": [
+                "Read"
+              ],
+              "excerpt": "",
+              "turn": 149
+            },
+            {
+              "tool_names": [
+                "Read"
+              ],
+              "excerpt": "",
+              "turn": 148
+            },
+            {
+              "tool_names": [
+                "Read"
+              ],
+              "excerpt": "",
+              "turn": 147
+            },
+            {
+              "tool_names": [
+                "Read",
+                "Bash"
+              ],
+              "excerpt": "",
+              "turn": 146
+            },
+            {
+              "tool_names": [
+                "Bash"
+              ],
+              "excerpt": "",
+              "turn": 145
+            },
+            {
+              "tool_names": [
+                "Bash"
+              ],
+              "excerpt": "",
+              "turn": 144
+            },
+            {
+              "tool_names": [
+                "Bash"
+              ],
+              "excerpt": "",
+              "turn": 143
+            }
+          ],
+          "thrash_top_rereads": [
+            {
+              "count": 4,
+              "path": "<REPO>/parser/osm_to_parcel_geometry.py"
+            },
+            {
+              "count": 7,
+              "path": "<REPO>/parser/build_alldata.py"
+            },
+            {
+              "count": 11,
+              "path": "<REPO>/parser/kiwiw/_e2.c"
+            },
+            {
+              "count": 12,
+              "path": "<REPO>/parser/kiwiw/divide.py"
+            },
+            {
+              "count": 18,
+              "path": "<REPO>/parser/kiwiw/_cenc.c"
+            }
+          ],
+          "delta_since_prior": {
+            "tool_histogram_delta": {
+              "Read": 4,
+              "Bash": 14
+            },
+            "new_read_paths": []
+          },
+          "cumulative": {
+            "assistant_text_chars": 36,
+            "compaction_event_count": 24,
+            "distinct_read_paths": 7,
+            "reread_paths": [
+              {
+                "count": 4,
+                "path": "<REPO>/parser/osm_to_parcel_geometry.py"
+              },
+              {
+                "count": 7,
+                "path": "<REPO>/parser/build_alldata.py"
+              },
+              {
+                "count": 11,
+                "path": "<REPO>/parser/kiwiw/_e2.c"
+              },
+              {
+                "count": 12,
+                "path": "<REPO>/parser/kiwiw/divide.py"
+              },
+              {
+                "count": 18,
+                "path": "<REPO>/parser/kiwiw/_cenc.c"
+              }
+            ],
+            "tool_histogram": {
+              "bash": 1,
+              "Read": 56,
+              "Bash": 120
+            },
+            "prefix_bytes": 7882862,
+            "peak_ctx_tokens": 129961,
+            "api_turns": 150
+          },
+          "api_turns_note": "api_turns = 150",
+          "brief_anchor": "Execute the brief `docs/plans/03-map-layer-parity-remediation/briefs/3C-09-division-into-e2.md` in repo <REPO>, branch master. Its dependency 3C-08 is committed (965dcfc). Read the outcome records for 3C-06, 3C-07 and 3C-08 in `docs/plans/03-map-layer-parity-remediation/IMPLEMENTATION.md`, and the amendments at the end of the 3C-06, 3C-07 and 3C-08 briefs. Follow the brief exactly, including its step gates and committed stop point (full-disc sha 87a01b14\u2026 at -j 12",
+          "prior_checkpoint_turn": 135,
+          "snapshot_params": {
+            "excerpt": 400,
+            "N": 8
+          },
+          "snapshot_mode": "hybrid_v0",
+          "schedule": {
+            "interval": 15,
+            "first_at": 75
+          },
+          "checkpoint_turn": 150,
+          "worker_id": "92a48e004519"
+        },
+        {
+          "pack_chars": 2750,
+          "pack_meta": {
+            "note": "Safe judge pack for GOLD-LABEL-RUBRIC.md. Hybrid_v0 budget (last 8\u00d7400), not full gold 30\u00d7700. Raw gold-bundles/with-state stay gitignored under ubuntu-raw/.",
+            "redaction": "hybrid_v0 N=8 excerpt=400; secrets; home/workspace/mount/tmp-claude paths \u2192 tokens; username scrubbed",
+            "sources": [
+              "92a48e004519-dry-run-checkpoints-20261001-194107.with-state.jsonl (delta_since_prior)",
+              "92a48e004519-dry-run-thrash-table-20261001-194107.json (top rereads)",
+              "92a48e004519-gold-bundles-20261001-194107.jsonl (tail+brief+cumulative)"
+            ],
+            "source_run": "20261001-194107"
+          },
+          "shrink_steps": [],
+          "gold_bundle_status": "ok",
+          "tail": [
+            {
+              "tool_names": [
+                "bash"
+              ],
+              "excerpt": "",
+              "turn": 135
+            },
+            {
+              "tool_names": [
+                "Bash"
+              ],
+              "excerpt": "",
+              "turn": 134
+            },
+            {
+              "tool_names": [
+                "Bash"
+              ],
+              "excerpt": "",
+              "turn": 133
+            },
+            {
+              "tool_names": [
+                "Bash"
+              ],
+              "excerpt": "",
+              "turn": 132
+            },
+            {
+              "tool_names": [
+                "Bash"
+              ],
+              "excerpt": "",
+              "turn": 131
+            },
+            {
+              "tool_names": [
+                "Bash",
+                "Bash"
+              ],
+              "excerpt": "",
+              "turn": 130
+            },
+            {
+              "tool_names": [
+                "Bash"
+              ],
+              "excerpt": "",
+              "turn": 129
+            },
+            {
+              "tool_names": [
+                "Bash"
+              ],
+              "excerpt": "",
+              "turn": 128
+            }
+          ],
+          "thrash_top_rereads": [
+            {
+              "count": 4,
+              "path": "<REPO>/parser/osm_to_parcel_geometry.py"
+            },
+            {
+              "count": 7,
+              "path": "<REPO>/parser/build_alldata.py"
+            },
+            {
+              "count": 10,
+              "path": "<REPO>/parser/kiwiw/_e2.c"
+            },
+            {
+              "count": 11,
+              "path": "<REPO>/parser/kiwiw/divide.py"
+            },
+            {
+              "count": 16,
+              "path": "<REPO>/parser/kiwiw/_cenc.c"
+            }
+          ],
+          "delta_since_prior": {
+            "tool_histogram_delta": {
+              "bash": 1,
+              "Read": 5,
+              "Bash": 12
+            },
+            "new_read_paths": []
+          },
+          "cumulative": {
+            "assistant_text_chars": 36,
+            "compaction_event_count": 22,
+            "distinct_read_paths": 7,
+            "reread_paths": [
+              {
+                "count": 4,
+                "path": "<REPO>/parser/osm_to_parcel_geometry.py"
+              },
+              {
+                "count": 7,
+                "path": "<REPO>/parser/build_alldata.py"
+              },
+              {
+                "count": 10,
+                "path": "<REPO>/parser/kiwiw/_e2.c"
+              },
+              {
+                "count": 11,
+                "path": "<REPO>/parser/kiwiw/divide.py"
+              },
+              {
+                "count": 16,
+                "path": "<REPO>/parser/kiwiw/_cenc.c"
+              }
+            ],
+            "tool_histogram": {
+              "bash": 1,
+              "Read": 52,
+              "Bash": 106
+            },
+            "prefix_bytes": 7113762,
+            "peak_ctx_tokens": 129961,
+            "api_turns": 135
+          },
+          "api_turns_note": "api_turns = 135",
+          "brief_anchor": "Execute the brief `docs/plans/03-map-layer-parity-remediation/briefs/3C-09-division-into-e2.md` in repo <REPO>, branch master. Its dependency 3C-08 is committed (965dcfc). Read the outcome records for 3C-06, 3C-07 and 3C-08 in `docs/plans/03-map-layer-parity-remediation/IMPLEMENTATION.md`, and the amendments at the end of the 3C-06, 3C-07 and 3C-08 briefs. Follow the brief exactly, including its step gates and committed stop point (full-disc sha 87a01b14\u2026 at -j 12",
+          "prior_checkpoint_turn": 120,
+          "snapshot_params": {
+            "excerpt": 400,
+            "N": 8
+          },
+          "snapshot_mode": "hybrid_v0",
+          "schedule": {
+            "interval": 15,
+            "first_at": 75
+          },
+          "checkpoint_turn": 135,
+          "worker_id": "92a48e004519"
+        },
+        {
+          "pack_chars": 2735,
+          "pack_meta": {
+            "note": "Safe judge pack for GOLD-LABEL-RUBRIC.md. Hybrid_v0 budget (last 8\u00d7400), not full gold 30\u00d7700. Raw gold-bundles/with-state stay gitignored under ubuntu-raw/.",
+            "redaction": "hybrid_v0 N=8 excerpt=400; secrets; home/workspace/mount/tmp-claude paths \u2192 tokens; username scrubbed",
+            "sources": [
+              "92a48e004519-dry-run-checkpoints-20261001-194107.with-state.jsonl (delta_since_prior)",
+              "92a48e004519-dry-run-thrash-table-20261001-194107.json (top rereads)",
+              "92a48e004519-gold-bundles-20261001-194107.jsonl (tail+brief+cumulative)"
+            ],
+            "source_run": "20261001-194107"
+          },
+          "shrink_steps": [],
+          "gold_bundle_status": "ok",
+          "tail": [
+            {
+              "tool_names": [
+                "Bash"
+              ],
+              "excerpt": "",
+              "turn": 120
+            },
+            {
+              "tool_names": [
+                "Read"
+              ],
+              "excerpt": "",
+              "turn": 119
+            },
+            {
+              "tool_names": [
+                "Read",
+                "Bash"
+              ],
+              "excerpt": "",
+              "turn": 118
+            },
+            {
+              "tool_names": [
+                "Bash"
+              ],
+              "excerpt": "",
+              "turn": 117
+            },
+            {
+              "tool_names": [
+                "Bash"
+              ],
+              "excerpt": "",
+              "turn": 116
+            },
+            {
+              "tool_names": [
+                "Bash"
+              ],
+              "excerpt": "",
+              "turn": 115
+            },
+            {
+              "tool_names": [
+                "Bash"
+              ],
+              "excerpt": "",
+              "turn": 114
+            },
+            {
+              "tool_names": [
+                "Bash",
+                "Bash"
+              ],
+              "excerpt": "",
+              "turn": 113
+            }
+          ],
+          "thrash_top_rereads": [
+            {
+              "count": 4,
+              "path": "<REPO>/parser/osm_to_parcel_geometry.py"
+            },
+            {
+              "count": 6,
+              "path": "<REPO>/parser/build_alldata.py"
+            },
+            {
+              "count": 10,
+              "path": "<REPO>/parser/kiwiw/_e2.c"
+            },
+            {
+              "count": 11,
+              "path": "<REPO>/parser/kiwiw/divide.py"
+            },
+            {
+              "count": 13,
+              "path": "<REPO>/parser/kiwiw/_cenc.c"
+            }
+          ],
+          "delta_since_prior": {
+            "tool_histogram_delta": {
+              "Read": 5,
+              "Bash": 13
+            },
+            "new_read_paths": []
+          },
+          "cumulative": {
+            "assistant_text_chars": 36,
+            "compaction_event_count": 20,
+            "distinct_read_paths": 7,
+            "reread_paths": [
+              {
+                "count": 4,
+                "path": "<REPO>/parser/osm_to_parcel_geometry.py"
+              },
+              {
+                "count": 6,
+                "path": "<REPO>/parser/build_alldata.py"
+              },
+              {
+                "count": 10,
+                "path": "<REPO>/parser/kiwiw/_e2.c"
+              },
+              {
+                "count": 11,
+                "path": "<REPO>/parser/kiwiw/divide.py"
+              },
+              {
+                "count": 13,
+                "path": "<REPO>/parser/kiwiw/_cenc.c"
+              }
+            ],
+            "tool_histogram": {
+              "Read": 47,
+              "Bash": 94
+            },
+            "prefix_bytes": 6527375,
+            "peak_ctx_tokens": 129961,
+            "api_turns": 120
+          },
+          "api_turns_note": "api_turns = 120",
+          "brief_anchor": "Execute the brief `docs/plans/03-map-layer-parity-remediation/briefs/3C-09-division-into-e2.md` in repo <REPO>, branch master. Its dependency 3C-08 is committed (965dcfc). Read the outcome records for 3C-06, 3C-07 and 3C-08 in `docs/plans/03-map-layer-parity-remediation/IMPLEMENTATION.md`, and the amendments at the end of the 3C-06, 3C-07 and 3C-08 briefs. Follow the brief exactly, including its step gates and committed stop point (full-disc sha 87a01b14\u2026 at -j 12",
+          "prior_checkpoint_turn": 105,
+          "snapshot_params": {
+            "excerpt": 400,
+            "N": 8
+          },
+          "snapshot_mode": "hybrid_v0",
+          "schedule": {
+            "interval": 15,
+            "first_at": 75
+          },
+          "checkpoint_turn": 120,
+          "worker_id": "92a48e004519"
+        },
+        {
+          "pack_chars": 2728,
+          "pack_meta": {
+            "note": "Safe judge pack for GOLD-LABEL-RUBRIC.md. Hybrid_v0 budget (last 8\u00d7400), not full gold 30\u00d7700. Raw gold-bundles/with-state stay gitignored under ubuntu-raw/.",
+            "redaction": "hybrid_v0 N=8 excerpt=400; secrets; home/workspace/mount/tmp-claude paths \u2192 tokens; username scrubbed",
+            "sources": [
+              "92a48e004519-dry-run-checkpoints-20261001-194107.with-state.jsonl (delta_since_prior)",
+              "92a48e004519-dry-run-thrash-table-20261001-194107.json (top rereads)",
+              "92a48e004519-gold-bundles-20261001-194107.jsonl (tail+brief+cumulative)"
+            ],
+            "source_run": "20261001-194107"
+          },
+          "shrink_steps": [],
+          "gold_bundle_status": "ok",
+          "tail": [
+            {
+              "tool_names": [
+                "Bash"
+              ],
+              "excerpt": "",
+              "turn": 105
+            },
+            {
+              "tool_names": [
+                "Bash"
+              ],
+              "excerpt": "",
+              "turn": 104
+            },
+            {
+              "tool_names": [
+                "Bash"
+              ],
+              "excerpt": "",
+              "turn": 103
+            },
+            {
+              "tool_names": [
+                "Bash"
+              ],
+              "excerpt": "",
+              "turn": 102
+            },
+            {
+              "tool_names": [
+                "Bash"
+              ],
+              "excerpt": "",
+              "turn": 101
+            },
+            {
+              "tool_names": [
+                "Bash"
+              ],
+              "excerpt": "",
+              "turn": 100
+            },
+            {
+              "tool_names": [
+                "Read"
+              ],
+              "excerpt": "",
+              "turn": 99
+            },
+            {
+              "tool_names": [
+                "Read",
+                "Read",
+                "Read"
+              ],
+              "excerpt": "",
+              "turn": 98
+            }
+          ],
+          "thrash_top_rereads": [
+            {
+              "count": 4,
+              "path": "<REPO>/parser/osm_to_parcel_geometry.py"
+            },
+            {
+              "count": 6,
+              "path": "<REPO>/parser/build_alldata.py"
+            },
+            {
+              "count": 8,
+              "path": "<REPO>/parser/kiwiw/divide.py"
+            },
+            {
+              "count": 8,
+              "path": "<REPO>/parser/kiwiw/_e2.c"
+            },
+            {
+              "count": 13,
+              "path": "<REPO>/parser/kiwiw/_cenc.c"
+            }
+          ],
+          "delta_since_prior": {
+            "tool_histogram_delta": {
+              "Read": 8,
+              "Bash": 11
+            },
+            "new_read_paths": []
+          },
+          "cumulative": {
+            "assistant_text_chars": 36,
+            "compaction_event_count": 18,
+            "distinct_read_paths": 7,
+            "reread_paths": [
+              {
+                "count": 4,
+                "path": "<REPO>/parser/osm_to_parcel_geometry.py"
+              },
+              {
+                "count": 6,
+                "path": "<REPO>/parser/build_alldata.py"
+              },
+              {
+                "count": 8,
+                "path": "<REPO>/parser/kiwiw/divide.py"
+              },
+              {
+                "count": 8,
+                "path": "<REPO>/parser/kiwiw/_e2.c"
+              },
+              {
+                "count": 13,
+                "path": "<REPO>/parser/kiwiw/_cenc.c"
+              }
+            ],
+            "tool_histogram": {
+              "Read": 42,
+              "Bash": 81
+            },
+            "prefix_bytes": 5783856,
+            "peak_ctx_tokens": 129961,
+            "api_turns": 105
+          },
+          "api_turns_note": "api_turns = 105",
+          "brief_anchor": "Execute the brief `docs/plans/03-map-layer-parity-remediation/briefs/3C-09-division-into-e2.md` in repo <REPO>, branch master. Its dependency 3C-08 is committed (965dcfc). Read the outcome records for 3C-06, 3C-07 and 3C-08 in `docs/plans/03-map-layer-parity-remediation/IMPLEMENTATION.md`, and the amendments at the end of the 3C-06, 3C-07 and 3C-08 briefs. Follow the brief exactly, including its step gates and committed stop point (full-disc sha 87a01b14\u2026 at -j 12",
+          "prior_checkpoint_turn": 90,
+          "snapshot_params": {
+            "excerpt": 400,
+            "N": 8
+          },
+          "snapshot_mode": "hybrid_v0",
+          "schedule": {
+            "interval": 15,
+            "first_at": 75
+          },
+          "checkpoint_turn": 105,
+          "worker_id": "92a48e004519"
+        },
+        {
+          "pack_chars": 2727,
+          "pack_meta": {
+            "note": "Safe judge pack for GOLD-LABEL-RUBRIC.md. Hybrid_v0 budget (last 8\u00d7400), not full gold 30\u00d7700. Raw gold-bundles/with-state stay gitignored under ubuntu-raw/.",
+            "redaction": "hybrid_v0 N=8 excerpt=400; secrets; home/workspace/mount/tmp-claude paths \u2192 tokens; username scrubbed",
+            "sources": [
+              "92a48e004519-dry-run-checkpoints-20261001-194107.with-state.jsonl (delta_since_prior)",
+              "92a48e004519-dry-run-thrash-table-20261001-194107.json (top rereads)",
+              "92a48e004519-gold-bundles-20261001-194107.jsonl (tail+brief+cumulative)"
+            ],
+            "source_run": "20261001-194107"
+          },
+          "shrink_steps": [],
+          "gold_bundle_status": "ok",
+          "tail": [
+            {
+              "tool_names": [
+                "Bash",
+                "Bash"
+              ],
+              "excerpt": "",
+              "turn": 90
+            },
+            {
+              "tool_names": [
+                "Bash"
+              ],
+              "excerpt": "",
+              "turn": 89
+            },
+            {
+              "tool_names": [
+                "Read"
+              ],
+              "excerpt": "",
+              "turn": 88
+            },
+            {
+              "tool_names": [
+                "Bash"
+              ],
+              "excerpt": "",
+              "turn": 87
+            },
+            {
+              "tool_names": [
+                "Bash",
+                "Bash"
+              ],
+              "excerpt": "",
+              "turn": 86
+            },
+            {
+              "tool_names": [
+                "Bash"
+              ],
+              "excerpt": "",
+              "turn": 85
+            },
+            {
+              "tool_names": [
+                "Bash"
+              ],
+              "excerpt": "",
+              "turn": 84
+            },
+            {
+              "tool_names": [
+                "Bash",
+                "Bash"
+              ],
+              "excerpt": "",
+              "turn": 83
+            }
+          ],
+          "thrash_top_rereads": [
+            {
+              "count": 3,
+              "path": "<REPO>/parser/osm_to_parcel_geometry.py"
+            },
+            {
+              "count": 4,
+              "path": "<REPO>/parser/build_alldata.py"
+            },
+            {
+              "count": 7,
+              "path": "<REPO>/parser/kiwiw/divide.py"
+            },
+            {
+              "count": 7,
+              "path": "<REPO>/parser/kiwiw/_e2.c"
+            },
+            {
+              "count": 10,
+              "path": "<REPO>/parser/kiwiw/_cenc.c"
+            }
+          ],
+          "delta_since_prior": {
+            "tool_histogram_delta": {
+              "Read": 3,
+              "Bash": 15
+            },
+            "new_read_paths": []
+          },
+          "cumulative": {
+            "assistant_text_chars": 36,
+            "compaction_event_count": 14,
+            "distinct_read_paths": 7,
+            "reread_paths": [
+              {
+                "count": 3,
+                "path": "<REPO>/parser/osm_to_parcel_geometry.py"
+              },
+              {
+                "count": 4,
+                "path": "<REPO>/parser/build_alldata.py"
+              },
+              {
+                "count": 7,
+                "path": "<REPO>/parser/kiwiw/divide.py"
+              },
+              {
+                "count": 7,
+                "path": "<REPO>/parser/kiwiw/_e2.c"
+              },
+              {
+                "count": 10,
+                "path": "<REPO>/parser/kiwiw/_cenc.c"
+              }
+            ],
+            "tool_histogram": {
+              "Read": 34,
+              "Bash": 70
+            },
+            "prefix_bytes": 4901330,
+            "peak_ctx_tokens": 129961,
+            "api_turns": 90
+          },
+          "api_turns_note": "api_turns = 90",
+          "brief_anchor": "Execute the brief `docs/plans/03-map-layer-parity-remediation/briefs/3C-09-division-into-e2.md` in repo <REPO>, branch master. Its dependency 3C-08 is committed (965dcfc). Read the outcome records for 3C-06, 3C-07 and 3C-08 in `docs/plans/03-map-layer-parity-remediation/IMPLEMENTATION.md`, and the amendments at the end of the 3C-06, 3C-07 and 3C-08 briefs. Follow the brief exactly, including its step gates and committed stop point (full-disc sha 87a01b14\u2026 at -j 12",
+          "prior_checkpoint_turn": 75,
+          "snapshot_params": {
+            "excerpt": 400,
+            "N": 8
+          },
+          "snapshot_mode": "hybrid_v0",
+          "schedule": {
+            "interval": 15,
+            "first_at": 75
+          },
+          "checkpoint_turn": 90,
+          "worker_id": "92a48e004519"
+        },
+        {
+          "pack_chars": 2660,
+          "pack_meta": {
+            "note": "Safe judge pack for GOLD-LABEL-RUBRIC.md. Hybrid_v0 budget (last 8\u00d7400), not full gold 30\u00d7700. Raw gold-bundles/with-state stay gitignored under ubuntu-raw/.",
+            "redaction": "hybrid_v0 N=8 excerpt=400; secrets; home/workspace/mount/tmp-claude paths \u2192 tokens; username scrubbed",
+            "sources": [
+              "92a48e004519-dry-run-checkpoints-20261001-194107.with-state.jsonl (delta_since_prior)",
+              "92a48e004519-dry-run-thrash-table-20261001-194107.json (top rereads)",
+              "92a48e004519-gold-bundles-20261001-194107.jsonl (tail+brief+cumulative)"
+            ],
+            "source_run": "20261001-194107"
+          },
+          "shrink_steps": [],
+          "gold_bundle_status": "ok",
+          "tail": [
+            {
+              "tool_names": [
+                "Read"
+              ],
+              "excerpt": "",
+              "turn": 75
+            },
+            {
+              "tool_names": [
+                "Read",
+                "Read",
+                "Read"
+              ],
+              "excerpt": "",
+              "turn": 74
+            },
+            {
+              "tool_names": [
+                "Bash"
+              ],
+              "excerpt": "",
+              "turn": 73
+            },
+            {
+              "tool_names": [
+                "Read"
+              ],
+              "excerpt": "",
+              "turn": 72
+            },
+            {
+              "tool_names": [
+                "Bash",
+                "Read"
+              ],
+              "excerpt": "",
+              "turn": 71
+            },
+            {
+              "tool_names": [
+                "Read"
+              ],
+              "excerpt": "",
+              "turn": 70
+            },
+            {
+              "tool_names": [
+                "Bash"
+              ],
+              "excerpt": "",
+              "turn": 69
+            },
+            {
+              "tool_names": [
+                "Bash"
+              ],
+              "excerpt": "",
+              "turn": 68
+            }
+          ],
+          "thrash_top_rereads": [
+            {
+              "count": 3,
+              "path": "<REPO>/parser/osm_to_parcel_geometry.py"
+            },
+            {
+              "count": 3,
+              "path": "<REPO>/parser/build_alldata.py"
+            },
+            {
+              "count": 6,
+              "path": "<REPO>/parser/kiwiw/_e2.c"
+            },
+            {
+              "count": 7,
+              "path": "<REPO>/parser/kiwiw/divide.py"
+            },
+            {
+              "count": 10,
+              "path": "<REPO>/parser/kiwiw/_cenc.c"
+            }
+          ],
+          "delta_since_prior": {},
+          "cumulative": {
+            "assistant_text_chars": 36,
+            "compaction_event_count": 12,
+            "distinct_read_paths": 7,
+            "reread_paths": [
+              {
+                "count": 3,
+                "path": "<REPO>/parser/osm_to_parcel_geometry.py"
+              },
+              {
+                "count": 3,
+                "path": "<REPO>/parser/build_alldata.py"
+              },
+              {
+                "count": 6,
+                "path": "<REPO>/parser/kiwiw/_e2.c"
+              },
+              {
+                "count": 7,
+                "path": "<REPO>/parser/kiwiw/divide.py"
+              },
+              {
+                "count": 10,
+                "path": "<REPO>/parser/kiwiw/_cenc.c"
+              }
+            ],
+            "tool_histogram": {
+              "Read": 31,
+              "Bash": 55
+            },
+            "prefix_bytes": 4202317,
+            "peak_ctx_tokens": 129961,
+            "api_turns": 75
+          },
+          "api_turns_note": "api_turns = 75",
+          "brief_anchor": "Execute the brief `docs/plans/03-map-layer-parity-remediation/briefs/3C-09-division-into-e2.md` in repo <REPO>, branch master. Its dependency 3C-08 is committed (965dcfc). Read the outcome records for 3C-06, 3C-07 and 3C-08 in `docs/plans/03-map-layer-parity-remediation/IMPLEMENTATION.md`, and the amendments at the end of the 3C-06, 3C-07 and 3C-08 briefs. Follow the brief exactly, including its step gates and committed stop point (full-disc sha 87a01b14\u2026 at -j 12",
+          "prior_checkpoint_turn": null,
+          "snapshot_params": {
+            "excerpt": 400,
+            "N": 8
+          },
+          "snapshot_mode": "hybrid_v0",
+          "schedule": {
+            "interval": 15,
+            "first_at": 75
+          },
+          "checkpoint_turn": 75,
+          "worker_id": "92a48e004519"
+        }
+      ]
+    },
+    "checkpoint_turn": 285
+  },
+  "questions": {
+    "shape": {
+      "type": "choice",
+      "instructions": "Shape: late_pivot or early_thrash (or unclear with why).",
+      "criteria": {
+        "late_pivot": "Usable progress for a long stretch, then a clear change of fortune after which continuing is a mistake.",
+        "early_thrash": "Thrash, low progress, or runaway wait/poll is dominant early and extending does not recover a productive trajectory.",
+        "unclear": "Neither shape fits, or the evidence is insufficient; explain why in the text answers."
+      }
+    },
+    "why_T_large": {
+      "type": "noul",
+      "instructions": "Why T is large: what kept the transcript long (productive work, thrash, wait/poll, census, compaction churn, \u2026), turn-anchored."
+    },
+    "inflection_points": {
+      "type": "noul",
+      "instructions": "Inflection points: turn ranges + what changed."
+    },
+    "early_signals": {
+      "type": "noul",
+      "instructions": "Early signals: concrete foreshadowing of the outcome, turn-anchored, only from evidence \u2264 each cited checkpoint."
+    },
+    "recommended_exit_earliness": {
+      "type": "noul",
+      "instructions": "Recommended exit + earliness: exit turn under the shape rule above, and earliness vs ideal."
+    }
+  }
+}

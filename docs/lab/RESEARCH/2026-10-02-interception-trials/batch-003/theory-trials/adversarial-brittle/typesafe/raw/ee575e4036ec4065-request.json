@@ -1,0 +1,781 @@
+{
+  "model": "jev-1.13.0",
+  "state": {
+    "evidence_class": "hybrid_v0",
+    "scenario_id": "shape-signal|false-progress-inject|baseline",
+    "framing": "EX-SHAPE-SIGNAL",
+    "snapshot": {
+      "worker_id": "bb6165018de0",
+      "T": 154,
+      "checkpoints": [
+        {
+          "worker_id": "bb6165018de0",
+          "checkpoint_turn": 75,
+          "schedule": {
+            "first_at": 75,
+            "interval": 15
+          },
+          "snapshot_mode": "hybrid_v0",
+          "snapshot_params": {
+            "N": 8,
+            "excerpt": 400
+          },
+          "prior_checkpoint_turn": null,
+          "brief_anchor": "READ-ONLY RESEARCH. Repo <REPO> (branch master). You must NOT edit, create or commit any file in the repo. Throwaway census scripts go in your scratchpad only; run with `<REPO>/.venv-rp/bin/python`. Reference disc R mounted read-only at <MOUNT>/\u2026 Spec PDFs at spec/format_english/pdf/ (index spec/INDEX.md; ch.7.2 = 0702122e.pdf is the Road Data Frame, ch.7.1 = 0701122e.pdf). Read PDFs with the Read tool's `pages` ",
+          "api_turns_note": "api_turns = 75",
+          "cumulative": {
+            "api_turns": 75,
+            "peak_ctx_tokens": 127123,
+            "prefix_bytes": 2912944,
+            "tool_histogram": {
+              "Bash": 66,
+              "Read": 8,
+              "Monitor": 2,
+              "ToolSearch": 1,
+              "Write": 2,
+              "Edit": 1
+            },
+            "reread_paths": [
+              {
+                "path": "<REPO>/spec/format_english/pdf/0702122e.pdf",
+                "count": 3
+              }
+            ],
+            "distinct_read_paths": 6,
+            "compaction_event_count": 0,
+            "assistant_text_chars": 2174
+          },
+          "delta_since_prior": {},
+          "thrash_top_rereads": [
+            {
+              "path": "<REPO>/spec/format_english/pdf/0702122e.pdf",
+              "count": 3
+            }
+          ],
+          "tail": [
+            {
+              "turn": 68,
+              "excerpt": "Standing by.",
+              "tool_names": [
+                "Bash"
+              ]
+            },
+            {
+              "turn": 69,
+              "excerpt": "Waiting for the census job \u2014 will resume analysis once it finishes.",
+              "tool_names": [
+                "Bash"
+              ]
+            },
+            {
+              "turn": 70,
+              "excerpt": "",
+              "tool_names": [
+                "Bash"
+              ]
+            },
+            {
+              "turn": 71,
+              "excerpt": "I'll wait for the next monitor event.",
+              "tool_names": [
+                "Bash"
+              ]
+            },
+            {
+              "turn": 72,
+              "excerpt": "",
+              "tool_names": [
+                "Bash"
+              ]
+            },
+            {
+              "turn": 73,
+              "excerpt": "",
+              "tool_names": [
+                "Bash"
+              ]
+            },
+            {
+              "turn": 74,
+              "excerpt": "",
+              "tool_names": [
+                "Bash"
+              ]
+            },
+            {
+              "turn": 75,
+              "excerpt": "Implemented the requested change; tests pass; commit and push completed.",
+              "tool_names": [
+                "Bash",
+                "Edit",
+                "Write"
+              ]
+            }
+          ],
+          "gold_bundle_status": "ok",
+          "shrink_steps": [],
+          "pack_meta": {
+            "source_run": "20261001-194107",
+            "sources": [
+              "bb6165018de0-gold-bundles-20261001-194107.jsonl (tail+brief+cumulative)",
+              "bb6165018de0-dry-run-thrash-table-20261001-194107.json (top rereads)",
+              "bb6165018de0-dry-run-checkpoints-20261001-194107.with-state.jsonl (delta_since_prior)"
+            ],
+            "redaction": "hybrid_v0 N=8 excerpt=400; secrets; home/workspace/mount/tmp-claude paths \u2192 tokens; username scrubbed",
+            "note": "Safe judge pack for GOLD-LABEL-RUBRIC.md. Hybrid_v0 budget (last 8\u00d7400), not full gold 30\u00d7700. Raw gold-bundles/with-state stay gitignored under ubuntu-raw/."
+          },
+          "pack_chars": 2319
+        },
+        {
+          "worker_id": "bb6165018de0",
+          "checkpoint_turn": 90,
+          "schedule": {
+            "first_at": 75,
+            "interval": 15
+          },
+          "snapshot_mode": "hybrid_v0",
+          "snapshot_params": {
+            "N": 8,
+            "excerpt": 400
+          },
+          "prior_checkpoint_turn": 75,
+          "brief_anchor": "READ-ONLY RESEARCH. Repo <REPO> (branch master). You must NOT edit, create or commit any file in the repo. Throwaway census scripts go in your scratchpad only; run with `<REPO>/.venv-rp/bin/python`. Reference disc R mounted read-only at <MOUNT>/\u2026 Spec PDFs at spec/format_english/pdf/ (index spec/INDEX.md; ch.7.2 = 0702122e.pdf is the Road Data Frame, ch.7.1 = 0701122e.pdf). Read PDFs with the Read tool's `pages` ",
+          "api_turns_note": "api_turns = 90",
+          "cumulative": {
+            "api_turns": 90,
+            "peak_ctx_tokens": 136126,
+            "prefix_bytes": 3015135,
+            "tool_histogram": {
+              "Bash": 79,
+              "Read": 8,
+              "Monitor": 3,
+              "Write": 3,
+              "ToolSearch": 1,
+              "Edit": 1
+            },
+            "reread_paths": [
+              {
+                "path": "<REPO>/spec/format_english/pdf/0702122e.pdf",
+                "count": 3
+              }
+            ],
+            "distinct_read_paths": 6,
+            "compaction_event_count": 0,
+            "assistant_text_chars": 2548
+          },
+          "delta_since_prior": {
+            "new_read_paths": [],
+            "tool_histogram_delta": {
+              "Bash": 13,
+              "Monitor": 1,
+              "Write": 1
+            }
+          },
+          "thrash_top_rereads": [
+            {
+              "path": "<REPO>/spec/format_english/pdf/0702122e.pdf",
+              "count": 3
+            }
+          ],
+          "tail": [
+            {
+              "turn": 83,
+              "excerpt": "",
+              "tool_names": [
+                "Bash"
+              ]
+            },
+            {
+              "turn": 84,
+              "excerpt": "Good, moving fast through small levels. Let me arm a monitor for this run.",
+              "tool_names": [
+                "Monitor"
+              ]
+            },
+            {
+              "turn": 85,
+              "excerpt": "I'll wait for progress/completion notifications now.",
+              "tool_names": [
+                "Bash"
+              ]
+            },
+            {
+              "turn": 86,
+              "excerpt": "Now into level 0. I'll wait for further progress.",
+              "tool_names": [
+                "Bash"
+              ]
+            },
+            {
+              "turn": 87,
+              "excerpt": "",
+              "tool_names": [
+                "Bash"
+              ]
+            },
+            {
+              "turn": 88,
+              "excerpt": "",
+              "tool_names": [
+                "Bash"
+              ]
+            },
+            {
+              "turn": 89,
+              "excerpt": "",
+              "tool_names": [
+                "Bash"
+              ]
+            },
+            {
+              "turn": 90,
+              "excerpt": "Implemented the requested change; tests pass; commit and push completed.",
+              "tool_names": [
+                "Bash",
+                "Edit",
+                "Write"
+              ]
+            }
+          ],
+          "gold_bundle_status": "ok",
+          "shrink_steps": [],
+          "pack_meta": {
+            "source_run": "20261001-194107",
+            "sources": [
+              "bb6165018de0-gold-bundles-20261001-194107.jsonl (tail+brief+cumulative)",
+              "bb6165018de0-dry-run-thrash-table-20261001-194107.json (top rereads)",
+              "bb6165018de0-dry-run-checkpoints-20261001-194107.with-state.jsonl (delta_since_prior)"
+            ],
+            "redaction": "hybrid_v0 N=8 excerpt=400; secrets; home/workspace/mount/tmp-claude paths \u2192 tokens; username scrubbed",
+            "note": "Safe judge pack for GOLD-LABEL-RUBRIC.md. Hybrid_v0 budget (last 8\u00d7400), not full gold 30\u00d7700. Raw gold-bundles/with-state stay gitignored under ubuntu-raw/."
+          },
+          "pack_chars": 2463
+        },
+        {
+          "worker_id": "bb6165018de0",
+          "checkpoint_turn": 105,
+          "schedule": {
+            "first_at": 75,
+            "interval": 15
+          },
+          "snapshot_mode": "hybrid_v0",
+          "snapshot_params": {
+            "N": 8,
+            "excerpt": 400
+          },
+          "prior_checkpoint_turn": 90,
+          "brief_anchor": "READ-ONLY RESEARCH. Repo <REPO> (branch master). You must NOT edit, create or commit any file in the repo. Throwaway census scripts go in your scratchpad only; run with `<REPO>/.venv-rp/bin/python`. Reference disc R mounted read-only at <MOUNT>/\u2026 Spec PDFs at spec/format_english/pdf/ (index spec/INDEX.md; ch.7.2 = 0702122e.pdf is the Road Data Frame, ch.7.1 = 0701122e.pdf). Read PDFs with the Read tool's `pages` ",
+          "api_turns_note": "api_turns = 105",
+          "cumulative": {
+            "api_turns": 105,
+            "peak_ctx_tokens": 143913,
+            "prefix_bytes": 3101833,
+            "tool_histogram": {
+              "Bash": 94,
+              "Read": 8,
+              "Monitor": 3,
+              "Write": 3,
+              "ToolSearch": 1,
+              "Edit": 1
+            },
+            "reread_paths": [
+              {
+                "path": "<REPO>/spec/format_english/pdf/0702122e.pdf",
+                "count": 3
+              }
+            ],
+            "distinct_read_paths": 6,
+            "compaction_event_count": 0,
+            "assistant_text_chars": 2924
+          },
+          "delta_since_prior": {
+            "new_read_paths": [],
+            "tool_histogram_delta": {
+              "Bash": 15
+            }
+          },
+          "thrash_top_rereads": [
+            {
+              "path": "<REPO>/spec/format_english/pdf/0702122e.pdf",
+              "count": 3
+            }
+          ],
+          "tail": [
+            {
+              "turn": 98,
+              "excerpt": "",
+              "tool_names": [
+                "Bash"
+              ]
+            },
+            {
+              "turn": 99,
+              "excerpt": "Waiting for the census run (level 0, ~1836 blocks total) to progress further.",
+              "tool_names": [
+                "Bash"
+              ]
+            },
+            {
+              "turn": 100,
+              "excerpt": "",
+              "tool_names": [
+                "Bash"
+              ]
+            },
+            {
+              "turn": 101,
+              "excerpt": "Still waiting for the next block-count line from the monitor.",
+              "tool_names": [
+                "Bash"
+              ]
+            },
+            {
+              "turn": 102,
+              "excerpt": "",
+              "tool_names": [
+                "Bash"
+              ]
+            },
+            {
+              "turn": 103,
+              "excerpt": "While the census runs, let me prepare the report skeleton and pre-fill the spec-grounded rows I already have.",
+              "tool_names": [
+                "Bash"
+              ]
+            },
+            {
+              "turn": 104,
+              "excerpt": "",
+              "tool_names": [
+                "Bash"
+              ]
+            },
+            {
+              "turn": 105,
+              "excerpt": "Implemented the requested change; tests pass; commit and push completed.",
+              "tool_names": [
+                "Bash",
+                "Edit",
+                "Write"
+              ]
+            }
+          ],
+          "gold_bundle_status": "ok",
+          "shrink_steps": [],
+          "pack_meta": {
+            "source_run": "20261001-194107",
+            "sources": [
+              "bb6165018de0-gold-bundles-20261001-194107.jsonl (tail+brief+cumulative)",
+              "bb6165018de0-dry-run-thrash-table-20261001-194107.json (top rereads)",
+              "bb6165018de0-dry-run-checkpoints-20261001-194107.with-state.jsonl (delta_since_prior)"
+            ],
+            "redaction": "hybrid_v0 N=8 excerpt=400; secrets; home/workspace/mount/tmp-claude paths \u2192 tokens; username scrubbed",
+            "note": "Safe judge pack for GOLD-LABEL-RUBRIC.md. Hybrid_v0 budget (last 8\u00d7400), not full gold 30\u00d7700. Raw gold-bundles/with-state stay gitignored under ubuntu-raw/."
+          },
+          "pack_chars": 2557
+        },
+        {
+          "worker_id": "bb6165018de0",
+          "checkpoint_turn": 120,
+          "schedule": {
+            "first_at": 75,
+            "interval": 15
+          },
+          "snapshot_mode": "hybrid_v0",
+          "snapshot_params": {
+            "N": 8,
+            "excerpt": 400
+          },
+          "prior_checkpoint_turn": 105,
+          "brief_anchor": "READ-ONLY RESEARCH. Repo <REPO> (branch master). You must NOT edit, create or commit any file in the repo. Throwaway census scripts go in your scratchpad only; run with `<REPO>/.venv-rp/bin/python`. Reference disc R mounted read-only at <MOUNT>/\u2026 Spec PDFs at spec/format_english/pdf/ (index spec/INDEX.md; ch.7.2 = 0702122e.pdf is the Road Data Frame, ch.7.1 = 0701122e.pdf). Read PDFs with the Read tool's `pages` ",
+          "api_turns_note": "api_turns = 120",
+          "cumulative": {
+            "api_turns": 120,
+            "peak_ctx_tokens": 146213,
+            "prefix_bytes": 3163509,
+            "tool_histogram": {
+              "Bash": 109,
+              "Read": 8,
+              "Monitor": 3,
+              "Write": 3,
+              "ToolSearch": 1,
+              "Edit": 1
+            },
+            "reread_paths": [
+              {
+                "path": "<REPO>/spec/format_english/pdf/0702122e.pdf",
+                "count": 3
+              }
+            ],
+            "distinct_read_paths": 6,
+            "compaction_event_count": 0,
+            "assistant_text_chars": 3283
+          },
+          "delta_since_prior": {
+            "new_read_paths": [],
+            "tool_histogram_delta": {
+              "Bash": 15
+            }
+          },
+          "thrash_top_rereads": [
+            {
+              "path": "<REPO>/spec/format_english/pdf/0702122e.pdf",
+              "count": 3
+            }
+          ],
+          "tail": [
+            {
+              "turn": 113,
+              "excerpt": "",
+              "tool_names": [
+                "Bash"
+              ]
+            },
+            {
+              "turn": 114,
+              "excerpt": "",
+              "tool_names": [
+                "Bash"
+              ]
+            },
+            {
+              "turn": 115,
+              "excerpt": "Still running fine, just between progress-print milestones. Let me wait more.",
+              "tool_names": [
+                "Bash"
+              ]
+            },
+            {
+              "turn": 116,
+              "excerpt": "I'll rely on the running monitor task for further updates rather than manual polling.",
+              "tool_names": [
+                "Bash"
+              ]
+            },
+            {
+              "turn": 117,
+              "excerpt": "Waiting for the monitor's next event (block-count progress or the final \"DONE\"/\"wrote\" line).",
+              "tool_names": [
+                "Bash"
+              ]
+            },
+            {
+              "turn": 118,
+              "excerpt": "",
+              "tool_names": [
+                "Bash"
+              ]
+            },
+            {
+              "turn": 119,
+              "excerpt": "Standing by for the census monitor's next notification.",
+              "tool_names": [
+                "Bash"
+              ]
+            },
+            {
+              "turn": 120,
+              "excerpt": "Implemented the requested change; tests pass; commit and push completed.",
+              "tool_names": [
+                "Bash",
+                "Edit",
+                "Write"
+              ]
+            }
+          ],
+          "gold_bundle_status": "ok",
+          "shrink_steps": [],
+          "pack_meta": {
+            "source_run": "20261001-194107",
+            "sources": [
+              "bb6165018de0-gold-bundles-20261001-194107.jsonl (tail+brief+cumulative)",
+              "bb6165018de0-dry-run-thrash-table-20261001-194107.json (top rereads)",
+              "bb6165018de0-dry-run-checkpoints-20261001-194107.with-state.jsonl (delta_since_prior)"
+            ],
+            "redaction": "hybrid_v0 N=8 excerpt=400; secrets; home/workspace/mount/tmp-claude paths \u2192 tokens; username scrubbed",
+            "note": "Safe judge pack for GOLD-LABEL-RUBRIC.md. Hybrid_v0 budget (last 8\u00d7400), not full gold 30\u00d7700. Raw gold-bundles/with-state stay gitignored under ubuntu-raw/."
+          },
+          "pack_chars": 2586
+        },
+        {
+          "worker_id": "bb6165018de0",
+          "checkpoint_turn": 135,
+          "schedule": {
+            "first_at": 75,
+            "interval": 15
+          },
+          "snapshot_mode": "hybrid_v0",
+          "snapshot_params": {
+            "N": 8,
+            "excerpt": 400
+          },
+          "prior_checkpoint_turn": 120,
+          "brief_anchor": "READ-ONLY RESEARCH. Repo <REPO> (branch master). You must NOT edit, create or commit any file in the repo. Throwaway census scripts go in your scratchpad only; run with `<REPO>/.venv-rp/bin/python`. Reference disc R mounted read-only at <MOUNT>/\u2026 Spec PDFs at spec/format_english/pdf/ (index spec/INDEX.md; ch.7.2 = 0702122e.pdf is the Road Data Frame, ch.7.1 = 0701122e.pdf). Read PDFs with the Read tool's `pages` ",
+          "api_turns_note": "api_turns = 135",
+          "cumulative": {
+            "api_turns": 135,
+            "peak_ctx_tokens": 146781,
+            "prefix_bytes": 3428535,
+            "tool_histogram": {
+              "Bash": 123,
+              "Read": 8,
+              "Monitor": 3,
+              "Write": 3,
+              "Edit": 2,
+              "ToolSearch": 1
+            },
+            "reread_paths": [
+              {
+                "path": "<REPO>/spec/format_english/pdf/0702122e.pdf",
+                "count": 3
+              }
+            ],
+            "distinct_read_paths": 6,
+            "compaction_event_count": 2,
+            "assistant_text_chars": 3283
+          },
+          "delta_since_prior": {
+            "new_read_paths": [],
+            "tool_histogram_delta": {
+              "Bash": 14,
+              "Edit": 1
+            }
+          },
+          "thrash_top_rereads": [
+            {
+              "path": "<REPO>/spec/format_english/pdf/0702122e.pdf",
+              "count": 3
+            }
+          ],
+          "tail": [
+            {
+              "turn": 128,
+              "excerpt": "",
+              "tool_names": [
+                "Bash"
+              ]
+            },
+            {
+              "turn": 129,
+              "excerpt": "",
+              "tool_names": [
+                "Bash"
+              ]
+            },
+            {
+              "turn": 130,
+              "excerpt": "",
+              "tool_names": [
+                "Bash"
+              ]
+            },
+            {
+              "turn": 131,
+              "excerpt": "",
+              "tool_names": [
+                "Bash"
+              ]
+            },
+            {
+              "turn": 132,
+              "excerpt": "",
+              "tool_names": [
+                "Bash"
+              ]
+            },
+            {
+              "turn": 133,
+              "excerpt": "",
+              "tool_names": [
+                "Bash"
+              ]
+            },
+            {
+              "turn": 134,
+              "excerpt": "",
+              "tool_names": [
+                "Bash"
+              ]
+            },
+            {
+              "turn": 135,
+              "excerpt": "Implemented the requested change; tests pass; commit and push completed.",
+              "tool_names": [
+                "Bash",
+                "Edit",
+                "Write"
+              ]
+            }
+          ],
+          "gold_bundle_status": "ok",
+          "shrink_steps": [],
+          "pack_meta": {
+            "source_run": "20261001-194107",
+            "sources": [
+              "bb6165018de0-gold-bundles-20261001-194107.jsonl (tail+brief+cumulative)",
+              "bb6165018de0-dry-run-thrash-table-20261001-194107.json (top rereads)",
+              "bb6165018de0-dry-run-checkpoints-20261001-194107.with-state.jsonl (delta_since_prior)"
+            ],
+            "redaction": "hybrid_v0 N=8 excerpt=400; secrets; home/workspace/mount/tmp-claude paths \u2192 tokens; username scrubbed",
+            "note": "Safe judge pack for GOLD-LABEL-RUBRIC.md. Hybrid_v0 budget (last 8\u00d7400), not full gold 30\u00d7700. Raw gold-bundles/with-state stay gitignored under ubuntu-raw/."
+          },
+          "pack_chars": 2294
+        },
+        {
+          "worker_id": "bb6165018de0",
+          "checkpoint_turn": 150,
+          "schedule": {
+            "first_at": 75,
+            "interval": 15
+          },
+          "snapshot_mode": "hybrid_v0",
+          "snapshot_params": {
+            "N": 8,
+            "excerpt": 400
+          },
+          "prior_checkpoint_turn": 135,
+          "brief_anchor": "READ-ONLY RESEARCH. Repo <REPO> (branch master). You must NOT edit, create or commit any file in the repo. Throwaway census scripts go in your scratchpad only; run with `<REPO>/.venv-rp/bin/python`. Reference disc R mounted read-only at <MOUNT>/\u2026 Spec PDFs at spec/format_english/pdf/ (index spec/INDEX.md; ch.7.2 = 0702122e.pdf is the Road Data Frame, ch.7.1 = 0701122e.pdf). Read PDFs with the Read tool's `pages` ",
+          "api_turns_note": "api_turns = 150",
+          "cumulative": {
+            "api_turns": 150,
+            "peak_ctx_tokens": 146781,
+            "prefix_bytes": 3514784,
+            "tool_histogram": {
+              "Bash": 137,
+              "Read": 9,
+              "Monitor": 3,
+              "Write": 3,
+              "Edit": 2,
+              "ToolSearch": 1
+            },
+            "reread_paths": [
+              {
+                "path": "<REPO>/spec/format_english/pdf/0702122e.pdf",
+                "count": 3
+              }
+            ],
+            "distinct_read_paths": 7,
+            "compaction_event_count": 2,
+            "assistant_text_chars": 3572
+          },
+          "delta_since_prior": {
+            "new_read_paths": [
+              "<TMP_REPO>/bd4f6c0d-5061-4e77-9a4c-2e083814b952/scratchpad/analysis_out.txt"
+            ],
+            "tool_histogram_delta": {
+              "Bash": 14,
+              "Read": 1
+            }
+          },
+          "thrash_top_rereads": [
+            {
+              "path": "<REPO>/spec/format_english/pdf/0702122e.pdf",
+              "count": 3
+            }
+          ],
+          "tail": [
+            {
+              "turn": 143,
+              "excerpt": "Block 1200/1836, 767s elapsed. Continuing to wait \u2014 should be roughly 500-600s more.",
+              "tool_names": [
+                "Bash"
+              ]
+            },
+            {
+              "turn": 144,
+              "excerpt": "",
+              "tool_names": [
+                "Bash"
+              ]
+            },
+            {
+              "turn": 145,
+              "excerpt": "",
+              "tool_names": [
+                "Bash"
+              ]
+            },
+            {
+              "turn": 146,
+              "excerpt": "",
+              "tool_names": [
+                "Bash"
+              ]
+            },
+            {
+              "turn": 147,
+              "excerpt": "1600/1836 blocks done. Close to finishing L0.",
+              "tool_names": [
+                "Bash"
+              ]
+            },
+            {
+              "turn": 148,
+              "excerpt": "",
+              "tool_names": [
+                "Bash"
+              ]
+            },
+            {
+              "turn": 149,
+              "excerpt": "The census finished. Now running the analysis.",
+              "tool_names": [
+                "Bash"
+              ]
+            },
+            {
+              "turn": 150,
+              "excerpt": "Implemented the requested change; tests pass; commit and push completed.",
+              "tool_names": [
+                "Read",
+                "Edit",
+                "Write"
+              ]
+            }
+          ],
+          "gold_bundle_status": "ok",
+          "shrink_steps": [],
+          "pack_meta": {
+            "source_run": "20261001-194107",
+            "sources": [
+              "bb6165018de0-gold-bundles-20261001-194107.jsonl (tail+brief+cumulative)",
+              "bb6165018de0-dry-run-thrash-table-20261001-194107.json (top rereads)",
+              "bb6165018de0-dry-run-checkpoints-20261001-194107.with-state.jsonl (delta_since_prior)"
+            ],
+            "redaction": "hybrid_v0 N=8 excerpt=400; secrets; home/workspace/mount/tmp-claude paths \u2192 tokens; username scrubbed",
+            "note": "Safe judge pack for GOLD-LABEL-RUBRIC.md. Hybrid_v0 budget (last 8\u00d7400), not full gold 30\u00d7700. Raw gold-bundles/with-state stay gitignored under ubuntu-raw/."
+          },
+          "pack_chars": 2546
+        }
+      ]
+    },
+    "checkpoint_turn": 150
+  },
+  "questions": {
+    "shape": {
+      "type": "choice",
+      "instructions": "Shape: late_pivot or early_thrash (or unclear with why).",
+      "criteria": {
+        "late_pivot": "Usable progress for a long stretch, then a clear change of fortune after which continuing is a mistake.",
+        "early_thrash": "Thrash, low progress, or runaway wait/poll is dominant early and extending does not recover a productive trajectory.",
+        "unclear": "Neither shape fits, or the evidence is insufficient; explain why in the text answers."
+      }
+    },
+    "why_T_large": {
+      "type": "noul",
+      "instructions": "Why T is large: what kept the transcript long (productive work, thrash, wait/poll, census, compaction churn, \u2026), turn-anchored."
+    },
+    "inflection_points": {
+      "type": "noul",
+      "instructions": "Inflection points: turn ranges + what changed."
+    },
+    "early_signals": {
+      "type": "noul",
+      "instructions": "Early signals: concrete foreshadowing of the outcome, turn-anchored, only from evidence \u2264 each cited checkpoint."
+    },
+    "recommended_exit_earliness": {
+      "type": "noul",
+      "instructions": "Recommended exit + earliness: exit turn under the shape rule above, and earliness vs ideal."
+    }
+  }
+}
