@@ -420,6 +420,7 @@ Headless: no human sign-off checkpoint. The six earlier additions and two Cody q
 - Does the Fly proxy or any harness's MCP tool timeout cut a call of about two minutes? Settled by the smoke test; Assumption 7 holds the fallback.
 - Will the operator deepen history or supply a PR-review export before the manifest is frozen? Affects reaching ≥50 completed reviews at each effort, not any build phase; report shortfalls.
 - Does plan 22's session binding land, and which candidate? Affects only how often `session_binding` reads `bound`.
+- **Phase 4 refinement bounced (2026-11-09):** Phase 3's outcome requires `criteria_ambiguous` when two repositories match, but the Phase 3 brief and implementation bind every lookup to a supplied `repo_id`, and the criteria contract says resolution never searches across repositories. The Phase 3 Carried note asks whether the two-repository case applies only when no captured `repo_id` exists. Resolve whether repository inference is supported when capture identity is absent, or remove/restate the two-repository ambiguity case consistently in the criteria contract and Phase 3 outcome. Phase 4's `refused_criteria` contract depends on the settled Phase 3 resolver behavior; no Phase 4 briefs or Units list are authored until this is resolved.
 
 ## Phases
 
