@@ -489,6 +489,14 @@ All seven phases are provable offline against local fixtures and an injected fak
 - Surfaces: `tools/shadow-review-trial/` (run, report, smoke), the Phase 4 REST entry it drives with the user's Yakka login, a lab record location under `docs/lab/RESEARCH/` for the later trial and smoke reports.
 - Approach: known
 - Depends on: Phases 4 and 6
+- Carried from Phase 6:
+  - Absorbed into 7-01: preserve Phase 4's REST `skipped_duplicate` receipt with its canonical review reference; reconcile it against stored review records and never count it as a completed case/effort. Resume the unchanged manifest without repeating a started case/effort call.
+  - Bounced to a future Phase 1 refinement: the `_capture_blob` per-file-cap memory issue remains outside Phase 7's scope.
+  - Preserved as a boundary for 7-01 and 7-03: the no-network/environment guarantee applies to `internal/review/build.go`; do not change or broaden that boundary.
+- Units:
+  - **7-01 — Historical trial runner and dry-run estimates** — `briefs/7-01-trial-runner.md`; depends on Phase 6; may run alongside 7-02. Owns persisted per-case/per-effort progress, authenticated REST request mechanics, dry-run projection, retries, resume and duplicate handling.
+  - **7-02 — Alignment report and adjudication inputs** — `briefs/7-02-alignment-report.md`; depends on Phase 6; may run alongside 7-01. Owns report calculation from the frozen manifest, full review records, comparator evidence and manual adjudications.
+  - **7-03 — CLI, fake-endpoint smoke and rehearsal integration** — `briefs/7-03-cli-smoke-rehearsal.md`; depends on 7-01 and 7-02; runs after both. Owns command composition and fixture-only end-to-end evidence across manifest, runner, adjudication and report.
 
 ## Provenance Notes
 
