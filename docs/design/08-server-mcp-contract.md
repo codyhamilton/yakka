@@ -129,6 +129,11 @@ but the server trusts neither place.
 
 ### Trust
 
+The [Plan 23 follow-up amendment](../plans/23-llm-review-shadow/DESIGN.md) designs full cached
+duplicate replies, effort/tags/store call controls and tenant-bound cursor paging through a new
+`list_reviews` tool. It preserves server-owned definitions and credential-derived tenancy.
+These are pending contracts; the reference-only duplicate behavior below is the landed baseline.
+
 `_local` and `arguments` are claims by the caller. A handler may use them to word an answer, to select
 a row inside the caller's own tenant (for example `(repo_id, rel_path)`), or to compare hashes. It must
 not use them to choose a tenant, open a path, run a command, build a URL or SQL text, or decide

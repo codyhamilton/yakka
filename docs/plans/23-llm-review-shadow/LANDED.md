@@ -1,3 +1,5 @@
+> Historical baseline from merged PR #210 (`299bded`). This record preserves the completed build; the sibling DESIGN.md amends the contracts and is the sole follow-up design authority. Statements about duplicate receipts, the trial gate and retrieval limits below describe that baseline.
+
 # Single-call LLM review, shadow mode
 
 Plan 23 added an advisory, single-call Claude review path to Yakka. It captures a bounded local change, resolves review criteria, builds a deterministic role-first packet, calls the provider through the authenticated server, validates and stores the result, and exposes it through MCP beside existing reviews. It also added offline tooling to freeze historical cases, run fixture-backed trial workflows, and calculate alignment reports. All seven designed phases were proved with fixtures and fake endpoints; the later paid historical trial and deployed smoke test remain operator work.
