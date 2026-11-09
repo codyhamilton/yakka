@@ -100,6 +100,25 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual(len(summary["estimates"]), 6)
         self.assertTrue(all(r["retry_inclusive_usd"] == 0.5 for r in summary["estimates"]))
 
+    def test_build_request_uses_resolved_range_head_and_preserves_head_fixtures(self):
+        data = frozen(1)
+        case = data["cases"][0]
+        checkout_head = "f" * 40
+        case["capture"]["head"] = checkout_head
+        case["capture"]["resolved_head"] = case["head_sha"]
+        request = runner.build_request(data, case, "high", True)
+        self.assertEqual(request["capture"]["head"], case["head_sha"])
+        self.assertEqual(request["capture"]["base"], case["base_sha"])
+
+        del case["capture"]["resolved_head"]
+        case["capture"]["head"] = case["head_sha"]
+        fixture_request = runner.build_request(data, case, "high", True)
+        self.assertEqual(fixture_request["capture"]["head"], case["head_sha"])
+
+        case["capture"]["resolved_head"] = "e" * 40
+        with self.assertRaisesRegex(runner.RunnerError, "differs from its frozen range"):
+            runner.build_request(data, case, "high", True)
+
     def test_effort_arms_change_only_trial_effort_and_cap_refusal_precedes_live_posts(self):
         fake = FakeREST(estimate=0.3)
         summary = self.execute(1, fake, cap=1.79, execute=True)

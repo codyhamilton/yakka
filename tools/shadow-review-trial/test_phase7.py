@@ -25,6 +25,7 @@ def git(repo, *args):
 
 class RehearsalHandler(http.server.BaseHTTPRequestHandler):
     records = []
+    requests = []
     model_calls = 0
 
     def log_message(self, *_args):
@@ -43,6 +44,7 @@ class RehearsalHandler(http.server.BaseHTTPRequestHandler):
             self._send(401, {"error": "unauthorized"})
             return
         payload = json.loads(self.rfile.read(int(self.headers.get("Content-Length", "0"))))
+        type(self).requests.append(payload)
         trial = payload["trial"]
         if payload["dry_run"]:
             self._send(200, {"status": "dry_run", "estimated_usd": 0.01})
@@ -115,6 +117,7 @@ class Phase7Tests(unittest.TestCase):
 
     def test_three_case_three_effort_manifest_run_saved_records_and_report(self):
         RehearsalHandler.records = []
+        RehearsalHandler.requests = []
         RehearsalHandler.model_calls = 0
         server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), RehearsalHandler)
         thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -129,30 +132,32 @@ class Phase7Tests(unittest.TestCase):
             self.assertEqual(cli.main(["manifest", "--repo", str(self._historical_repo()), "--output", str(manifest_path), "--target", "3"]), 0)
         frozen = json.loads(manifest_path.read_text())
         self.assertEqual(len(frozen["cases"]), 3)
-
-        # Adapt Phase 6's capture to the runner's declared range contract. The
-        # current manifest stores resolved_head separately; 7-01 currently
-        # requires it in capture.head. Keep the manifest output above intact.
-        runner_manifest = json.loads(json.dumps(frozen))
-        for case in runner_manifest["cases"]:
-            case["capture"]["head"] = case["capture"]["resolved_head"]
-        unhashed = {key: value for key, value in runner_manifest.items() if key != "manifest_sha256"}
-        runner_manifest["manifest_sha256"] = hashlib.sha256(
-            json.dumps(unhashed, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()
-        runner_manifest_path = self.root / "runner-manifest.json"
-        runner_manifest_path.write_text(json.dumps(runner_manifest), encoding="utf-8")
+        manifest_bytes = manifest_path.read_bytes()
+        manifest_hash = frozen["manifest_sha256"]
+        self.assertEqual(hashlib.sha256(
+            json.dumps({k: v for k, v in frozen.items() if k != "manifest_sha256"}, sort_keys=True,
+                       separators=(",", ":"), ensure_ascii=False).encode()).hexdigest(), manifest_hash)
 
         ledger_path = self.root / "run-ledger.json"
         endpoint = f"http://127.0.0.1:{server.server_port}"
         output = io.StringIO()
         with contextlib.redirect_stdout(output):
-            self.assertEqual(cli.main(["run", "--manifest", str(runner_manifest_path), "--ledger", str(ledger_path),
+            self.assertEqual(cli.main(["run", "--manifest", str(manifest_path), "--ledger", str(ledger_path),
                                        "--base-url", endpoint, "--auth-token", "fixture-auth", "--cap-usd", "1",
                                        "--reviewer-model", report.REVIEWER_MODEL, "--execute"]), 0)
         summary = json.loads(output.getvalue())
         self.assertEqual({effort: row["completed"] for effort, row in summary["arms"].items()},
                          {"high": 3, "xhigh": 3, "max": 3})
         self.assertEqual(RehearsalHandler.model_calls, 9)
+        cases = {case["case_id"]: case for case in frozen["cases"]}
+        run_requests = [request for request in RehearsalHandler.requests if not request["dry_run"]]
+        self.assertEqual(len(run_requests), 9)
+        for request in run_requests:
+            case = cases[request["trial"]["case_id"]]
+            self.assertEqual(request["capture"]["base"], case["base_sha"])
+            self.assertEqual(request["capture"]["head"], case["head_sha"])
+        self.assertEqual(manifest_path.read_bytes(), manifest_bytes)
+        self.assertEqual(json.loads(manifest_path.read_text())["manifest_sha256"], manifest_hash)
 
         records_path = self.root / "get-records.json"
         adjudication_path = self.root / "adjudication.json"
@@ -161,13 +166,13 @@ class Phase7Tests(unittest.TestCase):
         adjudication_path.write_text(json.dumps({"version": 1, "low_sample_rate": 1.0, "findings": []}), encoding="utf-8")
         output = io.StringIO()
         with contextlib.redirect_stdout(output):
-            self.assertEqual(cli.main(["report", "--manifest", str(runner_manifest_path), "--records", str(records_path),
+            self.assertEqual(cli.main(["report", "--manifest", str(manifest_path), "--records", str(records_path),
                                        "--adjudication", str(adjudication_path), "--output", str(report_path)]), 0)
         result = json.loads(report_path.read_text())
         self.assertEqual(result["paired_intersection"]["completed_cases"], 3)
         self.assertEqual({effort: row["completed"] for effort, row in result["arms"].items()},
                          {"high": 3, "xhigh": 3, "max": 3})
-        self.assertEqual(result, report.build_report(runner_manifest, RehearsalHandler.records, {},
+        self.assertEqual(result, report.build_report(frozen, RehearsalHandler.records, {},
                                                       {"version": 1, "low_sample_rate": 1.0, "findings": []}))
 
 

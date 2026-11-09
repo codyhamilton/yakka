@@ -67,7 +67,8 @@ def build_request(manifest: dict[str, Any], case: dict[str, Any], effort: str, d
     required_capture = {"repo_id", "mode", "view", "base", "head", "diff", "diff_sha256", "complete"}
     if not isinstance(cap, dict) or not required_capture.issubset(cap):
         raise RunnerError(f"case {case['case_id']} has no complete frozen capture")
-    if cap["mode"] != "range" or cap["base"] != case.get("base_sha") or cap["head"] != case.get("head_sha"):
+    range_head = cap.get("resolved_head", cap["head"])
+    if cap["mode"] != "range" or cap["base"] != case.get("base_sha") or range_head != case.get("head_sha"):
         raise RunnerError(f"case {case['case_id']} capture differs from its frozen range")
     criteria = case.get("criteria")
     if (not isinstance(criteria, dict) or criteria.get("source") not in {"head_blob", "explicit_text", "pinned"}
@@ -88,6 +89,10 @@ def build_request(manifest: dict[str, Any], case: dict[str, Any], effort: str, d
     # Keep only the REST Capture fields. Values are copied byte-for-byte from the frozen manifest.
     capture_fields = required_capture | {"merge_base", "merge_base_sha", "files", "manifest"}
     capture = {k: v for k, v in cap.items() if k in capture_fields}
+    # `head` in a Phase 6 capture is checkout state; REST `head` identifies
+    # the selected range tip. Preserve the frozen manifest and canonicalize
+    # only the outbound request field.
+    capture["head"] = case["head_sha"]
     request: dict[str, Any] = {
         "capture": capture,
         "kind": "adhoc",

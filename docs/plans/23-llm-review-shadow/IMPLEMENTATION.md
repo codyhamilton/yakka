@@ -57,6 +57,15 @@ The entry point `tools/shadow-review-trial manifest` → local-history enumerati
 - Deviations/concerns: the rehearsal used a fixture-only adapter because Phase 6 stores the range tip in `capture.resolved_head`, while 7-01 expected it in `capture.head`; a fresh frozen manifest therefore failed at the runner boundary. Fresh fixer `7-04-runner-manifest-boundary.md` owns reconciliation; do not consider Phase 7 integration verified until it passes without that adapter.
 - Feedback: brief and report delivered; Jev 1.13.0 screening pass.
 
+### 7-04-runner-manifest-boundary
+
+- Status: done; report and implementation record included in the unit commit.
+- Brief: `briefs/7-04-runner-manifest-boundary.md`.
+- Report: `reports/7-04-runner-manifest-boundary.md`.
+- Built: runner validates Phase 6 `resolved_head` when present (or legacy fixture `head` otherwise), then sends the frozen case `head_sha` as REST capture `head`. The Phase 7 rehearsal now passes the generated manifest directly, verifies its canonical hash and bytes stay unchanged, and checks all nine fake REST requests carry manifest base/head values. Added runner coverage for both capture forms and rejection of a mismatched resolved tip.
+- Checks: baseline `python3 -m unittest tools/shadow-review-trial/test_phase7.py` passed 2 tests because the old fixture adapter rewrote the mismatch. A direct generated-manifest request reproduced `RunnerError: case 98811e2a2caf3153ad5779b3b0f191f11fdb1df0 capture differs from its frozen range`. After the change, `python3 -m unittest tools/shadow-review-trial/test_runner.py tools/shadow-review-trial/test_phase7.py` passed all 11 tests; `git diff --check` passed.
+- Deviations, contradictions, unfinished work, known problems: none. No provider calls, credentials, deployment, Fly or Wrangler actions were used.
+
 ## Phase 5 — The MCP tool, shim registration and stage wiring
 
 ### 5-04-stage-wiring-docs
