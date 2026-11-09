@@ -2,6 +2,16 @@ Run: Codex execute, harness-dispatched unit 1-01; session: hlaunch build on feat
 
 # Implementation
 
+## Phase 2 — Review packet and prompt policy
+
+### 2-01-review-packet-prompt
+
+- Status: in progress.
+- Brief: `briefs/2-01-review-packet-prompt.md`.
+- Run: Codex execute, inline single-unit phase; started 2026-11-09.
+- Scope: pure packet and prompt builder with embedded policy values; provider calls, criteria resolution, persistence and MCP wiring remain outside this phase.
+- Brief feedback: `not delivered`; no stored version or queued artifact was available. Feedback was called by absolute path; the relative call resolved against the plugin cache and failed.
+
 ## Phase 1 — Local change capture
 
 ### 1-01-local-change-capture
