@@ -36,3 +36,40 @@ Author checks verified all prior Intent quote text against the owner-supplied pr
 `artifact_feedback` was called after the initial write and after each material compatibility fix. The final call used the resulting design digest above and returned **stale**: current content not delivered; the service holds hash prefix `567f31280665` from `2026-11-09T09:39:58Z`. No rejection, scores or outlier checks were returned. This is a delivery gap, not a quality pass; no paid submission, enqueue workaround or other-plan work was initiated. The same result is reported in the PR and completion summary.
 
 Publication is headless and authorized: this worktree and branch only, ordinary push, new ready PR to master, no merge or messages. No secrets, deployment, paid API calls, HOLD removal, other checkout edits or unpausing occurred. Live readiness, actual eligible population and higher-effort cost remain later operator questions; none blocks this design PR.
+
+---
+
+## Automation PR review (`2348437`)
+
+Verdict: **PASS_WITH_FOLLOWUPS**
+
+Reviewed SHA: `234843723b0a7ad51c0ccc815192ad99868c77b5` on `docs/23-followup-paging-tags-effort`.
+
+Classification: docs-only Plan 23 amendment (~299 lines). Reviewed in-process against `DESIGN.md`, stable-doc deltas (03/04/08), `LANDED.md` relocation, author `REVIEW.md`, and spot-checks of cited code (`maxReviewRecords`/dedupe scan, trial gate, registry lifecycle).
+
+### Phase outcomes (amendment acceptance)
+
+| Phase | Assessment |
+| --- | --- |
+| 1 — Review controls and complete cached reads | **met** (as design). Effort/tags/store, duplicate full-body parity, tag-sensitive execution keys with bounded legacy fallback, paging/`list_reviews` and direct-key dedupe are specified with fixture-verifiable outcomes. |
+| 2 — Synthetic isolation and disposable reset | **met** (as design). Fresh-tenant-only admin reset, global-asset attribution, cross-tenant non-leakage and zero-residual proofs are explicit; legacy 409 boundary is honest. |
+| 3 — Trial evidence, history and spend gate | **met** (as design). Full-history preparation, complete cursor reads, tag conventions, Cody approval artifact and dry_run authority are bounded; live trial remains operator work. |
+
+### Findings
+
+**Resolved in review**
+
+- **low** — Renaming `docs/plans/23-llm-review-shadow.md` to the folder layout broke the Plan 22 cross-reference. Updated to `../23-llm-review-shadow/LANDED.md`.
+
+**Follow-up (not blocking design sign-off)**
+
+- **low** — `artifact_feedback` delivery remained **stale** on final digest (reported in author review); downstream tuning may close the delivery gap; not a design-quality rejection.
+- **low** — Plan 20 analytics copy still references branch `origin/docs/23-llm-review-shadow`; harmless until that plan is next edited.
+
+### Intent, ledger and plan sufficiency
+
+Ten owner decisions map to domains with 28 ledger entries; the prior adversarial legacy-key/tag finding is reflected in the amended contract. Stable docs correctly label pending versus landed behaviour and correct the directory-delete implication in design 03. The design is sufficient to derive execute/refine briefs and QA for the three follow-up phases.
+
+### Residual risks
+
+Implementation phases carry real complexity (cursor high-water, global reservation ownership, admin reset concurrency). Open questions on deploy readiness, eligible population and xhigh/max cost remain operator concerns, as recorded in `DESIGN.md`.
