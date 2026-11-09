@@ -26,6 +26,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from queue import Empty, Queue
 from typing import Any, Callable, List, Optional, Tuple
@@ -472,6 +473,9 @@ def Patterns() -> List[str]:
 
 # --- local change capture (kept independent of MCP registration) ---
 
+_capture_deadline: ContextVar[Optional[float]] = ContextVar("capture_deadline", default=None)
+
+
 class CaptureError(ValueError):
     """A structured refusal to capture a local change."""
 
@@ -531,12 +535,18 @@ def _capture_git(root: str, *args: str, input_bytes: Optional[bytes] = None, lim
         if re.fullmatch(r"[A-Za-z0-9_.-]+", name):
             cmd.extend(("-c", f"filter.{name}.clean="))
     cmd.extend(("-C", root, *args))
+    deadline = _capture_deadline.get()
+    timeout = 10 if deadline is None else min(10, deadline - time.monotonic())
+    if timeout <= 0:
+        raise TimeoutError("capture deadline")
     try:
         p = subprocess.run(cmd, input=input_bytes, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                           timeout=10, env=_capture_env(), shell=False)
+                           timeout=timeout, env=_capture_env(), shell=False)
     except FileNotFoundError as exc:
         raise CaptureError("git_unavailable") from exc
     except subprocess.TimeoutExpired as exc:
+        if deadline is not None:
+            raise TimeoutError("capture deadline") from exc
         raise CaptureError("git_unavailable") from exc
     if len(p.stdout) > limit:
         raise CaptureError("over_budget")
@@ -2316,8 +2326,51 @@ def _mcp_response(raw: bytes) -> Optional[dict[str, Any]]:
 
 _MCP_ACTION = {"action": "enqueue_file_snapshot", "v": 1, "path_from": "resolved_path"}
 _MCP_ACTION_CAPABILITY = {"v": 1, "actions": [{"action": "enqueue_file_snapshot", "v": 1}]}
-_MCP_READER_VERSIONS = {"cwd": {1}, "project_dir": {1}, "resolved_path": {1}, "file": {1}, "git": {1}, "queue": {1, 2}, "drain": {1}}
-_MCP_READER_FAILURES = {"unsupported_reader", "unsupported_reader_version", "unsupported_declaration", "bad_params", "bad_input", "dependency_failed", "timeout", "io_error", "over_budget", "secret_in_context", "internal", "incomplete_queue"}
+_MCP_READER_VERSIONS = {"cwd": {1}, "project_dir": {1}, "resolved_path": {1}, "file": {1}, "git": {1}, "queue": {1, 2}, "drain": {1}, "change": {1}}
+_MCP_READER_FAILURES = {"unsupported_reader", "unsupported_reader_version", "unsupported_declaration", "bad_params", "bad_input", "dependency_failed", "timeout", "io_error", "over_budget", "secret_in_context", "internal", "incomplete_queue", "bad_ref", "no_project_dir", "wrong_checkout", "changed_during_capture", "not_a_repository", "git_unavailable"}
+
+# Closed validation shapes, matching the server's change v1 capability table.
+# These are safety ceilings and supported values, never capture policy defaults.
+_MCP_CHANGE_INTEGERS = {"change_max_file_bytes": (1, 262144), "change_max_total_bytes": (1, 2097152), "change_max_files": (1, 200), "context_lines": (0, 100), "budget_bytes": (2097152, 2097152)}
+_MCP_CHANGE_ARRAYS = {"change_exclude", "excluded_files", "excluded_directories", "lockfiles", "truncation_order"}
+_MCP_CHANGE_PARAMS = set(_MCP_CHANGE_INTEGERS) | _MCP_CHANGE_ARRAYS | {"exclusion_policy_version", "docs_never_noise"}
+
+
+def _mcp_change_policy(params: dict[str, Any]) -> dict[str, Any]:
+    if set(params) != _MCP_CHANGE_PARAMS:
+        raise ValueError("params")
+    for key, (lo, hi) in _MCP_CHANGE_INTEGERS.items():
+        if type(params[key]) is not int or not lo <= params[key] <= hi:
+            raise ValueError("integer")
+    if params["exclusion_policy_version"] != "review-exclusions-v1" or type(params["docs_never_noise"]) is not bool:
+        raise ValueError("policy version or boolean")
+    for key in _MCP_CHANGE_ARRAYS:
+        items = params[key]
+        if not isinstance(items, list) or not items:
+            raise ValueError("array")
+        if any(not isinstance(x, str) or re.fullmatch(r"[A-Za-z0-9_.*\-/]+", x) is None or x.startswith("/") or ".." in x for x in items):
+            raise ValueError("unsafe string")
+    if params["truncation_order"] != ["code", "tests", "config", "docs"]:
+        raise ValueError("truncation order")
+    return {**params, "exclude": params["change_exclude"],
+            "max_file_bytes": params["change_max_file_bytes"],
+            "max_total_bytes": params["change_max_total_bytes"],
+            "max_files": params["change_max_files"]}
+
+
+def _mcp_capture_change(args: dict[str, Any], project: Any, policy: dict[str, Any], deadline: float) -> dict[str, Any]:
+    if isinstance(project, dict) and "_failed" in project:
+        raise RuntimeError("dependency")
+    project_dir = project.get("path") if isinstance(project, dict) else None
+    token = _capture_deadline.set(deadline)
+    try:
+        value = CaptureChange(project_dir, policy=policy, **{key: args[key] for key in
+                              ("mode", "view", "include_untracked", "base", "head", "merge_base", "repo_id") if key in args})
+        if time.monotonic() >= deadline:
+            raise TimeoutError("capture deadline")
+        return value
+    finally:
+        _capture_deadline.reset(token)
 
 
 def _mcp_failed(code: str) -> dict[str, Any]:
@@ -2523,7 +2576,7 @@ def _mcp_readers(request: dict[str, Any], declaration: Any, queue_dir: str, getw
             values[name] = _mcp_failed("unsupported_reader"); continue
         if isinstance(ver, bool) or not isinstance(ver, int) or ver not in _MCP_READER_VERSIONS[name]:
             values[name] = _mcp_failed("unsupported_reader_version"); continue
-        allowed_params = {"cwd": set(), "project_dir": set(), "resolved_path": {"path_arg", "bases"}, "file": {"of"}, "git": {"of"}, "queue": {"of", "path"}, "drain": set()}[name]
+        allowed_params = {"cwd": set(), "project_dir": set(), "resolved_path": {"path_arg", "bases"}, "file": {"of"}, "git": {"of"}, "queue": {"of", "path"}, "drain": set(), "change": _MCP_CHANGE_PARAMS}[name]
         if set(params) != allowed_params:
             values[name] = _mcp_failed("bad_params"); continue
         valid_params = True
@@ -2536,10 +2589,16 @@ def _mcp_readers(request: dict[str, Any], declaration: Any, queue_dir: str, getw
             valid_params = params.get("of") in ("resolved_path", "project_dir", "cwd")
         elif name == "queue":
             valid_params = params.get("of") == "git" and params.get("path") == "resolved_path"
+        elif name == "change":
+            try:
+                policy = _mcp_change_policy(params)
+                valid_params = entry.get("bulk") is True and not (set(entry) - {"reader", "v", "params", "required", "bulk"})
+            except ValueError:
+                valid_params = False
         if not valid_params:
             values[name] = _mcp_failed("bad_params"); continue
         reader_deadline = min(deadline, time.monotonic() + _MCP_READER_TIMEOUT_S)
-        deps = {"file": ["resolved_path"], "git": [], "queue": ["git", "resolved_path"] + (["file"] if ver == 2 else []), "resolved_path": [], "cwd": [], "project_dir": [], "drain": []}[name]
+        deps = {"file": ["resolved_path"], "git": [], "queue": ["git", "resolved_path"] + (["file"] if ver == 2 else []), "resolved_path": [], "cwd": [], "project_dir": [], "drain": [], "change": []}[name]
         if any(dep not in values for dep in deps):
             values[name] = _mcp_failed("bad_params"); continue
         try:
@@ -2639,9 +2698,12 @@ def _mcp_readers(request: dict[str, Any], declaration: Any, queue_dir: str, getw
                             value["coverage"] = coverage
             elif name == "drain":
                 value = {"running": Running(queue_dir)}
+            elif name == "change":
+                value = _mcp_capture_change(args, values.get("project_dir"), policy, reader_deadline)
             else:
                 value = _mcp_failed("unsupported_reader")
-            if len(json.dumps(value, separators=(",", ":"), ensure_ascii=False).encode("utf-8")) > 65536:
+            budget = params["budget_bytes"] if name == "change" else 65536
+            if len(json.dumps(value, separators=(",", ":"), ensure_ascii=False).encode("utf-8")) > budget:
                 values[name] = _mcp_failed("over_budget")
             else:
                 values[name] = value
@@ -2649,6 +2711,8 @@ def _mcp_readers(request: dict[str, Any], declaration: Any, queue_dir: str, getw
             values[name] = _mcp_failed("dependency_failed")
         except TimeoutError:
             values[name] = _mcp_failed("timeout")
+        except CaptureError as exc:
+            values[name] = _mcp_failed("bad_input" if exc.code == "bad_argument" else exc.code)
         except ValueError:
             values[name] = _mcp_failed("bad_params")
         except OSError as exc:
