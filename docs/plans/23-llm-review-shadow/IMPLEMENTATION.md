@@ -65,6 +65,21 @@ The entry point `tools/shadow-review-trial manifest` → local-history enumerati
 - Built: runner validates Phase 6 `resolved_head` when present (or legacy fixture `head` otherwise), then sends the frozen case `head_sha` as REST capture `head`. The Phase 7 rehearsal now passes the generated manifest directly, verifies its canonical hash and bytes stay unchanged, and checks all nine fake REST requests carry manifest base/head values. Added runner coverage for both capture forms and rejection of a mismatched resolved tip.
 - Checks: baseline `python3 -m unittest tools/shadow-review-trial/test_phase7.py` passed 2 tests because the old fixture adapter rewrote the mismatch. A direct generated-manifest request reproduced `RunnerError: case 98811e2a2caf3153ad5779b3b0f191f11fdb1df0 capture differs from its frozen range`. After the change, `python3 -m unittest tools/shadow-review-trial/test_runner.py tools/shadow-review-trial/test_phase7.py` passed all 11 tests; `git diff --check` passed.
 - Deviations, contradictions, unfinished work, known problems: none. No provider calls, credentials, deployment, Fly or Wrangler actions were used.
+- Feedback: brief and report delivered; Jev 1.13.0 screening pass.
+
+### Phase 7 verification
+
+The outcome was verified through the frozen manifest CLI → runner → fake `POST /v1/reviews` endpoint → synthetic `GET` records → report. The direct, unchanged Phase 6 manifest completed all nine case/effort calls in the three-case rehearsal; each request used its recorded base/head, and the manifest bytes/hash remained unchanged. Smoke fixtures exercise the successful evidence record and `read`-scope refusal without credentials. Runner and report fixtures cover dry-run zero-call estimates and cap refusal, retry exposure, no-repeat resume, duplicate reconciliation, partial/failure/model accounting, every rubric category, denominators, 50/49 targets, asymmetric arms, and paired intersection.
+
+`TMPDIR` was inside the worktree and the 8 GiB address-space cap applied. Final command `python3 -m unittest tools/shadow-review-trial/test_phase7.py tools/shadow-review-trial/test_manifest.py tools/shadow-review-trial/test_runner.py tools/shadow-review-trial/test_report.py` passed all 22 tests (`OK`). `git diff --check` passed. `python3 -m unittest tools.release.test_layout` ran 7 tests: 6 passed; the repository layout test failed on the pre-existing unrelated violation `packages/yakka-analytics/src/lib/investigation/InvestigationShell.svelte: tools/ConversationsTool.svelte`.
+
+Phase 7 is closed with concerns. All briefs and reports have delivered Jev screening passes. No live provider call, paid trial, credential, deployment, Fly or Wrangler action was used.
+
+### Carried
+
+- The `_capture_blob` per-file-cap memory issue remains assigned to a future Phase 1 refinement; it is outside Phase 7.
+- `GET /v1/reviews` has a 500-record limit. The report flags the boundary, but a later large trial must supply the complete filtered record set or establish complete retrieval before claiming complete denominators.
+- The repository-wide layout test still reports the unrelated existing Svelte import violation recorded above.
 
 ## Phase 5 — The MCP tool, shim registration and stage wiring
 
