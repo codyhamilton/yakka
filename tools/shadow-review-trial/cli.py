@@ -102,6 +102,9 @@ def _parser():
     manifest.add_argument("--target", type=int, default=50)
     manifest.add_argument("--comparators", type=pathlib.Path)
     manifest.add_argument("--pr-export", type=pathlib.Path)
+    manifest.add_argument("--remote", default="origin", help="configured Git remote to fetch and verify")
+    manifest.add_argument("--expected-repository", default="codyhamilton/yakka",
+                          help="expected remote repository identity (owner/repo or fixture path)")
 
     run = commands.add_parser("run", help="estimate or run a frozen historical trial")
     run.add_argument("--manifest", type=pathlib.Path, required=True)
@@ -135,7 +138,8 @@ def main(argv=None):
     args = parser.parse_args(argv)
     try:
         if args.command == "manifest":
-            frozen = create_manifest(args.repo, args.output, args.seed, args.target, args.comparators, args.pr_export)
+            frozen = create_manifest(args.repo, args.output, args.seed, args.target, args.comparators, args.pr_export,
+                                     remote=args.remote, expected_repository=args.expected_repository)
             print(json.dumps({"manifest": str(args.output.resolve()), "manifest_sha256": frozen["manifest_sha256"],
                               "candidates": len(frozen["candidates"]), "eligible": len(frozen["cases"]),
                               "shortages": frozen["shortages"]}, sort_keys=True))
