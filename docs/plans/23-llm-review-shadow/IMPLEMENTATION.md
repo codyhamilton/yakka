@@ -1,4 +1,4 @@
-Run: Codex execute, harness-dispatched unit 3-01; session: hlaunch build on feat/23-llm-review-shadow; started 2026-11-09 06:33 UTC.
+Run: Codex execute, harness refine/build sub-runs; branch `feat/23-llm-review-shadow`; started 2026-11-09 08:03 UTC.
 
 # Implementation
 
