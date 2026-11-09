@@ -925,6 +925,107 @@ type Artifact struct {
 	Latest       Latest
 }
 
+// ArtifactVersion is one distinct stored content version for a specific
+// (repo_id, path). Body is populated only when the exact content hash is held
+// in the tenant's blob or pending store.
+type ArtifactVersion struct {
+	ContentHash            string
+	ReceivedAt             time.Time
+	ConversationID, Source string
+	Screen                 *ScreenRow
+	Rejection              *RejectionRow
+	Pending                bool
+	Body                   []byte
+}
+
+// PlanDesignPaths returns distinct stored DESIGN.md paths in repoID. limit is
+// mandatory and bounded so plan-name resolution cannot scan an unbounded
+// artifact ledger.
+func (t *Tenant) PlanDesignPaths(ctx context.Context, repoID string, limit int) ([]string, error) {
+	if limit < 1 || limit > 1000 {
+		return nil, errors.New("store: invalid artifact path limit")
+	}
+	rows, err := t.rdb.QueryContext(ctx, `SELECT DISTINCT path FROM facts
+		WHERE type='artifact_version' AND repo_id=? AND path GLOB 'docs/plans/*/DESIGN.md'
+		ORDER BY path LIMIT ?`, repoID, limit+1)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var paths []string
+	for rows.Next() {
+		var p string
+		if err := rows.Scan(&p); err != nil {
+			return nil, err
+		}
+		if len(paths) == limit {
+			return nil, errors.New("store: artifact path limit exceeded")
+		}
+		paths = append(paths, p)
+	}
+	return paths, rows.Err()
+}
+
+// ArtifactVersions reads distinct versions of one artifact path, newest
+// first. The fixed bound keeps historical body reads finite.
+func (t *Tenant) ArtifactVersions(ctx context.Context, repoID, path string) ([]ArtifactVersion, error) {
+	const maxArtifactVersions = 1000
+	rows, err := t.rdb.QueryContext(ctx, `SELECT content_hash, received_at, conversation_id,
+		json_extract(raw,'$.source') FROM (
+			SELECT content_hash, received_at, conversation_id, raw, rowid,
+				ROW_NUMBER() OVER (PARTITION BY content_hash ORDER BY received_at DESC,rowid DESC) AS rn
+			FROM facts WHERE type='artifact_version' AND repo_id=? AND path=?
+		) WHERE rn=1 ORDER BY received_at DESC,rowid DESC LIMIT ?`, repoID, path, maxArtifactVersions+1)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var versions []ArtifactVersion
+	for rows.Next() {
+		var v ArtifactVersion
+		var received int64
+		var source sql.NullString
+		if err := rows.Scan(&v.ContentHash, &received, &v.ConversationID, &source); err != nil {
+			return nil, err
+		}
+		if len(versions) == maxArtifactVersions {
+			return nil, errors.New("store: artifact version limit exceeded")
+		}
+		v.ReceivedAt, v.Source = time.Unix(0, received), source.String
+		var screen ScreenRow
+		var screenAt int64
+		err := t.rdb.QueryRowContext(ctx, `SELECT verdict,scorer,at FROM screens WHERE content_hash=?
+			ORDER BY at DESC,id DESC LIMIT 1`, v.ContentHash).Scan(&screen.Verdict, &screen.Scorer, &screenAt)
+		if err == nil {
+			screen.At = time.Unix(0, screenAt)
+			v.Screen = &screen
+		} else if !errors.Is(err, sql.ErrNoRows) {
+			return nil, err
+		}
+		var rejection RejectionRow
+		var rejectionAt int64
+		err = t.rdb.QueryRowContext(ctx, `SELECT stage,reason,at FROM rejections WHERE content_hash=?
+			ORDER BY id DESC LIMIT 1`, v.ContentHash).Scan(&rejection.Stage, &rejection.Reason, &rejectionAt)
+		if err == nil {
+			rejection.At = time.Unix(0, rejectionAt)
+			v.Rejection = &rejection
+		} else if !errors.Is(err, sql.ErrNoRows) {
+			return nil, err
+		}
+		if exists(t.blobPath(v.ContentHash)) {
+			v.Body, err = t.ReadBlob(v.ContentHash)
+		} else if exists(t.pendingPath(v.ContentHash)) {
+			v.Pending = true
+			v.Body, err = t.ReadPending(v.ContentHash)
+		}
+		if err != nil && !os.IsNotExist(err) {
+			return nil, err
+		}
+		versions = append(versions, v)
+	}
+	return versions, rows.Err()
+}
+
 // Artifact reads artifact_version facts for repoID/path; nil, nil when none.
 func (t *Tenant) Artifact(ctx context.Context, repoID, path string) (*Artifact, error) {
 	a := &Artifact{RepoID: repoID, Path: path}
