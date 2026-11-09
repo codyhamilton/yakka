@@ -507,7 +507,11 @@ func persistRefusal(ctx context.Context, t *store.Tenant, tenant string, r Reque
 			return Receipt{}, errors.New("review input persistence failed")
 		}
 	}
-	return persistRecord(ctx, t, tenant, r, repo, makeID(), status, reason, Result{}, nil, p, c, inputHash, cfg, "high", "shadow", "refusal")
+	effort, profile := "high", "shadow"
+	if r.Trial != nil {
+		effort, profile = r.Trial.Effort, "historical_trial"
+	}
+	return persistRecord(ctx, t, tenant, r, repo, makeID(), status, reason, Result{}, nil, p, c, inputHash, cfg, effort, profile, "refusal")
 }
 
 func persistRecord(ctx context.Context, t *store.Tenant, tenant string, r Request, repo, id, status, reason string, result Result, attempts []Attempt, p Packet, c CriteriaRecord, inputHash string, cfg RunConfig, effort, profile, key string) (Receipt, error) {

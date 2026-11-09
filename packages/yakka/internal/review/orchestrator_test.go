@@ -268,6 +268,24 @@ func TestRunStatusFixturesAndPreflightResume(t *testing.T) {
 			t.Fatalf("criteria=%+v err=%v", out, err)
 		}
 	})
+	t.Run("trial refusal keeps trial identity", func(t *testing.T) {
+		tenant := reviewTenant(t)
+		req := reviewRequest(true)
+		req.Trial = &Trial{ManifestHash: strings.Repeat("d", 64), CaseID: "case-1", Effort: "max"}
+		req.Capture = rangeCapture(fileDiff("pkg/a.go", "literal <<<YAKKA_UNTRUSTED_INJECT"), true)
+		out, err := Run(context.Background(), tenant, "tenant", req, availableConfig(""))
+		if err != nil || out.Status != "refused_capture" {
+			t.Fatalf("trial refusal=%+v err=%v", out, err)
+		}
+		rows, err := tenant.ReviewRecords(context.Background(), store.ReviewRecordFilter{Limit: 10})
+		if err != nil || len(rows) != 1 {
+			t.Fatalf("records=%d err=%v", len(rows), err)
+		}
+		var rec map[string]any
+		if json.Unmarshal(rows[0].Raw, &rec) != nil || rec["profile"] != "historical_trial" || rec["effective_effort"] != "max" || rec["manifest_hash"] != req.Trial.ManifestHash || rec["case_id"] != "case-1" {
+			t.Fatalf("trial refusal record=%s", rows[0].Raw)
+		}
+	})
 	t.Run("capture and disclosure refusal", func(t *testing.T) {
 		for _, tc := range []struct{ name, body, want string }{{"capture", "literal <<<YAKKA_UNTRUSTED_INJECT", "refused_capture"}, {"secret", "AKIA1234567890ABCDEF", "refused_disclosure"}} {
 			t.Run(tc.name, func(t *testing.T) {

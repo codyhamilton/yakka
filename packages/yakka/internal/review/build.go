@@ -67,7 +67,9 @@ type ManifestEntry struct {
 }
 
 // Capture is the server's received capture envelope. DiffSHA256 must hash the
-// exact Diff bytes received. Files, when supplied, are canonicalized by path.
+// exact Diff bytes received. Files, when supplied as diff objects, are
+// canonicalized by path. A Phase 1 capture lists included paths as strings and
+// puts the range tip in resolved_head; those forms are normalized on decode.
 type Capture struct {
 	RepoID       string          `json:"repo_id"`
 	Mode         string          `json:"mode"`
@@ -81,6 +83,55 @@ type Capture struct {
 	Files        []File          `json:"files,omitempty"`
 	Manifest     []ManifestEntry `json:"manifest,omitempty"`
 	Complete     bool            `json:"complete"`
+}
+
+// UnmarshalJSON accepts the server file-object form and the Phase 1 capture
+// envelope. Path-only files carry no hunks, so the diff bytes stay authoritative.
+// For range mode, resolved_head is the reviewed tip; head is checkout state.
+func (c *Capture) UnmarshalJSON(data []byte) error {
+	var raw struct {
+		RepoID       string          `json:"repo_id"`
+		Mode         string          `json:"mode"`
+		View         string          `json:"view"`
+		Base         string          `json:"base"`
+		Head         string          `json:"head"`
+		MergeBase    bool            `json:"merge_base"`
+		MergeBaseSHA string          `json:"merge_base_sha"`
+		Diff         string          `json:"diff"`
+		DiffSHA256   string          `json:"diff_sha256"`
+		Manifest     []ManifestEntry `json:"manifest"`
+		Complete     bool            `json:"complete"`
+		ResolvedHead *string         `json:"resolved_head"`
+		Files        json.RawMessage `json:"files"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	*c = Capture{
+		RepoID: raw.RepoID, Mode: raw.Mode, View: raw.View, Base: raw.Base, Head: raw.Head,
+		MergeBase: raw.MergeBase, MergeBaseSHA: raw.MergeBaseSHA, Diff: raw.Diff,
+		DiffSHA256: raw.DiffSHA256, Manifest: raw.Manifest, Complete: raw.Complete,
+	}
+	if c.Mode == "range" && raw.ResolvedHead != nil && *raw.ResolvedHead != "" {
+		c.Head = *raw.ResolvedHead
+	}
+	if c.MergeBase && c.MergeBaseSHA == "" {
+		c.MergeBaseSHA = c.Base
+	}
+	files := json.RawMessage(strings.TrimSpace(string(raw.Files)))
+	if len(files) == 0 || string(files) == "null" {
+		return nil
+	}
+	var objects []File
+	if err := json.Unmarshal(files, &objects); err == nil {
+		c.Files = objects
+		return nil
+	}
+	var paths []string
+	if err := json.Unmarshal(files, &paths); err != nil {
+		return fmt.Errorf("capture files must be path strings or file objects")
+	}
+	return nil
 }
 
 // Criterion is a stable packet-local criterion identifier and its text.

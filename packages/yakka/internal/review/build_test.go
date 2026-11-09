@@ -3,6 +3,7 @@ package review
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"go/parser"
 	"go/token"
 	"strconv"
@@ -167,6 +168,55 @@ func TestPolicyValuesAreVersionedAndDeterministic(t *testing.T) {
 	}
 	if strings.Join(a.Lockfiles, ",") != strings.Join(b.Lockfiles, ",") {
 		t.Fatal("policy values changed")
+	}
+}
+
+func TestCaptureAcceptsPhase1PathListAndRangeTip(t *testing.T) {
+	diff := fileDiff("pkg/a.go", "safe change")
+	sum := sha256.Sum256([]byte(diff))
+	checkout := strings.Repeat("c", 40)
+	tip := strings.Repeat("b", 40)
+	base := strings.Repeat("a", 40)
+	raw, err := json.Marshal(map[string]any{
+		"repo_id": "repo", "mode": "range", "view": "combined", "base": base, "head": checkout,
+		"resolved_head": tip, "merge_base": true, "requested_head": "feature", "linked_worktree": false,
+		"diff": diff, "diff_sha256": hex.EncodeToString(sum[:]), "complete": true,
+		"files": []string{"pkg/a.go"}, "manifest": []any{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got Capture
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Head != tip || got.Base != base || got.MergeBaseSHA != base || got.Files != nil {
+		t.Fatalf("phase 1 capture normalized to %#v", got)
+	}
+	if err := validateRequest(Request{Capture: got, Kind: "adhoc", BuildModels: []BuildModel{{ID: "unknown"}}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Build(Input{Capture: got}); err != nil {
+		t.Fatal(err)
+	}
+
+	explicit, err := json.Marshal(map[string]any{
+		"repo_id": "repo", "mode": "range", "view": "combined", "base": base, "head": tip,
+		"diff": diff, "diff_sha256": hex.EncodeToString(sum[:]), "complete": true,
+		"files": []map[string]string{{"path": "pkg/a.go", "state": "modified", "diff": diff}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var structured Capture
+	if err := json.Unmarshal(explicit, &structured); err != nil {
+		t.Fatal(err)
+	}
+	if structured.Head != tip || len(structured.Files) != 1 || structured.Files[0].Path != "pkg/a.go" || structured.MergeBaseSHA != "" {
+		t.Fatalf("structured capture = %#v", structured)
+	}
+	if err := json.Unmarshal([]byte(`{"files":[1]}`), &Capture{}); err == nil {
+		t.Fatal("malformed files were accepted")
 	}
 }
 
