@@ -110,7 +110,12 @@ def _parser():
     run.add_argument("--auth-token", required=True, help="Yakka bearer token; never printed or saved")
     run.add_argument("--cap-usd", type=float, required=True)
     run.add_argument("--reviewer-model", required=True)
-    run.add_argument("--execute", action="store_true", help="run reviews after dry-run preflight")
+    run_mode = run.add_mutually_exclusive_group()
+    run_mode.add_argument("--dry-run", dest="execute", action="store_false",
+                          help="estimate all three effort arms without model calls (default)")
+    run_mode.add_argument("--execute", dest="execute", action="store_true",
+                          help="run reviews after dry-run preflight")
+    run.set_defaults(execute=False)
     run.add_argument("--config-id", default="default")
 
     report = commands.add_parser("report", help="build a deterministic alignment report from saved inputs")

@@ -21,10 +21,10 @@ python3 tools/shadow-review-trial/cli.py run \
   --ledger tools/shadow-review-trial-data/run-ledger.json \
   --base-url https://yakka.example \
   --auth-token "$YAKKA_ACCESS_TOKEN" \
-  --reviewer-model claude-haiku-5-5 --cap-usd 10
+  --reviewer-model claude-haiku-5-5 --cap-usd 10 --dry-run
 ```
 
-The runner first posts dry-run estimates for each case and effort, includes the bounded retry exposure, and refuses execution when the projection exceeds `--cap-usd`. Add `--execute` to run after preflight. The base URL and auth provider are explicit inputs; the runner does not discover credentials. It persists each started case/effort in the ledger before the request. On resume it reconciles GET records first and will not repeat an ambiguous started request. A `skipped_duplicate` receipt is resolved through its canonical review reference and counts only when that stored record matches the manifest, case, effort and reviewer model.
+Dry-run is the default; `--dry-run` makes that mode explicit. The runner posts estimates for each case and effort, includes the bounded retry exposure, and refuses execution when the projection exceeds `--cap-usd`. Add `--execute` to run after preflight. The base URL and auth provider are explicit inputs; the runner does not discover credentials. It persists each started case/effort in the ledger before the request. On resume it reconciles GET records first and will not repeat an ambiguous started request. A `skipped_duplicate` receipt is resolved through its canonical review reference and counts only when that stored record matches the manifest, case, effort and reviewer model.
 
 ## Report
 
