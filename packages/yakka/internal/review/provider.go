@@ -11,6 +11,15 @@ import (
 	"time"
 )
 
+func reviewHTTPClient() *http.Client {
+	return &http.Client{
+		Timeout: 120 * time.Second,
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+}
+
 const (
 	claudeMessagesURL = "https://api.anthropic.com/v1/messages"
 	claudeAPIVersion  = "2023-06-01"
@@ -70,7 +79,7 @@ func NewReviewer(token, model, effort, endpoint string) *Reviewer {
 	if endpoint == "" {
 		endpoint = claudeMessagesURL
 	}
-	return NewReviewerWithClient(token, model, effort, endpoint, &http.Client{Timeout: 120 * time.Second})
+	return NewReviewerWithClient(token, model, effort, endpoint, reviewHTTPClient())
 }
 
 // ClaudeMessagesEndpoint is the fixed production endpoint.
@@ -83,7 +92,7 @@ func NewReviewerWithClient(token, model, effort, endpoint string, client *http.C
 		endpoint = claudeMessagesURL
 	}
 	if client == nil {
-		client = &http.Client{Timeout: 120 * time.Second}
+		client = reviewHTTPClient()
 	}
 	return &Reviewer{client: client, endpoint: endpoint, token: token, model: model, effort: effort}
 }

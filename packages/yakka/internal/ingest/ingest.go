@@ -1,7 +1,8 @@
 // Package ingest validates, prechecks and stores a batch of facts for one tenant (design 3 Ingest).
 //
 // Fact wire shape: a JSON object. Common keys: id (the drain's "<queue file>#<n>", echoed in the
-// result, never hashed or stored), type ("hook_event" | "artifact_version" | "commit" | "review_run"),
+// result, never hashed or stored), type ("hook_event" | "artifact_version" | "commit"). review_run
+// is accepted only through IngestReviewRuns on the authenticated review handler path.
 // conversation_id, harness, event, ts (Unix seconds, number).
 //
 //	hook_event:       payload (object, already scrubbed by the client)
@@ -185,8 +186,18 @@ func validate(obj map[string]any) string {
 	return ""
 }
 
-// Ingest processes facts for tenant. An error is a whole-request failure.
+// Ingest processes remote envelope facts for tenant. review_run facts are rejected; callers on the
+// review handler use IngestReviewRuns. An error is a whole-request failure.
 func Ingest(ctx context.Context, tenant *store.Tenant, facts []json.RawMessage) ([]Result, error) {
+	return ingestBatch(ctx, tenant, facts, false)
+}
+
+// IngestReviewRuns persists review_run facts from the authenticated review handler.
+func IngestReviewRuns(ctx context.Context, tenant *store.Tenant, facts []json.RawMessage) ([]Result, error) {
+	return ingestBatch(ctx, tenant, facts, true)
+}
+
+func ingestBatch(ctx context.Context, tenant *store.Tenant, facts []json.RawMessage, reviewRuns bool) ([]Result, error) {
 	results := make([]Result, len(facts))
 	var rows []store.FactRow
 	var rowIdx []int
@@ -207,6 +218,10 @@ func Ingest(ctx context.Context, tenant *store.Tenant, facts []json.RawMessage) 
 			continue
 		}
 		typ, _ := str(obj, "type")
+		if typ == "review_run" && !reviewRuns {
+			results[i].Status, results[i].Reason = Rejected, invalid("review_run is server-authored")
+			continue
+		}
 		harness, _ := str(obj, "harness")
 		event, _ := str(obj, "event")
 		payload, _ := obj["payload"].(map[string]any)

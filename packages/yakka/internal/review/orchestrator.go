@@ -564,7 +564,7 @@ func persistRecord(ctx context.Context, t *store.Tenant, tenant string, r Reques
 	}
 	b, _ := json.Marshal(rec)
 	raw := json.RawMessage(b)
-	facts, err := ingest.Ingest(ctx, t, []json.RawMessage{raw})
+	facts, err := ingest.IngestReviewRuns(ctx, t, []json.RawMessage{raw})
 	if err != nil {
 		return Receipt{}, errors.New("review record persistence failed")
 	}
