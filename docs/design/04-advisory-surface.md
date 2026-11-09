@@ -45,6 +45,13 @@ The review tool is exposed only when server review model configuration and the M
 permit registration, and only to `read_write` callers. Maintainer operations (defining checks, rescoring, rating) are CLI or REST
 only.
 
+Only the human owner may reset or delete a tenant. Agents must not perform or attempt this on a user's behalf.
+There is no reset/delete MCP tool. The [pending owner lifecycle API](03-remote-service.md#pending-owner-tenant-lifecycle-api-plan-23-phase-2)
+is cookie-session/profile-UI-only, with same-origin and dedicated UI-header guards; keys never
+qualify, even beside an owner cookie. Agents must not try REST, browser automation or header
+spoofing to bypass that boundary. The guards are spoofable, not proof of a human; a future
+human-verification/captcha step is out of scope for this amendment.
+
 ## `review_change`
 
 The [Plan 23 follow-up amendment](../plans/23-llm-review-shadow/DESIGN.md) designs per-call

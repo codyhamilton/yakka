@@ -52,6 +52,41 @@ design usage** is the design → brief → commit → report shape, not CI or dr
 cost** are the model calls, tokens and cost the harnesses report; an **analysis
 type** is the artifact kind plus its check distributions.
 
+## Pending owner lifecycle UI (Plan 23 Phase 2)
+
+The [Plan 23 amendment](../plans/23-llm-review-shadow/DESIGN.md) adds pending human-owner
+reset/delete controls to the profile. Only the human owner may reset or delete a tenant. Agents must not perform or attempt this on a user's behalf.
+No such controls or lifecycle API are shipped by this design amendment.
+
+Each confirmation names the operation, display name and immutable tenant id, requires typing that
+id, and says: **“Only the human owner may reset or delete a tenant. Agents must not perform or attempt this on a user's behalf.”**
+Reset explains that it erases data/revokes keys but keeps identity/ownership for reuse after
+rekeying. Delete explains permanent removal of tenant/data/keys/ownership. Cancellation or a
+rejected request changes neither selection nor data. Both may target the selected/only tenant;
+after `204`, clear target selection and cached reads/cursors across the acting UI origin's tabs,
+refresh `/v1/me` and require explicit re-selection/create on profile, without automatic fallback.
+Global login and other owned tenants remain usable. API-origin and Pages localStorage are
+separate. Phase 2 extends owned `/v1/me` entries with `lifecycle_state`
+(`active`, `resetting`, `deleting`, `unsupported`) and `lifecycle_generation` (opaque, null for
+unsupported legacy), read from registry/journal metadata without lazy-open. Disable lifecycle
+actions while recovery is unresolved. Pending entries remain owner-visible; reset changes generation and delete
+removes the entry. Both origins revalidate on return/focus/pageshow and before tenant reads,
+compare remembered id/generation, clear absent/changed selections and caches without automatic
+fallback, and suspend target reads during cleanup. Eligible remembered selections lacking a
+generation require explicit re-selection. Same-origin tabs receive invalidation notices; other
+origins/browsers observe it on their next validation. Failed reads show completion unknown. Do not replay a destructive request automatically
+after an ambiguous response; refresh state before a new typed confirmation.
+
+The lifecycle view is served at the **API origin**, including the production collector, which
+currently lacks the site bundle. Phase 2 provides this bounded view and a navigation link from the
+Pages profile; it does not require the paused analytics redesign or move other site routes.
+Its requests use only the owner cookie, exact API `Origin`, `Sec-Fetch-Site: same-origin` when
+present, `X-Yakka-UI: tenant-lifecycle`, JSON and exact `confirm_tenant_id`. It sends no bearer.
+Pages/configured CORS origins are rejected for these lifecycle fetches, despite remaining valid
+for other browser routes. See [pending API errors and cleanup](03-remote-service.md#pending-owner-tenant-lifecycle-api-plan-23-phase-2).
+The gate is spoofable and is not human attestation; future human verification/captcha is out of
+scope. No deployment, hosting change or destructive action occurs in this docs-only amendment.
+
 ## Analytics reads
 
 Additive `/v1` routes. Every analytics `GET` resolves the tenant exactly as `GET /v1/artifacts`

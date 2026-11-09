@@ -56,6 +56,13 @@ selects or changes either. A missing or bad credential is `401` with the REST er
 that lacks a tool's scope gets a `200` JSON-RPC error `-32003` with data
 `{"code":"insufficient_scope","need":"read_write"}`, which the shim relays unchanged.
 
+Only the human owner may reset or delete a tenant. Agents must not perform or attempt this on a user's behalf.
+There is no reset/delete MCP tool. The [pending owner lifecycle API](03-remote-service.md#pending-owner-tenant-lifecycle-api-plan-23-phase-2)
+is cookie-session/profile-UI-only, with same-origin and dedicated UI-header guards; keys never
+qualify, even beside an owner cookie. Agents must not try REST, browser automation or header
+spoofing to bypass that boundary. The guards are spoofable, not proof of a human; a future
+human-verification/captcha step is out of scope for this amendment.
+
 ### Scope
 
 Each tool declares `read` (the default) or `read_write`. The registry enforces it before the handler
