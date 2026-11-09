@@ -194,7 +194,7 @@ leaves orphaned registry entries, and a still-valid token can lazily recreate th
 owner lifecycle routes below are the complete-cleanup path: they coordinate tenant storage with the
 registry, global claims/reservations and the cleanup journal.
 
-The [Plan 23 follow-up amendment](../plans/23-llm-review-shadow/DESIGN.md) landed owner
+The [Plan 23 follow-up amendment](../plans/23-llm-review-shadow.md) landed owner
 self-serve reset and delete with complete tenant/global cleanup. Its per-call effort/tags/store
 controls, removal of the trial env gate, and complete paged review reads are also implemented and
 described above.

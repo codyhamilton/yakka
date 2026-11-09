@@ -54,7 +54,7 @@ type** is the artifact kind plus its check distributions.
 
 ## Owner lifecycle UI (Plan 23 Phase 2)
 
-The [Plan 23 amendment](../plans/23-llm-review-shadow/DESIGN.md) landed human-owner
+The [Plan 23 amendment](../plans/23-llm-review-shadow.md) landed human-owner
 reset/delete controls in the profile. Only the human owner may reset or delete a tenant. Agents must not perform or attempt this on a user's behalf.
 The API-origin lifecycle view and the Pages navigation to it are implemented; there is no lifecycle
 MCP tool or key/bearer path.

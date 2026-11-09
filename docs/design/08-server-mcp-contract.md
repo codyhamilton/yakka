@@ -137,7 +137,7 @@ but the server trusts neither place.
 
 ### Trust
 
-The [Plan 23 follow-up amendment](../plans/23-llm-review-shadow/DESIGN.md) added full cached
+The [Plan 23 follow-up amendment](../plans/23-llm-review-shadow.md) added full cached
 duplicate replies, effort/tags/store call controls and tenant-bound cursor paging through a
 `list_reviews` tool. They are implemented and preserve server-owned definitions and
 credential-derived tenancy. The amendment's owner-only tenant reset/delete is also implemented, but

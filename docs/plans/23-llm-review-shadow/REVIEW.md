@@ -132,3 +132,17 @@ and Phase 1 dependencies are proved on its build branch. This docs-only invocati
 nor unpauses that work. Other holds remain, including `~/workspace/.briefs/yakka/HOLD`.
 Publication is limited to this worktree/branch, an ordinary push and a new ready PR into master;
 PRs #179/#218, other plans/checkouts, secrets, deployments and paid APIs remain untouched.
+
+## Terminal review for follow-up PR #219
+
+Verdict: **PASS**. One terminal review covered the original Plan 23 record and all three follow-up outcomes against the signed-off amendment. No critical or high finding stands. The review used the committed reports and implementation verification; it did not rerun tests or contact the deployed service/provider.
+
+| Phase | Outcome | Evidence reviewed |
+| --- | --- | --- |
+| 1 — Review controls and complete cached reads | Met | Direct keyed duplicate lookup, complete cached bodies, per-call controls, REST/MCP cursor walks and tag filters; all 16 Go packages passed under the 8 GiB cap. |
+| 2 — Synthetic activity is isolated and completely disposable | Met | Tenant-bound review/search/analytics/usage isolation, cleanup/recovery and UI selection proofs; all 16 Go packages and 52 focused Vitest tests passed, plus offline production build. |
+| 3 — Real-server trial workflow has complete evidence and an explicit spend gate | Met for fixture workflow | Full-history file-remote fixtures, complete >500-row export, canonical attempt-cost accounting, approval refusal and fake end-to-end rehearsal; 58 Python tests passed. Live trial remains gated. |
+
+**Low finding — Issue [#225](https://github.com/codyhamilton/yakka/issues/225).** `Reservations.PurgeTenant` restores in-memory state on persistence failure, but there is no injected save-failure test. This is a coverage follow-up, not a demonstrated production failure, and does not block close-out.
+
+Retained gates: Cody confirmation for historical canonical rows without `review_id`; full-history clone and population proof; deployed-server readiness; provider credential kept server-side; separate written spend approval before any paid call or retry; and the human browser walkthrough for reset/delete and tenant re-selection. No paid call, live server access, credentials, deployment, Fly or Wrangler action was performed during this review.

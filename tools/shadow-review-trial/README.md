@@ -20,7 +20,7 @@ Operator preparation after the server is deployed: sign into the owner profile, 
 
 Only the human owner may reset or delete a tenant. Agents must not perform or attempt this on a user's behalf.
 
-The [amended Phase 2](../../docs/plans/23-llm-review-shadow/DESIGN.md) implements these operations
+The [amended Phase 2](../../docs/plans/23-llm-review-shadow.md) implements these operations
 through the API-origin profile UI. There is no lifecycle MCP tool or runner cleanup command. The
 trial's `wk_` key is for reviews, never reset/delete.
 

@@ -56,7 +56,7 @@ human-verification/captcha step is out of scope for this amendment.
 
 ## `review_change`
 
-The [Plan 23 follow-up amendment](../plans/23-llm-review-shadow/DESIGN.md) added per-call
+The [Plan 23 follow-up amendment](../plans/23-llm-review-shadow.md) added per-call
 effort/tags/store controls, full cached duplicate replies and a paged `list_reviews` tool. All three
 are implemented. The same amendment's owner-only tenant reset/delete is also implemented, but it is
 cookie-session/profile-UI-only and adds no MCP tool or key path.
