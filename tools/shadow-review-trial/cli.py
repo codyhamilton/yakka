@@ -113,6 +113,8 @@ def _parser():
     run.add_argument("--auth-token", required=True, help="Yakka bearer token; never printed or saved")
     run.add_argument("--cap-usd", type=float, required=True)
     run.add_argument("--reviewer-model", required=True)
+    run.add_argument("--run-id", required=True, help="frozen trial run id (1-32 chars, [A-Za-z0-9_-])")
+    run.add_argument("--tenant-id", required=True, help="expected dedicated tenant id confirmed via /v1/whoami")
     run_mode = run.add_mutually_exclusive_group()
     run_mode.add_argument("--dry-run", dest="execute", action="store_false",
                           help="estimate all three effort arms without model calls (default)")
@@ -146,6 +148,7 @@ def main(argv=None):
         elif args.command == "run":
             client = TrialRunner(args.base_url, lambda: args.auth_token)
             summary = run_trial(args.manifest, args.ledger, client, args.cap_usd, args.reviewer_model,
+                                run_id=args.run_id, tenant_id=args.tenant_id,
                                 execute=args.execute, config_id=args.config_id)
             print(json.dumps(summary, sort_keys=True))
         elif args.command == "report":

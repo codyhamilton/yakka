@@ -27,6 +27,8 @@ class RehearsalHandler(http.server.BaseHTTPRequestHandler):
     records = []
     requests = []
     model_calls = 0
+    tenant = "fixture-tenant"
+    case_by_hash = {}
 
     def log_message(self, *_args):
         pass
@@ -45,14 +47,18 @@ class RehearsalHandler(http.server.BaseHTTPRequestHandler):
             return
         payload = json.loads(self.rfile.read(int(self.headers.get("Content-Length", "0"))))
         type(self).requests.append(payload)
-        trial = payload["trial"]
+        tags = payload["tags"]
+        effort = next(tag[len("effort:"):] for tag in tags if tag.startswith("effort:"))
+        case_hash = next(tag[len("case:"):] for tag in tags if tag.startswith("case:"))
+        manifest_hash = next(tag[len("manifest:"):] for tag in tags if tag.startswith("manifest:"))
+        case_id = type(self).case_by_hash[case_hash]
         if payload["dry_run"]:
             self._send(200, {"status": "dry_run", "estimated_usd": 0.01})
             return
         type(self).model_calls += 1
-        rid = f"review-{trial['case_id']}-{trial['effort']}"
-        record = {"id": rid, "case_id": trial["case_id"], "effective_effort": trial["effort"],
-                  "profile": "historical_trial", "manifest_hash": trial["manifest_hash"],
+        rid = f"review-{case_id}-{effort}"
+        record = {"id": rid, "case_id": case_id, "effective_effort": effort,
+                  "profile": "historical_trial", "manifest_hash": manifest_hash, "tags": tags,
                   "configured_model": report.REVIEWER_MODEL, "returned_model": report.REVIEWER_MODEL,
                   "model_mismatch": False, "status": "ok", "build_models": payload["build_models"],
                   "attempts": [{"status": "ok", "latency_ms": 4, "cost_usd": 0.01,
@@ -62,6 +68,9 @@ class RehearsalHandler(http.server.BaseHTTPRequestHandler):
         self._send(200, {"id": rid, "status": "ok"})
 
     def do_GET(self):
+        if self.path.split("?", 1)[0] == "/v1/whoami":
+            self._send(200, {"tenant": type(self).tenant, "scope": "read_write", "expires_at": 0})
+            return
         self._send(200, {"reviews": type(self).records})
 
 
@@ -113,6 +122,13 @@ class Phase7Tests(unittest.TestCase):
             (repo / "code.py").write_text(f"value = {number}\n")
             git(repo, "add", "code.py")
             git(repo, "commit", "-qm", f"fixture phase {number}\n\nYakka-Phase: demo:{number}")
+        remote = self.root / "remote.git"
+        git(self.root, "init", "--bare", "-q", str(remote))
+        git(remote, "symbolic-ref", "HEAD", "refs/heads/main")
+        git(repo, "remote", "add", "origin", str(remote))
+        git(repo, "push", "-q", "origin", "HEAD:refs/heads/main")
+        git(repo, "fetch", "-q", "origin")
+        self.remote_identity = str(remote)
         return repo
 
     def test_three_case_three_effort_manifest_run_saved_records_and_report(self):
@@ -129,9 +145,12 @@ class Phase7Tests(unittest.TestCase):
         manifest_path = self.root / "manifest.json"
         output = io.StringIO()
         with contextlib.redirect_stdout(output):
-            self.assertEqual(cli.main(["manifest", "--repo", str(self._historical_repo()), "--output", str(manifest_path), "--target", "3"]), 0)
+            self.assertEqual(cli.main(["manifest", "--repo", str(self._historical_repo()), "--output", str(manifest_path),
+                                       "--target", "3", "--expected-repository", self.remote_identity]), 0)
         frozen = json.loads(manifest_path.read_text())
         self.assertEqual(len(frozen["cases"]), 3)
+        RehearsalHandler.case_by_hash = {
+            hashlib.sha256(case["case_id"].encode()).hexdigest(): case["case_id"] for case in frozen["cases"]}
         manifest_bytes = manifest_path.read_bytes()
         manifest_hash = frozen["manifest_sha256"]
         self.assertEqual(hashlib.sha256(
@@ -144,7 +163,8 @@ class Phase7Tests(unittest.TestCase):
         with contextlib.redirect_stdout(output):
             self.assertEqual(cli.main(["run", "--manifest", str(manifest_path), "--ledger", str(ledger_path),
                                        "--base-url", endpoint, "--auth-token", "fixture-auth", "--cap-usd", "1",
-                                       "--reviewer-model", report.REVIEWER_MODEL, "--execute"]), 0)
+                                       "--reviewer-model", report.REVIEWER_MODEL, "--run-id", "rehearsal-1",
+                                       "--tenant-id", RehearsalHandler.tenant, "--execute"]), 0)
         summary = json.loads(output.getvalue())
         self.assertEqual({effort: row["completed"] for effort, row in summary["arms"].items()},
                          {"high": 3, "xhigh": 3, "max": 3})
@@ -153,7 +173,14 @@ class Phase7Tests(unittest.TestCase):
         run_requests = [request for request in RehearsalHandler.requests if not request["dry_run"]]
         self.assertEqual(len(run_requests), 9)
         for request in run_requests:
-            case = cases[request["trial"]["case_id"]]
+            self.assertNotIn("trial", request)
+            self.assertIs(request["store"], True)
+            self.assertIn(request["effort"], ("high", "xhigh", "max"))
+            tags = set(request["tags"])
+            self.assertTrue({"trial:rehearsal-1", "effort:" + request["effort"],
+                             "manifest:" + manifest_hash}.issubset(tags))
+            case_hash = next(tag[len("case:"):] for tag in tags if tag.startswith("case:"))
+            case = cases[RehearsalHandler.case_by_hash[case_hash]]
             self.assertEqual(request["capture"]["base"], case["base_sha"])
             self.assertEqual(request["capture"]["head"], case["head_sha"])
         self.assertEqual(manifest_path.read_bytes(), manifest_bytes)

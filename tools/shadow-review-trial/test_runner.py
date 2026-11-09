@@ -31,48 +31,79 @@ def frozen(cases):
         })
     body = {"schema_version": 1, "manifest_sha256": None, "target_per_effort": 50,
             "cases": entries, "run_order": [c["case_id"] for c in entries],
+            "history": {"repository": "fixture/repo", "remote": "origin", "remote_url": "fixture/repo",
+                        "tip_sha": "a" * 40, "fetched_refs": ["refs/remotes/origin/main"],
+                        "shallow": False, "object_complete": True, "enumerated_commits": cases,
+                        "verified_count": cases, "shallow_boundary_shas": [], "oldest_enumerated_sha": "a" * 40},
             "settings": {"efforts": ["high", "xhigh", "max"]}}
+    return rehash(body)
+
+
+def rehash(body):
     body["manifest_sha256"] = runner._sha(runner._canonical({k: v for k, v in body.items() if k != "manifest_sha256"}))
     return body
 
 
 class FakeREST:
-    def __init__(self, behavior=None, estimate=0.25):
+    def __init__(self, behavior=None, estimate=0.25, tenant="tenant-trial", scope="read_write"):
         self.behavior = behavior or (lambda case, effort: ("ok", "claude-haiku-5-5"))
         self.estimate = estimate
+        self.tenant = tenant
+        self.scope = scope
         self.requests = []
         self.records = []
+        self.case_ids = {}
+        self.events = []
         self.model_calls = 0
+        self.new_calls = 0
         self.get_calls = 0
+
+    def bind(self, case_ids):
+        self.case_ids = {runner._sha(cid.encode()): cid for cid in case_ids}
 
     def request(self, method, url, headers, body, timeout):
         if headers.get("Authorization") != "Bearer fixture-auth":
             return 401, b'{"error":"fixture auth missing"}'
-        if method == "POST":
-            payload = json.loads(body)
-            self.requests.append(payload)
-            trial = payload["trial"]
-            if payload["dry_run"]:
-                return 200, json.dumps({"status": "dry_run", "estimated_usd": self.estimate}).encode()
-            self.model_calls += 1
-            status, model = self.behavior(trial["case_id"], trial["effort"])
-            if status == "skipped_duplicate":
-                canonical_id = f"canonical-{trial['case_id']}-{trial['effort']}"
-                self.records.append(self.record(trial, "ok", model, canonical_id))
-                receipt = {"id": "duplicate-receipt", "status": status, "reason": canonical_id}
-            else:
-                receipt = {"id": f"receipt-{trial['case_id']}-{trial['effort']}", "status": status,
-                           "attempts": [{"number": 1, "status": "timeout"}, {"number": 2, "status": status}]}
-                if status in {"ok", "ok_partial"}:
-                    self.records.append(self.record(trial, status, model, receipt["id"]))
-            return 200, json.dumps(receipt).encode()
-        self.get_calls += 1
-        return 200, json.dumps({"reviews": self.records}).encode()
+        if method == "GET":
+            if "/v1/whoami" in url:
+                self.events.append("whoami")
+                return 200, json.dumps({"tenant": self.tenant, "scope": self.scope, "expires_at": 0}).encode()
+            self.events.append("get")
+            self.get_calls += 1
+            return 200, json.dumps({"reviews": self.records}).encode()
+        payload = json.loads(body)
+        self.requests.append(payload)
+        tags = payload["tags"]
+        effort = next(tag[len("effort:"):] for tag in tags if tag.startswith("effort:"))
+        case_hash = next(tag[len("case:"):] for tag in tags if tag.startswith("case:"))
+        case_id = self.case_ids[case_hash]
+        if payload["dry_run"]:
+            self.events.append("post:dry")
+            return 200, json.dumps({"status": "dry_run", "estimated_usd": self.estimate}).encode()
+        self.events.append("post:run")
+        self.model_calls += 1
+        status, model = self.behavior(case_id, effort)
+        if status == "skipped_duplicate":
+            canonical_id = f"canonical-{case_id}-{effort}"
+            self.records.append(self.record(tags, "ok", model, canonical_id))
+            receipt = {"id": "duplicate-receipt", "status": status, "reason": canonical_id, "cached": True,
+                       "original_review_id": canonical_id, "original_status": "ok",
+                       "result": {"findings": []}, "coverage": {"state": "complete"}, "finding_counts": {},
+                       "model": model, "effort": effort, "tags": tags,
+                       "attempts": [{"number": 1, "status": "ok"}], "cost_usd": 0.0}
+        else:
+            self.new_calls += 1
+            receipt = {"id": f"receipt-{case_id}-{effort}", "status": status,
+                       "attempts": [{"number": 1, "status": "timeout"}, {"number": 2, "status": status}]}
+            if status in {"ok", "ok_partial"}:
+                self.records.append(self.record(tags, status, model, receipt["id"]))
+        return 200, json.dumps(receipt).encode()
 
     @staticmethod
-    def record(trial, status, model, record_id):
-        return {"id": record_id, "manifest_hash": trial["manifest_hash"], "case_id": trial["case_id"],
-                "effective_effort": trial["effort"], "returned_model": model, "status": status}
+    def record(tags, status, model, record_id):
+        effort = next(tag[len("effort:"):] for tag in tags if tag.startswith("effort:"))
+        return {"id": record_id, "tags": tags, "effective_effort": effort, "returned_model": model,
+                "status": status}
 
 
 class RunnerTests(unittest.TestCase):
@@ -83,19 +114,21 @@ class RunnerTests(unittest.TestCase):
         self.manifest_path = self.root / "manifest.json"
         self.ledger_path = self.root / "run-ledger.json"
 
-    def execute(self, count, fake, cap=1000, execute=True, config_id="default"):
+    def execute(self, count, fake, cap=1000, execute=True, config_id="default",
+                run_id="run-1", tenant_id="tenant-trial"):
         data = frozen(count)
         self.manifest_path.write_text(json.dumps(data), encoding="utf-8")
+        fake.bind([case["case_id"] for case in data["cases"]])
         client = runner.TrialRunner("http://fixture.invalid", lambda: "fixture-auth", fake)
         return runner.run(self.manifest_path, self.ledger_path, client, cap, "claude-haiku-5-5",
-                          execute=execute, config_id=config_id)
+                          run_id=run_id, tenant_id=tenant_id, execute=execute, config_id=config_id)
 
     def test_dry_run_has_no_model_calls_and_projects_retry_inclusive_all_arms(self):
         fake = FakeREST(estimate=0.25)
         summary = self.execute(2, fake, execute=False)
         self.assertEqual(fake.model_calls, 0)
         self.assertEqual(len(fake.requests), 6)
-        self.assertEqual([r["trial"]["effort"] for r in fake.requests], ["high", "xhigh", "max"] * 2)
+        self.assertEqual([r["effort"] for r in fake.requests], ["high", "xhigh", "max"] * 2)
         self.assertEqual(summary["projected_usd"], 3.0)
         self.assertEqual(len(summary["estimates"]), 6)
         self.assertTrue(all(r["retry_inclusive_usd"] == 0.5 for r in summary["estimates"]))
@@ -106,18 +139,18 @@ class RunnerTests(unittest.TestCase):
         checkout_head = "f" * 40
         case["capture"]["head"] = checkout_head
         case["capture"]["resolved_head"] = case["head_sha"]
-        request = runner.build_request(data, case, "high", True)
+        request = runner.build_request(data, case, "high", True, "run-1")
         self.assertEqual(request["capture"]["head"], case["head_sha"])
         self.assertEqual(request["capture"]["base"], case["base_sha"])
 
         del case["capture"]["resolved_head"]
         case["capture"]["head"] = case["head_sha"]
-        fixture_request = runner.build_request(data, case, "high", True)
+        fixture_request = runner.build_request(data, case, "high", True, "run-1")
         self.assertEqual(fixture_request["capture"]["head"], case["head_sha"])
 
         case["capture"]["resolved_head"] = "e" * 40
         with self.assertRaisesRegex(runner.RunnerError, "differs from its frozen range"):
-            runner.build_request(data, case, "high", True)
+            runner.build_request(data, case, "high", True, "run-1")
 
     def test_effort_arms_change_only_trial_effort_and_cap_refusal_precedes_live_posts(self):
         fake = FakeREST(estimate=0.3)
@@ -128,7 +161,8 @@ class RunnerTests(unittest.TestCase):
         normalized = []
         for request in fake.requests:
             request = json.loads(json.dumps(request))
-            request["trial"]["effort"] = "ARM"
+            for key in ("effort", "tags"):
+                request[key] = "ARM"
             request["dry_run"] = False
             normalized.append(request)
         self.assertEqual(normalized[0], normalized[1])
@@ -176,11 +210,96 @@ class RunnerTests(unittest.TestCase):
         fake = FakeREST(lambda case, effort: ("skipped_duplicate", "claude-haiku-5-5"))
         summary = self.execute(1, fake)
         self.assertEqual(summary["arms"]["high"]["completed"], 1)
+        self.assertEqual(fake.new_calls, 0)
+        self.assertEqual(fake.events.count("get"), 2)  # initial read plus final reconciliation only
         entry = next(e for e in json.loads(self.ledger_path.read_text())["entries"].values()
                      if e["effort"] == "high")
         self.assertEqual(entry["duplicate_receipt"]["status"], "skipped_duplicate")
+        self.assertEqual(entry["duplicate_receipt"]["original_review_id"], "canonical-case-000-high")
+        self.assertEqual(entry["duplicate_receipt"]["attempts"], [{"number": 1, "status": "ok"}])
         self.assertTrue(entry["duplicate_resolved"])
         self.assertEqual(entry["canonical_review_id"], "canonical-case-000-high")
+        self.assertEqual(entry["state"], "complete")
+
+    def test_general_request_has_effort_tags_store_and_rejects_disagreeing_tags(self):
+        data = frozen(1)
+        case = data["cases"][0]
+        request = runner.build_request(data, case, "high", True, "run_1")
+        self.assertNotIn("trial", request)
+        self.assertEqual(request["effort"], "high")
+        self.assertIs(request["store"], True)
+        expected = {"trial:run_1", "effort:high", "manifest:" + data["manifest_sha256"],
+                    "case:" + runner._sha(case["case_id"].encode())}
+        self.assertEqual(set(request["tags"]), expected)
+        self.assertEqual(request["tags"], sorted(request["tags"]))
+        with self.assertRaisesRegex(runner.RunnerError, "effort tag disagrees"):
+            runner.build_request(data, case, "high", True, "run_1", tags=["effort:max"])
+        with self.assertRaisesRegex(runner.RunnerError, "trial tag disagrees"):
+            runner.build_request(data, case, "high", True, "run_1", tags=["trial:other"])
+        with self.assertRaisesRegex(runner.RunnerError, "run id"):
+            runner.build_request(data, case, "high", True, "bad run id")
+        with self.assertRaisesRegex(runner.RunnerError, "tag is not"):
+            runner.build_request(data, case, "high", True, "run_1", tags=["bad tag"])
+
+    def test_whoami_tenant_or_scope_mismatch_aborts_before_any_review_post(self):
+        mismatch = FakeREST(tenant="other-tenant")
+        with self.assertRaisesRegex(runner.RunnerError, "dedicated tenant"):
+            self.execute(1, mismatch, execute=False)
+        self.assertEqual(mismatch.requests, [])
+        self.assertEqual(mismatch.events, ["whoami"])
+
+        read_scope = FakeREST(scope="read")
+        with self.assertRaisesRegex(runner.RunnerError, "read_write"):
+            self.execute(1, read_scope, execute=True)
+        self.assertEqual(read_scope.requests, [])
+
+        matching = FakeREST()
+        summary = self.execute(1, matching, execute=False)
+        self.assertEqual(matching.events[0], "whoami")
+        self.assertTrue(all(request["store"] is True for request in matching.requests))
+        self.assertEqual(summary["run_id"], "run-1")
+        self.assertEqual(summary["tenant_id"], "tenant-trial")
+
+    def test_ledger_resume_refuses_different_run_tenant_or_manifest(self):
+        self.execute(1, FakeREST())
+        with self.assertRaisesRegex(runner.RunnerError, "not bound"):
+            self.execute(1, FakeREST(), run_id="run-2")
+        with self.assertRaisesRegex(runner.RunnerError, "not bound"):
+            self.execute(1, FakeREST(tenant="other-tenant"), tenant_id="other-tenant")
+        data = frozen(2)
+        self.manifest_path.write_text(json.dumps(data), encoding="utf-8")
+        fake = FakeREST()
+        fake.bind([case["case_id"] for case in data["cases"]])
+        client = runner.TrialRunner("http://fixture.invalid", lambda: "fixture-auth", fake)
+        with self.assertRaisesRegex(runner.RunnerError, "not bound"):
+            runner.run(self.manifest_path, self.ledger_path, client, 1000, "claude-haiku-5-5",
+                       run_id="run-1", tenant_id="tenant-trial", execute=True)
+
+    def test_uncertified_or_shallow_manifest_is_refused_before_any_review_post(self):
+        base = frozen(1)
+
+        def missing(body):
+            del body["history"]
+
+        def shallow(body):
+            body["history"]["shallow"] = True
+
+        def incomplete(body):
+            body["history"]["object_complete"] = False
+
+        def count_mismatch(body):
+            body["history"]["verified_count"] += 1
+
+        for mutate in (missing, shallow, incomplete, count_mismatch):
+            body = json.loads(json.dumps(base))
+            mutate(body)
+            self.manifest_path.write_text(json.dumps(rehash(body)), encoding="utf-8")
+            fake = FakeREST()
+            client = runner.TrialRunner("http://fixture.invalid", lambda: "fixture-auth", fake)
+            with self.assertRaisesRegex(runner.RunnerError, "certif"):
+                runner.run(self.manifest_path, self.ledger_path, client, 1000, "claude-haiku-5-5",
+                           run_id="run-1", tenant_id="tenant-trial", execute=True)
+            self.assertEqual(fake.requests, [])
 
     def test_started_request_is_never_replayed_after_ambiguous_transport_failure(self):
         class Interrupting(FakeREST):
@@ -192,10 +311,13 @@ class RunnerTests(unittest.TestCase):
         fake = Interrupting()
         data = frozen(1)
         self.manifest_path.write_text(json.dumps(data))
+        fake.bind([case["case_id"] for case in data["cases"]])
         client = runner.TrialRunner("http://fixture.invalid", lambda: "fixture-auth", fake)
-        runner.run(self.manifest_path, self.ledger_path, client, 100, "claude-haiku-5-5", execute=True)
+        runner.run(self.manifest_path, self.ledger_path, client, 100, "claude-haiku-5-5",
+                   run_id="run-1", tenant_id="tenant-trial", execute=True)
         calls = fake.model_calls
-        runner.run(self.manifest_path, self.ledger_path, client, 100, "claude-haiku-5-5", execute=True)
+        runner.run(self.manifest_path, self.ledger_path, client, 100, "claude-haiku-5-5",
+                   run_id="run-1", tenant_id="tenant-trial", execute=True)
         self.assertEqual(fake.model_calls, calls)
 
     def test_preflight_block_is_rechecked_when_budget_configuration_changes(self):
@@ -210,11 +332,14 @@ class RunnerTests(unittest.TestCase):
         fake = BlockThenAllow()
         data = frozen(1)
         self.manifest_path.write_text(json.dumps(data))
+        fake.bind([case["case_id"] for case in data["cases"]])
         client = runner.TrialRunner("http://fixture.invalid", lambda: "fixture-auth", fake)
-        runner.run(self.manifest_path, self.ledger_path, client, 100, "claude-haiku-5-5", execute=True)
+        runner.run(self.manifest_path, self.ledger_path, client, 100, "claude-haiku-5-5",
+                   run_id="run-1", tenant_id="tenant-trial", execute=True)
         self.assertEqual(fake.model_calls, 0)
         fake.block = False
-        result = runner.run(self.manifest_path, self.ledger_path, client, 200, "claude-haiku-5-5", execute=True)
+        result = runner.run(self.manifest_path, self.ledger_path, client, 200, "claude-haiku-5-5",
+                            run_id="run-1", tenant_id="tenant-trial", execute=True)
         self.assertEqual(result["paired_completed"], 1)
         self.assertEqual(fake.model_calls, 3)
 
