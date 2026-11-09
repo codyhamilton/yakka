@@ -72,8 +72,10 @@ tenant-B rows, and end `complete=true,next_cursor=null`.
 ## Deviations
 
 - None from the brief. No plugin, shim, REST, store, review, stable-doc or phase1-04 file was
-  edited. The pre-existing phase1-03 line in `IMPLEMENTATION.md` was already in the working
-  tree; this commit only appends this unit's outcome.
+  edited. `IMPLEMENTATION.md` already carried an uncommitted phase1-03 artifact-feedback line
+  when this unit started; because that file is the shared unit log, this commit carries that
+  pending line alongside this unit's new outcome. No production code outside the owned paths
+  changed.
 
 ## Contradictions
 
