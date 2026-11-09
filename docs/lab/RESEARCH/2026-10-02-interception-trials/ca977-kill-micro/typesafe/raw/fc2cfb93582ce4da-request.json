@@ -1,0 +1,486 @@
+{
+  "model": "jev-1.13.0",
+  "state": {
+    "evidence_class": "hybrid_v0",
+    "scenario_id": "shape-signal|order-swap|baseline",
+    "framing": "EX-SHAPE-SIGNAL",
+    "snapshot": [
+      {
+        "pack_chars": 2700,
+        "pack_meta": {
+          "note": "Safe judge pack for GOLD-LABEL-RUBRIC.md. Hybrid_v0 budget (last 8\u00d7400), not full gold 30\u00d7700. Raw gold-bundles/with-state stay gitignored under ubuntu-raw/.",
+          "redaction": "hybrid_v0 N=8 excerpt=400; secrets; home/workspace/mount/tmp-claude paths \u2192 tokens; username scrubbed",
+          "sources": [
+            "ca977b9ca0dd-dry-run-checkpoints-20261001-204508.with-state.jsonl (delta_since_prior)",
+            "ca977b9ca0dd-dry-run-thrash-table-20261001-204508.json (top rereads)",
+            "ca977b9ca0dd-gold-bundles-20261001-204508.jsonl (tail+brief+cumulative)"
+          ],
+          "source_run": "20261001-204508"
+        },
+        "shrink_steps": [],
+        "gold_bundle_status": "ok",
+        "tail": [
+          {
+            "tool_names": [
+              "Bash"
+            ],
+            "excerpt": "",
+            "turn": 105
+          },
+          {
+            "tool_names": [
+              "Bash"
+            ],
+            "excerpt": "",
+            "turn": 104
+          },
+          {
+            "tool_names": [
+              "Read"
+            ],
+            "excerpt": "",
+            "turn": 103
+          },
+          {
+            "tool_names": [
+              "Bash"
+            ],
+            "excerpt": "",
+            "turn": 102
+          },
+          {
+            "tool_names": [
+              "Read"
+            ],
+            "excerpt": "",
+            "turn": 101
+          },
+          {
+            "tool_names": [
+              "Bash"
+            ],
+            "excerpt": "",
+            "turn": 100
+          },
+          {
+            "tool_names": [
+              "Read",
+              "Read"
+            ],
+            "excerpt": "",
+            "turn": 99
+          },
+          {
+            "tool_names": [
+              "Bash"
+            ],
+            "excerpt": "",
+            "turn": 98
+          }
+        ],
+        "thrash_top_rereads": [
+          {
+            "count": 5,
+            "path": "<REPO>/parser/kiwiw/cenc.py"
+          },
+          {
+            "count": 7,
+            "path": "<REPO>/parser/build_alldata.py"
+          },
+          {
+            "count": 9,
+            "path": "<REPO>/parser/kiwiw/_e2.c"
+          },
+          {
+            "count": 10,
+            "path": "<REPO>/parser/kiwiw/divide.py"
+          },
+          {
+            "count": 14,
+            "path": "<REPO>/parser/kiwiw/_cenc.c"
+          }
+        ],
+        "delta_since_prior": {
+          "tool_histogram_delta": {
+            "Read": 7,
+            "Bash": 10
+          },
+          "new_read_paths": []
+        },
+        "cumulative": {
+          "assistant_text_chars": 167,
+          "compaction_event_count": 16,
+          "distinct_read_paths": 15,
+          "reread_paths": [
+            {
+              "count": 5,
+              "path": "<REPO>/parser/kiwiw/cenc.py"
+            },
+            {
+              "count": 7,
+              "path": "<REPO>/parser/build_alldata.py"
+            },
+            {
+              "count": 9,
+              "path": "<REPO>/parser/kiwiw/_e2.c"
+            },
+            {
+              "count": 10,
+              "path": "<REPO>/parser/kiwiw/divide.py"
+            },
+            {
+              "count": 14,
+              "path": "<REPO>/parser/kiwiw/_cenc.c"
+            }
+          ],
+          "tool_histogram": {
+            "Read": 58,
+            "Bash": 62
+          },
+          "prefix_bytes": 4953678,
+          "peak_ctx_tokens": 127736,
+          "api_turns": 105
+        },
+        "api_turns_note": "api_turns = 105",
+        "brief_anchor": "Execute the brief `docs/plans/03-map-layer-parity-remediation/briefs/3C-09-division-into-e2.md` in repo <REPO>, branch master. Its dependency 3C-08 is committed (965dcfc). Read the outcome records for 3C-06, 3C-07 and 3C-08 in `docs/plans/03-map-layer-parity-remediation/IMPLEMENTATION.md`, and the amendments at the end of the 3C-06, 3C-07 and 3C-08 briefs. Follow the brief exactly, including its step gates and committed stop point (full-disc sha 87a01b14\u2026 at -j 12",
+        "prior_checkpoint_turn": 90,
+        "snapshot_params": {
+          "excerpt": 400,
+          "N": 8
+        },
+        "snapshot_mode": "hybrid_v0",
+        "schedule": {
+          "interval": 15,
+          "first_at": 75
+        },
+        "checkpoint_turn": 105,
+        "worker_id": "ca977b9ca0dd"
+      },
+      {
+        "pack_chars": 2810,
+        "pack_meta": {
+          "note": "Safe judge pack for GOLD-LABEL-RUBRIC.md. Hybrid_v0 budget (last 8\u00d7400), not full gold 30\u00d7700. Raw gold-bundles/with-state stay gitignored under ubuntu-raw/.",
+          "redaction": "hybrid_v0 N=8 excerpt=400; secrets; home/workspace/mount/tmp-claude paths \u2192 tokens; username scrubbed",
+          "sources": [
+            "ca977b9ca0dd-dry-run-checkpoints-20261001-204508.with-state.jsonl (delta_since_prior)",
+            "ca977b9ca0dd-dry-run-thrash-table-20261001-204508.json (top rereads)",
+            "ca977b9ca0dd-gold-bundles-20261001-204508.jsonl (tail+brief+cumulative)"
+          ],
+          "source_run": "20261001-204508"
+        },
+        "shrink_steps": [],
+        "gold_bundle_status": "ok",
+        "tail": [
+          {
+            "tool_names": [
+              "Bash"
+            ],
+            "excerpt": "",
+            "turn": 90
+          },
+          {
+            "tool_names": [
+              "Bash"
+            ],
+            "excerpt": "",
+            "turn": 89
+          },
+          {
+            "tool_names": [
+              "Bash"
+            ],
+            "excerpt": "",
+            "turn": 88
+          },
+          {
+            "tool_names": [
+              "Read"
+            ],
+            "excerpt": "",
+            "turn": 87
+          },
+          {
+            "tool_names": [
+              "Bash"
+            ],
+            "excerpt": "",
+            "turn": 86
+          },
+          {
+            "tool_names": [
+              "Bash"
+            ],
+            "excerpt": "",
+            "turn": 85
+          },
+          {
+            "tool_names": [
+              "Bash"
+            ],
+            "excerpt": "",
+            "turn": 84
+          },
+          {
+            "tool_names": [
+              "Bash"
+            ],
+            "excerpt": "",
+            "turn": 83
+          }
+        ],
+        "thrash_top_rereads": [
+          {
+            "count": 5,
+            "path": "<REPO>/parser/kiwiw/cenc.py"
+          },
+          {
+            "count": 5,
+            "path": "<REPO>/parser/build_alldata.py"
+          },
+          {
+            "count": 7,
+            "path": "<REPO>/parser/kiwiw/_e2.c"
+          },
+          {
+            "count": 9,
+            "path": "<REPO>/parser/kiwiw/divide.py"
+          },
+          {
+            "count": 12,
+            "path": "<REPO>/parser/kiwiw/_cenc.c"
+          }
+        ],
+        "delta_since_prior": {
+          "tool_histogram_delta": {
+            "Read": 6,
+            "Bash": 10
+          },
+          "new_read_paths": [
+            "<HOME>/.claude/projects/-home-<USER>-workspace-open-pajero-maps/d006f5a0-267f-402e-bed7-b13d1a65a961/tool-results/b1ugu23ad.txt"
+          ]
+        },
+        "cumulative": {
+          "assistant_text_chars": 167,
+          "compaction_event_count": 12,
+          "distinct_read_paths": 15,
+          "reread_paths": [
+            {
+              "count": 5,
+              "path": "<REPO>/parser/kiwiw/cenc.py"
+            },
+            {
+              "count": 5,
+              "path": "<REPO>/parser/build_alldata.py"
+            },
+            {
+              "count": 7,
+              "path": "<REPO>/parser/kiwiw/_e2.c"
+            },
+            {
+              "count": 9,
+              "path": "<REPO>/parser/kiwiw/divide.py"
+            },
+            {
+              "count": 12,
+              "path": "<REPO>/parser/kiwiw/_cenc.c"
+            }
+          ],
+          "tool_histogram": {
+            "Read": 51,
+            "Bash": 52
+          },
+          "prefix_bytes": 4201228,
+          "peak_ctx_tokens": 127736,
+          "api_turns": 90
+        },
+        "api_turns_note": "api_turns = 90",
+        "brief_anchor": "Execute the brief `docs/plans/03-map-layer-parity-remediation/briefs/3C-09-division-into-e2.md` in repo <REPO>, branch master. Its dependency 3C-08 is committed (965dcfc). Read the outcome records for 3C-06, 3C-07 and 3C-08 in `docs/plans/03-map-layer-parity-remediation/IMPLEMENTATION.md`, and the amendments at the end of the 3C-06, 3C-07 and 3C-08 briefs. Follow the brief exactly, including its step gates and committed stop point (full-disc sha 87a01b14\u2026 at -j 12",
+        "prior_checkpoint_turn": 75,
+        "snapshot_params": {
+          "excerpt": 400,
+          "N": 8
+        },
+        "snapshot_mode": "hybrid_v0",
+        "schedule": {
+          "interval": 15,
+          "first_at": 75
+        },
+        "checkpoint_turn": 90,
+        "worker_id": "ca977b9ca0dd"
+      },
+      {
+        "pack_chars": 2622,
+        "pack_meta": {
+          "note": "Safe judge pack for GOLD-LABEL-RUBRIC.md. Hybrid_v0 budget (last 8\u00d7400), not full gold 30\u00d7700. Raw gold-bundles/with-state stay gitignored under ubuntu-raw/.",
+          "redaction": "hybrid_v0 N=8 excerpt=400; secrets; home/workspace/mount/tmp-claude paths \u2192 tokens; username scrubbed",
+          "sources": [
+            "ca977b9ca0dd-dry-run-checkpoints-20261001-204508.with-state.jsonl (delta_since_prior)",
+            "ca977b9ca0dd-dry-run-thrash-table-20261001-204508.json (top rereads)",
+            "ca977b9ca0dd-gold-bundles-20261001-204508.jsonl (tail+brief+cumulative)"
+          ],
+          "source_run": "20261001-204508"
+        },
+        "shrink_steps": [],
+        "gold_bundle_status": "ok",
+        "tail": [
+          {
+            "tool_names": [
+              "Bash"
+            ],
+            "excerpt": "",
+            "turn": 75
+          },
+          {
+            "tool_names": [
+              "Bash"
+            ],
+            "excerpt": "",
+            "turn": 74
+          },
+          {
+            "tool_names": [
+              "Bash"
+            ],
+            "excerpt": "",
+            "turn": 73
+          },
+          {
+            "tool_names": [
+              "Read",
+              "Read"
+            ],
+            "excerpt": "",
+            "turn": 72
+          },
+          {
+            "tool_names": [
+              "Bash"
+            ],
+            "excerpt": "",
+            "turn": 71
+          },
+          {
+            "tool_names": [
+              "Bash"
+            ],
+            "excerpt": "",
+            "turn": 70
+          },
+          {
+            "tool_names": [
+              "Bash"
+            ],
+            "excerpt": "",
+            "turn": 69
+          },
+          {
+            "tool_names": [
+              "Bash"
+            ],
+            "excerpt": "",
+            "turn": 68
+          }
+        ],
+        "thrash_top_rereads": [
+          {
+            "count": 3,
+            "path": "<REPO>/parser/kiwiw/cenc.py"
+          },
+          {
+            "count": 5,
+            "path": "<REPO>/parser/build_alldata.py"
+          },
+          {
+            "count": 6,
+            "path": "<REPO>/parser/kiwiw/_e2.c"
+          },
+          {
+            "count": 9,
+            "path": "<REPO>/parser/kiwiw/divide.py"
+          },
+          {
+            "count": 10,
+            "path": "<REPO>/parser/kiwiw/_cenc.c"
+          }
+        ],
+        "delta_since_prior": {},
+        "cumulative": {
+          "assistant_text_chars": 167,
+          "compaction_event_count": 10,
+          "distinct_read_paths": 14,
+          "reread_paths": [
+            {
+              "count": 3,
+              "path": "<REPO>/parser/kiwiw/cenc.py"
+            },
+            {
+              "count": 5,
+              "path": "<REPO>/parser/build_alldata.py"
+            },
+            {
+              "count": 6,
+              "path": "<REPO>/parser/kiwiw/_e2.c"
+            },
+            {
+              "count": 9,
+              "path": "<REPO>/parser/kiwiw/divide.py"
+            },
+            {
+              "count": 10,
+              "path": "<REPO>/parser/kiwiw/_cenc.c"
+            }
+          ],
+          "tool_histogram": {
+            "Bash": 42,
+            "Read": 45
+          },
+          "prefix_bytes": 3522749,
+          "peak_ctx_tokens": 126470,
+          "api_turns": 75
+        },
+        "api_turns_note": "api_turns = 75",
+        "brief_anchor": "Execute the brief `docs/plans/03-map-layer-parity-remediation/briefs/3C-09-division-into-e2.md` in repo <REPO>, branch master. Its dependency 3C-08 is committed (965dcfc). Read the outcome records for 3C-06, 3C-07 and 3C-08 in `docs/plans/03-map-layer-parity-remediation/IMPLEMENTATION.md`, and the amendments at the end of the 3C-06, 3C-07 and 3C-08 briefs. Follow the brief exactly, including its step gates and committed stop point (full-disc sha 87a01b14\u2026 at -j 12",
+        "prior_checkpoint_turn": null,
+        "snapshot_params": {
+          "excerpt": 400,
+          "N": 8
+        },
+        "snapshot_mode": "hybrid_v0",
+        "schedule": {
+          "interval": 15,
+          "first_at": 75
+        },
+        "checkpoint_turn": 75,
+        "worker_id": "ca977b9ca0dd"
+      }
+    ],
+    "checkpoint_turn": 105
+  },
+  "questions": {
+    "shape": {
+      "type": "choice",
+      "instructions": "Shape: late_pivot or early_thrash (or unclear with why).",
+      "criteria": {
+        "late_pivot": "Usable progress for a long stretch, then a clear change of fortune after which continuing is a mistake.",
+        "early_thrash": "Thrash, low progress, or runaway wait/poll is dominant early and extending does not recover a productive trajectory.",
+        "unclear": "Neither shape fits, or the evidence is insufficient; explain why in the text answers."
+      }
+    },
+    "why_T_large": {
+      "type": "noul",
+      "instructions": "Why T is large: what kept the transcript long (productive work, thrash, wait/poll, census, compaction churn, \u2026), turn-anchored."
+    },
+    "inflection_points": {
+      "type": "noul",
+      "instructions": "Inflection points: turn ranges + what changed."
+    },
+    "early_signals": {
+      "type": "noul",
+      "instructions": "Early signals: concrete foreshadowing of the outcome, turn-anchored, only from evidence \u2264 each cited checkpoint."
+    },
+    "recommended_exit_earliness": {
+      "type": "noul",
+      "instructions": "Recommended exit + earliness: exit turn under the shape rule above, and earliness vs ideal."
+    }
+  }
+}

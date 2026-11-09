@@ -1,0 +1,240 @@
+{
+  "by_perturbation": {
+    "drop-brief_anchor": {
+      "arm": null,
+      "cell_ids": [
+        "d5f3da257a22bc0e",
+        "cdc8beb29cd09c3c",
+        "150c2cfe3d5d3049"
+      ],
+      "n_compared": 3,
+      "perturbation": "drop-brief_anchor",
+      "question_flip_rates": {
+        "early_signals": {
+          "flips": 0,
+          "n": 3,
+          "rate": 0.0
+        },
+        "inflection_points": {
+          "flips": 0,
+          "n": 3,
+          "rate": 0.0
+        },
+        "recommended_exit_earliness": {
+          "flips": 0,
+          "n": 3,
+          "rate": 0.0
+        },
+        "shape": {
+          "flips": 0,
+          "n": 3,
+          "rate": 0.0
+        },
+        "why_T_large": {
+          "flips": 0,
+          "n": 3,
+          "rate": 0.0
+        }
+      },
+      "shape_flip_count": 0,
+      "shape_flip_rate": 0.0
+    },
+    "excerpt-length-extremes:max": {
+      "arm": "max",
+      "cell_ids": [
+        "b889bf1cc8ce6fc0",
+        "4005598d30028411",
+        "c4bdad0918bcc260"
+      ],
+      "n_compared": 3,
+      "perturbation": "excerpt-length-extremes",
+      "question_flip_rates": {
+        "early_signals": {
+          "flips": 0,
+          "n": 3,
+          "rate": 0.0
+        },
+        "inflection_points": {
+          "flips": 0,
+          "n": 3,
+          "rate": 0.0
+        },
+        "recommended_exit_earliness": {
+          "flips": 0,
+          "n": 3,
+          "rate": 0.0
+        },
+        "shape": {
+          "flips": 0,
+          "n": 3,
+          "rate": 0.0
+        },
+        "why_T_large": {
+          "flips": 0,
+          "n": 3,
+          "rate": 0.0
+        }
+      },
+      "shape_flip_count": 0,
+      "shape_flip_rate": 0.0
+    },
+    "excerpt-length-extremes:near-empty": {
+      "arm": "near-empty",
+      "cell_ids": [
+        "0b72d8c4ea495401",
+        "5a93a01dddacc6f2",
+        "f5423038b2266257"
+      ],
+      "n_compared": 3,
+      "perturbation": "excerpt-length-extremes",
+      "question_flip_rates": {
+        "early_signals": {
+          "flips": 0,
+          "n": 3,
+          "rate": 0.0
+        },
+        "inflection_points": {
+          "flips": 0,
+          "n": 3,
+          "rate": 0.0
+        },
+        "recommended_exit_earliness": {
+          "flips": 0,
+          "n": 3,
+          "rate": 0.0
+        },
+        "shape": {
+          "flips": 2,
+          "n": 3,
+          "rate": 0.6667
+        },
+        "why_T_large": {
+          "flips": 0,
+          "n": 3,
+          "rate": 0.0
+        }
+      },
+      "shape_flip_count": 2,
+      "shape_flip_rate": 0.6667
+    },
+    "false-progress-inject": {
+      "arm": null,
+      "cell_ids": [
+        "2da4649f388884ca",
+        "1557a060695865e8",
+        "50459714cd7154da"
+      ],
+      "n_compared": 3,
+      "perturbation": "false-progress-inject",
+      "question_flip_rates": {
+        "early_signals": {
+          "flips": 0,
+          "n": 3,
+          "rate": 0.0
+        },
+        "inflection_points": {
+          "flips": 0,
+          "n": 3,
+          "rate": 0.0
+        },
+        "recommended_exit_earliness": {
+          "flips": 0,
+          "n": 3,
+          "rate": 0.0
+        },
+        "shape": {
+          "flips": 0,
+          "n": 3,
+          "rate": 0.0
+        },
+        "why_T_large": {
+          "flips": 0,
+          "n": 3,
+          "rate": 0.0
+        }
+      },
+      "shape_flip_count": 0,
+      "shape_flip_rate": 0.0
+    },
+    "order-swap": {
+      "arm": null,
+      "cell_ids": [
+        "fc2cfb93582ce4da",
+        "59a175ae6c3ea56b",
+        "dc1fb5cf84803f86"
+      ],
+      "n_compared": 3,
+      "perturbation": "order-swap",
+      "question_flip_rates": {
+        "early_signals": {
+          "flips": 0,
+          "n": 3,
+          "rate": 0.0
+        },
+        "inflection_points": {
+          "flips": 0,
+          "n": 3,
+          "rate": 0.0
+        },
+        "recommended_exit_earliness": {
+          "flips": 0,
+          "n": 3,
+          "rate": 0.0
+        },
+        "shape": {
+          "flips": 1,
+          "n": 3,
+          "rate": 0.3333
+        },
+        "why_T_large": {
+          "flips": 0,
+          "n": 3,
+          "rate": 0.0
+        }
+      },
+      "shape_flip_count": 1,
+      "shape_flip_rate": 0.3333
+    },
+    "prose-rewrite-stats": {
+      "arm": null,
+      "cell_ids": [
+        "3bb7e97b6fea7f93",
+        "0a0aa4f3b0e729f2",
+        "70cbc6d131b5d67d"
+      ],
+      "n_compared": 3,
+      "perturbation": "prose-rewrite-stats",
+      "question_flip_rates": {
+        "early_signals": {
+          "flips": 0,
+          "n": 3,
+          "rate": 0.0
+        },
+        "inflection_points": {
+          "flips": 0,
+          "n": 3,
+          "rate": 0.0
+        },
+        "recommended_exit_earliness": {
+          "flips": 0,
+          "n": 3,
+          "rate": 0.0
+        },
+        "shape": {
+          "flips": 0,
+          "n": 3,
+          "rate": 0.0
+        },
+        "why_T_large": {
+          "flips": 0,
+          "n": 3,
+          "rate": 0.0
+        }
+      },
+      "shape_flip_count": 0,
+      "shape_flip_rate": 0.0
+    }
+  },
+  "comparison_rule": "exact response_label comparison",
+  "primary_metric": "shape choice flip against same-worker baseline"
+}

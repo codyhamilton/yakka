@@ -1,0 +1,27 @@
+{
+  "captured_seats": 21,
+  "case_registry_sha256": "ef922870b7687c50f9e73e5fb3dcf15e892680481f0dc4de1683581fa61db3f0",
+  "choice_scrape_failures": 0,
+  "choice_scrape_ok": 21,
+  "driver": "TypeSafe",
+  "errors": 0,
+  "framing": "EX-SHAPE-SIGNAL five-Q only",
+  "generated_at": "2026-10-02T17:08:04+10:00",
+  "http_counts": {
+    "200": 21
+  },
+  "model": "jev-1.13.0",
+  "no_call_jev": true,
+  "perturbation_matrix_sha256": "27027e1804167af5e547c54d8cfdc616340a3b982fb0e29251aa3336034dd865",
+  "planned_seats": 21,
+  "product_wiring": false,
+  "soft_standard_hold": true,
+  "status": "complete",
+  "stratum": "maps-5h",
+  "successful_seats": 21,
+  "workers": [
+    "ca977b9ca0dd",
+    "7b00225cb824",
+    "5163c22a6a3e"
+  ]
+}

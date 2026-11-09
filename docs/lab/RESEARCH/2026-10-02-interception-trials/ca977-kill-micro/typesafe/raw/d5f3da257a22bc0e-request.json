@@ -1,0 +1,483 @@
+{
+  "model": "jev-1.13.0",
+  "state": {
+    "evidence_class": "hybrid_v0",
+    "scenario_id": "shape-signal|drop-brief_anchor|baseline",
+    "framing": "EX-SHAPE-SIGNAL",
+    "snapshot": [
+      {
+        "worker_id": "ca977b9ca0dd",
+        "checkpoint_turn": 75,
+        "schedule": {
+          "first_at": 75,
+          "interval": 15
+        },
+        "snapshot_mode": "hybrid_v0",
+        "snapshot_params": {
+          "N": 8,
+          "excerpt": 400
+        },
+        "prior_checkpoint_turn": null,
+        "api_turns_note": "api_turns = 75",
+        "cumulative": {
+          "api_turns": 75,
+          "peak_ctx_tokens": 126470,
+          "prefix_bytes": 3522749,
+          "tool_histogram": {
+            "Read": 45,
+            "Bash": 42
+          },
+          "reread_paths": [
+            {
+              "path": "<REPO>/parser/kiwiw/_cenc.c",
+              "count": 10
+            },
+            {
+              "path": "<REPO>/parser/kiwiw/divide.py",
+              "count": 9
+            },
+            {
+              "path": "<REPO>/parser/kiwiw/_e2.c",
+              "count": 6
+            },
+            {
+              "path": "<REPO>/parser/build_alldata.py",
+              "count": 5
+            },
+            {
+              "path": "<REPO>/parser/kiwiw/cenc.py",
+              "count": 3
+            }
+          ],
+          "distinct_read_paths": 14,
+          "compaction_event_count": 10,
+          "assistant_text_chars": 167
+        },
+        "delta_since_prior": {},
+        "thrash_top_rereads": [
+          {
+            "path": "<REPO>/parser/kiwiw/_cenc.c",
+            "count": 10
+          },
+          {
+            "path": "<REPO>/parser/kiwiw/divide.py",
+            "count": 9
+          },
+          {
+            "path": "<REPO>/parser/kiwiw/_e2.c",
+            "count": 6
+          },
+          {
+            "path": "<REPO>/parser/build_alldata.py",
+            "count": 5
+          },
+          {
+            "path": "<REPO>/parser/kiwiw/cenc.py",
+            "count": 3
+          }
+        ],
+        "tail": [
+          {
+            "turn": 68,
+            "excerpt": "",
+            "tool_names": [
+              "Bash"
+            ]
+          },
+          {
+            "turn": 69,
+            "excerpt": "",
+            "tool_names": [
+              "Bash"
+            ]
+          },
+          {
+            "turn": 70,
+            "excerpt": "",
+            "tool_names": [
+              "Bash"
+            ]
+          },
+          {
+            "turn": 71,
+            "excerpt": "",
+            "tool_names": [
+              "Bash"
+            ]
+          },
+          {
+            "turn": 72,
+            "excerpt": "",
+            "tool_names": [
+              "Read",
+              "Read"
+            ]
+          },
+          {
+            "turn": 73,
+            "excerpt": "",
+            "tool_names": [
+              "Bash"
+            ]
+          },
+          {
+            "turn": 74,
+            "excerpt": "",
+            "tool_names": [
+              "Bash"
+            ]
+          },
+          {
+            "turn": 75,
+            "excerpt": "",
+            "tool_names": [
+              "Bash"
+            ]
+          }
+        ],
+        "gold_bundle_status": "ok",
+        "shrink_steps": [],
+        "pack_meta": {
+          "source_run": "20261001-204508",
+          "sources": [
+            "ca977b9ca0dd-gold-bundles-20261001-204508.jsonl (tail+brief+cumulative)",
+            "ca977b9ca0dd-dry-run-thrash-table-20261001-204508.json (top rereads)",
+            "ca977b9ca0dd-dry-run-checkpoints-20261001-204508.with-state.jsonl (delta_since_prior)"
+          ],
+          "redaction": "hybrid_v0 N=8 excerpt=400; secrets; home/workspace/mount/tmp-claude paths \u2192 tokens; username scrubbed",
+          "note": "Safe judge pack for GOLD-LABEL-RUBRIC.md. Hybrid_v0 budget (last 8\u00d7400), not full gold 30\u00d7700. Raw gold-bundles/with-state stay gitignored under ubuntu-raw/."
+        },
+        "pack_chars": 2622
+      },
+      {
+        "worker_id": "ca977b9ca0dd",
+        "checkpoint_turn": 90,
+        "schedule": {
+          "first_at": 75,
+          "interval": 15
+        },
+        "snapshot_mode": "hybrid_v0",
+        "snapshot_params": {
+          "N": 8,
+          "excerpt": 400
+        },
+        "prior_checkpoint_turn": 75,
+        "api_turns_note": "api_turns = 90",
+        "cumulative": {
+          "api_turns": 90,
+          "peak_ctx_tokens": 127736,
+          "prefix_bytes": 4201228,
+          "tool_histogram": {
+            "Bash": 52,
+            "Read": 51
+          },
+          "reread_paths": [
+            {
+              "path": "<REPO>/parser/kiwiw/_cenc.c",
+              "count": 12
+            },
+            {
+              "path": "<REPO>/parser/kiwiw/divide.py",
+              "count": 9
+            },
+            {
+              "path": "<REPO>/parser/kiwiw/_e2.c",
+              "count": 7
+            },
+            {
+              "path": "<REPO>/parser/build_alldata.py",
+              "count": 5
+            },
+            {
+              "path": "<REPO>/parser/kiwiw/cenc.py",
+              "count": 5
+            }
+          ],
+          "distinct_read_paths": 15,
+          "compaction_event_count": 12,
+          "assistant_text_chars": 167
+        },
+        "delta_since_prior": {
+          "new_read_paths": [
+            "<HOME>/.claude/projects/-home-<USER>-workspace-open-pajero-maps/d006f5a0-267f-402e-bed7-b13d1a65a961/tool-results/b1ugu23ad.txt"
+          ],
+          "tool_histogram_delta": {
+            "Bash": 10,
+            "Read": 6
+          }
+        },
+        "thrash_top_rereads": [
+          {
+            "path": "<REPO>/parser/kiwiw/_cenc.c",
+            "count": 12
+          },
+          {
+            "path": "<REPO>/parser/kiwiw/divide.py",
+            "count": 9
+          },
+          {
+            "path": "<REPO>/parser/kiwiw/_e2.c",
+            "count": 7
+          },
+          {
+            "path": "<REPO>/parser/build_alldata.py",
+            "count": 5
+          },
+          {
+            "path": "<REPO>/parser/kiwiw/cenc.py",
+            "count": 5
+          }
+        ],
+        "tail": [
+          {
+            "turn": 83,
+            "excerpt": "",
+            "tool_names": [
+              "Bash"
+            ]
+          },
+          {
+            "turn": 84,
+            "excerpt": "",
+            "tool_names": [
+              "Bash"
+            ]
+          },
+          {
+            "turn": 85,
+            "excerpt": "",
+            "tool_names": [
+              "Bash"
+            ]
+          },
+          {
+            "turn": 86,
+            "excerpt": "",
+            "tool_names": [
+              "Bash"
+            ]
+          },
+          {
+            "turn": 87,
+            "excerpt": "",
+            "tool_names": [
+              "Read"
+            ]
+          },
+          {
+            "turn": 88,
+            "excerpt": "",
+            "tool_names": [
+              "Bash"
+            ]
+          },
+          {
+            "turn": 89,
+            "excerpt": "",
+            "tool_names": [
+              "Bash"
+            ]
+          },
+          {
+            "turn": 90,
+            "excerpt": "",
+            "tool_names": [
+              "Bash"
+            ]
+          }
+        ],
+        "gold_bundle_status": "ok",
+        "shrink_steps": [],
+        "pack_meta": {
+          "source_run": "20261001-204508",
+          "sources": [
+            "ca977b9ca0dd-gold-bundles-20261001-204508.jsonl (tail+brief+cumulative)",
+            "ca977b9ca0dd-dry-run-thrash-table-20261001-204508.json (top rereads)",
+            "ca977b9ca0dd-dry-run-checkpoints-20261001-204508.with-state.jsonl (delta_since_prior)"
+          ],
+          "redaction": "hybrid_v0 N=8 excerpt=400; secrets; home/workspace/mount/tmp-claude paths \u2192 tokens; username scrubbed",
+          "note": "Safe judge pack for GOLD-LABEL-RUBRIC.md. Hybrid_v0 budget (last 8\u00d7400), not full gold 30\u00d7700. Raw gold-bundles/with-state stay gitignored under ubuntu-raw/."
+        },
+        "pack_chars": 2810
+      },
+      {
+        "worker_id": "ca977b9ca0dd",
+        "checkpoint_turn": 105,
+        "schedule": {
+          "first_at": 75,
+          "interval": 15
+        },
+        "snapshot_mode": "hybrid_v0",
+        "snapshot_params": {
+          "N": 8,
+          "excerpt": 400
+        },
+        "prior_checkpoint_turn": 90,
+        "api_turns_note": "api_turns = 105",
+        "cumulative": {
+          "api_turns": 105,
+          "peak_ctx_tokens": 127736,
+          "prefix_bytes": 4953678,
+          "tool_histogram": {
+            "Bash": 62,
+            "Read": 58
+          },
+          "reread_paths": [
+            {
+              "path": "<REPO>/parser/kiwiw/_cenc.c",
+              "count": 14
+            },
+            {
+              "path": "<REPO>/parser/kiwiw/divide.py",
+              "count": 10
+            },
+            {
+              "path": "<REPO>/parser/kiwiw/_e2.c",
+              "count": 9
+            },
+            {
+              "path": "<REPO>/parser/build_alldata.py",
+              "count": 7
+            },
+            {
+              "path": "<REPO>/parser/kiwiw/cenc.py",
+              "count": 5
+            }
+          ],
+          "distinct_read_paths": 15,
+          "compaction_event_count": 16,
+          "assistant_text_chars": 167
+        },
+        "delta_since_prior": {
+          "new_read_paths": [],
+          "tool_histogram_delta": {
+            "Bash": 10,
+            "Read": 7
+          }
+        },
+        "thrash_top_rereads": [
+          {
+            "path": "<REPO>/parser/kiwiw/_cenc.c",
+            "count": 14
+          },
+          {
+            "path": "<REPO>/parser/kiwiw/divide.py",
+            "count": 10
+          },
+          {
+            "path": "<REPO>/parser/kiwiw/_e2.c",
+            "count": 9
+          },
+          {
+            "path": "<REPO>/parser/build_alldata.py",
+            "count": 7
+          },
+          {
+            "path": "<REPO>/parser/kiwiw/cenc.py",
+            "count": 5
+          }
+        ],
+        "tail": [
+          {
+            "turn": 98,
+            "excerpt": "",
+            "tool_names": [
+              "Bash"
+            ]
+          },
+          {
+            "turn": 99,
+            "excerpt": "",
+            "tool_names": [
+              "Read",
+              "Read"
+            ]
+          },
+          {
+            "turn": 100,
+            "excerpt": "",
+            "tool_names": [
+              "Bash"
+            ]
+          },
+          {
+            "turn": 101,
+            "excerpt": "",
+            "tool_names": [
+              "Read"
+            ]
+          },
+          {
+            "turn": 102,
+            "excerpt": "",
+            "tool_names": [
+              "Bash"
+            ]
+          },
+          {
+            "turn": 103,
+            "excerpt": "",
+            "tool_names": [
+              "Read"
+            ]
+          },
+          {
+            "turn": 104,
+            "excerpt": "",
+            "tool_names": [
+              "Bash"
+            ]
+          },
+          {
+            "turn": 105,
+            "excerpt": "",
+            "tool_names": [
+              "Bash"
+            ]
+          }
+        ],
+        "gold_bundle_status": "ok",
+        "shrink_steps": [],
+        "pack_meta": {
+          "source_run": "20261001-204508",
+          "sources": [
+            "ca977b9ca0dd-gold-bundles-20261001-204508.jsonl (tail+brief+cumulative)",
+            "ca977b9ca0dd-dry-run-thrash-table-20261001-204508.json (top rereads)",
+            "ca977b9ca0dd-dry-run-checkpoints-20261001-204508.with-state.jsonl (delta_since_prior)"
+          ],
+          "redaction": "hybrid_v0 N=8 excerpt=400; secrets; home/workspace/mount/tmp-claude paths \u2192 tokens; username scrubbed",
+          "note": "Safe judge pack for GOLD-LABEL-RUBRIC.md. Hybrid_v0 budget (last 8\u00d7400), not full gold 30\u00d7700. Raw gold-bundles/with-state stay gitignored under ubuntu-raw/."
+        },
+        "pack_chars": 2700
+      }
+    ],
+    "checkpoint_turn": 105
+  },
+  "questions": {
+    "shape": {
+      "type": "choice",
+      "instructions": "Shape: late_pivot or early_thrash (or unclear with why).",
+      "criteria": {
+        "late_pivot": "Usable progress for a long stretch, then a clear change of fortune after which continuing is a mistake.",
+        "early_thrash": "Thrash, low progress, or runaway wait/poll is dominant early and extending does not recover a productive trajectory.",
+        "unclear": "Neither shape fits, or the evidence is insufficient; explain why in the text answers."
+      }
+    },
+    "why_T_large": {
+      "type": "noul",
+      "instructions": "Why T is large: what kept the transcript long (productive work, thrash, wait/poll, census, compaction churn, \u2026), turn-anchored."
+    },
+    "inflection_points": {
+      "type": "noul",
+      "instructions": "Inflection points: turn ranges + what changed."
+    },
+    "early_signals": {
+      "type": "noul",
+      "instructions": "Early signals: concrete foreshadowing of the outcome, turn-anchored, only from evidence \u2264 each cited checkpoint."
+    },
+    "recommended_exit_earliness": {
+      "type": "noul",
+      "instructions": "Recommended exit + earliness: exit turn under the shape rule above, and earliness vs ideal."
+    }
+  }
+}
