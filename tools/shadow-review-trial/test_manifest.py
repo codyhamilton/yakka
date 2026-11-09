@@ -109,6 +109,24 @@ class ManifestFixtures(unittest.TestCase):
         self.assertEqual(normalized["sha256"], hashlib.sha256(path.read_bytes()).hexdigest())
         self.assertEqual(normalized["by_head"][self.pr_head][0]["body"], "PR review finding")
 
+    def test_phase_trailers_supply_plan_and_support_workflow_alias(self):
+        phase_heads = []
+        for marker, number in (("Yakka-Phase", 7), ("Workflow-Phase", 8)):
+            code = self.repo / "code.py"
+            code.write_text(f"phase = {number}\n")
+            git(self.repo, "add", "code.py")
+            git(self.repo, "commit", "-qm", f"phase {number}\n\n{marker}: demo:{number}")
+            phase_heads.append((git(self.repo, "rev-parse", "HEAD"), number))
+
+        frozen = manifest.create_manifest(self.repo, self.out, seed=2, target=50)
+        for head, number in phase_heads:
+            case = next(c for c in frozen["cases"] if c["head_sha"] == head)
+            self.assertEqual(case["stratum"], "phase")
+            self.assertEqual(case["plan"], "demo")
+            self.assertEqual(case["phase"], number)
+            self.assertEqual(case["criteria"]["source"], "head_blob")
+            self.assertTrue(any("IMPLEMENTATION.md" in pointer for pointer in case["comparator_pointers"]))
+
     def test_cli_freezes_fixture_repository(self):
         output = pathlib.Path(self.tmp.name) / "cli-manifest.json"
         result = subprocess.run([sys.executable, str(pathlib.Path(__file__).with_name("cli.py")), "manifest",

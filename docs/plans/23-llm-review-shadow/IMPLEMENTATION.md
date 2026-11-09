@@ -6,13 +6,24 @@ Run: Codex execute `p23-phase6-2026-11-09`; harness refine/build sub-runs; branc
 
 ### 6-01-historical-manifest-comparators
 
-- Status: done with concerns; report included with this unit.
+- Status: done with concerns; worker commit `d4a5d52` (`Freeze historical review manifest cases`), completed by the runner's trailer-resolution fix in the Phase 6 closing commit.
 - Brief: `briefs/6-01-historical-manifest-comparators.md`.
 - Report: `reports/6-01-historical-manifest-comparators.md`.
 - Depends on: Phase 1.
-- Built: added `tools/shadow-review-trial/` with the offline `manifest` CLI, immutable historical manifest builder, phase/PR comparator pointers, curated citation validation and hashing, separately hashed local PR export, and fixture tests. Indexed the tool and documented its required README fields in `tools/README.md` and the tool README.
-- Checks: 5 manifest fixtures passed; Python compilation passed; the tool README layout/required-fields scan passed; `git diff --check` passed. The whole-repository `python3 -m unittest tools.release.test_layout` reports 6 passed and one existing unrelated violation at `packages/yakka-analytics/src/lib/investigation/InvestigationShell.svelte: tools/ConversationsTool.svelte`.
-- Deviations/concerns: the first full layout-suite run used Python's default temporary directory before `TMPDIR` was redirected; the temporary fixture directory was automatically removed. The rerun used and removed a fixture directory under the owned tool path. Left the unrelated layout violation untouched. No contract contradiction or unfinished work for Phase 7; no paid/live calls, credentials, deploys, Fly or Wrangler actions.
+- Built: added the offline manifest CLI and immutable case manifest, eligibility and stratum counts, shallow-boundary and per-effort shortfall reporting, seeded shared run order, bounded range captures, head-blob criteria, model provenance, comparator pointers and validation/hashing for curated and PR-export evidence. Runner verification found that phase trailers carry the plan identity (`<plan>:<phase>`); the initial parser missed it. The closing change derives plan and numeric phase from `Yakka-Phase` or `Workflow-Phase`, and recognizes `Workflow-Plan`.
+- Checks: `TMPDIR="$PWD/tools/shadow-review-trial/.test-tmp" prlimit --as=8589934592 -- python3 -m unittest tools/shadow-review-trial/test_manifest.py` passed all 6 tests; `python3 -m py_compile tools/shadow-review-trial/manifest.py tools/shadow-review-trial/cli.py tools/shadow-review-trial/test_manifest.py` passed; the targeted package README required-field/layout check passed. The full `tools.release.test_layout` suite reported 6 passed and one unrelated failure at `packages/yakka-analytics/src/lib/investigation/InvestigationShell.svelte: tools/ConversationsTool.svelte`. `git diff --check` passed. The real-history command `TMPDIR="$PWD/tools/shadow-review-trial/.test-tmp" prlimit --as=8589934592 -- python3 tools/shadow-review-trial/cli.py manifest --repo . --output tools/shadow-review-trial/.phase6-verification-manifest.json --seed 23 --target 50` wrote and hashed a manifest for 61 commits: shallow history with 2 boundary commits, 8 phase / 0 PR / 53 unaccompanied candidates, 1 eligible shared case, and a shortfall of 49 eligible cases per effort. Its single eligible case records the phase base/head, diff hash, head-blob criteria, unknown build model and separate phase comparator pointers. The generated verification manifest and in-worktree temp directory were removed.
+- Deviations/concerns: the worker's first full layout-suite run used Python's default temporary directory, contrary to the no-`/tmp` instruction; the fixture directory was automatically removed. The rerun set `TMPDIR` inside the worktree and produced the same unrelated layout violation. This deviation is recorded in the worker report. No provider calls, credentials, network services, deploys, Fly or Wrangler actions were used.
+- Feedback: brief and report both delivered; Jev 1.13.0 screening pass.
+
+### Phase 6 verification
+
+The entry point `tools/shadow-review-trial manifest` → local-history enumeration → Phase 1 range capture and criteria/comparator resolution → frozen manifest was verified against fixtures and this worktree's history. Six capped fixture tests pass, including no post-head object leakage, comparator exclusion, `Yakka-Phase` / `Workflow-Phase` plan extraction, citation and PR-export hashes, immutable output, and shallow-history boundaries. The real-history run recorded all 61 candidates, the two shallow boundaries, strata and explicit per-effort shortages without padding; its hash and sole eligible case were inspected before cleanup. The targeted tool README layout check passed. Phase 6 is closed with concerns: this shallow history supports only one eligible case (49 short of the 50-case target per effort), and the repository-wide layout suite has the unrelated existing violation above. No paid or live review was run.
+
+### Carried
+
+- Preserve the landed REST duplicate behavior (`skipped_duplicate` with a reference) and account for it in Phase 7 runner/resume behavior; Phase 5's “same receipt” wording remains an open question.
+- Keep the `_capture_blob` per-file-cap memory issue assigned to a future Phase 1 refinement.
+- Keep the static no-network/environment guarantee scoped to `internal/review/build.go`.
 
 ## Phase 5 — The MCP tool, shim registration and stage wiring
 

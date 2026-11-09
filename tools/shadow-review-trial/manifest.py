@@ -39,9 +39,23 @@ def _trailers(repo: pathlib.Path, sha: str) -> dict[str, str]:
     for line in body.splitlines():
         if ":" in line:
             key, value = line.split(":", 1)
-            if key in {"Yakka-Plan", "Yakka-Phase", "Pull-Request", "PR"}:
+            if key in {"Yakka-Plan", "Yakka-Phase", "Workflow-Plan", "Workflow-Phase", "Pull-Request", "PR"}:
                 result[key] = value.strip()
     return result
+
+
+def _plan_identity(trailers: dict[str, str]) -> str:
+    plan = trailers.get("Yakka-Plan") or trailers.get("Workflow-Plan")
+    if plan:
+        return plan
+    phase = trailers.get("Yakka-Phase") or trailers.get("Workflow-Phase") or ""
+    return phase.rsplit(":", 1)[0] if ":" in phase else ""
+
+
+def _phase_number(trailers: dict[str, str]) -> int | None:
+    phase = trailers.get("Yakka-Phase") or trailers.get("Workflow-Phase") or ""
+    value = phase.rsplit(":", 1)[-1]
+    return int(value) if value.isdigit() else None
 
 
 def _blob(repo: pathlib.Path, path: str, sha: str) -> tuple[str, str] | None:
@@ -59,9 +73,10 @@ def _changed_paths(repo: pathlib.Path, base: str, head: str) -> list[str]:
 
 
 def _case_stratum(trailers: dict[str, str]) -> str:
-    if trailers.get("Yakka-Phase"):
+    if trailers.get("Yakka-Phase") or trailers.get("Workflow-Phase"):
         return "phase"
-    if trailers.get("Pull-Request") or trailers.get("PR") or trailers.get("Yakka-Plan"):
+    if (trailers.get("Pull-Request") or trailers.get("PR") or trailers.get("Yakka-Plan")
+            or trailers.get("Workflow-Plan")):
         return "pr"
     return "unaccompanied"
 
@@ -172,6 +187,7 @@ def create_manifest(repo: pathlib.Path, output: pathlib.Path, seed: int = 1, tar
         head, parents = parts[0], parts[1:]
         trailers = _trailers(repo, head)
         stratum = _case_stratum(trailers)
+        plan = _plan_identity(trailers)
         base = parents[0] if parents else None
         reason = "eligible"
         capture = None
@@ -198,7 +214,6 @@ def create_manifest(repo: pathlib.Path, output: pathlib.Path, seed: int = 1, tar
                     reason = "no_code_change"
                 else:
                     excluded = list(policy["change_exclude"])
-                    plan = trailers.get("Yakka-Plan", "")
                     prefix = plan.rstrip("/") if plan.startswith("docs/plans/") else f"docs/plans/{plan}" if plan else ""
                     if prefix:
                         excluded += [f"{prefix}/IMPLEMENTATION.md", f"{prefix}/REVIEW.md", f"{prefix}/QA.md"]
@@ -212,7 +227,6 @@ def create_manifest(repo: pathlib.Path, output: pathlib.Path, seed: int = 1, tar
                             reason = "empty_capture"
                     except yakka.CaptureError as exc:
                         reason = f"capture_{exc.code}"
-        plan = trailers.get("Yakka-Plan", "")
         crit = _criteria(repo, head, plan)
         pointers = _comparators(repo, head, plan, stratum)
         eligible = reason == "eligible" and bool(capture and capture["diff"])
@@ -221,7 +235,7 @@ def create_manifest(repo: pathlib.Path, output: pathlib.Path, seed: int = 1, tar
         if eligible and stratum in {"phase", "pr"} and not pointers:
             eligible, reason = False, "missing_comparator_source"
         candidates.append({"case_id": head, "eligible": eligible, "eligibility_reason": reason,
-                           "stratum": stratum, "plan": plan or None, "phase": trailers.get("Yakka-Phase"),
+                           "stratum": stratum, "plan": plan or None, "phase": _phase_number(trailers),
                            "pr": trailers.get("Pull-Request") or trailers.get("PR"), "base_sha": base,
                            "head_sha": head, "capture": capture, "criteria": crit,
                            "build_models": {"source": "unknown", "models": []},
