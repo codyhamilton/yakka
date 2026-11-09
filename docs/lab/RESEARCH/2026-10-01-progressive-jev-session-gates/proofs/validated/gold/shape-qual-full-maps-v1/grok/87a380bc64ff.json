@@ -1,0 +1,40 @@
+{
+  "experiment": "shape-qual-full-maps-v1",
+  "worker_id": "87a380bc64ff",
+  "model": "Grok",
+  "narrative_shape": "The only checkpoint is a monitor wait. Turns 68, 69, 73, and 74 are four versions of waiting on compare_disc and quantisation_roundtrip. Monitor is 6. There is no Edit and no Write. Bash is 56 and Read is 9, so command work happened before this tail, but the visible shape is standby. build_alldata.py is reread 4 times and overlap.py 3. Compactions 0. T=89, so this window is essentially the whole late prefix.",
+  "shape_label": "poll_monitor",
+  "phases": [
+    {
+      "range": "68-75",
+      "name": "dual-job monitor wait",
+      "note": "Waiting on compare_disc and the roundtrip job. Two Monitor calls in the tail plus earlier Monitor uses. No implementation tool in the histogram."
+    }
+  ],
+  "early_signals": [
+    {
+      "turn": 68,
+      "signal": "\"Waiting for compare_disc and quantisation_roundtrip to finish.\""
+    },
+    {
+      "turn": 69,
+      "signal": "Same wait, restated for the background jobs."
+    },
+    {
+      "turn": 73,
+      "signal": "\"Now waiting for both monitors to report back.\""
+    },
+    {
+      "turn": 74,
+      "signal": "\"Waiting on the compare_disc and roundtrip monitors.\""
+    },
+    {
+      "turn": 75,
+      "signal": "Monitor 6, no Edit/Write, compactions 0 — standby, not a reread/compaction storm."
+    }
+  ],
+  "early_signal_window_respected": true,
+  "recommended_exit": null,
+  "earliness": null,
+  "rationale": "Every prose turn in the only pack row is monitor standby. That is a poll/monitor shape, distinct from the silent reread loops (those have climbing compactions and no wait sentences). There is no later checkpoint to show a return."
+}

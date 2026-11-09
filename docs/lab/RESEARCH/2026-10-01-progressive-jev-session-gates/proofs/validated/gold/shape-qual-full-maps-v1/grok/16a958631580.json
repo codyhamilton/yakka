@@ -1,0 +1,41 @@
+{
+  "experiment": "shape-qual-full-maps-v1",
+  "worker_id": "16a958631580",
+  "model": "Grok",
+  "narrative_shape": "Clip/cenc fixes, then a pytest wait. Turns 68–75 run the suite, confirm a fix, and mirror it into emit_rect_piece in the C file. _cenc.c is at 5 reads, clip.py at 4, test_cenc.py at 3 — the files being patched. Edit count stays 13. Turns 83–85 wait on a background pytest watcher. The run ends at T=94, still in that wait in the pack, with a few reads after the wait sentences.",
+  "shape_label": "unclear",
+  "phases": [
+    {
+      "range": "68-75",
+      "name": "fix mirrored into C",
+      "note": "Full suite, Python fix confirmed, C emit_rect_piece updated. Edit 13."
+    },
+    {
+      "range": "83-90",
+      "name": "pytest wait",
+      "note": "Background watcher; explicit pause at turn 85. Then Read/Bash with no new prose. No further edits."
+    }
+  ],
+  "early_signals": [
+    {
+      "turn": 68,
+      "signal": "Running the full suite after the new tests — still on the implementation path."
+    },
+    {
+      "turn": 72,
+      "signal": "Fix confirmed, next step is the C mirror."
+    },
+    {
+      "turn": 75,
+      "signal": "C step computation edited to match the Python fix."
+    },
+    {
+      "turn": 85,
+      "signal": "Pauses for the pytest watcher notification."
+    }
+  ],
+  "early_signal_window_respected": true,
+  "recommended_exit": null,
+  "earliness": null,
+  "rationale": "≤120 shows a real fix and then a short pytest wait. The wait is not long enough, and not prose-free enough, to call a failed pivot, and the rereads are the files under edit."
+}

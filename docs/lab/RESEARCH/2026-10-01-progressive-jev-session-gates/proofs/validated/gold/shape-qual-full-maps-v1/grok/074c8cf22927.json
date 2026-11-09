@@ -1,0 +1,32 @@
+{
+  "experiment": "shape-qual-full-maps-v1",
+  "worker_id": "074c8cf22927",
+  "model": "Grok",
+  "narrative_shape": "Brief amendments, a green suite, and a commit, all inside the only checkpoint. Turn 70 confirms an append and moves on to amend brief 19. Turn 72 waits on tests. Turn 74: all 229 tests pass, scratch is outside the worktree, and the worker commits. Edit 4, Write 2, Read 12, no reread table, compactions 0. T=76.",
+  "shape_label": "unclear",
+  "phases": [
+    {
+      "range": "68-75",
+      "name": "amend, test, commit",
+      "note": "Brief 19 amended, full suite 229 pass, commit. A short test wait in the middle."
+    }
+  ],
+  "early_signals": [
+    {
+      "turn": 70,
+      "signal": "Own append confirmed; next act is amending brief 19."
+    },
+    {
+      "turn": 72,
+      "signal": "Waits for the full suite after the edits."
+    },
+    {
+      "turn": 74,
+      "signal": "All 229 tests pass and the commit is next."
+    }
+  ],
+  "early_signal_window_respected": true,
+  "recommended_exit": null,
+  "earliness": null,
+  "rationale": "The only window is a finished fix: amend, green tests, commit. The test wait is a few turns inside that close. No stall or thrash."
+}

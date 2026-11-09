@@ -1,0 +1,32 @@
+{
+  "experiment": "shape-qual-full-maps-v1",
+  "worker_id": "e8aa4f271927",
+  "model": "Grok",
+  "narrative_shape": "A gate wait on top of a small read set. Turn 69: the split script is ready and the worker is waiting on the monitor for the gate. Turn 74 drops already-staged deletions from the pathspec. Bash 60, Read 20, Write 3, no Edit. build_alldata.py reread 5, cenc.py reread 4, compactions 4, assistant text 270. The script-ready line is forward progress; the rereads and compactions are elevated for a single checkpoint; the wait is the brief's gate. T=76, so this is the whole late prefix and it does not show a frozen multi-checkpoint loop.",
+  "shape_label": "unclear",
+  "phases": [
+    {
+      "range": "68-75",
+      "name": "script ready, gate wait, pathspec cleanup",
+      "note": "Write of the split script, monitor wait, then git pathspec hygiene. Rereads sit on build_alldata.py and cenc.py."
+    }
+  ],
+  "early_signals": [
+    {
+      "turn": 69,
+      "signal": "Split script is ready; waiting on the monitor for the gate outcome."
+    },
+    {
+      "turn": 74,
+      "signal": "Drops deletions that are already staged from the pathspec — git cleanup beside the wait."
+    },
+    {
+      "turn": 75,
+      "signal": "build_alldata.py ×5 and cenc.py ×4, compactions 4, text 270, no Edit — a tight read/bash set, but only one checkpoint."
+    }
+  ],
+  "early_signal_window_respected": true,
+  "recommended_exit": null,
+  "earliness": null,
+  "rationale": "One checkpoint shows a finished script, a gate wait, and moderate rereads. That is not yet the climbing silent loop seen when those counts keep rising across checkpoints, and it is not a pure monitor park."
+}

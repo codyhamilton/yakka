@@ -1,0 +1,46 @@
+{
+  "experiment": "shape-qual-full-maps-v1",
+  "worker_id": "0853bc21d3aa",
+  "model": "Grok",
+  "narrative_shape": "Sustained divided-parcel implementation through a green suite. alldata_writer and plan_divisions are edited, test_divide.py is added, the suite passes aside from two pre-existing extractor failures, a rebuild completes, and turn 149 says all 224 tests pass and the worker is checking owned files before commit. Rereads stay around four on files being edited. No stall appears.",
+  "shape_label": "unclear",
+  "phases": [
+    {
+      "range": "74-90",
+      "name": "writer edits",
+      "note": "Signature, placement loop, _encode_level routed through plan_divisions, run() and manifest updated, compile check."
+    },
+    {
+      "range": "99-120",
+      "name": "tests and harness",
+      "note": "Existing suite passes, test_divide.py written, 5 tests pass, full suite re-run, Perth rebuild and compare_disc started."
+    },
+    {
+      "range": "128-150",
+      "name": "rebuild and commit prep",
+      "note": "plan_divisions safety edits, rebuild succeeds, 224 tests pass, concurrent-unit check before commit."
+    }
+  ],
+  "early_signals": [
+    {
+      "turn": 74,
+      "signal": "Starts the alldata_writer signature and docstring edit."
+    },
+    {
+      "turn": 90,
+      "signal": "Rewrites _encode_level through plan_divisions and checks that the file compiles."
+    },
+    {
+      "turn": 105,
+      "signal": "Existing suite passed; next act is writing test_divide.py."
+    },
+    {
+      "turn": 119,
+      "signal": "Full suite pass except two pre-existing failures, then Perth rebuild and compare_disc."
+    }
+  ],
+  "early_signal_window_respected": true,
+  "recommended_exit": null,
+  "earliness": null,
+  "rationale": "Turns ≤120 are the build itself: edits, then tests, then the harness. Later checkpoints continue that arc through a green suite. Nothing in the early window foreshadows a stall."
+}

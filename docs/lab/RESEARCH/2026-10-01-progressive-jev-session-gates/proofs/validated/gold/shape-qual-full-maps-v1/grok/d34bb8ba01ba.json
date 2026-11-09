@@ -1,0 +1,46 @@
+{
+  "experiment": "shape-qual-full-maps-v1",
+  "worker_id": "d34bb8ba01ba",
+  "model": "Grok",
+  "narrative_shape": "Edit-heavy decode-side fixes, then a short pytest wait. By turn 75 there are 18 edits across walk, parcel metrics, and census/overlay tools, and several of those files are described as already complete. Two more edits land by turn 83. Turns 99–103 park on a pytest monitor (\"I'll just wait and poll\"). Edit count stops at 20. The run ends at T=116, so the wait is the close of the prefix and is not shown failing or recovering.",
+  "shape_label": "unclear",
+  "phases": [
+    {
+      "range": "68-75",
+      "name": "edit burst",
+      "note": "parcel_metrics moved off DECODER_RANGE; walk.py and coord_scale_census treated as done; overlay and mirror tools next. Edit 18, Bash only 34."
+    },
+    {
+      "range": "83-90",
+      "name": "last edits, then bash",
+      "note": "Edit 20. New harness-walk test path. Tail after the edit is silent bash."
+    },
+    {
+      "range": "99-105",
+      "name": "pytest monitor",
+      "note": "ToolSearch, Monitor, and explicit wait sentences, then a Read at 105. One more Write."
+    }
+  ],
+  "early_signals": [
+    {
+      "turn": 69,
+      "signal": "Still fixing parcel_metrics — implementation, not a reread stall."
+    },
+    {
+      "turn": 73,
+      "signal": "walk.py judged already complete; the worker moves on to the next owned tool."
+    },
+    {
+      "turn": 75,
+      "signal": "Edit 18 against Bash 34 and a real reread set on the files being changed."
+    },
+    {
+      "turn": 99,
+      "signal": "Switches to waiting and polling a background pytest task."
+    }
+  ],
+  "early_signal_window_respected": true,
+  "recommended_exit": null,
+  "earliness": null,
+  "rationale": "The early window is an edit burst that ends in a pytest wait. The wait is inside ≤120 and is short. It is not yet a stalled trajectory, and the rereads match files under edit."
+}

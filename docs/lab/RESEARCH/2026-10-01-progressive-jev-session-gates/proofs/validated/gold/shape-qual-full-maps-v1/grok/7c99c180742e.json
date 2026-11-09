@@ -1,0 +1,41 @@
+{
+  "experiment": "shape-qual-full-maps-v1",
+  "worker_id": "7c99c180742e",
+  "model": "Grok",
+  "narrative_shape": "Implementation is already behind the first tail, then the session becomes a long disc-check wait and ends there. Turn 68: 152 tests pass, a stale process is killed, and the worker reviews compare_disc and context while the reference check runs. Edit 12 and Write 11 do not grow after that. Turns 84–90 re-arm a monitor on a detached self-check (level 0, 200/1836, then a second pass) and hold the commit. T=100, so the wait is the end state.",
+  "shape_label": "late_pivot",
+  "phases": [
+    {
+      "range": "68-75",
+      "name": "suite green, review during the check",
+      "note": "Full suite passed. Reviews compare_disc.py and context.py while the reference check runs. Monitor already 2."
+    },
+    {
+      "range": "84-90",
+      "name": "re-armed disc-check wait",
+      "note": "Persistent monitor on pid 1304219. Block 200/1836, then the pointers pass. No new edits. Worker will not commit until the check finishes."
+    }
+  ],
+  "early_signals": [
+    {
+      "turn": 68,
+      "signal": "Tests have passed and attention has shifted to background done-evidence and a stale process."
+    },
+    {
+      "turn": 74,
+      "signal": "Reviews compare_disc while the reference check is still running."
+    },
+    {
+      "turn": 75,
+      "signal": "Edit 12 and Write 11 are already in the histogram — the visible tail is the wait, not new build."
+    },
+    {
+      "turn": 84,
+      "signal": "Re-arms a monitor for a detached disc check that is only at block 200 of 1836."
+    }
+  ],
+  "early_signal_window_respected": true,
+  "recommended_exit": 90,
+  "earliness": "on time — the second checkpoint is the disc-check wait, and the run ends in it",
+  "rationale": "Usable build is already done by turn 68. The early tell is the shift onto the reference check. By turn 84 that wait is the session, and nothing after it returns to editing inside the pack."
+}

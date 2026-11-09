@@ -1,0 +1,41 @@
+{
+  "experiment": "shape-qual-full-maps-v1",
+  "worker_id": "a3cc4da7e21c",
+  "model": "Grok",
+  "narrative_shape": "Baseline capture that waits on long builds and then commits. Turn 70: pytest 518 before, 520 after, no failures. Turns 71–75 launch Perth j1/j4 and three full-AU builds under the heavy lock and wait. Checkpoint 90: unrelated sibling-unit files are left unstaged; owned paths are committed. Edit count stays at 5. Almost no reads (distinct paths 1 then 2). The wait is Contract W, and it ends in a commit.",
+  "shape_label": "unclear",
+  "phases": [
+    {
+      "range": "68-75",
+      "name": "pytest delta, then baseline launch",
+      "note": "Waiting on the baseline pytest, then a 90-minute background script for the disc builds."
+    },
+    {
+      "range": "83-90",
+      "name": "commit owned paths",
+      "note": "Sibling dirty files identified and avoided. Owned paths staged and committed. Read +1."
+    }
+  ],
+  "early_signals": [
+    {
+      "turn": 70,
+      "signal": "Before 518 passed, after 520 passed; the diff is restored and the baseline script is next."
+    },
+    {
+      "turn": 73,
+      "signal": "Baseline script launched under a 90-minute Contract W window."
+    },
+    {
+      "turn": 75,
+      "signal": "Waiting on Perth j1/j4 and the full-AU builds."
+    },
+    {
+      "turn": 88,
+      "signal": "Refuses to stage another unit's files and moves to commit owned paths."
+    }
+  ],
+  "early_signal_window_respected": true,
+  "recommended_exit": null,
+  "earliness": null,
+  "rationale": "≤120 shows the test delta, the long baseline wait, and the commit. The wait resolves. Low read counts fit a build script, not a reread loop."
+}
