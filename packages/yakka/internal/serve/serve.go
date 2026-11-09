@@ -308,6 +308,14 @@ func New(cfg Config, opts Options) *Server {
 		panic("serve: registry: " + err.Error())
 	}
 	s := &Server{cfg: cfg, opts: opts, registry: reg, mcpTools: mcpTools, grants: newDeviceGrants(), tenants: map[string]*tenantState{}, stop: make(chan struct{}), screen: opts.ScreenStep}
+	// A review tool is advertised only when its declared 150-second contract
+	// fits this server's configured MCP call ceiling and review is configured.
+	// This keeps an unavailable optional capability out of minimal/local servers.
+	if cfg.ReviewModel != "" && mcpTools.maxCall >= 150 {
+		if err := s.RegisterReviewMCPTool(); err != nil {
+			panic("serve: review MCP tool: " + err.Error())
+		}
+	}
 	s.reviewReservations = opts.ReviewReservations
 	if s.reviewReservations == nil {
 		reservations, err := review.NewPersistentReservations(cfg.ReviewUSDCap, 2, filepath.Join(cfg.Data, "review-reservations.json"))
