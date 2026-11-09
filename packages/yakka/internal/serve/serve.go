@@ -586,6 +586,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/v1/analytics/score-series", s.method(http.MethodGet, s.auth(s.analyticsScoreSeries)))
 	mux.HandleFunc("/v1/me", s.method(http.MethodGet, s.sessionOnly(s.handleMe)))
 	mux.HandleFunc("/v1/tenants", s.handleTenantsRoute)
+	mux.HandleFunc("/v1/tenants/", s.handleTenantLifecycleRoute)
 	mux.HandleFunc("/v1/tokens", s.handleTokensRoute)
 	mux.HandleFunc("/v1/tokens/", s.handleTokensSubpath)
 	mux.HandleFunc("/v1/admin/tokens", s.method(http.MethodGet, s.sessionOnly(s.handleAdminListTokens)))
