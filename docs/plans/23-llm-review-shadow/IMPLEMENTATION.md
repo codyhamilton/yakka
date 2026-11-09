@@ -6,11 +6,15 @@ Run: Codex execute, harness-dispatched unit 1-01; session: hlaunch build on feat
 
 ### 2-01-review-packet-prompt
 
-- Status: in progress.
+- Status: done; committed with this unit's report.
 - Brief: `briefs/2-01-review-packet-prompt.md`.
+- Report: `reports/2-01-review-packet-prompt.md`.
 - Run: Codex execute, inline single-unit phase; started 2026-11-09.
-- Scope: pure packet and prompt builder with embedded policy values; provider calls, criteria resolution, persistence and MCP wiring remain outside this phase.
+- Built: added `packages/yakka/internal/review/{build.go,build_test.go,policy.json}`. The package revalidates the received diff hash, re-filters captures, constructs the deterministic role-first prompt, applies secret scans, derives the authoritative capture id, and exports embedded declaration/trial policy values. No provider, env, network, criteria resolver, persistence or MCP code was added.
+- Checks: `prlimit --as=8589934592 -- go test -count=1 -p=3 ./internal/review` passed (final run 0.486s); `git diff --check` passed. One initial assertion expected manifest insertion order; after correcting it to sorted order, the full suite passed.
+- Deviations: none. Contradictions: none. Unfinished work and known problems: none.
 - Brief feedback: `not delivered`; no stored version or queued artifact was available. Feedback was called by absolute path; the relative call resolved against the plugin cache and failed.
+- Report feedback: `not delivered`; no stored version or queued artifact was available when called by absolute path.
 
 ## Phase 1 — Local change capture
 
