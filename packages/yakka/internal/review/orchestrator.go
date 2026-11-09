@@ -23,6 +23,8 @@ const (
 	MaxReviewBody         = 3 << 20
 	maxReviewInputTokens  = int64(400_000)
 	maxReviewOutputTokens = int64(8_000)
+	reviewWallTime        = 120 * time.Second
+	defaultAttemptTimeout = 60 * time.Second
 )
 
 type BuildModel struct {
@@ -238,10 +240,17 @@ func Run(ctx context.Context, tenant *store.Tenant, tenantID string, req Request
 	if status == "" {
 		defer cfg.Reservations.finish(tenantID)
 		reviewer := NewReviewer(cfg.Availability.Token, cfg.Availability.Model, effective, cfg.Endpoint)
+		reviewCtx, cancelReview := context.WithTimeout(ctx, reviewWallTime)
+		defer cancelReview()
 		for n := 1; n <= 2; n++ {
-			if n > 1 && !cfg.Reservations.reserveRetry(key, tenantID, n, reservationAmount(cfg.Availability.Model)) {
-				reason = "retry reservation exceeds spend cap"
-				break
+			if n > 1 {
+				if reviewCtx.Err() != nil {
+					break
+				}
+				if !cfg.Reservations.reserveRetry(key, tenantID, n, reservationAmount(cfg.Availability.Model)) {
+					reason = "retry reservation exceeds spend cap"
+					break
+				}
 			}
 			at := time.Now()
 			if cfg.Now != nil {
@@ -249,9 +258,9 @@ func Run(ctx context.Context, tenant *store.Tenant, tenantID string, req Request
 			}
 			timeout := cfg.AttemptTimeout
 			if timeout <= 0 {
-				timeout = 120 * time.Second
+				timeout = defaultAttemptTimeout
 			}
-			callCtx, cancel := context.WithTimeout(ctx, timeout)
+			callCtx, cancel := context.WithTimeout(reviewCtx, timeout)
 			res, err := reviewer.Review(callCtx, packet, resolved.Criteria)
 			cancel()
 			lat := time.Since(at).Milliseconds()
