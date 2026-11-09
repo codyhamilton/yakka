@@ -1,17 +1,15 @@
-import { ApiError, fetchMe, type Tenant } from './api';
+import { ApiError, fetchMe, isLifecycleTracked, tenantLifecycleState, type Tenant } from './api';
 import { client } from './query';
 import { clearError, clearNotices } from './state.svelte';
 import {
 	INVALIDATED_TENANT,
 	invalidateTenantSelection,
-	isLifecycleTracked,
 	readRememberedGeneration,
 	readRememberedTenant,
 	readSelectionInvalidated,
 	rememberTenant,
 	selectionReadBlock,
 	TenantSelectionError,
-	tenantLifecycleState,
 	tenantsFromMe,
 	validateSelection,
 	clearSelectionInvalidation,
