@@ -37,6 +37,16 @@ The entry point `tools/shadow-review-trial manifest` → local-history enumerati
 - Deviations/concerns: the REST request requires non-empty `build_models`; the runner sends the manifest's explicit `unknown` sentinel when provenance is unavailable. No design contradiction or unfinished integration work reported. No credential or live provider call was used.
 - Feedback: brief and report delivered; Jev 1.13.0 screening pass.
 
+### 7-02-alignment-report
+
+- Status: done with concerns; committed as `5167dae` (`Add historical trial alignment report`).
+- Brief: `briefs/7-02-alignment-report.md`.
+- Report: `reports/7-02-alignment-report.md`.
+- Built: added deterministic report calculation and input validation for manifest, reviews, separated phase/PR comparator evidence, and adjudications. Output includes rubric categories, denominators, status/attempt accounting, per-arm and paired/available comparisons, model and effort strata, usage/cap totals, low-finding sampling and missing-data fields.
+- Checks: before implementation, `python3 -m unittest tools/shadow-review-trial/test_report.py` failed because the test module did not exist. After implementation, it passed all 5 tests; `python3 -m py_compile tools/shadow-review-trial/report.py tools/shadow-review-trial/test_report.py` and `git diff --check` passed.
+- Deviations/concerns: no contract departure or unfinished work was reported. The GET endpoint returns at most 500 records; the report flags `record_limit_may_truncate` at that boundary, and the caller must supply the complete filtered set for a complete denominator.
+- Feedback: brief and report delivered; Jev 1.13.0 screening pass.
+
 ## Phase 5 — The MCP tool, shim registration and stage wiring
 
 ### 5-04-stage-wiring-docs
