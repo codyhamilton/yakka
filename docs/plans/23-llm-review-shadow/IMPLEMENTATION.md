@@ -32,4 +32,3 @@ Run identity: Codex; current API session; started 2026-11-09 12:48 UTC (22:48 Au
 - Historical canonical review rows have no recoverable public review ID; duplicate requests against rows without `review_id` return `cache_unavailable` without provider replay. `gate: owner confirmation of this compatibility behavior for pre-upgrade canonical rows`.
 - Cursor checksums bind tenant/filter state but are not MACs; same-tenant cursor edits remain possible as described in the phase1-05 report.
 - Phase 2 synthetic tenant disposal and Phase 3 real-server paid trial remain pending. No live-trial result is claimed.
-
