@@ -25,6 +25,16 @@ Run: Codex execute, harness-dispatched unit 3-01; session: hlaunch build on feat
 - Feedback: brief and report delivered, Jev screening pass. Harness reported 77,658 tokens; no turn/final-context figures were available.
 - Deviations, unfinished work, known problems: none.
 
+### 4-03-provider-call-validation
+
+- Status: done with concerns; committed with report in `7bafa1b` (`Add review provider call validation`).
+- Brief: `briefs/4-03-provider-call-validation.md`.
+- Report: `reports/4-03-provider-call-validation.md`.
+- Built: added the injectable standard-library Claude Messages client and mechanical response validator. `NewReviewer(token, model, effort, endpoint).Review(ctx, packet, criteria)` returns validated outcomes/findings and provider usage; unsupported findings are retained and flagged, and reply secrets are redacted.
+- Checks: with the 8 GiB address-space cap and `-p=3`, `go test ./internal/review` passed (`0.649s`); fake-server and validation fixtures passed; `git diff --cached --check` passed.
+- Feedback: brief and report delivered, Jev screening pass. Harness reported 88,421 tokens; no turn/final-context figures were available.
+- Deviation/concern: `TestBuildPackageHasNoNetworkOrEnvironmentImports` originally scanned every production file in the package, preventing the new HTTP transport. It now constrains the offline-import check to `build.go`, preserving the pure packet-builder contract. No unfinished work or other known problems.
+
 ## Phase 3 — Criteria resolution from the artifact store
 
 ### 3-01-criteria-resolution
