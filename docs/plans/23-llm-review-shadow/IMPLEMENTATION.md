@@ -13,7 +13,7 @@ Run: Codex execute, harness refine/build sub-runs; branch `feat/23-llm-review-sh
 - Checks: 8 GiB capped `go test -p=3 ./internal/serve` passed (`11.273s`); capped `python3 -m unittest test_mcp_shim test_capture` passed all 36 (`7.585s`); `tools/driver/check_skills.py` passed against a repository skill-layout fixture; stage and stable-doc checks passed; `git diff --check` passed. All final check temp files were directed inside the worktree and removed.
 - Deviations/concerns: first attempt stopped at the 15-file budget; the one retry completed the unit. During that retry, a temporary checker fixture was created in `/tmp` against the user instruction; `TemporaryDirectory` removed it and the path was verified absent. Final verification used only worktree temp paths. The implementation describes 5-03's duplicate receipt behavior without altering idempotency.
 - Carried: the 5-02 report's `_capture_blob` unbounded read before per-file cap remains a known issue for a later refinement. No unpaid/live calls, deploys, credentials, Fly or Wrangler actions. Harness turn/final-context figures were unavailable.
-- Feedback: pending runner feedback on the final brief/report.
+- Feedback: brief and final report delivered, Jev screening pass. Harness turn/final-context figures were unavailable.
 
 ### 5-01-typed-change-declaration
 
@@ -45,6 +45,20 @@ Run: Codex execute, harness refine/build sub-runs; branch `feat/23-llm-review-sh
 - Checks: under `prlimit --as=8589934592`, `go test -p=3 ./internal/serve` passed (`9.311s`); `python3 -m unittest test_mcp_shim` passed all 21 tests (`6.431s`); `git diff --check` passed.
 - Departures and concerns: registration is conditional on review model configuration and a server timeout ceiling of at least 150 seconds, to preserve existing conformance fixtures and the tool timeout contract. REST replay of the same capture returns `skipped_duplicate`, not a byte-identical receipt; the same capture id is used and the duplicate names the MCP result. The report records no unfinished work or other known problems.
 - Feedback: brief and report delivered, Jev screening pass. The worker's first report feedback call was unreachable; the runner's follow-up returned delivered. Harness turn/final-context figures were unavailable.
+
+### Phase 5 verification
+
+The fixture entry point `review_change` → typed `change` declaration and shim capture → shared review orchestrator → fake provider → validated receipt was verified across the Go MCP route and the Python shim's declared-reader forwarding fixture. Go cases cover both `uncommitted` and `range`, required scope, unsupported reader refusal, explicit live `high`, receipt/full-detail behavior, and the same-capture REST duplicate reference without returning captured diff. Python cases cover real capture modes, server policy forwarding, `_local` spoof replacement, capture failures, size budgets, bearer scan and reader deadline.
+
+The runner's final capped reruns passed: `go test -p=3 ./internal/serve` (`11.273s`) and `python3 -m unittest test_mcp_shim test_capture` (36 tests, `7.585s`). The skill checker passed against an in-worktree install-layout fixture; stage JSON/text assertions, plugin version and all five stable-doc checks passed; `git diff --check` passed. `TMPDIR` was directed inside the worktree for final verification. Earlier subrun test commands did not explicitly set `TMPDIR`, and the 5-04 retry also created one transient checker fixture under `/tmp`; `TemporaryDirectory` removed it, the path was verified absent, and no `/tmp` artifacts remain.
+
+Phase 5 is closed with concerns. The same-input REST follow-up is a `skipped_duplicate` receipt that identifies the MCP review rather than a byte-identical copy; the implemented stage guidance names this as earlier evidence and never treats it as independent review. The 5-03 fixture proves the shared orchestrator and duplicate link. No paid/live provider call, credential, deploy, Fly or Wrangler action was used.
+
+### Carried
+
+- Fix the known capture-memory bound: `_capture_blob` reads the worktree file before enforcing the per-file cap, so a large candidate can allocate above the declared limit. The 5-02 report identifies the code path; no reproduction or fix was done in this phase.
+- Clarify in a future design refinement whether “the same receipt” across MCP and REST means the same underlying review referenced by `skipped_duplicate` or an identical receipt payload. Preserve the Phase 4 idempotency contract until resolved.
+- Preserve the static no-network/environment guarantee scoped to `internal/review/build.go`; the provider transport intentionally uses HTTP, while packet construction remains offline.
 
 ## Phase 4 — Review handler, single call, record and availability
 
