@@ -2,6 +2,17 @@ Run: Codex execute, harness refine/build sub-runs; branch `feat/23-llm-review-sh
 
 # Implementation
 
+## Phase 5 — The MCP tool, shim registration and stage wiring
+
+### 5-02-shim-change-reader
+
+- Status: over budget; handoff committed with report.
+- Brief: `briefs/5-02-shim-change-reader.md`.
+- Done: required contract review confirmed the shim reader must use `CaptureChange`, with server-declared values from the fixed `change` reader policy. Phase 5 unit 5-01 has landed as `47351f4`; its accepted `change` params are `exclusion_policy_version`, `change_max_file_bytes`, `change_max_total_bytes`, `change_max_files`, `context_lines`, `docs_never_noise`, `change_exclude`, `excluded_files`, `excluded_directories`, `lockfiles`, `truncation_order`, and `budget_bytes`.
+- Not done: no shim implementation, fixtures, or done-evidence checks were completed. The required reading and policy inspection exceeded this brief's nine-file read budget before code changes began. Stop here per the brief's budget rule.
+- Handoff: extend only `plugins/yakka/client/yakka.py` and `test_mcp_shim.py` (capture fixtures only if needed). Add `change` v1 to the fixed reader table; reject unknown/wrong/unsafe declaration params; require the content/bulk declaration shape and 2 MiB budget; call `CaptureChange` with `project_dir` plus the declared `mode`, `view`, `include_untracked`, `base`, `head`, and `merge_base`; overwrite `_local`; preserve timeout/budget checks and surface capture failures as reader failures. Add the fixture matrix in the brief, then run its two unittest modules and `git diff --check`.
+- Deviations, contradictions, known problems: implementation is deferred solely because the explicit read budget was exceeded. No code checks were run. No other known problems.
+
 ## Phase 4 — Review handler, single call, record and availability
 
 ### 4-01-shared-haiku-pricing
