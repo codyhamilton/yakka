@@ -21,9 +21,14 @@ Everything is a recorded fact with a join key. State is a view over facts.
 | Hook event | harness hook → spool | conversation ID, harness, event, normalised event, tool, timing, model, token usage and cost where the payload has them |
 | Artifact version | write hook → drain reads file | `repo_id`, `path`, content hash, content, conversation ID, source (`worktree` or `commit`) |
 | Commit | hook on `git commit` | SHA, touched paths, rename pairs, conversation ID |
+| Review run | authenticated review handler | tenant-bound repo, capture and criteria hashes, reviewer/build models, effort, status, attempts, validated result and cost; captured input is stored separately by content hash |
 
 Gaps (a brief whose design has no version, a write with no artifact version) are computed by the
 view, not submitted.
+
+`review_run` is appended through the in-process ingest path after review argument and capture
+validation. It remains outside conversation, hook-event and facet counts; captured review input is
+kept outside the artifact blob and screening areas.
 
 ### Keys
 

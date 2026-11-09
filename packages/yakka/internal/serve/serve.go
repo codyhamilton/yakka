@@ -3,16 +3,20 @@
 package serve
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"math"
 	"net"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -20,6 +24,7 @@ import (
 
 	"github.com/codyhamilton/yakka/packages/yakka/internal/ingest"
 	"github.com/codyhamilton/yakka/packages/yakka/internal/keys"
+	"github.com/codyhamilton/yakka/packages/yakka/internal/review"
 	"github.com/codyhamilton/yakka/packages/yakka/internal/scorer"
 	"github.com/codyhamilton/yakka/packages/yakka/internal/store"
 )
@@ -37,7 +42,11 @@ type Config struct {
 	GitHubOAuthClientSecret string
 	// CORSOrigins are the exact origins allowed to read a keyed server from a browser. Local mode
 	// ignores it and allows loopback origins.
-	CORSOrigins []string
+	CORSOrigins                            []string
+	ReviewToken, ReviewModel, ReviewEffort string
+	ReviewTrialEnabled                     bool
+	ReviewUSDCap                           float64
+	ReviewRepositories                     map[string]bool
 }
 
 // KeyPair maps one key to one tenant.
@@ -74,6 +83,35 @@ func ConfigFromEnv(getenv func(string) string) (Config, error) {
 		return Config{}, fmt.Errorf("YAKKA_SERVE_KEYS is set; keyed startup via environment is no longer supported")
 	}
 	c := Config{Addr: getenv("YAKKA_SERVE_ADDR"), Data: getenv("YAKKA_SERVE_DATA")}
+	c.ReviewToken = strings.TrimSpace(getenv("CLAUDE_API_TOKEN"))
+	c.ReviewModel = strings.TrimSpace(getenv("YAKKA_REVIEW_MODEL"))
+	c.ReviewEffort = strings.TrimSpace(getenv("YAKKA_REVIEW_EFFORT"))
+	if raw := strings.TrimSpace(getenv("YAKKA_REVIEW_USD_CAP")); raw != "" {
+		v, err := strconv.ParseFloat(raw, 64)
+		if err != nil || v <= 0 || math.IsNaN(v) || math.IsInf(v, 0) {
+			return Config{}, errors.New("YAKKA_REVIEW_USD_CAP must be a positive number")
+		}
+		c.ReviewUSDCap = v
+	}
+	if raw := strings.TrimSpace(getenv("YAKKA_REVIEW_TRIAL_ENABLED")); raw != "" {
+		v, err := strconv.ParseBool(raw)
+		if err != nil {
+			return Config{}, errors.New("YAKKA_REVIEW_TRIAL_ENABLED must be true or false")
+		}
+		c.ReviewTrialEnabled = v
+	}
+	c.ReviewRepositories = map[string]bool{}
+	for _, entry := range strings.Split(getenv("YAKKA_REVIEW_REPOS"), ",") {
+		entry = strings.TrimSpace(entry)
+		if entry == "" {
+			continue
+		}
+		parts := strings.SplitN(entry, "/", 2)
+		if len(parts) != 2 || !tenantRE.MatchString(parts[0]) || strings.TrimSpace(parts[1]) == "" || strings.ContainsAny(parts[1], "\r\n\x00") {
+			return Config{}, errors.New("YAKKA_REVIEW_REPOS entries must be <tenant>/<repo_id>")
+		}
+		c.ReviewRepositories[parts[0]+"/"+strings.TrimSpace(parts[1])] = true
+	}
 	if c.Addr == "" {
 		c.Addr = "127.0.0.1:8770"
 	}
@@ -199,14 +237,16 @@ func Preflight(dataDir string) error {
 
 // Options tunes a Server.
 type Options struct {
-	Version        string
-	DisableWorker  bool          // tests: leave pending/ alone
-	PollInterval   time.Duration // default 3s
-	GroupWindow    time.Duration
-	ScreenStep     ScreenFunc     // default: promote as unscreened
-	Checks         *scorer.Checks // loaded checks for /v1/checks; nil = none loaded
-	ScreenBackoff  time.Duration  // first wait after an unreachable scorer; default 5s, doubles to 5 min
-	GitHubHTTPBase string         // tests: mock GitHub authorize/token/api base URL
+	Version            string
+	DisableWorker      bool          // tests: leave pending/ alone
+	PollInterval       time.Duration // default 3s
+	GroupWindow        time.Duration
+	ScreenStep         ScreenFunc     // default: promote as unscreened
+	Checks             *scorer.Checks // loaded checks for /v1/checks; nil = none loaded
+	ScreenBackoff      time.Duration  // first wait after an unreachable scorer; default 5s, doubles to 5 min
+	GitHubHTTPBase     string         // tests: mock GitHub authorize/token/api base URL
+	ReviewEndpoint     string         // tests: fake provider endpoint; production uses the fixed URL
+	ReviewReservations *review.Reservations
 }
 
 // ScreenFunc is the screen step applied to one pending hash. Phase 3 replaces it.
@@ -234,12 +274,13 @@ type hashFailure struct {
 
 // Server is the HTTP service.
 type Server struct {
-	cfg      Config
-	opts     Options
-	screen   ScreenFunc
-	registry *Registry
-	mcpTools mcpRegistry
-	grants   *deviceGrants
+	cfg                Config
+	opts               Options
+	screen             ScreenFunc
+	registry           *Registry
+	mcpTools           mcpRegistry
+	grants             *deviceGrants
+	reviewReservations *review.Reservations
 
 	mu      sync.Mutex
 	tenants map[string]*tenantState
@@ -267,6 +308,14 @@ func New(cfg Config, opts Options) *Server {
 		panic("serve: registry: " + err.Error())
 	}
 	s := &Server{cfg: cfg, opts: opts, registry: reg, mcpTools: mcpTools, grants: newDeviceGrants(), tenants: map[string]*tenantState{}, stop: make(chan struct{}), screen: opts.ScreenStep}
+	s.reviewReservations = opts.ReviewReservations
+	if s.reviewReservations == nil {
+		reservations, err := review.NewPersistentReservations(cfg.ReviewUSDCap, 2, filepath.Join(cfg.Data, "review-reservations.json"))
+		if err != nil {
+			reservations = review.NewUnavailableReservations()
+		}
+		s.reviewReservations = reservations
+	}
 	s.ctx, s.cancel = context.WithCancel(context.Background())
 	if s.screen == nil {
 		s.screen = unscreened
@@ -490,6 +539,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/v1/mcp", s.method(http.MethodPost, s.mcp))
 	mux.HandleFunc("/v1/whoami", s.method(http.MethodGet, s.whoami))
 	mux.HandleFunc("/v1/ingest", s.method(http.MethodPost, s.auth(s.ingest)))
+	mux.HandleFunc("/v1/reviews", s.reviewsRoute)
 	mux.HandleFunc("/v1/artifacts", s.method(http.MethodGet, s.auth(s.artifacts)))
 	mux.HandleFunc("/v1/checks", s.method(http.MethodGet, s.auth(s.checks)))
 	mux.HandleFunc("/v1/baselines", s.method(http.MethodGet, s.auth(s.baselines)))
@@ -662,6 +712,149 @@ func (s *Server) auth(h tenantHandler) http.HandlerFunc {
 		}
 		h(w, r, name, ts)
 	}
+}
+
+func (s *Server) reviewsRoute(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodPost {
+		s.reviewsPostRoute(w, r)
+		return
+	}
+	if r.Method == http.MethodGet {
+		s.reviewsGetRoute(w, r)
+		return
+	}
+	w.Header().Set("Allow", "GET, POST")
+	writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+}
+
+func (s *Server) reviewsPostRoute(w http.ResponseWriter, r *http.Request) {
+	res := s.authorizeRequest(r)
+	if res.status != authOK {
+		code := http.StatusUnauthorized
+		if res.status == authForbidden {
+			code = http.StatusForbidden
+		}
+		writeJSON(w, code, map[string]string{"error": "unauthorized"})
+		return
+	}
+	if !s.cfg.Local() && res.scope != TokenScopeReadWrite {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "read_write scope required"})
+		return
+	}
+	if !s.cfg.Local() && !strings.HasPrefix(r.Header.Get("Authorization"), "Bearer ") {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "bearer token required"})
+		return
+	}
+	mt, _, _ := strings.Cut(r.Header.Get("Content-Type"), ";")
+	if !strings.EqualFold(strings.TrimSpace(mt), "application/json") {
+		writeJSON(w, http.StatusUnsupportedMediaType, map[string]string{"error": "content type must be application/json"})
+		return
+	}
+	body, readErr := io.ReadAll(http.MaxBytesReader(w, r.Body, review.MaxReviewBody))
+	if readErr != nil {
+		var maxErr *http.MaxBytesError
+		if errors.As(readErr, &maxErr) {
+			writeJSON(w, 413, map[string]string{"error": "review body too large"})
+		} else {
+			writeJSON(w, 400, map[string]string{"error": "invalid review arguments"})
+		}
+		return
+	}
+	dec := json.NewDecoder(bytes.NewReader(body))
+	dec.DisallowUnknownFields()
+	var req review.Request
+	if err := dec.Decode(&req); err != nil {
+		writeJSON(w, 400, map[string]string{"error": "invalid review arguments"})
+		return
+	}
+	var extra any
+	if err := dec.Decode(&extra); err != io.EOF {
+		writeJSON(w, 400, map[string]string{"error": "invalid review arguments"})
+		return
+	}
+	ts, err := s.tenant(res.tenant)
+	if err != nil {
+		writeJSON(w, 503, map[string]string{"error": "tenant unavailable"})
+		return
+	}
+	availability := review.Availability{Token: s.cfg.ReviewToken, Model: s.cfg.ReviewModel, Effort: s.cfg.ReviewEffort, TrialEnabled: s.cfg.ReviewTrialEnabled, USDCap: s.cfg.ReviewUSDCap, Repositories: s.cfg.ReviewRepositories, Local: s.cfg.Local()}
+	receipt, err := review.Run(r.Context(), ts.t, res.tenant, req, review.RunConfig{Availability: availability, Reservations: s.reviewReservations, Endpoint: s.opts.ReviewEndpoint})
+	if err != nil {
+		writeJSON(w, 400, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, 200, receipt)
+}
+
+func (s *Server) reviewsGetRoute(w http.ResponseWriter, r *http.Request) {
+	res := s.authorizeRequest(r)
+	if res.status != authOK {
+		code := http.StatusUnauthorized
+		if res.status == authForbidden {
+			code = http.StatusForbidden
+		}
+		writeJSON(w, code, map[string]string{"error": "unauthorized"})
+		return
+	}
+	if !s.cfg.Local() && res.scope != "" && res.scope != TokenScopeRead && res.scope != TokenScopeReadWrite {
+		writeJSON(w, 403, map[string]string{"error": "read scope required"})
+		return
+	}
+	q := r.URL.Query()
+	phase := (*int)(nil)
+	if raw := q.Get("phase"); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n < 1 {
+			writeJSON(w, 400, map[string]string{"error": "phase must be a positive integer"})
+			return
+		}
+		phase = &n
+	}
+	since := float64(0)
+	if raw := q.Get("since"); raw != "" {
+		v, err := strconv.ParseFloat(raw, 64)
+		if err != nil || v < 0 {
+			writeJSON(w, 400, map[string]string{"error": "since must be a timestamp"})
+			return
+		}
+		since = v
+	}
+	limit := 0
+	if raw := q.Get("limit"); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n < 1 || n > 500 {
+			writeJSON(w, 400, map[string]string{"error": "limit must be between 1 and 500"})
+			return
+		}
+		limit = n
+	}
+	detail := q.Get("detail")
+	if detail != "" && detail != "full" {
+		writeJSON(w, 400, map[string]string{"error": "detail must be full"})
+		return
+	}
+	ts, err := s.tenant(res.tenant)
+	if err != nil {
+		writeJSON(w, 503, map[string]string{"error": "tenant unavailable"})
+		return
+	}
+	rows, err := ts.t.ReviewRecords(r.Context(), store.ReviewRecordFilter{RepoID: q.Get("repo_id"), Plan: q.Get("plan"), Phase: phase, Kind: q.Get("kind"), Status: q.Get("status"), Effort: q.Get("effort"), Profile: q.Get("profile"), ManifestHash: q.Get("manifest_hash"), Since: since, Limit: limit})
+	if err != nil {
+		writeJSON(w, 500, map[string]string{"error": "review read failed"})
+		return
+	}
+	items := make([]map[string]any, 0, len(rows))
+	for _, row := range rows {
+		var item map[string]any
+		if json.Unmarshal(row.Raw, &item) != nil {
+			continue
+		}
+		if detail != "full" {
+			delete(item, "payload")
+		}
+		items = append(items, item)
+	}
+	writeJSON(w, 200, map[string]any{"reviews": items})
 }
 
 // whoami answers which tenant and scope a bearer token is bound to, so `yakka sync` can confirm its
