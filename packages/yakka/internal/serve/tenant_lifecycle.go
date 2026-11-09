@@ -90,6 +90,12 @@ func (s *Server) evictTenantGate(name string) {
 // unregistered (deleted) or mid-cleanup. TryRLock makes admission during a
 // cleanup fail fast instead of queueing behind the write side.
 func (s *Server) beginTenantUse(name string) (func(), error) {
+	// An id that is already gone must not grow the gate map. The registration
+	// check is repeated after the lock so a delete that commits in between
+	// cannot open storage on a freshly created gate.
+	if s.cfg.Remote() && !s.registry.tenantRegistered(name) {
+		return nil, ErrTenantNotFound
+	}
 	gate := s.tenantGate(name)
 	if !gate.TryRLock() {
 		return nil, ErrTenantLifecycleBusy

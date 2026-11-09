@@ -43,6 +43,9 @@ func TestLifecycleProfileServedInPlaceholderMode(t *testing.T) {
 	if ct := rec.Header().Get("Content-Type"); ct != "text/html; charset=utf-8" {
 		t.Fatalf("content-type = %q", ct)
 	}
+	if rec.Header().Get("X-Frame-Options") != "DENY" || !strings.Contains(rec.Header().Get("Content-Security-Policy"), "frame-ancestors 'none'") {
+		t.Fatalf("lifecycle page is frameable: X-Frame-Options=%q CSP=%q", rec.Header().Get("X-Frame-Options"), rec.Header().Get("Content-Security-Policy"))
+	}
 	body := rec.Body.String()
 	if strings.Contains(body, "analytics bundle not embedded") {
 		t.Fatal("lifecycle view fell through to the placeholder site handler")

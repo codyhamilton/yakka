@@ -338,6 +338,22 @@ func TestLifecycleSaveFailureRestoresMemory(t *testing.T) {
 	if !tokenPresent(r, tok.Record.ID) {
 		t.Fatal("failed complete delete dropped the token from memory")
 	}
+
+	// A missing owner must not be recreated as an empty owner string. That
+	// would make the id registered again after a failed save.
+	r.mu.Lock()
+	delete(r.owners, id)
+	r.mu.Unlock()
+	blockSaves()
+	if err := r.CompleteTenantDelete(id); err == nil {
+		t.Fatal("complete delete saved despite an unwritable registry")
+	}
+	r.mu.Lock()
+	_, invented := r.owners[id]
+	r.mu.Unlock()
+	if invented || r.ownsTenant(7, id) {
+		t.Fatal("failed complete delete invented an owner")
+	}
 }
 
 func tokenPresent(r *Registry, id string) bool {

@@ -517,3 +517,108 @@ func TestRepeatedResetAndDelete(t *testing.T) {
 		t.Fatal("repeated delete is not not-found")
 	}
 }
+
+func TestDeviceGrantRedeemFollowsLifecycleGeneration(t *testing.T) {
+	gh := mockGitHub(t, 310, "grant-owner", []mockEmail{{Email: "grant@example.com", Verified: true}})
+	t.Cleanup(gh.Close)
+	dir := t.TempDir()
+	s := newLifecycleServer(dir, gh.URL, Options{})
+	t.Cleanup(func() { _ = s.Close() })
+	h := s.Handler()
+	origin := "https://collector.example"
+	sess := loginRemote(t, h, origin)
+	tenant := remoteCreateTenant(t, h, origin, sess, "work")
+	generation, ok := s.registry.TenantGeneration(tenant)
+	if !ok || generation == "" {
+		t.Fatal("tenant has no lifecycle generation")
+	}
+
+	issueCode := func() codeResp {
+		t.Helper()
+		code, body, _ := doWithCookies(t, h, http.MethodPost, "/v1/device/code", "", "", nil)
+		if code != 200 {
+			t.Fatalf("device code: %d %s", code, body)
+		}
+		var cr codeResp
+		if err := json.Unmarshal([]byte(body), &cr); err != nil {
+			t.Fatal(err)
+		}
+		auth := `{"user_code":"` + cr.UserCode + `","tenant":"` + tenant + `","scope":"read_write","lifetime":"1d"}`
+		code, body, _ = doWithCookies(t, h, http.MethodPost, "/v1/device/authorize", origin, auth, sess)
+		if code != 200 {
+			t.Fatalf("authorize: %d %s", code, body)
+		}
+		return cr
+	}
+
+	fresh := issueCode()
+	code, body, _ := doWithCookies(t, h, http.MethodPost, "/v1/device/token", "", `{"device_code":"`+fresh.DeviceCode+`"}`, nil)
+	if code != 200 || !strings.Contains(body, `"token":"wk_`) {
+		t.Fatalf("redeem before reset: %d %s", code, body)
+	}
+	var minted map[string]string
+	if err := json.Unmarshal([]byte(body), &minted); err != nil {
+		t.Fatal(err)
+	}
+	if code, body := do(t, h, http.MethodGet, "/v1/whoami", minted["token"], ""); code != 200 || !strings.Contains(body, `"tenant":"`+tenant+`"`) {
+		t.Fatalf("fresh device token: %d %s", code, body)
+	}
+
+	// poll drops the grant and returns a copy. Reset can then finish before redeem.
+	staleCode := issueCode()
+	res, gr := s.grants.poll(staleCode.DeviceCode)
+	if res != pollApproved || gr.generation != generation {
+		t.Fatalf("approved grant: result=%v generation=%q want %q", res, gr.generation, generation)
+	}
+	if err := s.ResetTenant(context.Background(), 310, tenant); err != nil {
+		t.Fatal(err)
+	}
+	if code, _ := do(t, h, http.MethodGet, "/v1/whoami", minted["token"], ""); code != 401 {
+		t.Fatalf("pre-reset device token still authorizes: %d", code)
+	}
+	rec := httptest.NewRecorder()
+	s.redeemDeviceGrant(rec, gr)
+	if rec.Code != 400 || !strings.Contains(rec.Body.String(), `"error":"access_denied"`) {
+		t.Fatalf("redeem after reset: %d %s", rec.Code, rec.Body.String())
+	}
+	for _, tok := range s.registry.ListAllTokens() {
+		if tok.Tenant == tenant {
+			t.Fatalf("device grant minted a token after reset: %+v", tok)
+		}
+	}
+}
+
+func TestNonOwnerCannotObserveTenantCleanup(t *testing.T) {
+	gh := mockGitHub(t, 311, "busy-owner", []mockEmail{{Email: "busy-owner@example.com", Verified: true}})
+	t.Cleanup(gh.Close)
+	dir := t.TempDir()
+	s := newLifecycleServer(dir, gh.URL, Options{})
+	t.Cleanup(func() { _ = s.Close() })
+	h := s.Handler()
+	origin := "https://collector.example"
+	sess := loginRemote(t, h, origin)
+	tenant := remoteCreateTenant(t, h, origin, sess, "work")
+	if err := s.registry.BeginTenantReset(311, tenant); err != nil {
+		t.Fatal(err)
+	}
+	stranger := putLifecycleSession(t, s, "sess-stranger", 999)
+	body := `{"tenant":"` + tenant + `","scope":"read","lifetime":"1d"}`
+	code, resp, _ := doWithCookies(t, h, http.MethodPost, "/v1/tokens", origin, body, stranger)
+	if code != 403 || strings.Contains(resp, "tenant_busy") {
+		t.Fatalf("non-owner token create during cleanup: %d %s", code, resp)
+	}
+	code, resp, _ = doWithCookies(t, h, http.MethodPost, "/v1/tokens", origin, `{"tenant":"t-notreal0000","scope":"read","lifetime":"1d"}`, stranger)
+	if code != 403 {
+		t.Fatalf("non-owner unknown tenant: %d %s", code, resp)
+	}
+	s.mu.Lock()
+	_, gated := s.gates["t-notreal0000"]
+	s.mu.Unlock()
+	if gated {
+		t.Fatal("unknown tenant id retained an admission gate")
+	}
+	code, resp, _ = doWithCookies(t, h, http.MethodPost, "/v1/tokens", origin, body, sess)
+	if code != 409 || !strings.Contains(resp, "tenant_busy") {
+		t.Fatalf("owner token create during cleanup: %d %s", code, resp)
+	}
+}

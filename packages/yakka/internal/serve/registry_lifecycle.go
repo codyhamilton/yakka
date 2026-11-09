@@ -163,7 +163,7 @@ func (r *Registry) CompleteTenantDelete(tenant string) error {
 	if rec.State != lifecycleStateDeleting || rec.Operation != lifecycleOpDelete {
 		return ErrTenantLifecycleConflict
 	}
-	prevOwner := r.owners[tenant]
+	prevOwner, hadOwner := r.owners[tenant]
 	prevName, hadName := r.names[tenant]
 	prevTokens, prevDirty := cloneTokenHashes(r.tokenHashes), r.dirty
 	delete(r.owners, tenant)
@@ -172,7 +172,11 @@ func (r *Registry) CompleteTenantDelete(tenant string) error {
 	r.purgeTenantTokensLocked(tenant)
 	r.dirty = true
 	if err := r.saveLocked(); err != nil {
-		r.owners[tenant] = prevOwner
+		if hadOwner {
+			r.owners[tenant] = prevOwner
+		} else {
+			delete(r.owners, tenant)
+		}
 		if hadName {
 			r.names[tenant] = prevName
 		}

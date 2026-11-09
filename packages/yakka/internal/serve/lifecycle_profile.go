@@ -20,5 +20,9 @@ func (s *Server) handleLifecycleProfile(w http.ResponseWriter, r *http.Request) 
 	h := w.Header()
 	h.Set("Content-Type", "text/html; charset=utf-8")
 	h.Set("Cache-Control", "no-cache")
+	// The page can reset or delete a tenant with the caller's cookie. Do not
+	// let another origin frame it and steer that confirmation.
+	h.Set("Content-Security-Policy", "frame-ancestors 'none'")
+	h.Set("X-Frame-Options", "DENY")
 	_, _ = w.Write(lifecycleProfilePage)
 }

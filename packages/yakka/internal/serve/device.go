@@ -166,6 +166,12 @@ func (s *Server) handleDeviceAuthorize(w http.ResponseWriter, r *http.Request, s
 			writeJSON(w, 400, map[string]string{"error": "invalid token name"})
 			return
 		}
+		// Ownership before admission, so a non-owner cannot observe cleanup or
+		// pin an admission gate for an id they do not own.
+		if !s.registry.ownsTenant(sess.GitHubID, body.Tenant) {
+			writeJSON(w, 403, map[string]string{"error": "forbidden"})
+			return
+		}
 	}
 	if !deny {
 		release, uerr := s.beginTenantUse(body.Tenant)
@@ -194,7 +200,11 @@ func (s *Server) handleDeviceAuthorize(w http.ResponseWriter, r *http.Request, s
 		if name == "" {
 			name = defaultTokenName
 		}
-		gr.status, gr.tenant, gr.scope, gr.name, gr.expiresAt, gr.githubID = grantApproved, body.Tenant, body.Scope, name, exp.UTC(), sess.GitHubID
+		generation := ""
+		if gen, ok := s.registry.TenantGeneration(body.Tenant); ok {
+			generation = gen
+		}
+		gr.status, gr.tenant, gr.scope, gr.name, gr.expiresAt, gr.githubID, gr.generation = grantApproved, body.Tenant, body.Scope, name, exp.UTC(), sess.GitHubID, generation
 		return nil
 	})
 	if blocked {
@@ -260,6 +270,15 @@ func (s *Server) redeemDeviceGrant(w http.ResponseWriter, gr deviceGrant) {
 		return
 	}
 	defer release()
+	// poll has already dropped the grant, so a reset can finish before this
+	// mint. The approval is bound to the generation it observed; a completed
+	// reset or delete no longer matches, and the read lock keeps a reset that
+	// is still waiting from advancing the generation underneath this check.
+	current, ok := s.registry.TenantGeneration(gr.tenant)
+	if !grantGenerationCurrent(gr.generation, current, ok) {
+		writeJSON(w, 400, map[string]string{"error": "access_denied"})
+		return
+	}
 	created, err := s.registry.CreateToken(gr.tenant, gr.scope, gr.name, gr.expiresAt, gr.githubID, s.grants.now())
 	if err != nil {
 		writeJSON(w, 400, map[string]string{"error": "access_denied"})

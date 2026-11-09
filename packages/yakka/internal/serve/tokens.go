@@ -84,6 +84,13 @@ func (s *Server) handleCreateToken(w http.ResponseWriter, r *http.Request, sess 
 		writeJSON(w, 400, map[string]string{"error": "invalid token name"})
 		return
 	}
+	// Ownership before admission. beginTenantUse would otherwise report
+	// tenant_busy for a cleanup the caller does not own, and would retain an
+	// admission gate for any id they send.
+	if !s.registry.ownsTenant(sess.GitHubID, body.Tenant) {
+		writeJSON(w, 403, map[string]string{"error": "forbidden"})
+		return
+	}
 	release, uerr := s.beginTenantUse(body.Tenant)
 	if uerr != nil {
 		if errors.Is(uerr, ErrTenantLifecycleBusy) {
