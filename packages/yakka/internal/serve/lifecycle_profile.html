@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tenant lifecycle</title>
+<style>
+:root{color-scheme:light dark}body{font:15px/1.5 system-ui,sans-serif;margin:0 auto;max-width:52rem;padding:1.5rem}h1{font-size:1.4rem}ul{list-style:none;margin:0;padding:0}li{border:1px solid #8884;border-radius:8px;margin:.75rem 0;padding:.75rem 1rem}li strong{font-size:1.05rem}.meta{color:#666;font-size:.9rem}.pending{color:#9a6700}#status{min-height:1.5em;color:#b00020;white-space:pre-wrap}#recovery{border:1px solid #b00020;border-radius:8px;padding:.75rem 1rem}dialog{max-width:34rem}dialog p{margin:.5rem 0}.human{font-weight:600}.effect{border-left:3px solid #8884;padding-left:.75rem}label{display:block;margin-top:.75rem}input{font:inherit;width:100%;box-sizing:border-box;padding:.4rem}.actions{display:flex;gap:.5rem;margin-top:1rem}button{font:inherit;padding:.35rem .8rem}
+</style>
+</head>
+<body>
+<h1>Tenant lifecycle</h1>
+<p>Only the human owner may reset or delete a tenant. Agents must not perform or attempt this on a user's behalf.</p>
+<p id="identity" hidden></p>
+<p><a id="signin" href="/oauth/login" hidden>Sign in</a></p>
+<p id="status" role="status" aria-live="polite"></p>
+<p id="recovery" hidden>completion unknown: the owner lifecycle state could not be read. Lifecycle actions are disabled until a later successful read.</p>
+<ul id="tenants"></ul>
+<p id="selection-note" hidden>Tenant selection was cleared. Choose a tenant explicitly; this page never auto-selects a fallback. To create a new key after a reset, use the profile.</p>
+<p>Token creation and other profile actions live on the <a href="https://yakka.build/profile">profile</a>.</p>
+<dialog id="confirm-dialog">
+<h2 id="op-title"></h2>
+<p id="op-name"></p>
+<p id="op-id"></p>
+<p id="op-effect" class="effect"></p>
+<p class="human">Only the human owner may reset or delete a tenant. Agents must not perform or attempt this on a user's behalf.</p>
+<label>Type the immutable tenant id to confirm <input id="typed-id" data-testid="typed-id" autocomplete="off" spellcheck="false"></label>
+<div class="actions"><button id="cancel-action" type="button">Cancel</button><button id="confirm-action" type="button" disabled>Confirm</button></div>
+</dialog>
+<script>
+"use strict";
+const HUMAN = "Only the human owner may reset or delete a tenant. Agents must not perform or attempt this on a user's behalf.";
+const RESET_EFFECT = "Erase all tenant data and revoke its keys. Keep this tenant and your ownership; issue a new key to reuse it.";
+const DELETE_EFFECT = "Permanently remove this tenant, all its data and keys, and your ownership link.";
+const SELECTION_KEY = "yakka.selectedTenant", GENERATION_KEY = "yakka.selectedTenantGeneration";
+const INVALIDATION_KEY = "yakka.tenantLifecycleInvalidation";
+const CHANNEL = typeof BroadcastChannel === "function" ? new BroadcastChannel("yakka-tenant-lifecycle") : null;
+const state = { me: null, signedOut: false, recoveryFailed: false, busy: false, pending: null };
+const byId = (id) => document.getElementById(id);
+function setStatus(text) { byId("status").textContent = text; }
+function clearRemembered() {
+  try {
+    localStorage.removeItem(SELECTION_KEY); localStorage.removeItem(GENERATION_KEY);
+    localStorage.removeItem("yakka.tenantReads"); localStorage.removeItem("yakka.reviewCursor");
+  } catch (e) { /* storage may be unavailable */ }
+}
+// Same-origin invalidation only: this notice carries no credential or authority.
+function notifySameOrigin(kind, id) {
+  clearRemembered();
+  if (CHANNEL) CHANNEL.postMessage({ kind: kind, id: id });
+  try {
+    localStorage.setItem(INVALIDATION_KEY, JSON.stringify({ kind: kind, id: id, at: Date.now() }));
+    localStorage.removeItem(INVALIDATION_KEY);
+  } catch (e) { /* storage may be unavailable */ }
+}
+window.addEventListener("storage", function (ev) { if (ev.key === INVALIDATION_KEY) loadMe(); });
+if (CHANNEL) CHANNEL.onmessage = function () { loadMe(); };
+async function loadMe() {
+  setStatus("");
+  try {
+    const res = await fetch("/v1/me", { method: "GET", credentials: 'include', headers: { "Accept": "application/json" } });
+    if (res.status === 401) { unauth(); return; }
+    if (!res.ok) throw new Error("me status " + res.status);
+    state.me = await res.json(); state.signedOut = false; state.recoveryFailed = false; render();
+  } catch (e) {
+    state.me = null; state.signedOut = false; state.recoveryFailed = true; render();
+  }
+}
+function unauth() { state.me = null; state.signedOut = true; state.recoveryFailed = false; render(); }
+function render() {
+  const list = byId("tenants"); list.textContent = "";
+  byId("identity").hidden = !state.me; byId("signin").hidden = !state.signedOut;
+  byId("recovery").hidden = !state.recoveryFailed; byId("selection-note").hidden = true;
+  if (state.me) {
+    byId("identity").textContent = "Signed in as " + state.me.github_login + " (" + state.me.github_id + ")";
+    state.me.tenants.forEach(function (tenant) { list.appendChild(renderTenant(tenant)); });
+  }
+  updateButtons();
+}
+function renderTenant(tenant) {
+  const li = document.createElement("li");
+  const title = document.createElement("strong"); title.textContent = tenant.name; li.appendChild(title);
+  const idLine = document.createElement("div"); idLine.className = "meta"; idLine.textContent = "immutable id: " + tenant.id; li.appendChild(idLine);
+  const generation = tenant.lifecycle_generation === null ? "none (legacy)" : tenant.lifecycle_generation;
+  const meta = document.createElement("div"); meta.className = "meta";
+  meta.textContent = "lifecycle_state: " + tenant.lifecycle_state + " \u00b7 generation: " + generation; li.appendChild(meta);
+  if (tenant.lifecycle_state === "active") {
+    li.appendChild(actionButton("Reset", tenant, "reset")); li.appendChild(actionButton("Delete", tenant, "delete"));
+  } else if (tenant.lifecycle_state === "unsupported") {
+    const note = document.createElement("p"); note.className = "pending";
+    note.textContent = "legacy_tenant_cleanup_unsupported: this legacy tenant has no trustworthy lifecycle marker and no lifecycle actions are offered.";
+    li.appendChild(note);
+  } else {
+    const note = document.createElement("p"); note.className = "pending";
+    note.textContent = "Cleanup in progress (" + tenant.lifecycle_state + "). Lifecycle actions are disabled until the owner state is active again.";
+    li.appendChild(note);
+  }
+  return li;
+}
+function actionButton(label, tenant, op) {
+  const button = document.createElement("button");
+  button.type = "button"; button.className = "tenant-action"; button.textContent = label;
+  button.disabled = state.busy || state.recoveryFailed;
+  button.addEventListener("click", function () { openConfirm(op, tenant); });
+  return button;
+}
+function updateButtons() {
+  document.querySelectorAll(".tenant-action").forEach(function (b) { b.disabled = state.busy || state.recoveryFailed; });
+}
+function openConfirm(op, tenant) {
+  if (state.busy || state.recoveryFailed || !state.me) return;
+  state.pending = { op: op, tenant: tenant };
+  byId("op-title").textContent = op === "reset" ? "Reset tenant" : "Delete tenant";
+  byId("op-name").textContent = "Display name: " + tenant.name;
+  byId("op-id").textContent = "Immutable id: " + tenant.id;
+  byId("op-effect").textContent = op === "reset" ? RESET_EFFECT : DELETE_EFFECT;
+  byId("typed-id").value = ""; byId("confirm-action").disabled = true;
+  byId("confirm-dialog").showModal();
+}
+byId("typed-id").addEventListener("input", function () {
+  const pending = state.pending;
+  const match = !!pending && this.value === pending.tenant.id;
+  byId("confirm-action").disabled = !match || state.busy || state.recoveryFailed;
+});
+byId("cancel-action").addEventListener("click", function () {
+  // Cancellation changes nothing: data, selection and recovery state stay as they were.
+  state.pending = null; byId("confirm-dialog").close();
+});
+byId("confirm-action").addEventListener("click", function () { submitConfirmed(); });
+async function submitConfirmed() {
+  const pending = state.pending;
+  if (!pending || state.busy || state.recoveryFailed || !state.me) return;
+  if (byId("typed-id").value !== pending.tenant.id) return;
+  state.pending = null; byId("confirm-dialog").close(); state.busy = true; updateButtons();
+  const id = encodeURIComponent(pending.tenant.id);
+  const url = pending.op === "reset" ? "/v1/tenants/" + id + "/reset" : "/v1/tenants/" + id;
+  const init = {
+    method: pending.op === "reset" ? "POST" : "DELETE", credentials: 'include',
+    headers: { "Content-Type": "application/json", "X-Yakka-UI": "tenant-lifecycle" },
+    body: JSON.stringify({ confirm_tenant_id: pending.tenant.id })
+  };
+  let res;
+  try { res = await fetch(url, init); } catch (e) {
+    state.busy = false; await ambiguousFailure(pending.op, pending.tenant.id); return;
+  }
+  if (res.status === 204) {
+    notifySameOrigin(pending.op, pending.tenant.id);
+    state.busy = false; state.me = null; await loadMe();
+    byId("selection-note").hidden = false; setStatus(""); return;
+  }
+  state.busy = false; await reportedFailure(res, pending.op, pending.tenant.id);
+}
+// The outcome is unknown. Show completion unknown, re-read owner state and never
+// replay the destructive call automatically; a fresh typed confirmation is required.
+async function ambiguousFailure(op, id) {
+  state.me = null; state.recoveryFailed = true; render();
+  await loadMe();
+  setStatus("completion unknown: the " + op + " request for " + id + " did not return a usable response. " +
+    "Review the owner lifecycle state below before any fresh confirmed attempt.");
+}
+async function reportedFailure(res, op, id) {
+  let body = null; try { body = await res.json(); } catch (e) { body = null; }
+  const code = body && body.error ? body.error : "http_" + res.status;
+  await loadMe(); setStatus(failureMessage(code, op, id));
+}
+function failureMessage(code, op, id) {
+  switch (code) {
+    case "tenant_lifecycle_ui_only": return "tenant_lifecycle_ui_only: only the human owner may reset or delete a tenant, from this profile UI.";
+    case "session_required": return "session_required: your session has ended. Sign in again; nothing was changed.";
+    case "tenant_owner_required": return "tenant_owner_required: this signed-in owner does not own tenant " + id + ".";
+    case "tenant_busy": return "tenant_busy: cleanup is already running for tenant " + id + ". Review the owner lifecycle state below.";
+    case "legacy_tenant_cleanup_unsupported": return "legacy_tenant_cleanup_unsupported: this legacy tenant has no trustworthy lifecycle marker and cannot be cleaned up here.";
+    case "tenant_cleanup_incomplete": return "tenant_cleanup_incomplete: cleanup did not finish for tenant " + id + ". The tenant stays unavailable until recovery completes.";
+    case "tenant_not_found": return "tenant_not_found: tenant " + id + " no longer exists.";
+    case "tenant_confirmation_mismatch": return "tenant_confirmation_mismatch: the typed id did not match. Nothing was changed.";
+    case "json_required": return "json_required: the request could not be sent as JSON. Nothing was changed.";
+    default: return "The " + op + " request for " + id + " was not accepted (" + code + "). Nothing is assumed to have succeeded.";
+  }
+}
+loadMe();
+</script>
+</body>
+</html>

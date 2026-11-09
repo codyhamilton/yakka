@@ -602,6 +602,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/oauth/login", s.method(http.MethodGet, s.oauthLogin))
 	mux.HandleFunc("/oauth/callback", s.method(http.MethodGet, s.oauthCallback))
 	mux.HandleFunc("/logout", s.method(http.MethodPost, s.originGuard(s.logout)))
+	// Bounded API-origin lifecycle view. It must be registered before the site
+	// fallback and does not depend on the analytics bundle being embedded.
+	mux.HandleFunc("/profile/lifecycle", s.method(http.MethodGet, s.handleLifecycleProfile))
 	mux.HandleFunc("/", siteHandler(siteFS))
 	h := s.withSession(s.cors(mux))
 	if s.cfg.Local() {
