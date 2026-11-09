@@ -4,6 +4,13 @@ Run: Codex execute, harness refine/build sub-runs; branch `feat/23-llm-review-sh
 
 ## Phase 5 — The MCP tool, shim registration and stage wiring
 
+### 5-04-stage-wiring-docs — handoff (over budget)
+
+- Status: over budget before implementation; the 15-file read budget was exceeded while completing the required cold reads and checking the registered call schema. Per the brief, feature work stopped at that point.
+- Done: reviewed the design, the three stage skills, plugin manifest, skill checker, Phase 5-03 report, and stable architecture docs. Confirmed the registered tool is `review_change`, requires `mode` and `build_models`, accepts explicit range `base`/`head`, and allows `kind`, `plan`, `phase`, `pr`, `brief`, and `detail`. Phase 5-03 reports MCP detail includes validated findings and receipts do not include captured diff content.
+- Not done: no stage invocations or stable documentation updates; no plugin version bump; no skill check or stage-call fixture check. No behavioral changes were made.
+- Learned: the 5-03 report confirms identical repeated captures return `skipped_duplicate` (with the earlier receipt ID as reason), not a fresh review. Stage guidance must describe that receipt as advisory and must not imply each repeat produces independent findings. Resolve the stage-call cadence against this contract without changing 5-03 idempotency.
+
 ### 5-01-typed-change-declaration
 
 - Status: done; committed with report in `47351f4` (`Validate typed MCP change reader policy`).
