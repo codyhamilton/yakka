@@ -420,8 +420,8 @@ Headless: no human sign-off checkpoint. The six earlier additions and two Cody q
 - Does the Fly proxy or any harness's MCP tool timeout cut a call of about two minutes? Settled by the smoke test; Assumption 7 holds the fallback.
 - Will the operator deepen history or supply a PR-review export before the manifest is frozen? Affects reaching ≥50 completed reviews at each effort, not any build phase; report shortfalls.
 - Does plan 22's session binding land, and which candidate? Affects only how often `session_binding` reads `bound`.
-- **Phase 6 refinement bounced (2026-11-09):** Phase 5 carried an unresolved contract question: does REST/MCP parity mean an identical receipt payload or a receipt that points to the same underlying review? The landed REST replay returns `skipped_duplicate` with a reference, while Phase 5's outcome says the same arguments and capture yield “the same receipt.” Resolve this wording against the Phase 4 idempotency contract before refining Phase 7, whose runner must account for duplicate receipts and resume behavior. Preserve the landed behavior until then; this question does not change Phase 6's manifest contract.
-- Phase 5's `_capture_blob` per-file-cap memory issue remains unallocated: it belongs with a future refinement of the Phase 1 capture contract and is not folded into Phase 6's history-manifest work. The Phase 5 static no-network/environment guarantee remains scoped to `internal/review/build.go`; this refinement makes no change to that boundary.
+- **Carried/open for Phase 7 runner:** REST replay of the same capture returns `skipped_duplicate` with a reference to the MCP review, rather than an identical receipt payload. Preserve this landed behavior and account for duplicate receipts and resume behavior in the Phase 7 runner. This concern does not conflict with or change Phase 6's manifest contract.
+- Phase 5's `_capture_blob` per-file-cap memory issue remains assigned to a future Phase 1 refinement of the capture contract; it is not folded into Phase 6's history-manifest work. Preserve the Phase 5 static no-network/environment guarantee scoped to `internal/review/build.go`; this refinement makes no change to that boundary.
 
 ## Phases
 
@@ -480,6 +480,8 @@ All seven phases are provable offline against local fixtures and an injected fak
 - Surfaces: new `tools/shadow-review-trial/` (manifest, comparator format, README with the four-field layout `tools/release/test_layout.py` expects), the Phase 1 reader it imports, `tools/README.md` table.
 - Approach: known
 - Depends on: Phase 1
+- Units:
+  - **6-01 — Frozen historical manifest and comparator evidence** — `briefs/6-01-historical-manifest-comparators.md`; depends on Phase 1; runs alone because manifest identity, comparator validation/hash binding, CLI, and README layout form one contract.
 
 ### Phase 7 — Trial run, dry run and alignment report
 
