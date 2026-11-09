@@ -278,6 +278,7 @@ func (s *Server) mcpListReviews(ctx context.Context, tenant string, ts *tenantSt
 		if json.Unmarshal(row.Raw, &item) != nil {
 			return nil, errors.New("review read failed")
 		}
+		restoreReviewID(item)
 		if q.filters.Detail != "full" {
 			delete(item, "payload")
 		}

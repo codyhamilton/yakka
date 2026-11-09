@@ -249,6 +249,97 @@ func TestLifecycleCompletionPurgesTenantTokens(t *testing.T) {
 	}
 }
 
+func TestLifecycleSaveFailureRestoresMemory(t *testing.T) {
+	dir := t.TempDir()
+	r, err := OpenRegistry(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, ok, err := r.CreateTenant("work", 7)
+	if err != nil || !ok {
+		t.Fatalf("create: ok=%v err=%v", ok, err)
+	}
+	if err := r.Persist(); err != nil {
+		t.Fatal(err)
+	}
+	before, ok := r.TenantLifecycle(id)
+	if !ok {
+		t.Fatal("missing lifecycle")
+	}
+	tok, err := r.CreateToken(id, TokenScopeRead, "laptop", time.Now().Add(time.Hour), 7, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Persist(); err != nil {
+		t.Fatal(err)
+	}
+	savedPath := r.path
+	blockSaves := func() { r.path = filepath.Join(dir, "missing-parent", registryFileName) }
+	restoreSaves := func() { r.path = savedPath }
+
+	blockSaves()
+	if err := r.BeginTenantReset(7, id); err == nil {
+		t.Fatal("begin reset saved despite an unwritable registry")
+	}
+	if got, ok := r.TenantLifecycle(id); !ok || got != before {
+		t.Fatalf("failed begin reset mutated lifecycle: ok=%v %+v", ok, got)
+	}
+	disk, err := OpenRegistry(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, ok := disk.TenantLifecycle(id); !ok || got != before {
+		t.Fatalf("failed begin reset changed disk: ok=%v %+v", ok, got)
+	}
+
+	restoreSaves()
+	if err := r.BeginTenantReset(7, id); err != nil {
+		t.Fatal(err)
+	}
+	resetting, ok := r.TenantLifecycle(id)
+	if !ok || resetting.State != lifecycleStateResetting {
+		t.Fatalf("reset did not begin: %+v", resetting)
+	}
+	blockSaves()
+	if _, err := r.CompleteTenantReset(id); err == nil {
+		t.Fatal("complete reset saved despite an unwritable registry")
+	}
+	if got, ok := r.TenantLifecycle(id); !ok || got != resetting {
+		t.Fatalf("failed complete reset mutated lifecycle: ok=%v %+v want %+v", ok, got, resetting)
+	}
+	if !tokenPresent(r, tok.Record.ID) {
+		t.Fatal("failed complete reset dropped the token from memory")
+	}
+
+	restoreSaves()
+	if _, err := r.CompleteTenantReset(id); err != nil {
+		t.Fatal(err)
+	}
+	tok, err = r.CreateToken(id, TokenScopeRead, "after-reset", time.Now().Add(time.Hour), 7, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Persist(); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.BeginTenantDelete(7, id); err != nil {
+		t.Fatal(err)
+	}
+	blockSaves()
+	if err := r.CompleteTenantDelete(id); err == nil {
+		t.Fatal("complete delete saved despite an unwritable registry")
+	}
+	if !r.ownsTenant(7, id) {
+		t.Fatal("failed complete delete unregistered the tenant in memory")
+	}
+	if _, ok := r.TenantLifecycle(id); !ok {
+		t.Fatal("failed complete delete dropped the lifecycle record")
+	}
+	if !tokenPresent(r, tok.Record.ID) {
+		t.Fatal("failed complete delete dropped the token from memory")
+	}
+}
+
 func tokenPresent(r *Registry, id string) bool {
 	_, ok := r.TokenByID(id)
 	return ok

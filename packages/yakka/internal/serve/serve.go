@@ -938,6 +938,7 @@ func (s *Server) reviewsGetRoute(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, 500, map[string]string{"error": "review read failed"})
 			return
 		}
+		restoreReviewID(item)
 		if detail != "full" {
 			delete(item, "payload")
 		}

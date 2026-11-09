@@ -50,6 +50,10 @@ function notifySameOrigin(kind, id) {
   if (CHANNEL) CHANNEL.postMessage({ type: "invalidate", kind: kind, id: id });
 }
 if (CHANNEL) CHANNEL.onmessage = function () { loadMe(); };
+// Another same-origin tab can clear the selection through localStorage without a channel.
+window.addEventListener("storage", function (event) {
+  if (event.key === SELECTION_KEY || event.key === GENERATION_KEY || event.key === INVALIDATED_KEY) loadMe();
+});
 async function loadMe() {
   setStatus("");
   try {

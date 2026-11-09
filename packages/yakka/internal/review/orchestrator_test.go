@@ -1396,3 +1396,20 @@ func TestDryRunValidatesReadinessWithoutEffects(t *testing.T) {
 		assertUnchanged(t, tenant, cfg, [4]int{})
 	})
 }
+
+func TestRunRejectsMissingBuildModelsBeforeProvider(t *testing.T) {
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { calls.Add(1) }))
+	defer srv.Close()
+	tenant := reviewTenant(t)
+	cfg := availableConfig(srv.URL)
+	req := reviewRequest(true)
+	req.BuildModels = nil
+	if _, err := Run(context.Background(), tenant, "tenant", req, cfg); err == nil || err.Error() != "build_models required" || calls.Load() != 0 {
+		t.Fatalf("missing build_models err=%v calls=%d", err, calls.Load())
+	}
+	req.BuildModels = []BuildModel{{ID: "  "}}
+	if _, err := Run(context.Background(), tenant, "tenant", req, cfg); err == nil || err.Error() != "build_models entries require id" || calls.Load() != 0 {
+		t.Fatalf("blank build model err=%v calls=%d", err, calls.Load())
+	}
+}

@@ -216,6 +216,14 @@ func Run(ctx context.Context, tenant *store.Tenant, tenantID string, req Request
 	if len(secrets.Scan(repo)) > 0 || len(secrets.Scan(req.Plan)) > 0 || (req.Brief != nil && len(secrets.Scan(req.Brief.Path)) > 0) {
 		return Receipt{}, errors.New("review identity arguments invalid")
 	}
+	if len(req.BuildModels) == 0 {
+		return Receipt{}, errors.New("build_models required")
+	}
+	for _, m := range req.BuildModels {
+		if strings.TrimSpace(m.ID) == "" || len(secrets.Scan(m.ID+"\n"+m.Role)) > 0 {
+			return Receipt{}, errors.New("build_models entries require id")
+		}
+	}
 	if req.Kind != "phase" && req.Kind != "pr" && req.Kind != "adhoc" {
 		return Receipt{}, errors.New("kind must be phase, pr or adhoc")
 	}

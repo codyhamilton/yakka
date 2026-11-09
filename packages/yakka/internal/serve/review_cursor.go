@@ -89,6 +89,18 @@ type reviewCursorPayload struct {
 	LastID     int64              `json:"last_id"`
 }
 
+// restoreReviewID puts the public receipt id back on a stored review row. keys.Canonical
+// strips the reserved top-level id before persistence, and the review handler keeps that
+// value in review_id. List readers, including the trial evidence export, address rows by id.
+func restoreReviewID(item map[string]any) {
+	if id, _ := item["id"].(string); id != "" {
+		return
+	}
+	if reviewID, _ := item["review_id"].(string); reviewID != "" {
+		item["id"] = reviewID
+	}
+}
+
 // tenantReviewGeneration reads the tenant's current lifecycle generation from registry metadata only;
 // it never opens tenant storage. Keyed/local tenants and unsupported legacy tenants have no
 // trustworthy record, so their generation is empty and a reset cannot apply to them.

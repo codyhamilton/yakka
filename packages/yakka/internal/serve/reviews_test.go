@@ -54,9 +54,22 @@ func TestReviewRESTRoutesAuthTenantAndReceipt(t *testing.T) {
 	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"status":"ok"`) || strings.Contains(rec.Body.String(), "new code") {
 		t.Fatalf("POST status=%d body=%s", rec.Code, rec.Body.String())
 	}
+	var posted review.Receipt
+	if err := json.Unmarshal(rec.Body.Bytes(), &posted); err != nil || posted.ID == "" {
+		t.Fatalf("receipt id: %v %s", err, rec.Body.String())
+	}
 	code, body := do(t, h, "GET", "/v1/reviews?repo_id=repo-a&kind=adhoc&status=ok&effort=high&profile=shadow&limit=10", "ka", "")
 	if code != 200 || !strings.Contains(body, `"reviews":[{`) || strings.Contains(body, `"payload"`) {
 		t.Fatalf("receipt GET=%d %s", code, body)
+	}
+	var listed struct {
+		Reviews []map[string]any `json:"reviews"`
+	}
+	if err := json.Unmarshal([]byte(body), &listed); err != nil || len(listed.Reviews) != 1 {
+		t.Fatalf("listed reviews: %v %s", err, body)
+	}
+	if listed.Reviews[0]["id"] != posted.ID || listed.Reviews[0]["review_id"] != posted.ID {
+		t.Fatalf("listed id=%v review_id=%v want %s", listed.Reviews[0]["id"], listed.Reviews[0]["review_id"], posted.ID)
 	}
 	code, body = do(t, h, "GET", "/v1/reviews?repo_id=repo-a&detail=full", "ka", "")
 	if code != 200 || !strings.Contains(body, `"payload"`) {

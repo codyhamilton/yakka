@@ -103,11 +103,17 @@ func (r *Registry) beginTenantLifecycle(githubID int64, tenant, op, state string
 	if rec.State == lifecycleStateResetting || rec.State == lifecycleStateDeleting {
 		return ErrTenantLifecycleBusy
 	}
+	prev, prevDirty := rec, r.dirty
 	rec.State = state
 	rec.Operation = op
 	r.lifecycle[tenant] = rec
 	r.dirty = true
-	return r.saveLocked()
+	if err := r.saveLocked(); err != nil {
+		r.lifecycle[tenant] = prev
+		r.dirty = prevDirty
+		return err
+	}
+	return nil
 }
 
 // CompleteTenantReset finishes a begun reset: it advances the generation,
@@ -128,6 +134,7 @@ func (r *Registry) CompleteTenantReset(tenant string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	prev, prevTokens, prevDirty := rec, cloneTokenHashes(r.tokenHashes), r.dirty
 	rec.Generation = generation
 	rec.State = lifecycleStateActive
 	rec.Operation = ""
@@ -135,6 +142,9 @@ func (r *Registry) CompleteTenantReset(tenant string) (string, error) {
 	r.purgeTenantTokensLocked(tenant)
 	r.dirty = true
 	if err := r.saveLocked(); err != nil {
+		r.lifecycle[tenant] = prev
+		r.tokenHashes = prevTokens
+		r.dirty = prevDirty
 		return "", err
 	}
 	return generation, nil
@@ -153,12 +163,25 @@ func (r *Registry) CompleteTenantDelete(tenant string) error {
 	if rec.State != lifecycleStateDeleting || rec.Operation != lifecycleOpDelete {
 		return ErrTenantLifecycleConflict
 	}
+	prevOwner := r.owners[tenant]
+	prevName, hadName := r.names[tenant]
+	prevTokens, prevDirty := cloneTokenHashes(r.tokenHashes), r.dirty
 	delete(r.owners, tenant)
 	delete(r.names, tenant)
 	delete(r.lifecycle, tenant)
 	r.purgeTenantTokensLocked(tenant)
 	r.dirty = true
-	return r.saveLocked()
+	if err := r.saveLocked(); err != nil {
+		r.owners[tenant] = prevOwner
+		if hadName {
+			r.names[tenant] = prevName
+		}
+		r.lifecycle[tenant] = rec
+		r.tokenHashes = prevTokens
+		r.dirty = prevDirty
+		return err
+	}
+	return nil
 }
 
 // PurgeTenantTokens removes every token record for tenant, including revoked
@@ -166,8 +189,25 @@ func (r *Registry) CompleteTenantDelete(tenant string) error {
 func (r *Registry) PurgeTenantTokens(tenant string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	prevTokens, prevDirty := cloneTokenHashes(r.tokenHashes), r.dirty
 	r.purgeTenantTokensLocked(tenant)
-	return r.saveLocked()
+	if err := r.saveLocked(); err != nil {
+		r.tokenHashes = prevTokens
+		r.dirty = prevDirty
+		return err
+	}
+	return nil
+}
+
+// cloneTokenHashes copies the token slice so a failed registry save can restore it.
+// A nil slice stays nil; an empty slice stays empty.
+func cloneTokenHashes(in []TokenHashRecord) []TokenHashRecord {
+	if in == nil {
+		return nil
+	}
+	out := make([]TokenHashRecord, len(in))
+	copy(out, in)
+	return out
 }
 
 // purgeTenantTokensLocked drops every token record for tenant. The caller holds r.mu.

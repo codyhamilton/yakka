@@ -53,7 +53,7 @@ function applySelection(me: MeFetchResult): SelectionOutcome {
 			break;
 		case 'pending':
 			sessionGate.pending = outcome.state;
-			sessionGate.notice = `This tenant is ${outcome.state}. Tenant data will resume after it completes.`;
+			sessionGate.notice = selectionReadBlock(outcome) ?? '';
 			clearTenantData();
 			break;
 		case 'invalidate':
@@ -113,11 +113,12 @@ export function chooseTenant(id: string, known?: Tenant): void {
 	const tenant = known ?? tenantsFromMe(sessionGate.me).find((t) => t.id === id);
 	const state = tenant ? tenantLifecycleState(tenant) : 'active';
 	const generation = tenant && isLifecycleTracked(tenant) ? (tenant.lifecycle_generation ?? '') : '';
+	const pending = state === 'resetting' || state === 'deleting' ? state : '';
 	sessionGate.tenant = id;
 	sessionGate.invalidated = false;
-	sessionGate.pending = state === 'resetting' || state === 'deleting' ? state : '';
-	sessionGate.notice = sessionGate.pending
-		? `This tenant is ${state}. Tenant data will resume after it completes.`
+	sessionGate.pending = pending;
+	sessionGate.notice = pending
+		? (selectionReadBlock({ kind: 'pending', tenant: tenant ?? { id, name: id }, state: pending }) ?? '')
 		: '';
 	rememberTenant(id, generation);
 }

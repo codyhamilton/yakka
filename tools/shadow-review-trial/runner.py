@@ -237,9 +237,15 @@ class TrialRunner:
         for row in rows:
             if not isinstance(row, dict):
                 raise RunnerError("review read page has a malformed review row")
+            # Stored rows keep the receipt id in review_id. keys.Canonical strips the
+            # reserved top-level id, so a real server page may not have "id" at all.
             identity = row.get("id")
             if not isinstance(identity, str) or not identity:
-                raise RunnerError("review read page row has no identity")
+                identity = row.get("review_id")
+                if isinstance(identity, str) and identity:
+                    row["id"] = identity
+                else:
+                    raise RunnerError("review read page row has no identity")
         cursor = result.get("next_cursor")
         if cursor is not None and not isinstance(cursor, str):
             raise RunnerError("review read page cursor is not a string or null")

@@ -127,6 +127,22 @@ class FakeREST:
 
 
 class RunnerTests(unittest.TestCase):
+    def test_review_page_accepts_stored_review_id(self):
+        rows, cursor, complete = runner.TrialRunner._review_page({
+            "reviews": [{"review_id": "rev-1", "status": "ok"}],
+            "next_cursor": None,
+            "complete": True,
+        })
+        self.assertEqual(rows[0]["id"], "rev-1")
+        self.assertIsNone(cursor)
+        self.assertTrue(complete)
+        with self.assertRaisesRegex(runner.RunnerError, "no identity"):
+            runner.TrialRunner._review_page({
+                "reviews": [{"status": "ok"}],
+                "next_cursor": None,
+                "complete": True,
+            })
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
