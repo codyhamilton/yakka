@@ -285,7 +285,10 @@ func extractDesign(content, phase string) ([]Criterion, error) {
 func markdownSection(content, heading string, level int) string {
 	lines := strings.Split(strings.ReplaceAll(content, "\r\n", "\n"), "\n")
 	for i, line := range lines {
-		if line != heading && !(strings.HasPrefix(line, heading) && len(line) > len(heading) && line[len(heading)] == ' ') {
+		if level > 0 && line != heading {
+			continue
+		}
+		if level == 0 && !strings.HasPrefix(line, heading) {
 			continue
 		}
 		if level == 0 {

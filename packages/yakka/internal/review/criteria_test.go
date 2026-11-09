@@ -124,6 +124,28 @@ func TestResolveBriefAndReferencePrecedence(t *testing.T) {
 	}
 }
 
+func TestBriefExtractionRequiresExactSectionHeadings(t *testing.T) {
+	body := `# Brief
+
+Owned paths: packages/yakka/internal/review/
+
+## Goal extra
+
+This is not the Goal section.
+
+## Contract
+
+- Use tenant-scoped versions.
+
+## Done evidence
+
+- Fixture suite passes.
+`
+	if _, err := extractBrief(body); err == nil || !strings.Contains(err.Error(), "criteria_unavailable") {
+		t.Fatalf("near-match heading should not satisfy Goal: %v", err)
+	}
+}
+
 func TestResolveExplicitNoneAndNoCrossTenant(t *testing.T) {
 	tnA, tnB := openCriteriaTenant(t), openCriteriaTenant(t)
 	p := "docs/plans/23-demo/DESIGN.md"
