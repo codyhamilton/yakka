@@ -72,6 +72,29 @@ design ──sign-off──▶ ┌ per phase, in the design's order ┐ ──�
 
 **comprehensive-review → yakka-tuning**: one-way, artifact-only, via the plan-sufficiency judgment.
 
+## Advisory change review
+
+`review_change` is owned by the Go server: definition/schema, prompt and exclusion policy, stored
+brief or plan/phase criteria resolution, provider call, validation, spend limits and tenant-local
+records. It shares the `POST /v1/reviews` orchestrator. The Python shim alone captures a bounded,
+secret-scanned local diff and omission manifest through the declared `change` reader, in
+uncommitted or explicit Git range mode. The server rescans and alone holds the provider credential;
+machines use their existing Yakka login and need no provider key. The tool is `read_write`,
+`readOnlyHint:false`: its effect is server spend and record. Its declaration allows 150 seconds and
+no local actions. Registration requires review model configuration and a sufficient MCP timeout
+ceiling; source integration does not establish deployed availability.
+
+Beside existing reviews, `execute` makes one non-gating range call after each phase closing commit;
+`comprehensive-review` and `post-build` each make one at their reviewed/candidate PR head. Explicit
+base/head SHAs select the change, available stored criteria references select the rubric, and
+`build_models` comes from the run record or `unknown`; stages send no `trial` argument. Only session
+output carries receipt summaries and validated findings (`detail=full`), never captured diff content.
+Results never enter gates, verdicts, commits, trailers, exit codes or plan-folder files, and never
+trigger fixes or dispatch. Absent, unavailable or failed calls leave existing decisions unchanged.
+Repeated captures may yield `skipped_duplicate` referring to an earlier receipt, not fresh evidence.
+See [the advisory surface](design/04-advisory-surface.md#review_change) and
+[MCP contract](design/08-server-mcp-contract.md#the-shipped-tools).
+
 ## Trailer dual-read
 
 Writers and readers for phase trailers, plan markers, and execution-report fences:

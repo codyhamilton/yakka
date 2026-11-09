@@ -1,0 +1,16 @@
+{
+  "prompt_policy_version": "review-prompt-v1",
+  "exclusion_policy_version": "review-exclusions-v1",
+  "packet_character_budget": 400000,
+  "per_file_character_budget": 60000,
+  "change_max_file_bytes": 262144,
+  "change_max_total_bytes": 2097152,
+  "change_max_files": 200,
+  "context_lines": 20,
+  "change_exclude": ["vendor/**", "node_modules/**", "package-lock.json", "npm-shrinkwrap.json", "yarn.lock", "pnpm-lock.yaml", "bun.lock", "Cargo.lock", "go.sum", "**/*.map", "**/*.min.js", "**/*.min.css", "**/__snapshots__/**", "dist/**", "build/**", "coverage/**", "target/**"],
+  "lockfiles": ["package-lock.json", "npm-shrinkwrap.json", "yarn.lock", "pnpm-lock.yaml", "bun.lock", "bun.lockb", "Cargo.lock", "go.sum", "poetry.lock", "Pipfile.lock", "composer.lock", "Gemfile.lock", "package.resolved", "Podfile.lock"],
+  "excluded_files": ["*.min.js", "*.min.css", "*.map", "*.snap", "*.png", "*.jpg", "*.jpeg", "*.gif", "*.webp", "*.ico", "*.pdf", "*.woff", "*.woff2", "*.ttf", "*.zip", "*.gz", "*.wasm"],
+  "excluded_directories": ["vendor/", "node_modules/", "dist/", "build/", "coverage/", ".next/", "target/"],
+  "truncation_order": ["code", "tests", "config", "docs"],
+  "docs_never_noise": true
+}

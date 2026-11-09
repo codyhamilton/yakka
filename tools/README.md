@@ -10,4 +10,5 @@ Direction: **`plugins/yakka` → packages. Packages → packages. Tools → anyt
 | `jev-variants` | Variant-search registry |
 | `quality` | Legacy quality service; catalogue lives in `packages/yakka` |
 | `release` | Four-platform binary build |
+| `shadow-review-trial` | Offline historical review manifest and comparator evidence |
 | `transcript` | Session cost metrics |

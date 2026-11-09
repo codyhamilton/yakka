@@ -1,13 +1,15 @@
 // Package ingest validates, prechecks and stores a batch of facts for one tenant (design 3 Ingest).
 //
 // Fact wire shape: a JSON object. Common keys: id (the drain's "<queue file>#<n>", echoed in the
-// result, never hashed or stored), type ("hook_event" | "artifact_version" | "commit"),
+// result, never hashed or stored), type ("hook_event" | "artifact_version" | "commit"). review_run
+// is accepted only through IngestReviewRuns on the authenticated review handler path.
 // conversation_id, harness, event, ts (Unix seconds, number).
 //
 //	hook_event:       payload (object, already scrubbed by the client)
 //	artifact_version: repo_id, path, content_hash, content (the file's UTF-8 bytes as a string),
 //	                  source ("worktree" | "commit")
 //	commit:           repo_id, sha, paths ([]string), renames ([]{"from","to"})
+//	review_run:       repo_id, kind, capture_id, status and generic review record fields
 //
 // Unknown keys are kept in the stored raw JSON. Per fact the order is: validate; for hook_event the
 // event policy (policy.go: a Remove fact is answered accepted and leaves nothing); precheck every
@@ -127,7 +129,7 @@ func validate(obj map[string]any) string {
 	typ, _ := str(obj, "type")
 	conv, _ := str(obj, "conversation_id")
 	switch typ {
-	case "hook_event", "artifact_version", "commit":
+	case "hook_event", "artifact_version", "commit", "review_run":
 	default:
 		return invalid("unknown type")
 	}
@@ -163,12 +165,39 @@ func validate(obj map[string]any) string {
 				return invalid("commit needs %s", k)
 			}
 		}
+	case "review_run":
+		for _, k := range []string{"repo_id", "kind", "capture_id", "status"} {
+			if s, ok := str(obj, k); !ok || s == "" {
+				return invalid("review_run needs %s", k)
+			}
+		}
+		kind, _ := str(obj, "kind")
+		if kind != "phase" && kind != "pr" && kind != "adhoc" {
+			return invalid("review_run kind must be phase, pr or adhoc")
+		}
+		status, _ := str(obj, "status")
+		switch status {
+		case "ok", "ok_partial", "timeout", "api_error", "invalid_output", "unavailable",
+			"refused_capture", "refused_disclosure", "refused_criteria", "skipped_budget", "skipped_duplicate":
+		default:
+			return invalid("review_run has unknown status")
+		}
 	}
 	return ""
 }
 
-// Ingest processes facts for tenant. An error is a whole-request failure.
+// Ingest processes remote envelope facts for tenant. review_run facts are rejected; callers on the
+// review handler use IngestReviewRuns. An error is a whole-request failure.
 func Ingest(ctx context.Context, tenant *store.Tenant, facts []json.RawMessage) ([]Result, error) {
+	return ingestBatch(ctx, tenant, facts, false)
+}
+
+// IngestReviewRuns persists review_run facts from the authenticated review handler.
+func IngestReviewRuns(ctx context.Context, tenant *store.Tenant, facts []json.RawMessage) ([]Result, error) {
+	return ingestBatch(ctx, tenant, facts, true)
+}
+
+func ingestBatch(ctx context.Context, tenant *store.Tenant, facts []json.RawMessage, reviewRuns bool) ([]Result, error) {
 	results := make([]Result, len(facts))
 	var rows []store.FactRow
 	var rowIdx []int
@@ -189,6 +218,10 @@ func Ingest(ctx context.Context, tenant *store.Tenant, facts []json.RawMessage) 
 			continue
 		}
 		typ, _ := str(obj, "type")
+		if typ == "review_run" && !reviewRuns {
+			results[i].Status, results[i].Reason = Rejected, invalid("review_run is server-authored")
+			continue
+		}
 		harness, _ := str(obj, "harness")
 		event, _ := str(obj, "event")
 		payload, _ := obj["payload"].(map[string]any)
@@ -258,6 +291,18 @@ func Ingest(ctx context.Context, tenant *store.Tenant, facts []json.RawMessage) 
 		} else {
 			row.Source, _ = str(obj, "source")
 			row.SHA, _ = str(obj, "sha")
+		}
+		if typ == "review_run" {
+			ins, err := tenant.AppendReviewRuns(ctx, []store.FactRow{row})
+			if err != nil {
+				return nil, err
+			}
+			if ins[0] {
+				results[i].Status = Accepted
+			} else {
+				results[i].Status = Duplicate
+			}
+			continue
 		}
 		rows = append(rows, row)
 		rowIdx = append(rowIdx, i)

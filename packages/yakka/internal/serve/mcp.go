@@ -33,12 +33,23 @@ const (
 var mcpReaderTable []byte
 
 type mcpReaderSpec struct {
-	Name           string              `json:"name"`
-	Versions       []int               `json:"versions"`
-	Depends        []string            `json:"depends_on"`
-	Params         map[string][]string `json:"params"`
-	Bulk           bool                `json:"bulk"`
-	RequiredParams []string            `json:"required_params"`
+	Name           string                  `json:"name"`
+	Versions       []int                   `json:"versions"`
+	Depends        []string                `json:"depends_on"`
+	Params         map[string][]string     `json:"params"`
+	TypedParams    map[string]mcpParamSpec `json:"typed_params,omitempty"`
+	Bulk           bool                    `json:"bulk"`
+	RequiredParams []string                `json:"required_params"`
+}
+
+// mcpParamSpec describes only the fixed scalar and string-array policy values
+// supported by the closed reader table. It is not a general schema language.
+type mcpParamSpec struct {
+	Type   string   `json:"type"`
+	Min    int64    `json:"min,omitempty"`
+	Max    int64    `json:"max,omitempty"`
+	Values []string `json:"values,omitempty"`
+	Exact  []string `json:"exact,omitempty"`
 }
 
 // MCPTool is registered during server construction, before serving requests.
@@ -199,10 +210,21 @@ func (s *Server) RegisterMCPTool(t MCPTool) error {
 				if err != nil || json.Unmarshal(b, &n) != nil || n < 1 || n > mcpMaxBody {
 					return fmt.Errorf("invalid MCP bulk budget")
 				}
+				if typed, ok := spec.TypedParams[key]; ok {
+					if err := validateMCPReaderParam(value, typed); err != nil {
+						return fmt.Errorf("invalid MCP reader param %q: %w", key, err)
+					}
+				}
 				budget += n
 				continue
 			}
 			allowed, ok := spec.Params[key]
+			if typed, typedOK := spec.TypedParams[key]; typedOK {
+				if err := validateMCPReaderParam(value, typed); err != nil {
+					return fmt.Errorf("invalid MCP reader param %q: %w", key, err)
+				}
+				continue
+			}
 			if !ok {
 				return fmt.Errorf("unknown MCP reader param %q", key)
 			}
@@ -289,6 +311,101 @@ func (s *Server) RegisterMCPTool(t MCPTool) error {
 	}
 	s.mcpTools.tools = append(s.mcpTools.tools, t)
 	return nil
+}
+
+func validateMCPReaderParam(value any, spec mcpParamSpec) error {
+	switch spec.Type {
+	case "integer":
+		var n int64
+		switch v := value.(type) {
+		case int:
+			n = int64(v)
+		case int64:
+			n = v
+		case float64:
+			if v != float64(int64(v)) {
+				return fmt.Errorf("must be an integer")
+			}
+			n = int64(v)
+		default:
+			return fmt.Errorf("must be an integer")
+		}
+		if n < spec.Min || n > spec.Max {
+			return fmt.Errorf("integer outside allowed range")
+		}
+		return nil
+	case "boolean":
+		if _, ok := value.(bool); !ok {
+			return fmt.Errorf("must be a boolean")
+		}
+		return nil
+	case "string":
+		v, ok := value.(string)
+		if !ok || !mcpAllowedString(v, spec.Values) {
+			return fmt.Errorf("must be an allowed string")
+		}
+		return nil
+	case "string_array":
+		var values []any
+		switch v := value.(type) {
+		case []any:
+			values = v
+		case []string:
+			for _, item := range v {
+				values = append(values, item)
+			}
+		default:
+			return fmt.Errorf("must be an array of strings")
+		}
+		if len(values) == 0 {
+			return fmt.Errorf("must not be empty")
+		}
+		if len(spec.Exact) > 0 {
+			if len(values) != len(spec.Exact) {
+				return fmt.Errorf("must match the fixed policy order")
+			}
+			for i, item := range values {
+				v, ok := item.(string)
+				if !ok || v != spec.Exact[i] {
+					return fmt.Errorf("must match the fixed policy order")
+				}
+			}
+		}
+		for _, item := range values {
+			v, ok := item.(string)
+			if !ok || !mcpAllowedString(v, spec.Values) {
+				return fmt.Errorf("contains an unsafe or disallowed string")
+			}
+		}
+		return nil
+	default:
+		return fmt.Errorf("unsupported typed policy")
+	}
+}
+
+func mcpAllowedString(value string, values []string) bool {
+	if value == "" || strings.TrimSpace(value) != value {
+		return false
+	}
+	for _, allowed := range values {
+		if value == allowed {
+			return true
+		}
+	}
+	// Exclusion patterns are deliberately path-like: no absolute paths,
+	// traversal, URLs, backslashes, whitespace or control characters.
+	if len(values) == 0 {
+		if strings.HasPrefix(value, "/") || strings.Contains(value, "..") || strings.Contains(value, "://") || strings.Contains(value, `\\`) {
+			return false
+		}
+		for _, c := range value {
+			if !(c == '/' || c == '*' || c == '.' || c == '-' || c == '_' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9') {
+				return false
+			}
+		}
+		return true
+	}
+	return false
 }
 
 func (s *Server) mcpAuth(w http.ResponseWriter, r *http.Request) (string, string, bool) {

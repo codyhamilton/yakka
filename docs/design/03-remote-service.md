@@ -69,6 +69,12 @@ Server configuration is environment only:
 | `YAKKA_SERVE_CORS_ORIGINS` | comma-separated exact origins allowed to call bearer-authenticated reads from a browser; unset or empty means no CORS headers; ignored in local mode, which allows loopback origins ([design 7](07-analytics-site.md#browser-access)) |
 | `GITHUB_OAUTH_CLIENT_ID`, `GITHUB_OAUTH_CLIENT_SECRET`, `YAKKA_PUBLIC_URL` | set together for remote collector mode (non-loopback bind); ignored on loopback ([design 5](05-distribution.md#local-bootstrap)) |
 | `TYPESAFE_API_KEY` | scorer credential; server side only, never in any client config |
+| `CLAUDE_API_TOKEN` | optional review provider credential; server side only, sent only in the provider authentication header |
+| `YAKKA_REVIEW_MODEL` | exact live review model id; availability requires `claude-haiku-5-5` |
+| `YAKKA_REVIEW_EFFORT` | live review effort; unset means `high`, any configured value other than `high` disables calls |
+| `YAKKA_REVIEW_TRIAL_ENABLED` | historical trial effort override gate; defaults to `false` |
+| `YAKKA_REVIEW_USD_CAP` | positive server-wide rolling 24-hour USD spend cap; unset disables calls |
+| `YAKKA_REVIEW_REPOS` | comma-separated `<tenant>/<repo_id>` allowlist; unset enables no repositories |
 
 **Local mode** is loopback with no credential requirement, for one user on one machine:
 
