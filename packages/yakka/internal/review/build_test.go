@@ -5,7 +5,6 @@ import (
 	"encoding/hex"
 	"go/parser"
 	"go/token"
-	"os"
 	"strconv"
 	"strings"
 	"testing"
@@ -134,26 +133,19 @@ func TestBuildRecomputesCaptureIdentityAndRejectsChangedDiffHash(t *testing.T) {
 }
 
 func TestBuildPackageHasNoNetworkOrEnvironmentImports(t *testing.T) {
-	entries, err := os.ReadDir(".")
+	// Build remains deterministic and offline; provider.go intentionally owns
+	// the later Phase 4 transport and must use net/http.
+	f, err := parser.ParseFile(token.NewFileSet(), "build.go", nil, parser.ImportsOnly)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".go") || strings.HasSuffix(entry.Name(), "_test.go") {
-			continue
-		}
-		f, err := parser.ParseFile(token.NewFileSet(), entry.Name(), nil, parser.ImportsOnly)
-		if err != nil {
+	for _, imp := range f.Imports {
+		var name string
+		if err := unquote(imp.Path.Value, &name); err != nil {
 			t.Fatal(err)
 		}
-		for _, imp := range f.Imports {
-			var name string
-			if err := unquote(imp.Path.Value, &name); err != nil {
-				t.Fatal(err)
-			}
-			if name == "net" || strings.HasPrefix(name, "net/") || name == "os" {
-				t.Errorf("forbidden import %q in %s", name, entry.Name())
-			}
+		if name == "net" || strings.HasPrefix(name, "net/") || name == "os" {
+			t.Errorf("forbidden import %q in build.go", name)
 		}
 	}
 }
