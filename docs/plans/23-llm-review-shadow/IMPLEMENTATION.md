@@ -80,3 +80,18 @@ Run identity: Codex; current API session; started 2026-11-09 12:48 UTC (22:48 Au
 - `Reservations.PurgeTenant` restores in-memory state on persistence failure, but that rollback branch has no dedicated injected-save-failure test.
 - The API-origin and Pages lifecycle UI passed fixture/content tests, focused Vitest and a production bundle build; no human browser walkthrough of the typed confirmation, ambiguous-response recovery and cross-origin re-selection flow was performed. `gate: manual browser walkthrough of reset/delete and re-selection behavior before operator use`.
 - The separate Phase 3 historical trial remains pending by request. `gate: full-history clone/population proof, deployed-server readiness, provider credential held only by the server, and Cody's separate explicit spend approval before any live or paid run`.
+
+## Phase 3
+
+### Refine handoff
+
+- Refine sub-run: `hlaunch.sh`; opencode; harness selected DeepSeek Flash (`deepseek/deepseek-flash`); current API session; 2026-11-10. Refined only Phase 3 of `DESIGN.md` read cold from the committed `DESIGN.md`, `IMPLEMENTATION.md` and Phase 2 Carried; no Phase 3 implementation.
+- Outcome: Proceed with six units, dependency order recorded under Phase 3 in `DESIGN.md`; briefs `phase3-01` through `phase3-06` written from `templates/brief.md`. Wave 1 is 3-01, wave 2 is 3-02, wave 3 is 3-03, wave 4 is 3-04, wave 5 is 3-05, wave 6 is 3-06. 3-03 and 3-04 serialize because both exercise the composed `test_phase7.py` rehearsal. The 50/49/asymmetric count proof is split across 3-02 (runner) and 3-04 (report), with the composed rehearsal in 3-05. Recon correction: the design surfaces list `smoke.py`, but the landed smoke fixture lives in `cli.py`/`test_phase7.py`; Phase 3 keeps it there and adds no live smoke command. The loopback `smoke` fixture remains free; the approval gate applies to any provider-reaching execute or paid smoke path, including resume. Refinement wrote no implementation code, ran no tests, and used no live provider/server, secret, deploy, Fly/Wrangler command or `/tmp`.
+- Feedback, exact results:
+  - `phase3-01-full-history-manifest-freeze.md`: `delivered`, screen `pass by jev-1.13.0`, versions 1.
+  - `phase3-02-general-call-runner-tenant-check.md`: `delivered`, screen `pass by jev-1.13.0`, versions 1.
+  - `phase3-03-complete-paged-evidence.md`: `delivered`, screen `pass by jev-1.13.0`, versions 2.
+  - `phase3-04-report-provenance-canonical-cost.md`: `delivered`, screen `pass by jev-1.13.0`, versions 3.
+  - `phase3-05-spend-approval-rehearsal.md`: `delivered`, screen `pass by jev-1.13.0`, versions 1.
+  - `phase3-06-operator-docs-evidence-format.md`: `delivered`, screen `pass by jev-1.13.0`, versions 1.
+- No rejections or flagged outliers. Carried placement: the Phase 1 historical canonical-row cache gate remains an owner-confirmation gate (not Phase 3 scope); the non-MAC cursor limitation is preserved with 3-03 verifying protocol consistency and unique identities only; the unproven `Reservations.PurgeTenant` rollback branch is a Phase 2 residual unrelated to Phase 3; the pending Phase 3 trial gate is absorbed by 3-05's approval gate and 3-06's operator gates; the Phase 2 manual browser walkthrough gate is preserved in 3-06 and not claimed done. Gates: `gate: full-history clone/population proof`, `gate: deployed-server readiness`, `gate: provider credential held only by the server`, `gate: Cody's separate explicit spend approval before any live or paid run`, `gate: manual browser walkthrough of reset/delete and re-selection before operator use`.

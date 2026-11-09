@@ -294,6 +294,17 @@ Carried placement from Phase 1: the historical canonical-row duplicate-cache gat
 - Surfaces: `tools/shadow-review-trial/{cli,manifest,runner,report,smoke}.py`, tests and README; `tools/README.md` if command inventory changes; later operator evidence format under `docs/lab/RESEARCH/` (no fabricated run record in this amendment).
 - Approach: **Known**.
 - Depends on: Phases 1 and 2. Full history, deployed readiness and Cody's spend approval are later operator prerequisites for live execution, not build-phase closure.
+- Units:
+  - **3-01 Full-history preparation and verified manifest freeze** — `briefs/phase3-01-full-history-manifest-freeze.md`; depends on nothing; runs alongside nothing.
+  - **3-02 General-call runner and dedicated-tenant identity** — `briefs/phase3-02-general-call-runner-tenant-check.md`; depends on 3-01; runs alongside nothing.
+  - **3-03 Complete cursor-paged evidence retrieval** — `briefs/phase3-03-complete-paged-evidence.md`; depends on 3-02; runs alongside nothing.
+  - **3-04 Report provenance, completeness and canonical-cost isolation** — `briefs/phase3-04-report-provenance-canonical-cost.md`; depends on 3-01, 3-02 and 3-03; runs alongside nothing.
+  - **3-05 Spend authorization gate and approved execution rehearsal** — `briefs/phase3-05-spend-approval-rehearsal.md`; depends on 3-03 and 3-04; runs alongside nothing.
+  - **3-06 Operator documentation and trial evidence format** — `briefs/phase3-06-operator-docs-evidence-format.md`; depends on 3-01, 3-02, 3-03, 3-04 and 3-05; runs alongside nothing.
+
+**Phase 3 refinement verdict (2026-11-10): Proceed — six units.** Wave 1 is 3-01; wave 2 is 3-02; wave 3 is 3-03; wave 4 is 3-04; wave 5 is 3-05; wave 6 is 3-06. 3-03 and 3-04 serialize because both exercise the composed `test_phase7.py` rehearsal. The 50/49/asymmetric count proof is split across 3-02 (runner) and 3-04 (report), with the composed rehearsal in 3-05. No unit needs a live provider, deployed server, credential, deployment or paid trial. Recon correction: the Phase 3 surfaces line lists `smoke.py`, but the landed smoke fixture lives in `cli.py`/`test_phase7.py`; Phase 3 keeps it there and adds no live smoke command. The loopback `smoke` fixture remains free; the approval gate applies to any provider-reaching execute or paid smoke path, including resume. Gates: `gate: full-history clone/population proof`, `gate: deployed-server readiness`, `gate: provider credential held only by the server`, `gate: Cody's separate explicit spend approval before any live or paid run`, `gate: manual browser walkthrough of reset/delete and re-selection before operator use`. Contract gap: none found; no design bounce. Open Questions are unchanged.
+
+Carried placement from Phases 1 and 2: the historical canonical-row duplicate-cache gate remains a Phase 1 owner-confirmation gate and is not Phase 3 scope (no Phase 3 contract depends on it); the non-MAC cursor limitation is preserved, with 3-03 verifying protocol consistency and unique identities only; the unproven `Reservations.PurgeTenant` rollback branch is a Phase 2 residual unrelated to Phase 3; the pending Phase 3 trial gate is absorbed by 3-05's approval gate and 3-06's operator gates; the Phase 2 manual browser walkthrough gate is preserved in 3-06 and not claimed done. Artifact feedback: all six briefs returned `delivered` / screen `pass` (jev-1.13.0); no rejections or flagged outliers. Refinement made no code change and used no live server, provider, secret, deployment or `/tmp`.
 
 ## Provenance Notes
 
