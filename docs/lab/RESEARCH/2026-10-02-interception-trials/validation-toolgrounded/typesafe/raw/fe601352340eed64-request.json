@@ -1,0 +1,184 @@
+{
+  "model": "jev-1.13.0",
+  "state": {
+    "evidence_class": "hybrid_v0",
+    "framing": "PR-VALIDATION-TOOLGROUNDED",
+    "seat": "seat-2",
+    "worker_id": "ca977b9ca0dd",
+    "stratum": "thrash",
+    "checkpoint_turn": 60,
+    "tool_evidence": {
+      "edit_count": 0,
+      "write_count": 0,
+      "bash_count": 30,
+      "last_tools": [
+        "Read",
+        "Bash",
+        "Bash",
+        "Bash",
+        "Bash",
+        "Read",
+        "Read",
+        "Bash"
+      ],
+      "tool_evidence_block": "edit_count=0; write_count=0; bash_count=30; last_tools=[Read, Bash, Bash, Bash, Bash, Read, Read, Bash]"
+    },
+    "snapshot": {
+      "worker_id": "ca977b9ca0dd",
+      "stratum": "thrash",
+      "checkpoint_turn": 60,
+      "snapshot_mode": "hybrid_v0",
+      "cumulative": {
+        "api_turns": 60,
+        "peak_ctx_tokens": 123714,
+        "prefix_bytes": 2976768,
+        "tool_histogram": {
+          "Read": 40,
+          "Bash": 30
+        },
+        "reread_paths": [
+          {
+            "path": "<REPO>/parser/kiwiw/_cenc.c",
+            "count": 8
+          },
+          {
+            "path": "<REPO>/parser/kiwiw/divide.py",
+            "count": 8
+          },
+          {
+            "path": "<REPO>/parser/build_alldata.py",
+            "count": 5
+          },
+          {
+            "path": "<REPO>/parser/kiwiw/_e2.c",
+            "count": 4
+          },
+          {
+            "path": "<REPO>/parser/kiwiw/cenc.py",
+            "count": 3
+          }
+        ],
+        "distinct_read_paths": 14,
+        "compaction_event_count": 8,
+        "assistant_text_chars": 111
+      },
+      "delta_since_prior": {
+        "new_read_paths": [
+          "<HOME>/.claude/projects/-home-<USER>-workspace-open-pajero-maps/d006f5a0-267f-402e-bed7-b13d1a65a961/tool-results/b2f5a3jt5.txt"
+        ],
+        "tool_histogram_delta": {
+          "Bash": 6,
+          "Read": 5
+        }
+      },
+      "tail": [
+        {
+          "turn": 53,
+          "excerpt": "",
+          "tool_names": [
+            "Read"
+          ]
+        },
+        {
+          "turn": 54,
+          "excerpt": "",
+          "tool_names": [
+            "Bash"
+          ]
+        },
+        {
+          "turn": 55,
+          "excerpt": "",
+          "tool_names": [
+            "Bash"
+          ]
+        },
+        {
+          "turn": 56,
+          "excerpt": "",
+          "tool_names": [
+            "Bash"
+          ]
+        },
+        {
+          "turn": 57,
+          "excerpt": "",
+          "tool_names": [
+            "Bash"
+          ]
+        },
+        {
+          "turn": 58,
+          "excerpt": "",
+          "tool_names": [
+            "Read"
+          ]
+        },
+        {
+          "turn": 59,
+          "excerpt": "",
+          "tool_names": [
+            "Read"
+          ]
+        },
+        {
+          "turn": 60,
+          "excerpt": "",
+          "tool_names": [
+            "Bash"
+          ]
+        }
+      ],
+      "tool_evidence": {
+        "edit_count": 0,
+        "write_count": 0,
+        "bash_count": 30,
+        "last_tools": [
+          "Read",
+          "Bash",
+          "Bash",
+          "Bash",
+          "Bash",
+          "Read",
+          "Read",
+          "Bash"
+        ],
+        "tool_evidence_block": "edit_count=0; write_count=0; bash_count=30; last_tools=[Read, Bash, Bash, Bash, Bash, Read, Read, Bash]"
+      }
+    }
+  },
+  "questions": {
+    "choice": {
+      "type": "choice",
+      "instructions": "Is this worker already in validation (reactive read/fix/test loop) vs forward build? Answer building ONLY if Edit or Write appears in the shown window tool evidence; otherwise prefer in_validation or inconclusive.",
+      "labels": [
+        "in_validation",
+        "building",
+        "inconclusive"
+      ],
+      "criteria": {
+        "in_validation": "Reactive read/fix/test loop is supported; do not call building without Edit or Write evidence.",
+        "building": "Forward build is supported AND Edit or Write appears in the shown tool evidence.",
+        "inconclusive": "The shown evidence does not distinguish validation from forward build."
+      }
+    },
+    "pattern_note": {
+      "type": "choice",
+      "instructions": "Choose exactly one pattern note from the shown tool evidence: test_fix_loop, forward_edit, or mixed_or_unclear.",
+      "labels": [
+        "test_fix_loop",
+        "forward_edit",
+        "mixed_or_unclear"
+      ],
+      "criteria": {
+        "test_fix_loop": "Reactive read/fix/test loop dominates.",
+        "forward_edit": "Forward editing/building dominates.",
+        "mixed_or_unclear": "Evidence is mixed or unclear."
+      }
+    },
+    "freeform_note": {
+      "type": "noul",
+      "instructions": "One concise free-form note about the tool evidence; do not introduce a new label."
+    }
+  }
+}

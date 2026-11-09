@@ -1,0 +1,162 @@
+{
+  "model": "jev-1.13.0",
+  "state": {
+    "evidence_class": "hybrid_v0",
+    "framing": "PR-VALIDATION-TOOLGROUNDED",
+    "seat": "seat-2",
+    "worker_id": "0677f597286e",
+    "stratum": "productive_edit",
+    "checkpoint_turn": 50,
+    "tool_evidence": {
+      "edit_count": 3,
+      "write_count": 5,
+      "bash_count": 32,
+      "last_tools": [
+        "Bash",
+        "Read",
+        "Edit",
+        "Read",
+        "Bash",
+        "Bash",
+        "Bash",
+        "Bash"
+      ],
+      "tool_evidence_block": "edit_count=3; write_count=5; bash_count=32; last_tools=[Bash, Read, Edit, Read, Bash, Bash, Bash, Bash]"
+    },
+    "snapshot": {
+      "worker_id": "0677f597286e",
+      "stratum": "productive_edit",
+      "checkpoint_turn": 50,
+      "snapshot_mode": "hybrid_v0",
+      "cumulative": {
+        "api_turns": 50,
+        "peak_ctx_tokens": 126023,
+        "prefix_bytes": 1092962,
+        "tool_histogram": {
+          "Bash": 32,
+          "Read": 15,
+          "Write": 5,
+          "Edit": 3
+        },
+        "reread_paths": [
+          {
+            "path": "<REPO>/parser/kiwiw/_cenc.c",
+            "count": 4
+          }
+        ],
+        "distinct_read_paths": 8,
+        "compaction_event_count": 2,
+        "assistant_text_chars": 1006
+      },
+      "delta_since_prior": {},
+      "tail": [
+        {
+          "turn": 43,
+          "excerpt": "",
+          "tool_names": [
+            "Bash"
+          ]
+        },
+        {
+          "turn": 44,
+          "excerpt": "`iter_level` exists at line 516, returning `Iterator[tuple[int, int, dict]]` \u2014 exactly matching the test's usage. Let me confirm its actual body matches expectations (content dict shape).",
+          "tool_names": [
+            "Read"
+          ]
+        },
+        {
+          "turn": 45,
+          "excerpt": "",
+          "tool_names": [
+            "Edit"
+          ]
+        },
+        {
+          "turn": 46,
+          "excerpt": "Now let me check `cbuild.py` current content before running anything.",
+          "tool_names": [
+            "Read"
+          ]
+        },
+        {
+          "turn": 47,
+          "excerpt": "",
+          "tool_names": [
+            "Bash"
+          ]
+        },
+        {
+          "turn": 48,
+          "excerpt": "\"Before\" confirmed: these are untracked/new files (no prior version existed to run). Now run the actual test suite for the first time.",
+          "tool_names": [
+            "Bash"
+          ]
+        },
+        {
+          "turn": 49,
+          "excerpt": "All 7 tests pass on the first run, including the hand-computed C unit tests and the real-Perth-frame invariant test. Now demonstrate the touch-rebuild behavior.",
+          "tool_names": [
+            "Bash"
+          ]
+        },
+        {
+          "turn": 50,
+          "excerpt": "",
+          "tool_names": [
+            "Bash"
+          ]
+        }
+      ],
+      "tool_evidence": {
+        "edit_count": 3,
+        "write_count": 5,
+        "bash_count": 32,
+        "last_tools": [
+          "Bash",
+          "Read",
+          "Edit",
+          "Read",
+          "Bash",
+          "Bash",
+          "Bash",
+          "Bash"
+        ],
+        "tool_evidence_block": "edit_count=3; write_count=5; bash_count=32; last_tools=[Bash, Read, Edit, Read, Bash, Bash, Bash, Bash]"
+      }
+    }
+  },
+  "questions": {
+    "choice": {
+      "type": "choice",
+      "instructions": "Is this worker already in validation (reactive read/fix/test loop) vs forward build? Answer building ONLY if Edit or Write appears in the shown window tool evidence; otherwise prefer in_validation or inconclusive.",
+      "labels": [
+        "in_validation",
+        "building",
+        "inconclusive"
+      ],
+      "criteria": {
+        "in_validation": "Reactive read/fix/test loop is supported; do not call building without Edit or Write evidence.",
+        "building": "Forward build is supported AND Edit or Write appears in the shown tool evidence.",
+        "inconclusive": "The shown evidence does not distinguish validation from forward build."
+      }
+    },
+    "pattern_note": {
+      "type": "choice",
+      "instructions": "Choose exactly one pattern note from the shown tool evidence: test_fix_loop, forward_edit, or mixed_or_unclear.",
+      "labels": [
+        "test_fix_loop",
+        "forward_edit",
+        "mixed_or_unclear"
+      ],
+      "criteria": {
+        "test_fix_loop": "Reactive read/fix/test loop dominates.",
+        "forward_edit": "Forward editing/building dominates.",
+        "mixed_or_unclear": "Evidence is mixed or unclear."
+      }
+    },
+    "freeform_note": {
+      "type": "noul",
+      "instructions": "One concise free-form note about the tool evidence; do not introduce a new label."
+    }
+  }
+}

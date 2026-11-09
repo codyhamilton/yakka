@@ -1,0 +1,173 @@
+{
+  "model": "jev-1.13.0",
+  "state": {
+    "evidence_class": "hybrid_v0",
+    "framing": "PR-VALIDATION-TOOLGROUNDED",
+    "seat": "seat-3",
+    "worker_id": "0677f597286e",
+    "stratum": "productive_edit",
+    "checkpoint_turn": 75,
+    "tool_evidence": {
+      "edit_count": 7,
+      "write_count": 5,
+      "bash_count": 46,
+      "last_tools": [
+        "Read",
+        "Edit",
+        "Read",
+        "Edit",
+        "Bash",
+        "Bash",
+        "Bash"
+      ],
+      "tool_evidence_block": "edit_count=7; write_count=5; bash_count=46; last_tools=[Read, Edit, Read, Edit, Bash, Bash, Bash]"
+    },
+    "snapshot": {
+      "worker_id": "0677f597286e",
+      "stratum": "productive_edit",
+      "checkpoint_turn": 75,
+      "snapshot_mode": "hybrid_v0",
+      "cumulative": {
+        "api_turns": 75,
+        "peak_ctx_tokens": 126023,
+        "prefix_bytes": 1306824,
+        "tool_histogram": {
+          "Bash": 46,
+          "Read": 20,
+          "Edit": 7,
+          "Write": 5,
+          "ToolSearch": 1
+        },
+        "reread_paths": [
+          {
+            "path": "<REPO>/docs/provenance.md",
+            "count": 5
+          },
+          {
+            "path": "<REPO>/parser/kiwiw/_cenc.c",
+            "count": 4
+          }
+        ],
+        "distinct_read_paths": 9,
+        "compaction_event_count": 2,
+        "assistant_text_chars": 3263
+      },
+      "delta_since_prior": {
+        "new_read_paths": [
+          "<REPO>/.gitignore"
+        ],
+        "tool_histogram_delta": {
+          "Bash": 5,
+          "Read": 5,
+          "Edit": 3,
+          "ToolSearch": 1
+        }
+      },
+      "tail": [
+        {
+          "turn": 68,
+          "excerpt": "",
+          "tool_names": [
+            "Read"
+          ]
+        },
+        {
+          "turn": 69,
+          "excerpt": "I'll correct the now-inaccurate \"rebuilt when the source is newer\" line (it describes the exact mechanism I changed) and append my own new entry for the Contract T build products.",
+          "tool_names": [
+            "Edit"
+          ]
+        },
+        {
+          "turn": 70,
+          "excerpt": "Now append my own new entry at the end of the file (after 3C-01's or others' latest entries, appending only \u2014 not touching 3C-03's concurrent additions).",
+          "tool_names": [
+            "Read"
+          ]
+        },
+        {
+          "turn": 71,
+          "excerpt": "That's the end of the file (231 lines original + my 3 added lines = 234). I'll append my new entry there.",
+          "tool_names": [
+            "Edit"
+          ]
+        },
+        {
+          "turn": 72,
+          "excerpt": "Now let's check on the full pytest run.",
+          "tool_names": [
+            "Bash"
+          ]
+        },
+        {
+          "turn": 73,
+          "excerpt": "",
+          "tool_names": [
+            "Bash"
+          ]
+        },
+        {
+          "turn": 74,
+          "excerpt": "I'll wait for this notification. Meanwhile, let's prepare the commit message and double-check nothing else needs attention while it's still running \u2014 no further action possible until it completes, so I'll pause here.",
+          "tool_names": [
+            "Bash"
+          ]
+        },
+        {
+          "turn": 75,
+          "excerpt": "The full pytest suite is running in the background under a bounded wait (`timeout 3300`, polling every 10s for `ALLDONE`/`ABORT`/`FAIL`/`Traceback`). I'll continue once that notification arrives.",
+          "tool_names": []
+        }
+      ],
+      "tool_evidence": {
+        "edit_count": 7,
+        "write_count": 5,
+        "bash_count": 46,
+        "last_tools": [
+          "Read",
+          "Edit",
+          "Read",
+          "Edit",
+          "Bash",
+          "Bash",
+          "Bash"
+        ],
+        "tool_evidence_block": "edit_count=7; write_count=5; bash_count=46; last_tools=[Read, Edit, Read, Edit, Bash, Bash, Bash]"
+      }
+    }
+  },
+  "questions": {
+    "choice": {
+      "type": "choice",
+      "instructions": "Is this worker already in validation (reactive read/fix/test loop) vs forward build? Answer building ONLY if Edit or Write appears in the shown window tool evidence; otherwise prefer in_validation or inconclusive.",
+      "labels": [
+        "in_validation",
+        "building",
+        "inconclusive"
+      ],
+      "criteria": {
+        "in_validation": "Reactive read/fix/test loop is supported; do not call building without Edit or Write evidence.",
+        "building": "Forward build is supported AND Edit or Write appears in the shown tool evidence.",
+        "inconclusive": "The shown evidence does not distinguish validation from forward build."
+      }
+    },
+    "pattern_note": {
+      "type": "choice",
+      "instructions": "Choose exactly one pattern note from the shown tool evidence: test_fix_loop, forward_edit, or mixed_or_unclear.",
+      "labels": [
+        "test_fix_loop",
+        "forward_edit",
+        "mixed_or_unclear"
+      ],
+      "criteria": {
+        "test_fix_loop": "Reactive read/fix/test loop dominates.",
+        "forward_edit": "Forward editing/building dominates.",
+        "mixed_or_unclear": "Evidence is mixed or unclear."
+      }
+    },
+    "freeform_note": {
+      "type": "noul",
+      "instructions": "One concise free-form note about the tool evidence; do not introduce a new label."
+    }
+  }
+}

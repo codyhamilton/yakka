@@ -1,0 +1,168 @@
+{
+  "model": "jev-1.13.0",
+  "state": {
+    "evidence_class": "hybrid_v0",
+    "framing": "PR-VALIDATION-TOOLGROUNDED",
+    "seat": "seat-2",
+    "worker_id": "0677f597286e",
+    "stratum": "productive_edit",
+    "checkpoint_turn": 60,
+    "tool_evidence": {
+      "edit_count": 4,
+      "write_count": 5,
+      "bash_count": 41,
+      "last_tools": [
+        "Bash",
+        "Edit",
+        "Bash",
+        "Bash",
+        "Bash",
+        "Bash",
+        "Bash",
+        "Bash"
+      ],
+      "tool_evidence_block": "edit_count=4; write_count=5; bash_count=41; last_tools=[Bash, Edit, Bash, Bash, Bash, Bash, Bash, Bash]"
+    },
+    "snapshot": {
+      "worker_id": "0677f597286e",
+      "stratum": "productive_edit",
+      "checkpoint_turn": 60,
+      "snapshot_mode": "hybrid_v0",
+      "cumulative": {
+        "api_turns": 60,
+        "peak_ctx_tokens": 126023,
+        "prefix_bytes": 1173096,
+        "tool_histogram": {
+          "Bash": 41,
+          "Read": 15,
+          "Write": 5,
+          "Edit": 4
+        },
+        "reread_paths": [
+          {
+            "path": "<REPO>/parser/kiwiw/_cenc.c",
+            "count": 4
+          }
+        ],
+        "distinct_read_paths": 8,
+        "compaction_event_count": 2,
+        "assistant_text_chars": 1992
+      },
+      "delta_since_prior": {
+        "new_read_paths": [],
+        "tool_histogram_delta": {
+          "Bash": 9,
+          "Edit": 1
+        }
+      },
+      "tail": [
+        {
+          "turn": 53,
+          "excerpt": "",
+          "tool_names": [
+            "Bash"
+          ]
+        },
+        {
+          "turn": 54,
+          "excerpt": "Found a real bug: `build_test_bin`'s staleness hash only covers `ctest/*.c` files, not the extension sources they `#include` transitively \u2014 so editing `_cenc.c` alone does NOT trigger a test-binary rebuild. Fixing this now (within the owned `cbuild.py` file).",
+          "tool_names": [
+            "Edit"
+          ]
+        },
+        {
+          "turn": 55,
+          "excerpt": "Now re-verify the fix triggers a rebuild, and that a subsequent run with no changes does not rebuild.",
+          "tool_names": [
+            "Bash"
+          ]
+        },
+        {
+          "turn": 56,
+          "excerpt": "Rebuilt (mtime changed 1790312458 \u2192 1790312503), and tests still pass. Now revert the demo comment in `_cenc.c` (not my owned content, must stay untouched) and confirm no-rebuild on rerun.",
+          "tool_names": [
+            "Bash"
+          ]
+        },
+        {
+          "turn": 57,
+          "excerpt": "",
+          "tool_names": [
+            "Bash"
+          ]
+        },
+        {
+          "turn": 58,
+          "excerpt": "`_cenc.c` reverted cleanly, and the second unchanged rerun shows no rebuild (mtime stable at 1790312511). Now the full test suite run, via a Contract W background script.",
+          "tool_names": [
+            "Bash"
+          ]
+        },
+        {
+          "turn": 59,
+          "excerpt": "Clean. Now run the full test suite in background per Contract W.",
+          "tool_names": [
+            "Bash"
+          ]
+        },
+        {
+          "turn": 60,
+          "excerpt": "",
+          "tool_names": [
+            "Bash"
+          ]
+        }
+      ],
+      "tool_evidence": {
+        "edit_count": 4,
+        "write_count": 5,
+        "bash_count": 41,
+        "last_tools": [
+          "Bash",
+          "Edit",
+          "Bash",
+          "Bash",
+          "Bash",
+          "Bash",
+          "Bash",
+          "Bash"
+        ],
+        "tool_evidence_block": "edit_count=4; write_count=5; bash_count=41; last_tools=[Bash, Edit, Bash, Bash, Bash, Bash, Bash, Bash]"
+      }
+    }
+  },
+  "questions": {
+    "choice": {
+      "type": "choice",
+      "instructions": "Is this worker already in validation (reactive read/fix/test loop) vs forward build? Answer building ONLY if Edit or Write appears in the shown window tool evidence; otherwise prefer in_validation or inconclusive.",
+      "labels": [
+        "in_validation",
+        "building",
+        "inconclusive"
+      ],
+      "criteria": {
+        "in_validation": "Reactive read/fix/test loop is supported; do not call building without Edit or Write evidence.",
+        "building": "Forward build is supported AND Edit or Write appears in the shown tool evidence.",
+        "inconclusive": "The shown evidence does not distinguish validation from forward build."
+      }
+    },
+    "pattern_note": {
+      "type": "choice",
+      "instructions": "Choose exactly one pattern note from the shown tool evidence: test_fix_loop, forward_edit, or mixed_or_unclear.",
+      "labels": [
+        "test_fix_loop",
+        "forward_edit",
+        "mixed_or_unclear"
+      ],
+      "criteria": {
+        "test_fix_loop": "Reactive read/fix/test loop dominates.",
+        "forward_edit": "Forward editing/building dominates.",
+        "mixed_or_unclear": "Evidence is mixed or unclear."
+      }
+    },
+    "freeform_note": {
+      "type": "noul",
+      "instructions": "One concise free-form note about the tool evidence; do not introduce a new label."
+    }
+  }
+}

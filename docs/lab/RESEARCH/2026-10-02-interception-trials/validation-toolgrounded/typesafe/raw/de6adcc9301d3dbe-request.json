@@ -1,0 +1,162 @@
+{
+  "model": "jev-1.13.0",
+  "state": {
+    "evidence_class": "hybrid_v0",
+    "framing": "PR-VALIDATION-TOOLGROUNDED",
+    "seat": "seat-2",
+    "worker_id": "87a380bc64ff",
+    "stratum": "poll",
+    "checkpoint_turn": 50,
+    "tool_evidence": {
+      "edit_count": 0,
+      "write_count": 0,
+      "bash_count": 36,
+      "last_tools": [
+        "Bash",
+        "Bash",
+        "Bash",
+        "Bash",
+        "Bash",
+        "Bash",
+        "Bash"
+      ],
+      "tool_evidence_block": "edit_count=0; write_count=0; bash_count=36; last_tools=[Bash, Bash, Bash, Bash, Bash, Bash, Bash]"
+    },
+    "snapshot": {
+      "worker_id": "87a380bc64ff",
+      "stratum": "poll",
+      "checkpoint_turn": 50,
+      "snapshot_mode": "hybrid_v0",
+      "cumulative": {
+        "api_turns": 50,
+        "peak_ctx_tokens": 92950,
+        "prefix_bytes": 649191,
+        "tool_histogram": {
+          "Bash": 36,
+          "Read": 9,
+          "Monitor": 3,
+          "ToolSearch": 1
+        },
+        "reread_paths": [
+          {
+            "path": "<REPO>/parser/build_alldata.py",
+            "count": 4
+          },
+          {
+            "path": "<REPO>/parser/kiwiw/overlap.py",
+            "count": 3
+          }
+        ],
+        "distinct_read_paths": 4,
+        "compaction_event_count": 0,
+        "assistant_text_chars": 1444
+      },
+      "delta_since_prior": {},
+      "tail": [
+        {
+          "turn": 43,
+          "excerpt": "",
+          "tool_names": [
+            "Bash"
+          ]
+        },
+        {
+          "turn": 44,
+          "excerpt": "",
+          "tool_names": [
+            "Bash"
+          ]
+        },
+        {
+          "turn": 45,
+          "excerpt": "Waiting for the background full-Australia build and Perth fixture builds to complete before continuing with compare_disc, roundtrip, and mirror-probe checks.",
+          "tool_names": [
+            "Bash"
+          ]
+        },
+        {
+          "turn": 46,
+          "excerpt": "",
+          "tool_names": [
+            "Bash"
+          ]
+        },
+        {
+          "turn": 47,
+          "excerpt": "Good, both still running/in-progress. I'll wait for the monitor notifications.",
+          "tool_names": [
+            "Bash"
+          ]
+        },
+        {
+          "turn": 48,
+          "excerpt": "Still waiting on the background builds (full-Australia -j12 and Perth j1/j4); will report once the monitor notifications land.",
+          "tool_names": [
+            "Bash"
+          ]
+        },
+        {
+          "turn": 49,
+          "excerpt": "Waiting for the background build tasks to complete.",
+          "tool_names": [
+            "Bash"
+          ]
+        },
+        {
+          "turn": 50,
+          "excerpt": "I'll wait here for the Monitor notifications for both background builds (full-Australia -j12 and Perth j1/j4) rather than polling further.",
+          "tool_names": []
+        }
+      ],
+      "tool_evidence": {
+        "edit_count": 0,
+        "write_count": 0,
+        "bash_count": 36,
+        "last_tools": [
+          "Bash",
+          "Bash",
+          "Bash",
+          "Bash",
+          "Bash",
+          "Bash",
+          "Bash"
+        ],
+        "tool_evidence_block": "edit_count=0; write_count=0; bash_count=36; last_tools=[Bash, Bash, Bash, Bash, Bash, Bash, Bash]"
+      }
+    }
+  },
+  "questions": {
+    "choice": {
+      "type": "choice",
+      "instructions": "Is this worker already in validation (reactive read/fix/test loop) vs forward build? Answer building ONLY if Edit or Write appears in the shown window tool evidence; otherwise prefer in_validation or inconclusive.",
+      "labels": [
+        "in_validation",
+        "building",
+        "inconclusive"
+      ],
+      "criteria": {
+        "in_validation": "Reactive read/fix/test loop is supported; do not call building without Edit or Write evidence.",
+        "building": "Forward build is supported AND Edit or Write appears in the shown tool evidence.",
+        "inconclusive": "The shown evidence does not distinguish validation from forward build."
+      }
+    },
+    "pattern_note": {
+      "type": "choice",
+      "instructions": "Choose exactly one pattern note from the shown tool evidence: test_fix_loop, forward_edit, or mixed_or_unclear.",
+      "labels": [
+        "test_fix_loop",
+        "forward_edit",
+        "mixed_or_unclear"
+      ],
+      "criteria": {
+        "test_fix_loop": "Reactive read/fix/test loop dominates.",
+        "forward_edit": "Forward editing/building dominates.",
+        "mixed_or_unclear": "Evidence is mixed or unclear."
+      }
+    },
+    "freeform_note": {
+      "type": "noul",
+      "instructions": "One concise free-form note about the tool evidence; do not introduce a new label."
+    }
+  }
+}

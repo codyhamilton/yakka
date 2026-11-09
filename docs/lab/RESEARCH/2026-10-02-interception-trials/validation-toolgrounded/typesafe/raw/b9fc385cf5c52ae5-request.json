@@ -1,0 +1,158 @@
+{
+  "model": "jev-1.13.0",
+  "state": {
+    "evidence_class": "hybrid_v0",
+    "framing": "PR-VALIDATION-TOOLGROUNDED",
+    "seat": "seat-1",
+    "worker_id": "074c8cf22927",
+    "stratum": "productive_edit",
+    "checkpoint_turn": 50,
+    "tool_evidence": {
+      "edit_count": 4,
+      "write_count": 2,
+      "bash_count": 36,
+      "last_tools": [
+        "Edit",
+        "Edit",
+        "Edit",
+        "Bash",
+        "Bash",
+        "Read",
+        "Bash",
+        "Bash"
+      ],
+      "tool_evidence_block": "edit_count=4; write_count=2; bash_count=36; last_tools=[Edit, Edit, Edit, Bash, Bash, Read, Bash, Bash]"
+    },
+    "snapshot": {
+      "worker_id": "074c8cf22927",
+      "stratum": "productive_edit",
+      "checkpoint_turn": 50,
+      "snapshot_mode": "hybrid_v0",
+      "cumulative": {
+        "api_turns": 50,
+        "peak_ctx_tokens": 122645,
+        "prefix_bytes": 849009,
+        "tool_histogram": {
+          "Bash": 36,
+          "Read": 9,
+          "Edit": 4,
+          "Write": 2,
+          "ToolSearch": 1
+        },
+        "reread_paths": [],
+        "distinct_read_paths": 8,
+        "compaction_event_count": 0,
+        "assistant_text_chars": 1501
+      },
+      "delta_since_prior": {},
+      "tail": [
+        {
+          "turn": 43,
+          "excerpt": "",
+          "tool_names": [
+            "Edit"
+          ]
+        },
+        {
+          "turn": 44,
+          "excerpt": "Now let's add a regression test in test_selection.py that cross-checks selection.json's background predicates against bg_type.json's mappability, guarding against this exact class of bug reappearing.",
+          "tool_names": [
+            "Edit"
+          ]
+        },
+        {
+          "turn": 45,
+          "excerpt": "",
+          "tool_names": [
+            "Edit"
+          ]
+        },
+        {
+          "turn": 46,
+          "excerpt": "Now run the full test suite.",
+          "tool_names": [
+            "Bash"
+          ]
+        },
+        {
+          "turn": 47,
+          "excerpt": "",
+          "tool_names": [
+            "Bash"
+          ]
+        },
+        {
+          "turn": 48,
+          "excerpt": "",
+          "tool_names": [
+            "Read"
+          ]
+        },
+        {
+          "turn": 49,
+          "excerpt": "All 229 tests pass. Now let's run the dry-run calibration counting mode as a done-evidence artifact.",
+          "tool_names": [
+            "Bash"
+          ]
+        },
+        {
+          "turn": 50,
+          "excerpt": "",
+          "tool_names": [
+            "Bash"
+          ]
+        }
+      ],
+      "tool_evidence": {
+        "edit_count": 4,
+        "write_count": 2,
+        "bash_count": 36,
+        "last_tools": [
+          "Edit",
+          "Edit",
+          "Edit",
+          "Bash",
+          "Bash",
+          "Read",
+          "Bash",
+          "Bash"
+        ],
+        "tool_evidence_block": "edit_count=4; write_count=2; bash_count=36; last_tools=[Edit, Edit, Edit, Bash, Bash, Read, Bash, Bash]"
+      }
+    }
+  },
+  "questions": {
+    "choice": {
+      "type": "choice",
+      "instructions": "Is this worker already in validation (reactive read/fix/test loop) vs forward build? Answer building ONLY if Edit or Write appears in the shown window tool evidence; otherwise prefer in_validation or inconclusive.",
+      "labels": [
+        "in_validation",
+        "building",
+        "inconclusive"
+      ],
+      "criteria": {
+        "in_validation": "Reactive read/fix/test loop is supported; do not call building without Edit or Write evidence.",
+        "building": "Forward build is supported AND Edit or Write appears in the shown tool evidence.",
+        "inconclusive": "The shown evidence does not distinguish validation from forward build."
+      }
+    },
+    "pattern_note": {
+      "type": "choice",
+      "instructions": "Choose exactly one pattern note from the shown tool evidence: test_fix_loop, forward_edit, or mixed_or_unclear.",
+      "labels": [
+        "test_fix_loop",
+        "forward_edit",
+        "mixed_or_unclear"
+      ],
+      "criteria": {
+        "test_fix_loop": "Reactive read/fix/test loop dominates.",
+        "forward_edit": "Forward editing/building dominates.",
+        "mixed_or_unclear": "Evidence is mixed or unclear."
+      }
+    },
+    "freeform_note": {
+      "type": "noul",
+      "instructions": "One concise free-form note about the tool evidence; do not introduce a new label."
+    }
+  }
+}
