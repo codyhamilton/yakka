@@ -822,10 +822,10 @@ func (s *Server) reviewsGetRoute(w http.ResponseWriter, r *http.Request) {
 		}
 		since = v
 	}
-	limit := 0
+	limit := defaultReviewPage
 	if raw := q.Get("limit"); raw != "" {
 		n, err := strconv.Atoi(raw)
-		if err != nil || n < 1 || n > 500 {
+		if err != nil || n < 1 || n > maxReviewPageSize {
 			writeJSON(w, 400, map[string]string{"error": "limit must be between 1 and 500"})
 			return
 		}
@@ -836,12 +836,39 @@ func (s *Server) reviewsGetRoute(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 400, map[string]string{"error": "detail must be full"})
 		return
 	}
+	tags, err := reviewFilterTags(q["tag"])
+	if err != nil {
+		writeJSON(w, 400, map[string]string{"error": err.Error()})
+		return
+	}
+	filters := reviewCursorFilter{RepoID: q.Get("repo_id"), Plan: q.Get("plan"), Phase: phase, Kind: q.Get("kind"), Status: q.Get("status"), Effort: q.Get("effort"), Profile: q.Get("profile"), ManifestHash: q.Get("manifest_hash"), Since: since, Tags: tags, Detail: detail}
 	ts, err := s.tenant(res.tenant)
 	if err != nil {
 		writeJSON(w, 503, map[string]string{"error": "tenant unavailable"})
 		return
 	}
-	rows, err := ts.t.ReviewRecords(r.Context(), store.ReviewRecordFilter{RepoID: q.Get("repo_id"), Plan: q.Get("plan"), Phase: phase, Kind: q.Get("kind"), Status: q.Get("status"), Effort: q.Get("effort"), Profile: q.Get("profile"), ManifestHash: q.Get("manifest_hash"), Since: since, Limit: limit})
+	highWater := int64(0)
+	var after *store.ReviewPageKey
+	if raw := q.Get("cursor"); raw != "" {
+		payload, err := decodeReviewCursor(raw)
+		if err != nil {
+			writeJSON(w, 400, map[string]string{"error": err.Error()})
+			return
+		}
+		if err := payload.validate(res.tenant, filters); err != nil {
+			writeJSON(w, 400, map[string]string{"error": err.Error()})
+			return
+		}
+		highWater = payload.HighWater
+		after = &store.ReviewPageKey{TS: payload.LastTS, InsertionID: payload.LastID}
+	} else {
+		highWater, err = ts.t.BeginReviewWalk(r.Context())
+		if err != nil {
+			writeJSON(w, 500, map[string]string{"error": "review read failed"})
+			return
+		}
+	}
+	rows, hasMore, err := ts.t.ReviewPage(r.Context(), store.ReviewRecordFilter{RepoID: filters.RepoID, Plan: filters.Plan, Phase: filters.Phase, Kind: filters.Kind, Status: filters.Status, Effort: filters.Effort, Profile: filters.Profile, ManifestHash: filters.ManifestHash, Since: filters.Since, Tags: filters.Tags}, highWater, after, limit)
 	if err != nil {
 		writeJSON(w, 500, map[string]string{"error": "review read failed"})
 		return
@@ -850,14 +877,25 @@ func (s *Server) reviewsGetRoute(w http.ResponseWriter, r *http.Request) {
 	for _, row := range rows {
 		var item map[string]any
 		if json.Unmarshal(row.Raw, &item) != nil {
-			continue
+			writeJSON(w, 500, map[string]string{"error": "review read failed"})
+			return
 		}
 		if detail != "full" {
 			delete(item, "payload")
 		}
 		items = append(items, item)
 	}
-	writeJSON(w, 200, map[string]any{"reviews": items})
+	var nextCursor any
+	if hasMore {
+		last := rows[len(rows)-1]
+		encoded, err := encodeReviewCursor(reviewCursorPayload{Version: reviewCursorVersion, Tenant: res.tenant, Route: reviewCursorRoute, Filters: filters, HighWater: highWater, LastTS: last.TS, LastID: last.InsertionID})
+		if err != nil {
+			writeJSON(w, 500, map[string]string{"error": "review read failed"})
+			return
+		}
+		nextCursor = encoded
+	}
+	writeJSON(w, 200, map[string]any{"reviews": items, "next_cursor": nextCursor, "complete": !hasMore})
 }
 
 // whoami answers which tenant and scope a bearer token is bound to, so `yakka sync` can confirm its
