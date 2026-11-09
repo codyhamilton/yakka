@@ -237,6 +237,24 @@ func TestReviewRESTCursorRejectsMismatch(t *testing.T) {
 		t.Fatal(err)
 	}
 	want400("/v1/reviews?limit=1&cursor="+url.QueryEscape(unsupported), "ka")
+
+	wrongRoute, err := encodeReviewCursor(reviewCursorPayload{
+		Version: reviewCursorVersion, Tenant: "a", Route: "GET /v1/other",
+		Filters: reviewCursorFilter{}, HighWater: 3, LastTS: 10, LastID: 3,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want400("/v1/reviews?limit=1&cursor="+url.QueryEscape(wrongRoute), "ka")
+
+	wrongGeneration, err := encodeReviewCursor(reviewCursorPayload{
+		Version: reviewCursorVersion, Tenant: "a", Route: reviewCursorRoute,
+		Filters: reviewCursorFilter{}, Generation: "stale-generation", HighWater: 3, LastTS: 10, LastID: 3,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want400("/v1/reviews?limit=1&cursor="+url.QueryEscape(wrongGeneration), "ka")
 }
 
 func TestReviewRESTCompletionMetadata(t *testing.T) {
@@ -262,6 +280,88 @@ func TestReviewRESTCompletionMetadata(t *testing.T) {
 	empty := reviewPage(t, s, "/v1/reviews", "kb")
 	if !empty.Complete || empty.NextCursor != nil || len(empty.Reviews) != 0 {
 		t.Fatalf("empty population complete=%v cursor=%v rows=%d", empty.Complete, empty.NextCursor, len(empty.Reviews))
+	}
+}
+
+func TestReviewRESTCursorInvalidAfterReset(t *testing.T) {
+	gh := mockGitHub(t, 401, "cursor-reset-owner", []mockEmail{{Email: "cursor-reset@example.com", Verified: true}})
+	t.Cleanup(gh.Close)
+	s := remoteTestConfig(t, t.TempDir(), gh.URL)
+	h := s.Handler()
+	origin := "https://collector.example"
+	sess := loginRemote(t, h, origin)
+	tenant := remoteCreateTenant(t, h, origin, sess, "walk")
+	_, key := remoteIssueToken(t, h, origin, sess, tenant, TokenScopeRead, "1d")
+	seedReviewRows(t, s, tenant, []store.FactRow{
+		reviewTestRow("r1", "conv-1", 100, nil),
+		reviewTestRow("r2", "conv-2", 100, nil),
+	})
+
+	first := reviewPage(t, s, "/v1/reviews?limit=1", key)
+	if first.Complete || first.NextCursor == nil || len(first.Reviews) != 1 {
+		t.Fatalf("first page complete=%v cursor=%v rows=%d", first.Complete, first.NextCursor, len(first.Reviews))
+	}
+	stale := url.QueryEscape(*first.NextCursor)
+
+	if err := s.ResetTenant(context.Background(), 401, tenant); err != nil {
+		t.Fatalf("reset: %v", err)
+	}
+	_, freshKey := remoteIssueToken(t, h, origin, sess, tenant, TokenScopeRead, "1d")
+
+	code, body := do(t, h, "GET", "/v1/reviews?limit=1&cursor="+stale, freshKey, "")
+	if code != 400 {
+		t.Fatalf("stale cursor after reset = %d %s, want 400", code, body)
+	}
+	for _, leak := range []string{"conv-1", "conv-2"} {
+		if strings.Contains(body, leak) {
+			t.Fatalf("rejected stale cursor leaked rows: %s", body)
+		}
+	}
+
+	fresh := reviewPage(t, s, "/v1/reviews?limit=1", freshKey)
+	if !fresh.Complete || fresh.NextCursor != nil || len(fresh.Reviews) != 0 {
+		t.Fatalf("fresh walk after reset complete=%v cursor=%v rows=%v", fresh.Complete, fresh.NextCursor, reviewConvs(fresh))
+	}
+}
+
+func TestReviewRESTCursorGenerationBinding(t *testing.T) {
+	// A keyed tenant has no lifecycle record, so its empty generation keeps walks working.
+	legacy, _ := newServer(t, true)
+	seedReviewRows(t, legacy, "a", []store.FactRow{
+		reviewTestRow("l1", "legacy-1", 100, nil),
+		reviewTestRow("l2", "legacy-2", 100, nil),
+	})
+	first := reviewPage(t, legacy, "/v1/reviews?limit=1", "ka")
+	second := reviewPage(t, legacy, "/v1/reviews?limit=1&cursor="+url.QueryEscape(*first.NextCursor), "ka")
+	if !second.Complete || len(second.Reviews) != 1 {
+		t.Fatalf("legacy unsupported walk did not complete: %#v", second)
+	}
+
+	// Another tenant's reset must not invalidate this tenant's cursor, and page size may change.
+	gh := mockGitHub(t, 403, "cursor-other-owner", []mockEmail{{Email: "cursor-other@example.com", Verified: true}})
+	t.Cleanup(gh.Close)
+	s := remoteTestConfig(t, t.TempDir(), gh.URL)
+	h := s.Handler()
+	origin := "https://collector.example"
+	sess := loginRemote(t, h, origin)
+	a := remoteCreateTenant(t, h, origin, sess, "a")
+	b := remoteCreateTenant(t, h, origin, sess, "b")
+	_, bKey := remoteIssueToken(t, h, origin, sess, b, TokenScopeRead, "1d")
+	seedReviewRows(t, s, a, []store.FactRow{reviewTestRow("a1", "a-conv-1", 100, nil)})
+	seedReviewRows(t, s, b, []store.FactRow{
+		reviewTestRow("b1", "b-conv-1", 100, nil),
+		reviewTestRow("b2", "b-conv-2", 100, nil),
+	})
+	bFirst := reviewPage(t, s, "/v1/reviews?limit=1", bKey)
+	if bFirst.NextCursor == nil {
+		t.Fatal("tenant b first page had no cursor")
+	}
+	if err := s.ResetTenant(context.Background(), 403, a); err != nil {
+		t.Fatalf("reset tenant a: %v", err)
+	}
+	bSecond := reviewPage(t, s, "/v1/reviews?limit=5&cursor="+url.QueryEscape(*bFirst.NextCursor), bKey)
+	if !bSecond.Complete || len(bSecond.Reviews) != 1 || reviewConvs(bSecond)[0] != "b-conv-1" {
+		t.Fatalf("tenant b cursor after unrelated reset: %#v", bSecond)
 	}
 }
 

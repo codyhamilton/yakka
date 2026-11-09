@@ -247,10 +247,11 @@ func (s *Server) mcpListReviews(ctx context.Context, tenant string, ts *tenantSt
 	if msg != "" {
 		return nil, errors.New(msg)
 	}
+	generation := s.tenantReviewGeneration(tenant)
 	highWater := int64(0)
 	var after *store.ReviewPageKey
 	if q.hasCursor {
-		if err := q.cursor.validate(tenant, q.filters); err != nil {
+		if err := q.cursor.validate(tenant, q.filters, generation); err != nil {
 			return nil, err
 		}
 		highWater = q.cursor.HighWater
@@ -287,7 +288,7 @@ func (s *Server) mcpListReviews(ctx context.Context, tenant string, ts *tenantSt
 		last := rows[len(rows)-1]
 		encoded, err := encodeReviewCursor(reviewCursorPayload{
 			Version: reviewCursorVersion, Tenant: tenant, Route: reviewCursorRoute,
-			Filters: q.filters, HighWater: highWater, LastTS: last.TS, LastID: last.InsertionID,
+			Filters: q.filters, Generation: generation, HighWater: highWater, LastTS: last.TS, LastID: last.InsertionID,
 		})
 		if err != nil {
 			return nil, errors.New("review read failed")

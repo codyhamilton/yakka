@@ -894,6 +894,7 @@ func (s *Server) reviewsGetRoute(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 503, map[string]string{"error": "tenant unavailable"})
 		return
 	}
+	generation := s.tenantReviewGeneration(res.tenant)
 	highWater := int64(0)
 	var after *store.ReviewPageKey
 	if raw := q.Get("cursor"); raw != "" {
@@ -902,7 +903,7 @@ func (s *Server) reviewsGetRoute(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, 400, map[string]string{"error": err.Error()})
 			return
 		}
-		if err := payload.validate(res.tenant, filters); err != nil {
+		if err := payload.validate(res.tenant, filters, generation); err != nil {
 			writeJSON(w, 400, map[string]string{"error": err.Error()})
 			return
 		}
@@ -935,7 +936,7 @@ func (s *Server) reviewsGetRoute(w http.ResponseWriter, r *http.Request) {
 	var nextCursor any
 	if hasMore {
 		last := rows[len(rows)-1]
-		encoded, err := encodeReviewCursor(reviewCursorPayload{Version: reviewCursorVersion, Tenant: res.tenant, Route: reviewCursorRoute, Filters: filters, HighWater: highWater, LastTS: last.TS, LastID: last.InsertionID})
+		encoded, err := encodeReviewCursor(reviewCursorPayload{Version: reviewCursorVersion, Tenant: res.tenant, Route: reviewCursorRoute, Filters: filters, Generation: generation, HighWater: highWater, LastTS: last.TS, LastID: last.InsertionID})
 		if err != nil {
 			writeJSON(w, 500, map[string]string{"error": "review read failed"})
 			return

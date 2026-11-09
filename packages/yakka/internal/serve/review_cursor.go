@@ -75,16 +75,32 @@ func (f reviewCursorFilter) equal(g reviewCursorFilter) bool {
 }
 
 // reviewCursorPayload is the opaque state of one walk page. It binds the cursor version, the
-// authenticated tenant, the route, the canonical filters and detail, the fixed high-water mark and
+// authenticated tenant, the route, the canonical filters and detail, the tenant lifecycle
+// generation observed when the first page fixed its high-water mark, the fixed high-water mark and
 // the strict last key. Page size is deliberately not bound.
 type reviewCursorPayload struct {
-	Version   int                `json:"v"`
-	Tenant    string             `json:"tenant"`
-	Route     string             `json:"route"`
-	Filters   reviewCursorFilter `json:"filters"`
-	HighWater int64              `json:"high_water"`
-	LastTS    float64            `json:"last_ts"`
-	LastID    int64              `json:"last_id"`
+	Version    int                `json:"v"`
+	Tenant     string             `json:"tenant"`
+	Route      string             `json:"route"`
+	Filters    reviewCursorFilter `json:"filters"`
+	Generation string             `json:"generation,omitempty"`
+	HighWater  int64              `json:"high_water"`
+	LastTS     float64            `json:"last_ts"`
+	LastID     int64              `json:"last_id"`
+}
+
+// tenantReviewGeneration reads the tenant's current lifecycle generation from registry metadata only;
+// it never opens tenant storage. Keyed/local tenants and unsupported legacy tenants have no
+// trustworthy record, so their generation is empty and a reset cannot apply to them.
+func (s *Server) tenantReviewGeneration(tenant string) string {
+	if s.registry == nil {
+		return ""
+	}
+	generation, ok := s.registry.TenantGeneration(tenant)
+	if !ok {
+		return ""
+	}
+	return generation
 }
 
 type reviewCursorEnvelope struct {
@@ -129,7 +145,7 @@ func decodeReviewCursor(raw string) (reviewCursorPayload, error) {
 
 // validate checks every field bound to the current request. A mismatch is an explicit argument
 // error, never a silent reselection.
-func (p reviewCursorPayload) validate(tenant string, filters reviewCursorFilter) error {
+func (p reviewCursorPayload) validate(tenant string, filters reviewCursorFilter, generation string) error {
 	if p.Version != reviewCursorVersion {
 		return errors.New("unsupported cursor version")
 	}
@@ -141,6 +157,11 @@ func (p reviewCursorPayload) validate(tenant string, filters reviewCursorFilter)
 	}
 	if !p.Filters.equal(filters) {
 		return errors.New("cursor filter mismatch")
+	}
+	// A reset advances the generation, invalidating walks fixed against the old store incarnation.
+	// A pre-generation cursor carries an empty generation and so also fails an owned tenant.
+	if p.Generation != generation {
+		return errors.New("cursor generation mismatch")
 	}
 	return nil
 }

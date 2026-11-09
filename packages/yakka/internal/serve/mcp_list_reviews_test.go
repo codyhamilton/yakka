@@ -1,6 +1,7 @@
 package serve
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http/httptest"
@@ -200,6 +201,49 @@ func TestMCPListReviewsRejectsInvalidAndForeignCursors(t *testing.T) {
 	foreign := mcpCallResult(t, mcpRequest(t, s.Handler(), "kb", mcpCallBody("list_reviews", map[string]any{"limit": 1, "cursor": *page.NextCursor}), nil))
 	if foreign["isError"] != true || len(foreign["content"].([]any)) == 0 {
 		t.Fatalf("cross-tenant cursor was not rejected: %#v", foreign)
+	}
+}
+
+func TestMCPListReviewsCursorInvalidAfterReset(t *testing.T) {
+	gh := mockGitHub(t, 402, "mcp-cursor-reset", []mockEmail{{Email: "mcp-cursor@example.com", Verified: true}})
+	t.Cleanup(gh.Close)
+	s := remoteTestConfig(t, t.TempDir(), gh.URL)
+	if err := s.RegisterListReviewsMCPTool(); err != nil {
+		t.Fatal(err)
+	}
+	h := s.Handler()
+	origin := "https://collector.example"
+	sess := loginRemote(t, h, origin)
+	tenant := remoteCreateTenant(t, h, origin, sess, "walk")
+	_, key := remoteIssueToken(t, h, origin, sess, tenant, TokenScopeRead, "1d")
+	seedReviewRows(t, s, tenant, []store.FactRow{
+		listReviewFixture("r1", "conv-1", 100, nil),
+		listReviewFixture("r2", "conv-2", 100, nil),
+	})
+
+	firstResult := mcpCallResult(t, mcpRequest(t, h, key, mcpCallBody("list_reviews", map[string]any{"limit": 1}), nil))
+	var first reviewPageResponse
+	b, _ := json.Marshal(firstResult)
+	if err := json.Unmarshal(b, &first); err != nil || first.Complete || first.NextCursor == nil {
+		t.Fatalf("first MCP page=%s err=%v", b, err)
+	}
+	stale := *first.NextCursor
+
+	if err := s.ResetTenant(context.Background(), 402, tenant); err != nil {
+		t.Fatalf("reset: %v", err)
+	}
+	_, freshKey := remoteIssueToken(t, h, origin, sess, tenant, TokenScopeRead, "1d")
+
+	staleResult := mcpCallResult(t, mcpRequest(t, h, freshKey, mcpCallBody("list_reviews", map[string]any{"limit": 1, "cursor": stale}), nil))
+	if staleResult["isError"] != true || len(staleResult["content"].([]any)) == 0 {
+		t.Fatalf("stale MCP cursor after reset accepted: %#v", staleResult)
+	}
+
+	freshResult := mcpCallResult(t, mcpRequest(t, h, freshKey, mcpCallBody("list_reviews", map[string]any{"limit": 1}), nil))
+	var fresh reviewPageResponse
+	fb, _ := json.Marshal(freshResult)
+	if err := json.Unmarshal(fb, &fresh); err != nil || !fresh.Complete || fresh.NextCursor != nil || len(fresh.Reviews) != 0 {
+		t.Fatalf("fresh MCP walk after reset=%s err=%v", fb, err)
 	}
 }
 
