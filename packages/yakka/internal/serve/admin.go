@@ -201,6 +201,12 @@ func (s *Server) handleAdminRescore(w http.ResponseWriter, r *http.Request, _ *S
 		writeJSON(w, 404, map[string]string{"error": "no such tenant"})
 		return
 	}
+	release, uerr := s.beginTenantUse(body.Tenant)
+	if uerr != nil {
+		writeTenantUseError(w, uerr)
+		return
+	}
+	defer release()
 	if rec, ok := s.registry.TenantLifecycle(body.Tenant); ok && (rec.State == lifecycleStateResetting || rec.State == lifecycleStateDeleting) {
 		writeJSON(w, 409, map[string]string{"error": "tenant_busy"})
 		return

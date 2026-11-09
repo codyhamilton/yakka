@@ -32,28 +32,23 @@
 const HUMAN = "Only the human owner may reset or delete a tenant. Agents must not perform or attempt this on a user's behalf.";
 const RESET_EFFECT = "Erase all tenant data and revoke its keys. Keep this tenant and your ownership; issue a new key to reuse it.";
 const DELETE_EFFECT = "Permanently remove this tenant, all its data and keys, and your ownership link.";
-const SELECTION_KEY = "yakka.selectedTenant", GENERATION_KEY = "yakka.selectedTenantGeneration";
-const INVALIDATION_KEY = "yakka.tenantLifecycleInvalidation";
-const CHANNEL = typeof BroadcastChannel === "function" ? new BroadcastChannel("yakka-tenant-lifecycle") : null;
+const SELECTION_KEY = "yakka-analytics-tenant", GENERATION_KEY = "yakka-analytics-tenant-generation";
+const INVALIDATED_KEY = "yakka-analytics-tenant-invalidated";
+const CHANNEL = typeof BroadcastChannel === "function" ? new BroadcastChannel("yakka-analytics-tenant-selection") : null;
 const state = { me: null, signedOut: false, recoveryFailed: false, busy: false, pending: null };
 const byId = (id) => document.getElementById(id);
 function setStatus(text) { byId("status").textContent = text; }
 function clearRemembered() {
   try {
     localStorage.removeItem(SELECTION_KEY); localStorage.removeItem(GENERATION_KEY);
-    localStorage.removeItem("yakka.tenantReads"); localStorage.removeItem("yakka.reviewCursor");
+    localStorage.setItem(INVALIDATED_KEY, "1");
   } catch (e) { /* storage may be unavailable */ }
 }
 // Same-origin invalidation only: this notice carries no credential or authority.
 function notifySameOrigin(kind, id) {
   clearRemembered();
-  if (CHANNEL) CHANNEL.postMessage({ kind: kind, id: id });
-  try {
-    localStorage.setItem(INVALIDATION_KEY, JSON.stringify({ kind: kind, id: id, at: Date.now() }));
-    localStorage.removeItem(INVALIDATION_KEY);
-  } catch (e) { /* storage may be unavailable */ }
+  if (CHANNEL) CHANNEL.postMessage({ type: "invalidate", kind: kind, id: id });
 }
-window.addEventListener("storage", function (ev) { if (ev.key === INVALIDATION_KEY) loadMe(); });
 if (CHANNEL) CHANNEL.onmessage = function () { loadMe(); };
 async function loadMe() {
   setStatus("");
