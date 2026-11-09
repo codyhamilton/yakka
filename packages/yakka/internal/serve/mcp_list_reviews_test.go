@@ -91,11 +91,18 @@ func TestMCPListReviewsMatchesRESTAcrossCompleteWalk(t *testing.T) {
 	filters.Add("tag", "tag:b")
 	tags := []any{"tag:a", "tag:b"}
 	limits := []int{37, 150, 333, 500}
-	var restCursor, mcpCursor string
-	seen := 0
-	appended := false
-	for i := 0; ; i++ {
-		limit := limits[i%len(limits)]
+	type walkState struct {
+		detail     string
+		restCursor string
+		mcpCursor  string
+		seen       int
+		pages      int
+		complete   bool
+	}
+	walks := []*walkState{{}, {detail: "full"}}
+	fetch := func(walk *walkState) {
+		t.Helper()
+		limit := limits[walk.pages%len(limits)]
 		q := cloneValues(filters)
 		q.Set("limit", fmt.Sprint(limit))
 		args := map[string]any{
@@ -103,13 +110,13 @@ func TestMCPListReviewsMatchesRESTAcrossCompleteWalk(t *testing.T) {
 			"effort": "high", "profile": "shadow", "manifest_hash": "mh", "since": 50,
 			"tags": tags, "limit": limit,
 		}
-		if i%2 == 1 {
+		if walk.detail == "full" {
 			q.Set("detail", "full")
 			args["detail"] = "full"
 		}
-		if restCursor != "" {
-			q.Set("cursor", restCursor)
-			args["cursor"] = mcpCursor
+		if walk.restCursor != "" {
+			q.Set("cursor", walk.restCursor)
+			args["cursor"] = walk.mcpCursor
 		}
 		rest := reviewPage(t, s, "/v1/reviews?"+q.Encode(), "ka")
 		mcpResult := mcpCallResult(t, mcpRequest(t, s.Handler(), "ka", mcpCallBody("list_reviews", args), nil))
@@ -119,29 +126,46 @@ func TestMCPListReviewsMatchesRESTAcrossCompleteWalk(t *testing.T) {
 			t.Fatalf("decode MCP page %s: %v", b, err)
 		}
 		if !reflect.DeepEqual(rest, mcp) {
-			t.Fatalf("page %d REST/MCP differ\nREST: %#v\nMCP:  %#v", i, rest, mcp)
+			t.Fatalf("detail=%q page=%d REST/MCP differ\nREST: %#v\nMCP:  %#v", walk.detail, walk.pages, rest, mcp)
 		}
-		seen += len(mcp.Reviews)
-		if i == 0 && !appended {
-			seedReviewRows(t, s, "a", []store.FactRow{
-				listReviewFixture("late-1", "late-conv-1", 50, []string{"tag:a", "tag:b"}),
-				listReviewFixture("late-2", "late-conv-2", 1, []string{"tag:a", "tag:b"}),
-			})
-			appended = true
+		for _, item := range mcp.Reviews {
+			_, hasPayload := item["payload"]
+			if hasPayload != (walk.detail == "full") {
+				t.Fatalf("detail=%q payload presence=%v", walk.detail, hasPayload)
+			}
 		}
+		walk.seen += len(mcp.Reviews)
+		walk.pages++
+		walk.complete = mcp.Complete
 		if mcp.Complete {
-			break
+			if mcp.NextCursor != nil {
+				t.Fatalf("terminal page returned cursor: %#v", mcp.NextCursor)
+			}
+			return
 		}
 		if rest.NextCursor == nil || mcp.NextCursor == nil {
-			t.Fatalf("page %d nonterminal response omitted cursor", i)
+			t.Fatalf("detail=%q page=%d nonterminal response omitted cursor", walk.detail, walk.pages-1)
 		}
-		restCursor, mcpCursor = *rest.NextCursor, *mcp.NextCursor
-		if i > 30 {
-			t.Fatal("review walk did not terminate")
-		}
+		walk.restCursor, walk.mcpCursor = *rest.NextCursor, *mcp.NextCursor
 	}
-	if seen != 1101 {
-		t.Fatalf("walk returned %d rows, want 1101 original rows", seen)
+	// Start both detail modes before inserting backdated rows so each cursor is
+	// fixed to the same high-water. Neither walk may see the later appends.
+	fetch(walks[0])
+	fetch(walks[1])
+	seedReviewRows(t, s, "a", []store.FactRow{
+		listReviewFixture("late-1", "late-conv-1", 50, []string{"tag:a", "tag:b"}),
+		listReviewFixture("late-2", "late-conv-2", 1, []string{"tag:a", "tag:b"}),
+	})
+	for _, walk := range walks {
+		for !walk.complete {
+			fetch(walk)
+			if walk.pages > 30 {
+				t.Fatal("review walk did not terminate")
+			}
+		}
+		if walk.seen != 1101 {
+			t.Fatalf("detail=%q walk returned %d rows, want 1101 originals", walk.detail, walk.seen)
+		}
 	}
 }
 
