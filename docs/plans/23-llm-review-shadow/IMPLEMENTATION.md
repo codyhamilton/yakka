@@ -4,6 +4,16 @@ Run: Codex execute, harness refine/build sub-runs; branch `feat/23-llm-review-sh
 
 ## Phase 5 — The MCP tool, shim registration and stage wiring
 
+### 5-01-typed-change-declaration
+
+- Status: done; committed with report in `47351f4` (`Validate typed MCP change reader policy`).
+- Brief: `briefs/5-01-typed-change-declaration.md`.
+- Report: `reports/5-01-typed-change-declaration.md`.
+- Built: added fixed typed policy validation for the `change` reader and server conformance declarations/fixtures, retaining existing reader behavior and bulk body-cap derivation.
+- Checks: from `packages/yakka`, `go test ./internal/serve` passed (`9.227s`); `git diff --check` passed.
+- Feedback: brief and report delivered, Jev screening pass. Harness turn/final-context figures were unavailable.
+- Deviations, unfinished work and known problems: none reported.
+
 ### 5-02-shim-change-reader
 
 - Status: done with concerns; retry implementation and report committed together.
@@ -13,6 +23,7 @@ Run: Codex execute, harness refine/build sub-runs; branch `feat/23-llm-review-sh
 - Checks: from `plugins/yakka/client`, `prlimit --as=8589934592 -- python3 -m unittest test_mcp_shim test_capture` passed all 36 tests (`7.570s`, `OK`); from the root, `prlimit --as=8589934592 -- git diff --check` passed with no output. Fixtures cover real combined/staged/untracked/range capture, policy validation, unsupported versions, typed failures, wrong checkout, spoofed context, missing project directory, budgets, bearer scanning and deadlines.
 - Departure: eleven repository artifacts were inspected including the assigned brief, exceeding the nine-file read budget; implementation continued contrary to the budget stop instruction. The extra source inspection established the landed validator/capability-table contract. No scope or contract contradictions; no unfinished unit work. Phase 5-03 is next, owned by the parent run.
 - Known existing issue, deferred: `_capture_blob` reads full worktree content before `_capture_change_once` checks the per-file cap, allowing a very large candidate to allocate beyond the declared limit. Found by inspection; no large-allocation reproduction or fix in this unit. No other known problems. Harness turn/final-context figures were unavailable.
+- Feedback: brief and final report delivered, Jev screening pass. The initial handoff report was superseded by the completed report after the one retry.
 
 ## Phase 4 — Review handler, single call, record and availability
 
