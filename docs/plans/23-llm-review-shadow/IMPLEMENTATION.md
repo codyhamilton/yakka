@@ -16,6 +16,14 @@ Run: Codex execute, harness-dispatched unit 1-01; session: hlaunch build on feat
 - Brief feedback: `not delivered`; no stored version or queued artifact was available. Feedback was called by absolute path; the relative call resolved against the plugin cache and failed.
 - Report feedback: `not delivered`; no stored version or queued artifact was available when called by absolute path.
 
+### Phase 2 verification
+
+The design outcome was checked through the fixture entry point `Build` → received-capture re-filtering → packet/prompt result. Tests establish byte-identical prompts and capture ids, fixed section order, stable criterion ids, lockfile and plan-run exclusion with manifest entries, retained docs, budget-driven whole-file truncation and `coverage: partial`, oversize criteria and delimiter refusals, secret refusal codes without matched bytes in errors, recomputed capture identity and diff-hash mismatch errors, and absence of network/environment imports. The package suite passed under the 8 GiB cap; `git diff --check` is clean. All unit artifacts and implementation are committed.
+
+### Carried
+
+None.
+
 ## Phase 1 — Local change capture
 
 ### 1-01-local-change-capture
