@@ -683,7 +683,7 @@ func localGuard(h http.Handler) http.Handler {
 			writeJSON(w, 403, map[string]string{"error": "local mode accepts only loopback hosts"})
 			return
 		}
-		if r.Method == http.MethodPost {
+		if r.Method == http.MethodPost && !tenantLifecyclePath(r.URL.Path) {
 			mt, _, _ := strings.Cut(r.Header.Get("Content-Type"), ";")
 			if !strings.EqualFold(strings.TrimSpace(mt), "application/json") {
 				writeJSON(w, 415, map[string]string{"error": "content type must be application/json"})
@@ -692,6 +692,13 @@ func localGuard(h http.Handler) http.Handler {
 		}
 		h.ServeHTTP(w, r)
 	})
+}
+
+// tenantLifecyclePath reports the lifecycle route subtree. Those routes enforce
+// their own method, credential and local-mode refusals, so the generic local
+// POST content-type check must not answer first.
+func tenantLifecyclePath(path string) bool {
+	return strings.HasPrefix(path, "/v1/tenants/")
 }
 
 func writeJSON(w http.ResponseWriter, code int, v any) {

@@ -349,12 +349,28 @@ func TestLifecycleConformanceRefusalsNoEffects(t *testing.T) {
 		t.Fatalf("legacy refusal opened storage: %v", err)
 	}
 
-	// Local keyless mode is refused for both operations.
-	ls = New(Config{Data: t.TempDir()}, Options{DisableWorker: true})
+	// Local keyless mode is refused for both operations. A non-JSON POST must
+	// reach the lifecycle route's own local-mode refusal instead of being
+	// answered 415 by localGuard's generic content-type check.
+	localDir := t.TempDir()
+	ls = New(Config{Data: localDir}, Options{DisableWorker: true})
 	t.Cleanup(func() { _ = ls.Close() })
-	local := httptest.NewRecorder()
-	ls.Handler().ServeHTTP(local, httptest.NewRequest(http.MethodDelete, "http://127.0.0.1:8770/v1/tenants/local", nil))
-	assertLifecycleError(t, local, 403, "tenant_lifecycle_ui_only", tenantLifecycleUIMessage)
+	for _, tc := range []struct{ name, method, path string }{
+		{"reset", http.MethodPost, "/v1/tenants/local/reset"},
+		{"delete", http.MethodDelete, "/v1/tenants/local"},
+	} {
+		t.Run("local "+tc.name, func(t *testing.T) {
+			before := lifecycleStateDigest(t, ls, localDir, "local")
+			req := httptest.NewRequest(tc.method, "http://127.0.0.1:8770"+tc.path, strings.NewReader("not json"))
+			req.Header.Set("Content-Type", "text/plain")
+			rec := httptest.NewRecorder()
+			ls.Handler().ServeHTTP(rec, req)
+			assertLifecycleError(t, rec, 403, "tenant_lifecycle_ui_only", tenantLifecycleUIMessage)
+			if got := lifecycleStateDigest(t, ls, localDir, "local"); got != before {
+				t.Fatal("local refusal changed store, tokens, grants, claims or spend")
+			}
+		})
+	}
 }
 
 // TestLifecycleConformanceCrashRestartExactlyOnce stops the reset at every
