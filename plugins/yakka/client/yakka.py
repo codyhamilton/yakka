@@ -797,7 +797,10 @@ def _capture_change_once(project_dir: Optional[str], mode: str = "uncommitted", 
     total = 0
     for path, diff in included:
         if len(selected) >= p["max_files"] or total + len(diff) > p["max_total_bytes"]:
-            manifest.append({"path": path, "reason": "truncated_budget", "added": 0, "removed": 0,
+            omitted_lines = diff.decode("utf-8", "replace").splitlines()
+            added = sum(1 for line in omitted_lines if line.startswith("+") and not line.startswith("+++"))
+            removed = sum(1 for line in omitted_lines if line.startswith("-") and not line.startswith("---"))
+            manifest.append({"path": path, "reason": "truncated_budget", "added": added, "removed": removed,
                              "blob_sha256": hashlib.sha256(_capture_blob(root, path, mode, view, resolved_base, resolved_head)).hexdigest()})
         else:
             selected.append((path, diff)); total += len(diff)
