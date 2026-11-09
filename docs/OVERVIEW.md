@@ -42,6 +42,28 @@ Teams and individual developers who want:
 
 **OpenCode (partial)** — skills only: `./install.sh --opencode-skills` or `YAKKA_INSTALL_MODE=opencode` symlinks `skills/*` into `~/.config/opencode/skills/`. Phase running maps to the `execute` skill; harness persona name `orchestrate` is separate from skill names. Built-in OpenCode `plan` is not workflow `design`. **DeepSeek Flash** is encouraged for brief/unit work when rationing capacity; sign-off only is gated in [`docs/lab/GUIDANCE-flash-review-gate.md`](lab/GUIDANCE-flash-review-gate.md) (Sonnet 5.5 review of Flash work, then Claude Code or Grok phase sign-off — no Flash auto close-out).
 
+## Advisory change review
+
+The server-owned `review_change` MCP tool supplies a single-call shadow review beside existing
+reviews. `execute` calls once after each phase closes; `comprehensive-review` and `post-build` each
+call once at their reviewed/candidate PR head. Each call uses an explicit Git range, available
+stored brief or plan criteria, and contributor `build_models` from the run record or `unknown`.
+Stages send no `trial` argument. This is non-gating advisory evidence: receipt summaries and findings
+stay in session output and never enter gates, verdicts, commits, trailers, exit codes or plan-folder
+files, or trigger fixes. Absent, unavailable and failed calls leave existing decisions unchanged;
+`skipped_duplicate` refers to earlier evidence rather than a new independent review.
+
+The Go server owns the definition, prompt/policy, criteria resolution, provider call, validation,
+spend limits and tenant-local records, through the same orchestrator as `POST /v1/reviews`. The
+Python shim alone captures a bounded diff and omission manifest, scans before egress and forwards
+declared local context; the server rescans. Machines use their existing Yakka login and need no
+provider key. `read_write` scope and `readOnlyHint:false` disclose the server spend-and-record
+boundary; the tool declares 150 seconds and no local actions. Receipts omit captured diff content;
+`detail=full` includes validated findings. Registration depends on server review model configuration
+and a sufficient MCP timeout ceiling; deployment and live availability require separate evidence.
+See [architecture](ARCHITECTURE.md#advisory-change-review) and
+[the advisory surface](design/04-advisory-surface.md#review_change).
+
 ## Core Intent
 
 Optimize for outcome quality per token. Prevent:

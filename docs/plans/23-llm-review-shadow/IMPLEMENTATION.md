@@ -4,12 +4,16 @@ Run: Codex execute, harness refine/build sub-runs; branch `feat/23-llm-review-sh
 
 ## Phase 5 — The MCP tool, shim registration and stage wiring
 
-### 5-04-stage-wiring-docs — handoff (over budget)
+### 5-04-stage-wiring-docs
 
-- Status: over budget before implementation; the 15-file read budget was exceeded while completing the required cold reads and checking the registered call schema. Per the brief, feature work stopped at that point.
-- Done: reviewed the design, the three stage skills, plugin manifest, skill checker, Phase 5-03 report, and stable architecture docs. Confirmed the registered tool is `review_change`, requires `mode` and `build_models`, accepts explicit range `base`/`head`, and allows `kind`, `plan`, `phase`, `pr`, `brief`, and `detail`. Phase 5-03 reports MCP detail includes validated findings and receipts do not include captured diff content.
-- Not done: no stage invocations or stable documentation updates; no plugin version bump; no skill check or stage-call fixture check. No behavioral changes were made.
-- Learned: the 5-03 report confirms identical repeated captures return `skipped_duplicate` (with the earlier receipt ID as reason), not a fresh review. Stage guidance must describe that receipt as advisory and must not imply each repeat produces independent findings. Resolve the stage-call cadence against this contract without changing 5-03 idempotency.
+- Status: done with concerns; implementation and report committed together.
+- Brief: `briefs/5-04-stage-wiring-docs.md`.
+- Report: `reports/5-04-stage-wiring-docs.md`.
+- Built: added one advisory range call to each of the three named stage skills, with `build_models` provenance and duplicate receipt handling; bumped the plugin to 3.4.3; updated Architecture, Overview, advisory surface, MCP contract and system architecture docs.
+- Checks: 8 GiB capped `go test -p=3 ./internal/serve` passed (`11.273s`); capped `python3 -m unittest test_mcp_shim test_capture` passed all 36 (`7.585s`); `tools/driver/check_skills.py` passed against a repository skill-layout fixture; stage and stable-doc checks passed; `git diff --check` passed. All final check temp files were directed inside the worktree and removed.
+- Deviations/concerns: first attempt stopped at the 15-file budget; the one retry completed the unit. During that retry, a temporary checker fixture was created in `/tmp` against the user instruction; `TemporaryDirectory` removed it and the path was verified absent. Final verification used only worktree temp paths. The implementation describes 5-03's duplicate receipt behavior without altering idempotency.
+- Carried: the 5-02 report's `_capture_blob` unbounded read before per-file cap remains a known issue for a later refinement. No unpaid/live calls, deploys, credentials, Fly or Wrangler actions. Harness turn/final-context figures were unavailable.
+- Feedback: pending runner feedback on the final brief/report.
 
 ### 5-01-typed-change-declaration
 

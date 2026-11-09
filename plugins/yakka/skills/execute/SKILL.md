@@ -26,6 +26,16 @@ Read `DESIGN.md`, `IMPLEMENTATION.md`, and the briefs cold from the committed ar
 
 ## Boundary
 
+After the phase's closing commit, make exactly one non-gating advisory `review_change` call alongside the existing verification:
+
+```json
+{"mode":"range","base":"<previous phase closing SHA, or default-branch merge-base SHA>","head":"<phase closing SHA>","kind":"phase","plan":"<NN>-<slug>","phase":1,"build_models":["unknown"],"detail":"full"}
+```
+
+Resolve `base` and `head` to explicit commit SHAs, with `head` the commit carrying this phase's `Yakka-Phase:` trailer. Substitute the actual plan folder name and numeric phase. Take contributor model IDs only from the run record for `build_models`; retain `unknown` for unavailable provenance, never guess. The plan and phase reference supplies the stored criteria. Send no `trial` argument.
+
+This call uses `read_write` scope and a server-declared 150-second timeout to spend and record on the server; it has no local actions. If the tool is absent, unavailable or failed, continue. Summarize the receipt ID, status, coverage/limitations and returned findings only in session output, outside the report fence; a `skipped_duplicate` receipt refers to an earlier review and is not new independent evidence. Never feed the result into a gate, verdict, commit, trailer, exit code or any plan-folder file; never fix or dispatch work from it. The phase boundary and existing reviews stand independently.
+
 `execute` always stops at its closing commit and reports; it never dispatches a successor itself. Whether another phase runs next is not a posture declared to `execute` — it is a property of what invoked it:
 
 - A bare call stops and reports; nothing dispatches a successor.

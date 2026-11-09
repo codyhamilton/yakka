@@ -14,11 +14,11 @@ its own design. Skill behaviour stays in each `SKILL.md`; the skill-level seams 
         │ write files (designs, briefs, execution reports)
  Harness adapters       Claude Code hooks · Codex hooks.json · OpenCode plugin   (cheap, local, no network)
         │ spool envelopes
- Edge capture           spool → drain (scrub, archive, deliver)                  (all transport lives here)
+ Edge capture           spool → drain (scrub, archive, deliver)                  (capture transport)
         │ ingest
- Remote service         ingest API · ledger · derived views · scorer client      (replaceable backends)
+ Remote service         ingest API · ledger · scorer client · review orchestrator (replaceable backends)
         │ reads
- Agent advisory tools   read-only MCP: "what should I decide?"
+ Agent advisory tools   MCP reads + advisory review (server spend and record)
  Maintainer skills      .claude/skills/ — jev-variants · held-out set · white paper (not part of the pipeline)
 ```
 
@@ -29,9 +29,10 @@ TypeSafe's choice and is not part of any contract here.
 
 1. **Writes are captured, never requested.** Nothing the system needs depends on an agent calling a
    tool to report state. State is derived from facts: hook events, files, git.
-2. **The agent-facing surface is read-only and exists to help the agent decide.** A tool earns a
-   place only if the agent would act differently in this run because of its answer. Tools that
-   serve only the dataset are removed from the agent's list.
+2. **Advisory reads help the agent decide; shadow review supplies comparison evidence.** The
+   original advisory tools retain read scope. Server-owned `review_change` is the explicit
+   `read_write` exception: it spends on a provider call and stores a tenant-local review record,
+   with `readOnlyHint:false`. It never feeds a workflow gate or decision.
 3. **Capture never mutates what the agent wrote.** No hook edits a file, a commit message or any
    other agent output. Correlation lives in the envelope, not in the artifact.
 4. **Relationships are edges, not fields.** A conversation, an artifact version, a commit and an
@@ -57,7 +58,25 @@ TypeSafe's choice and is not part of any contract here.
 | Hook payload → spool envelope | raw event + `{ts, harness, event}` | harness → disk |
 | Spool → remote ingest | scrubbed events and artifact versions, batched, idempotent by hash | drain → remote |
 | Remote → advisory tools | scores, similar plans, cost estimates, queue state | remote → local MCP shim → agent |
+| Shim → review orchestrator | secret-scanned bounded Git diff and omission manifest; explicit criteria references and build-model provenance | local `change` reader → remote `review_change` |
+| Review orchestrator → provider | server-built prompt and filtered change; server-only credential | remote → Claude; validated receipt/findings back to the agent |
 | Remote → scorer | scrubbed artifact text | remote → Jev |
+
+`review_change` shares its server-owned orchestrator with `POST /v1/reviews`. The server owns the
+definition, prompt/policy, criteria resolution, provider call, validation, spend limits and records.
+Only the shim captures local content, in uncommitted or explicit range mode, using declared typed
+policy values; it scans before egress and the server rescans. Machines need no provider key.
+The tool declares a 150-second timeout and no local actions; local capture is read-only.
+Registration depends on review model configuration and a sufficient MCP timeout ceiling, without
+claiming deployment or live availability.
+
+`execute` makes one non-gating range call after each phase closes; `comprehensive-review` and
+`post-build` each make one at their reviewed/candidate PR head, beside existing reviews. Calls use
+explicit base/head SHAs, available stored criteria references and `build_models` from the run record
+or `unknown`, without `trial`. Receipt summaries and findings stay in session output, never gates,
+verdicts, commits, trailers, exit codes or plan-folder files. Absence, unavailability and failure
+leave stage decisions unchanged. A repeated capture may return `skipped_duplicate` referring to
+earlier evidence, not a new review. Receipts never return captured diff content.
 
 ## What is retired
 
@@ -73,7 +92,7 @@ are maintainer operations and move to the REST API or CLI.
 | 1 | [Event model and ingest contract](01-event-model-and-ingest.md) | join keys, artifact identity, derived execution view, execution report, envelope types |
 | 2 | [Edge capture](02-edge-capture.md) | spool, drain daemon, client config, MCP shim plumbing, per-harness install and trust |
 | 3 | [Remote service](03-remote-service.md) | runtime (Go `yakka` binary), API versioning, auth and tenancy, precheck, storage, screening and scoring, local drain hosting |
-| 4 | [Agent advisory surface](04-advisory-surface.md) | the read-only MCP, hook feedback, behaviour when the remote is unreachable |
+| 4 | [Agent advisory surface](04-advisory-surface.md) | MCP reads, advisory review's server spend-and-record boundary, hook feedback, behaviour when the remote is unreachable |
 | 5 | [Distribution](05-distribution.md) | plugin layout, per-harness packaging, the pinned Codex copy |
 | 6 | Lab and analysis | held-out set, white paper, check-to-cost revisit |
 | 7 | [Analytics site](07-analytics-site.md) | person-facing `/v1/analytics` reads, browser CORS, the current static site, local and Pages hosting; [Plan20](../plans/20-analytics-reset/DESIGN.md) designs the native no-build replacement |

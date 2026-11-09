@@ -1,20 +1,29 @@
 # 5-04 — Advisory stage wiring and stable docs
 
-Status: `over budget`
+Status: done with concerns
 
-## Done
+## Delivered
 
-- Read the assigned design sections and architecture contracts, all three stage skills, plugin manifest, skill checker, Phase 5 implementation record, and the 5-03 integration report.
-- Confirmed the registered tool is `review_change`; its required arguments are `mode` and `build_models`. It accepts explicit range refs (`base`, `head`) and plan/phase or PR criteria references. The registered declaration uses `read_write` scope, a 150-second timeout, no local actions, and the `project_dir`, `cwd`, `git`, `change` context order.
-- Recorded the handoff in `IMPLEMENTATION.md`.
+- Added one non-gating `review_change` range call to each of `execute`, `post-build`, and `comprehensive-review`. Each uses explicit range placeholders, plan/phase or PR criteria when available, and `build_models` from the run record or `unknown`; each sends no `trial` argument. The instructions keep results in session output and out of gates, verdicts, commits, reports, and plan artifacts. They treat `skipped_duplicate` as a reference to earlier evidence, not a new independent review.
+- Updated the Claude plugin version from 3.4.2 to 3.4.3.
+- Updated `docs/ARCHITECTURE.md`, `docs/OVERVIEW.md`, `docs/design/04-advisory-surface.md`, `docs/design/08-server-mcp-contract.md`, and `docs/design/system-architecture.md` to document server ownership, `read_write` spend-and-record behavior, shim-only bounded local capture, no provider key on machines, no local actions, conditional registration, advisory behavior, and duplicate receipts.
 
-## Not done
+## Evidence
 
-- No stage skill calls, stable documentation updates, plugin version bump, or checker changes were made.
-- `python3 tools/driver/check_skills.py`, the requested stage-call fixture check, and `git diff --check` were not run because the brief's 15-file read budget was exceeded before implementation and required stopping.
+Final verification commands ran with an 8 GiB address-space cap and `TMPDIR` inside this worktree; no final test used `/tmp`.
 
-## Contradiction and known concern
+- `GOMAXPROCS=3 prlimit --as=8589934592 -- go test -p=3 ./internal/serve` — passed (`11.273s`).
+- `prlimit --as=8589934592 -- python3 -m unittest test_mcp_shim test_capture` — 36 passed (`7.585s`).
+- `python3 tools/driver/check_skills.py` against a temporary install-layout fixture pointing to the repository skills — passed; found all six expected skills. The fixture lived under `.codex-phase5-tmp` in the worktree and was removed.
+- Stage text/JSON fixture — passed: exactly one non-gating range call in each named skill, correct criteria kind, `build_models`, no `trial`, explicit range, duplicate semantics, and advisory wording.
+- Stable-doc text check — passed for all five updated docs; manifest version check — passed (3.4.2 → 3.4.3).
+- `git diff --check` — passed.
 
-- The 5-03 report says repeated identical captures return `skipped_duplicate`, naming the original receipt, rather than a fresh independent review. Do not alter that idempotency behavior in this unit. Stage guidance should accurately describe duplicate receipts as advisory and avoid promising a new review for a repeated capture.
+## Concerns and deviations
 
-No live provider call, trial, secret, deploy, Fly or Wrangler action was used. No implementation changes were made.
+- The first 5-04 attempt stopped before implementation at the brief's 15-file read budget and committed handoff `ed013e1`; the one retry completed the unit.
+- During that retry, a temporary checker fixture was created under `/tmp`, contrary to the task instruction. The directory was automatically removed by `TemporaryDirectory` and verified absent. All final checks were rerun with `TMPDIR` inside the worktree. No other `/tmp` path was used for final verification.
+- The 5-03 report's REST replay returns `skipped_duplicate` rather than a byte-identical first receipt. Stage guidance documents the existing idempotency behavior and does not promise fresh independent findings on duplicate captures.
+- Known carried issue from 5-02: `_capture_blob` reads full worktree content before enforcing the per-file cap; it remains unmodified and should be considered by a later refinement.
+
+No paid/live provider call, credential access, deploy, Fly, or Wrangler action was used. No remaining work in this unit.

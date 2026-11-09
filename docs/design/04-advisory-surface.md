@@ -16,7 +16,7 @@ similar work exists.
 ## Shape
 
 `python3 plugins/yakka/client/yakka.py mcp` is a stdio shim registered by each harness. The server
-owns all three tool definitions, argument validation, state logic and user-facing wording. The
+owns all tool definitions, argument validation, state logic and user-facing wording. The
 shim forwards `initialize`, `tools/list` and `tools/call` to `POST /v1/mcp` using the shared login,
 injects the declared facts it reads from its fixed local reader table, and relays server replies.
 Local read failures are injected context, not synthesized tool results. A remote transport or
@@ -31,16 +31,40 @@ a separate, explicitly bounded queue effect. It writes pointer metadata through 
 spool path; the drain remains the content reader and uploader. Enqueue acknowledgment does not
 prove queued or delivered: those states require current covering queue evidence or a matching
 service hash. Unsupported versions, unknown outcomes and failures remain visible. The shim does
-not upload content, scan secrets, wake workers, run arbitrary commands or delete queue entries.
+not upload artifact content or scan it on this feedback path, wake workers, run arbitrary commands
+or delete queue entries. The separate `change` reader below scans and transmits bounded diffs.
 
 | Tool | Answers | Changes the agent's decision by |
 |---|---|---|
 | `artifact_feedback(path)` | for the file at `path`: delivery state of its current content, screen verdict, scores per check with the tenant's baseline for that kind | telling it to fix a refusal, or revise a criterion that is out of norm, before moving on |
 | `list_checks(kind)` | the checks a design, brief or report is scored against | letting it write to the rubric rather than discover it afterwards |
 | `search_artifacts(query, kind?)` | similar past designs, briefs and reports in this tenant, with path, repo and a snippet | reusing or contrasting prior work |
+| `review_change(mode, build_models, …)` | a server-owned single-call review receipt, with validated findings when `detail=full` | advisory comparison beside existing reviews; never a workflow decision input |
 
-Nothing else is exposed. Maintainer operations (defining checks, rescoring, rating) are CLI or REST
+The review tool is exposed only when server review model configuration and the MCP timeout ceiling
+permit registration, and only to `read_write` callers. Maintainer operations (defining checks, rescoring, rating) are CLI or REST
 only.
+
+## `review_change`
+
+The server owns the tool definition, prompt and exclusion policy, stored brief or plan/phase criteria
+resolution, provider call, validation, spend limits and tenant-local review record. It uses the same
+orchestrator as authenticated `POST /v1/reviews`; records are read through `GET /v1/reviews`.
+`read_write` scope and `readOnlyHint:false` disclose this spend-and-record boundary. Local collection
+is read-only: the declaration has a 150-second timeout and no local actions. The shim alone captures
+uncommitted changes or an explicit Git range using the server-declared `change` reader, scans before
+egress and supplies bounded diff content and an omission manifest. The server rescans, and alone
+holds the provider credential; machines use their existing Yakka login and need no provider key.
+Receipts contain no captured diff content; `detail=full` includes validated findings.
+
+`execute` calls once after each phase closing commit; `comprehensive-review` and `post-build` each
+call once at their reviewed/candidate PR head. These are non-gating `range` calls with explicit base
+and head SHAs, stored criteria references where available, and contributor `build_models` from the
+run record or `unknown`. Stages send no `trial` argument. Identical repeated captures can return
+`skipped_duplicate` referring to an earlier receipt, not an independent review. Receipt summaries
+and findings stay in session output, outside workflow handoffs. They never feed gates, verdicts,
+commits, trailers, exit codes or plan-folder files and never trigger local fixes or dispatch.
+Absent, unavailable and failed calls leave the stage's existing decisions unchanged.
 
 ## `artifact_feedback`
 
@@ -56,7 +80,8 @@ drain (design 1).
 
 ## API
 
-Service reads behind the tools. All need the key, all are scoped to the key's tenant.
+Service reads behind the original advisory tools. All need the key, all are scoped to the key's tenant.
+The review POST additionally spends and records with `read_write` scope as described above.
 
 | Request | Response |
 |---|---|
@@ -105,9 +130,12 @@ removed.
 
 ## Tests
 
-1. Over stdio against a test service: `initialize`, `tools/list` relays the server's three tools,
-   and each declared call carries the required reader facts to the server.
+1. Over stdio against a test service: `initialize`, `tools/list` relays the server's registered,
+   scope-visible tools, and each declared call carries the required reader facts to the server.
 2. `artifact_feedback` for a file that is queued, rejected, delivered, and delivered at an older
    hash gives the corresponding server-formatted states; failed required context never becomes a
    clean state.
 3. Service down: the shim reports its transport error and does not synthesize a local tool answer.
+4. Fake-provider review calls exercise both capture modes, `read`-scope refusal, validated full
+   findings and duplicate receipts, without local file changes or returned captured content. Stage
+   text checks establish one non-gating range call per stage and recorded build-model provenance.
