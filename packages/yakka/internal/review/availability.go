@@ -20,7 +20,6 @@ const LiveModel = "claude-haiku-5-5"
 // included in an Error returned by CheckAvailability.
 type Availability struct {
 	Token, Model, Effort string
-	TrialEnabled         bool
 	USDCap               float64
 	Repositories         map[string]bool
 	Local                bool
@@ -30,7 +29,7 @@ type AvailabilityError struct{ Setting string }
 
 func (e *AvailabilityError) Error() string { return "unavailable: " + e.Setting }
 
-func CheckAvailability(c Availability, tenant, repo, effectiveEffort string, trial bool) error {
+func CheckAvailability(c Availability, tenant, repo, effectiveEffort string) error {
 	switch {
 	case c.Local:
 		return &AvailabilityError{"authenticated remote mode required"}
@@ -48,12 +47,8 @@ func CheckAvailability(c Availability, tenant, repo, effectiveEffort string, tri
 		return &AvailabilityError{"priced model required"}
 	case !c.Repositories[tenant+"/"+repo]:
 		return &AvailabilityError{"YAKKA_REVIEW_REPOS"}
-	case trial && !c.TrialEnabled:
-		return &AvailabilityError{"trial_disabled"}
-	case trial && effectiveEffort != "high" && effectiveEffort != "xhigh" && effectiveEffort != "max":
-		return &AvailabilityError{"trial effort"}
-	case !trial && effectiveEffort != "high":
-		return &AvailabilityError{"YAKKA_REVIEW_EFFORT must be high"}
+	case effectiveEffort != "high" && effectiveEffort != "xhigh" && effectiveEffort != "max":
+		return &AvailabilityError{"effort must be high, xhigh or max"}
 	}
 	return nil
 }
@@ -181,6 +176,32 @@ func (r *Reservations) begin(key, id, tenant string, amount float64) error {
 	r.spent = append(r.spent, spendEntry{At: time.Now(), Amount: amount, Key: key, Attempt: 1})
 	if err := r.save(); err != nil {
 		delete(r.claimed, key)
+		r.spent = r.spent[:len(r.spent)-1]
+		r.inflight[tenant]--
+		return fmt.Errorf("reservation persistence failed")
+	}
+	return nil
+}
+
+// beginEphemeral reserves spend and an in-flight slot under a fresh non-cache
+// identifier without creating a durable dedupe claim.
+func (r *Reservations) beginEphemeral(key, tenant string, amount float64) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.failed {
+		return ErrReservationState
+	}
+	r.expire(time.Now())
+	var total float64
+	for _, e := range r.spent {
+		total += e.Amount
+	}
+	if total+amount > r.cap || r.inflight[tenant] >= r.limit {
+		return ErrBudget
+	}
+	r.inflight[tenant]++
+	r.spent = append(r.spent, spendEntry{At: time.Now(), Amount: amount, Key: key, Attempt: 1})
+	if err := r.save(); err != nil {
 		r.spent = r.spent[:len(r.spent)-1]
 		r.inflight[tenant]--
 		return fmt.Errorf("reservation persistence failed")

@@ -39,10 +39,27 @@ func TestReviewMCPRegistrationContract(t *testing.T) {
 	if err := validateReviewMCPArgs(map[string]any{"mode": "range", "base": "a", "head": "b", "build_models": []any{map[string]any{"id": "unknown"}}}); err != "" {
 		t.Fatal(err)
 	}
+	if idempotent, ok := tool.Annotations["idempotentHint"].(bool); ok && idempotent {
+		t.Fatal("review_change must not promise unconditional idempotency")
+	}
+	properties, _ := tool.InputSchema["properties"].(map[string]any)
+	for _, key := range []string{"effort", "tags", "store"} {
+		if properties[key] == nil {
+			t.Fatalf("review schema missing %s", key)
+		}
+	}
+	if err := validateReviewMCPArgs(map[string]any{"mode": "uncommitted", "build_models": []any{map[string]any{"id": "unknown"}}, "effort": "max", "tags": []any{"run:1"}, "store": false}); err != "" {
+		t.Fatalf("valid call controls rejected: %s", err)
+	}
 	for _, args := range []map[string]any{
 		{"mode": "range", "build_models": []any{map[string]any{"id": "unknown"}}},
 		{"mode": "uncommitted", "build_models": []any{map[string]any{"id": "unknown"}}, "surprise": true},
 		{"mode": "uncommitted", "build_models": []any{map[string]any{"id": "unknown"}}, "include_untracked": "yes"},
+		{"mode": "uncommitted", "build_models": []any{map[string]any{"id": "unknown"}}, "effort": "min"},
+		{"mode": "uncommitted", "build_models": []any{map[string]any{"id": "unknown"}}, "tags": "run"},
+		{"mode": "uncommitted", "build_models": []any{map[string]any{"id": "unknown"}}, "tags": []any{"ok", 5}},
+		{"mode": "uncommitted", "build_models": []any{map[string]any{"id": "unknown"}}, "tags": make([]any, 17)},
+		{"mode": "uncommitted", "build_models": []any{map[string]any{"id": "unknown"}}, "store": "yes"},
 	} {
 		if err := validateReviewMCPArgs(args); err == "" {
 			t.Fatalf("invalid args accepted: %#v", args)

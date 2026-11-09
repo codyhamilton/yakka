@@ -109,11 +109,11 @@ func TestReviewRESTReadTokenCanReadButCannotPost(t *testing.T) {
 
 func TestReviewEnvironmentConfigValidation(t *testing.T) {
 	env := func(m map[string]string) func(string) string { return func(k string) string { return m[k] } }
-	c, err := ConfigFromEnv(env(map[string]string{"CLAUDE_API_TOKEN": "private-value", "YAKKA_REVIEW_MODEL": "claude-haiku-5-5", "YAKKA_REVIEW_EFFORT": "high", "YAKKA_REVIEW_TRIAL_ENABLED": "true", "YAKKA_REVIEW_USD_CAP": "2.5", "YAKKA_REVIEW_REPOS": "tenant/github.com/org/repo,other/r"}))
-	if err != nil || c.ReviewToken != "private-value" || c.ReviewUSDCap != 2.5 || !c.ReviewTrialEnabled || !c.ReviewRepositories["tenant/github.com/org/repo"] {
+	c, err := ConfigFromEnv(env(map[string]string{"CLAUDE_API_TOKEN": "private-value", "YAKKA_REVIEW_MODEL": "claude-haiku-5-5", "YAKKA_REVIEW_EFFORT": "high", "YAKKA_REVIEW_USD_CAP": "2.5", "YAKKA_REVIEW_REPOS": "tenant/github.com/org/repo,other/r"}))
+	if err != nil || c.ReviewToken != "private-value" || c.ReviewUSDCap != 2.5 || !c.ReviewRepositories["tenant/github.com/org/repo"] {
 		t.Fatalf("config=%+v err=%v", c, err)
 	}
-	for _, m := range []map[string]string{{"YAKKA_REVIEW_USD_CAP": "zero"}, {"YAKKA_REVIEW_TRIAL_ENABLED": "sometimes"}, {"YAKKA_REVIEW_REPOS": "not-qualified"}} {
+	for _, m := range []map[string]string{{"YAKKA_REVIEW_USD_CAP": "zero"}, {"YAKKA_REVIEW_REPOS": "not-qualified"}} {
 		if _, err := ConfigFromEnv(env(m)); err == nil || strings.Contains(err.Error(), "private-value") {
 			t.Fatalf("invalid review config accepted or leaked: %v", err)
 		}

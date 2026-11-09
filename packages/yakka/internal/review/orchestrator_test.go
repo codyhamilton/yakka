@@ -2,12 +2,17 @@ package review
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -311,7 +316,7 @@ func TestRunStatusFixturesAndPreflightResume(t *testing.T) {
 			t.Fatalf("records=%d err=%v", len(rows), err)
 		}
 	})
-	t.Run("disabled then enabled trial", func(t *testing.T) {
+	t.Run("legacy adapter needs no deployment gate", func(t *testing.T) {
 		tenant := reviewTenant(t)
 		var calls atomic.Int32
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -321,15 +326,9 @@ func TestRunStatusFixturesAndPreflightResume(t *testing.T) {
 		defer srv.Close()
 		req := reviewRequest(true)
 		req.Trial = &Trial{ManifestHash: strings.Repeat("a", 64), CaseID: "case", Effort: "xhigh"}
-		cfg := availableConfig(srv.URL)
-		out, err := Run(context.Background(), tenant, "tenant", req, cfg)
-		if err != nil || out.Status != "unavailable" || calls.Load() != 0 {
-			t.Fatalf("disabled=%+v %v calls=%d", out, err, calls.Load())
-		}
-		cfg.Availability.TrialEnabled = true
-		out, err = Run(context.Background(), tenant, "tenant", req, cfg)
+		out, err := Run(context.Background(), tenant, "tenant", req, availableConfig(srv.URL))
 		if err != nil || out.Status != "ok" || calls.Load() != 1 {
-			t.Fatalf("enabled=%+v %v calls=%d", out, err, calls.Load())
+			t.Fatalf("legacy=%+v %v calls=%d", out, err, calls.Load())
 		}
 	})
 	t.Run("budget then available", func(t *testing.T) {
@@ -404,7 +403,6 @@ func TestHistoricalEffortsRemainSeparateFromLiveHigh(t *testing.T) {
 			req := reviewRequest(true)
 			req.Trial = &Trial{ManifestHash: strings.Repeat("a", 64), CaseID: eff, Effort: eff}
 			cfg := availableConfig(srv.URL)
-			cfg.Availability.TrialEnabled = true
 			out, err := Run(context.Background(), tenant, "tenant", req, cfg)
 			if err != nil || out.Status != "ok" || got != eff {
 				t.Fatalf("effort=%q result=%+v err=%v", got, out, err)
@@ -426,7 +424,6 @@ func TestSameHistoricalCaseAtDifferentEffortsIsNotDuplicate(t *testing.T) {
 	}))
 	defer srv.Close()
 	cfg := availableConfig(srv.URL)
-	cfg.Availability.TrialEnabled = true
 	for _, eff := range []string{"high", "xhigh", "max"} {
 		req := reviewRequest(true)
 		req.Trial = &Trial{ManifestHash: strings.Repeat("b", 64), CaseID: "same-case", Effort: eff}
@@ -515,4 +512,349 @@ func TestPersistentReservationKeepsUnknownClaimAndSpend(t *testing.T) {
 	if err := b.begin("other-key", "third-id", "tenant", .01); !errors.Is(err, ErrBudget) {
 		t.Fatalf("rolling spend not restored: %v", err)
 	}
+}
+
+func countReviewInputs(t *testing.T, tenant *store.Tenant) int {
+	t.Helper()
+	n := 0
+	_ = filepath.WalkDir(filepath.Join(tenant.Dir(), "review-inputs"), func(_ string, d os.DirEntry, err error) error {
+		if err == nil && !d.IsDir() {
+			n++
+		}
+		return nil
+	})
+	return n
+}
+
+func readReviewRecord(t *testing.T, tenant *store.Tenant) map[string]any {
+	t.Helper()
+	rows, err := tenant.ReviewRecords(context.Background(), store.ReviewRecordFilter{Limit: 1})
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("records=%d err=%v", len(rows), err)
+	}
+	var rec map[string]any
+	if err := json.Unmarshal(rows[0].Raw, &rec); err != nil {
+		t.Fatal(err)
+	}
+	return rec
+}
+
+func recordTags(t *testing.T, rec map[string]any) []string {
+	t.Helper()
+	raw, _ := json.Marshal(rec["tags"])
+	var tags []string
+	if err := json.Unmarshal(raw, &tags); err != nil {
+		t.Fatalf("tags=%v err=%v", rec["tags"], err)
+	}
+	return tags
+}
+
+func reservationsClaimCount(r *Reservations) int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return len(r.claimed)
+}
+
+func TestRunCallControlsRefuseBeforeEffects(t *testing.T) {
+	base, err := json.Marshal(reviewRequest(true))
+	if err != nil {
+		t.Fatal(err)
+	}
+	seventeen := make([]string, 17)
+	for i := range seventeen {
+		seventeen[i] = fmt.Sprintf("tag-%d", i)
+	}
+	cases := []struct {
+		name   string
+		mutate func(map[string]any)
+	}{
+		{"effort null", func(m map[string]any) { m["effort"] = nil }},
+		{"effort empty", func(m map[string]any) { m["effort"] = "" }},
+		{"effort unsupported", func(m map[string]any) { m["effort"] = "min" }},
+		{"effort number", func(m map[string]any) { m["effort"] = 3 }},
+		{"tags null", func(m map[string]any) { m["tags"] = nil }},
+		{"tags string", func(m map[string]any) { m["tags"] = "run" }},
+		{"tags non-string element", func(m map[string]any) { m["tags"] = []any{"ok", 5} }},
+		{"tags overcount", func(m map[string]any) { m["tags"] = seventeen }},
+		{"tags overlength", func(m map[string]any) { m["tags"] = []string{strings.Repeat("a", 97)} }},
+		{"tags whitespace", func(m map[string]any) { m["tags"] = []string{"a b"} }},
+		{"tags control", func(m map[string]any) { m["tags"] = []string{"a\x01b"} }},
+		{"store null", func(m map[string]any) { m["store"] = nil }},
+		{"store string", func(m map[string]any) { m["store"] = "true" }},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var raw map[string]any
+			if err := json.Unmarshal(base, &raw); err != nil {
+				t.Fatal(err)
+			}
+			tc.mutate(raw)
+			body, _ := json.Marshal(raw)
+			var req Request
+			decodeErr := json.Unmarshal(body, &req)
+			var calls atomic.Int32
+			srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { calls.Add(1) }))
+			defer srv.Close()
+			tenant := reviewTenant(t)
+			if decodeErr == nil {
+				if _, runErr := Run(context.Background(), tenant, "tenant", req, availableConfig(srv.URL)); runErr == nil {
+					t.Fatalf("invalid controls accepted: %s", body)
+				}
+			}
+			if calls.Load() != 0 {
+				t.Fatalf("provider called %d", calls.Load())
+			}
+			rows, err := tenant.ReviewRecords(context.Background(), store.ReviewRecordFilter{Limit: 10})
+			if err != nil || len(rows) != 0 {
+				t.Fatalf("rows=%d err=%v", len(rows), err)
+			}
+			if n := countReviewInputs(t, tenant); n != 0 {
+				t.Fatalf("review inputs=%d", n)
+			}
+		})
+	}
+}
+
+func TestRunEffortsInBothModesWithoutTrialEnv(t *testing.T) {
+	for _, mode := range []string{"uncommitted", "range"} {
+		for _, eff := range []string{"high", "xhigh", "max"} {
+			t.Run(mode+"/"+eff, func(t *testing.T) {
+				tenant := reviewTenant(t)
+				var got atomic.Value
+				srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					var body map[string]any
+					_ = json.NewDecoder(r.Body).Decode(&body)
+					got.Store(body["output_config"].(map[string]any)["effort"].(string))
+					io.WriteString(w, providerReply([]any{}, []any{}, []any{}, "complete"))
+				}))
+				defer srv.Close()
+				req := reviewRequest(true)
+				if mode == "uncommitted" {
+					req.Capture.Mode = "uncommitted"
+					req.Capture.View = "combined"
+					req.Capture.Base = ""
+					req.Capture.Head = strings.Repeat("c", 40)
+				}
+				req.Effort = eff
+				out, err := Run(context.Background(), tenant, "tenant", req, availableConfig(srv.URL))
+				if err != nil || out.Status != "ok" {
+					t.Fatalf("%+v %v", out, err)
+				}
+				if got.Load() != eff {
+					t.Fatalf("provider effort=%v want %s", got.Load(), eff)
+				}
+				rec := readReviewRecord(t, tenant)
+				if rec["configured_effort"] != "high" || rec["requested_effort"] != eff || rec["effective_effort"] != eff {
+					t.Fatalf("effort fields configured=%v requested=%v effective=%v", rec["configured_effort"], rec["requested_effort"], rec["effective_effort"])
+				}
+			})
+		}
+	}
+}
+
+func TestLegacyAdapterMapsTagsAndRejectsConflicts(t *testing.T) {
+	manifest := strings.Repeat("a", 64)
+	caseID := "case-1"
+	digest := sha256.Sum256([]byte(caseID))
+	adapter := []string{"case:" + hex.EncodeToString(digest[:]), "effort:xhigh", "manifest:" + manifest}
+	sort.Strings(adapter)
+	provider := func(calls *atomic.Int32) *httptest.Server {
+		return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			calls.Add(1)
+			io.WriteString(w, providerReply([]any{}, []any{}, []any{}, "complete"))
+		}))
+	}
+
+	t.Run("pure adapter maps deterministic tags", func(t *testing.T) {
+		tenant := reviewTenant(t)
+		var calls atomic.Int32
+		srv := provider(&calls)
+		defer srv.Close()
+		req := reviewRequest(true)
+		req.Trial = &Trial{ManifestHash: manifest, CaseID: caseID, Effort: "xhigh"}
+		out, err := Run(context.Background(), tenant, "tenant", req, availableConfig(srv.URL))
+		if err != nil || out.Status != "ok" || calls.Load() != 1 {
+			t.Fatalf("%+v %v calls=%d", out, err, calls.Load())
+		}
+		rec := readReviewRecord(t, tenant)
+		if got := recordTags(t, rec); strings.Join(got, ",") != strings.Join(adapter, ",") {
+			t.Fatalf("tags=%v want %v", got, adapter)
+		}
+		if rec["profile"] != "historical_trial" || rec["manifest_hash"] != manifest || rec["case_id"] != caseID {
+			t.Fatalf("legacy record=%v", rec)
+		}
+	})
+
+	t.Run("caller tags union with adapter tags", func(t *testing.T) {
+		tenant := reviewTenant(t)
+		var calls atomic.Int32
+		srv := provider(&calls)
+		defer srv.Close()
+		req := reviewRequest(true)
+		req.Trial = &Trial{ManifestHash: manifest, CaseID: caseID, Effort: "xhigh"}
+		req.Tags = []string{"run:alpha"}
+		out, err := Run(context.Background(), tenant, "tenant", req, availableConfig(srv.URL))
+		if err != nil || out.Status != "ok" {
+			t.Fatalf("%+v %v", out, err)
+		}
+		want := append([]string{"run:alpha"}, adapter...)
+		sort.Strings(want)
+		if got := recordTags(t, readReviewRecord(t, tenant)); strings.Join(got, ",") != strings.Join(want, ",") {
+			t.Fatalf("tags=%v want %v", got, want)
+		}
+	})
+
+	t.Run("equal top-level effort accepted", func(t *testing.T) {
+		tenant := reviewTenant(t)
+		var calls atomic.Int32
+		srv := provider(&calls)
+		defer srv.Close()
+		req := reviewRequest(true)
+		req.Effort = "xhigh"
+		req.Trial = &Trial{ManifestHash: manifest, CaseID: caseID, Effort: "xhigh"}
+		if out, err := Run(context.Background(), tenant, "tenant", req, availableConfig(srv.URL)); err != nil || out.Status != "ok" {
+			t.Fatalf("%+v %v", out, err)
+		}
+	})
+
+	t.Run("conflicting effort refuses before effects", func(t *testing.T) {
+		tenant := reviewTenant(t)
+		var calls atomic.Int32
+		srv := provider(&calls)
+		defer srv.Close()
+		req := reviewRequest(true)
+		req.Effort = "max"
+		req.Trial = &Trial{ManifestHash: manifest, CaseID: caseID, Effort: "xhigh"}
+		if _, err := Run(context.Background(), tenant, "tenant", req, availableConfig(srv.URL)); err == nil {
+			t.Fatal("conflicting effort accepted")
+		}
+		if calls.Load() != 0 {
+			t.Fatalf("provider called %d", calls.Load())
+		}
+		rows, err := tenant.ReviewRecords(context.Background(), store.ReviewRecordFilter{Limit: 10})
+		if err != nil || len(rows) != 0 {
+			t.Fatalf("rows=%d err=%v", len(rows), err)
+		}
+	})
+
+	t.Run("merged set over 16 refuses", func(t *testing.T) {
+		tenant := reviewTenant(t)
+		var calls atomic.Int32
+		srv := provider(&calls)
+		defer srv.Close()
+		req := reviewRequest(true)
+		req.Trial = &Trial{ManifestHash: manifest, CaseID: caseID, Effort: "xhigh"}
+		for i := 0; i < 14; i++ {
+			req.Tags = append(req.Tags, fmt.Sprintf("t-%02d", i))
+		}
+		if _, err := Run(context.Background(), tenant, "tenant", req, availableConfig(srv.URL)); err == nil {
+			t.Fatal("merged tag overflow accepted")
+		}
+		if calls.Load() != 0 {
+			t.Fatalf("provider called %d", calls.Load())
+		}
+	})
+}
+
+func legacyFixtureKey(t *testing.T, req Request, tenant, repo string, p Packet, effort, profile string) string {
+	t.Helper()
+	b, _ := json.Marshal(struct {
+		Tenant, Repo, Kind, Plan, Capture, Criteria, Build, Model, Effort, Profile, Manifest, Case, Policy string
+		Phase                                                                                              int
+	}{tenant, repo, req.Kind, req.Plan, p.CaptureID, "", fmt.Sprint(req.BuildModels), LiveModel, effort, profile, trialManifest(req.Trial), trialCase(req.Trial), p.PromptPolicyVersion, req.Phase})
+	return keys.ContentHash(b)
+}
+
+func TestExecutionKeyPreservesPreUpgradeAndSeparatesTags(t *testing.T) {
+	req := reviewRequest(true)
+	packet, err := Build(Input{Capture: req.Capture})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := legacyFixtureKey(t, req, "tenant", "repo-sentinel", packet, "high", "shadow")
+	untagged := executionKey(req, "tenant", "repo-sentinel", packet, CriteriaRecord{}, LiveModel, "high", "shadow", nil)
+	if untagged != want {
+		t.Fatalf("untagged key changed: %s want %s", untagged, want)
+	}
+	if got := PreUpgradeExecutionKey(req, "tenant", "repo-sentinel", packet, CriteriaRecord{}, LiveModel, "high", "shadow"); got != want {
+		t.Fatalf("pre-upgrade helper=%s want %s", got, want)
+	}
+	alpha := executionKey(req, "tenant", "repo-sentinel", packet, CriteriaRecord{}, LiveModel, "high", "shadow", []string{"alpha"})
+	beta := executionKey(req, "tenant", "repo-sentinel", packet, CriteriaRecord{}, LiveModel, "high", "shadow", []string{"beta"})
+	if alpha == beta || alpha == untagged || beta == untagged {
+		t.Fatalf("tag keys not distinct: untagged=%s alpha=%s beta=%s", untagged, alpha, beta)
+	}
+	if got := canonicalTags([]string{"beta", "alpha", "beta"}); strings.Join(got, ",") != "alpha,beta" {
+		t.Fatalf("canonical tags=%v", got)
+	}
+}
+
+func TestStoreFalseBypassesCacheAndPersistence(t *testing.T) {
+	t.Run("identical stored call still pays again", func(t *testing.T) {
+		tenant := reviewTenant(t)
+		var calls atomic.Int32
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			calls.Add(1)
+			io.WriteString(w, providerReply([]any{}, []any{}, []any{}, "complete"))
+		}))
+		defer srv.Close()
+		cfg := availableConfig(srv.URL)
+		req := reviewRequest(true)
+		if out, err := Run(context.Background(), tenant, "tenant", req, cfg); err != nil || out.Status != "ok" {
+			t.Fatalf("stored=%+v %v", out, err)
+		}
+		inputs := countReviewInputs(t, tenant)
+		claims := reservationsClaimCount(cfg.Reservations)
+		ephemeral := req
+		off := false
+		ephemeral.Store = &off
+		out, err := Run(context.Background(), tenant, "tenant", ephemeral, cfg)
+		if err != nil || out.Status != "ok" {
+			t.Fatalf("ephemeral=%+v %v", out, err)
+		}
+		if out.Result == nil {
+			t.Fatal("store=false did not return a full result")
+		}
+		if calls.Load() != 2 {
+			t.Fatalf("provider calls=%d want 2", calls.Load())
+		}
+		rows, err := tenant.ReviewRecords(context.Background(), store.ReviewRecordFilter{Limit: 10})
+		if err != nil || len(rows) != 1 {
+			t.Fatalf("rows=%d err=%v", len(rows), err)
+		}
+		if countReviewInputs(t, tenant) != inputs {
+			t.Fatal("store=false wrote a review input")
+		}
+		if reservationsClaimCount(cfg.Reservations) != claims {
+			t.Fatal("store=false added a durable claim")
+		}
+	})
+
+	t.Run("fresh store=false leaves no claim or record", func(t *testing.T) {
+		tenant := reviewTenant(t)
+		var calls atomic.Int32
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			calls.Add(1)
+			io.WriteString(w, providerReply([]any{}, []any{}, []any{}, "complete"))
+		}))
+		defer srv.Close()
+		cfg := availableConfig(srv.URL)
+		off := false
+		req := reviewRequest(true)
+		req.Store = &off
+		out, err := Run(context.Background(), tenant, "tenant", req, cfg)
+		if err != nil || out.Status != "ok" || out.Result == nil || calls.Load() != 1 {
+			t.Fatalf("%+v %v calls=%d", out, err, calls.Load())
+		}
+		if reservationsClaimCount(cfg.Reservations) != 0 {
+			t.Fatal("store=false created a durable claim")
+		}
+		rows, err := tenant.ReviewRecords(context.Background(), store.ReviewRecordFilter{Limit: 10})
+		if err != nil || len(rows) != 0 {
+			t.Fatalf("rows=%d err=%v", len(rows), err)
+		}
+		if n := countReviewInputs(t, tenant); n != 0 {
+			t.Fatalf("review inputs=%d", n)
+		}
+	})
 }

@@ -44,7 +44,6 @@ type Config struct {
 	// ignores it and allows loopback origins.
 	CORSOrigins                            []string
 	ReviewToken, ReviewModel, ReviewEffort string
-	ReviewTrialEnabled                     bool
 	ReviewUSDCap                           float64
 	ReviewRepositories                     map[string]bool
 }
@@ -92,13 +91,6 @@ func ConfigFromEnv(getenv func(string) string) (Config, error) {
 			return Config{}, errors.New("YAKKA_REVIEW_USD_CAP must be a positive number")
 		}
 		c.ReviewUSDCap = v
-	}
-	if raw := strings.TrimSpace(getenv("YAKKA_REVIEW_TRIAL_ENABLED")); raw != "" {
-		v, err := strconv.ParseBool(raw)
-		if err != nil {
-			return Config{}, errors.New("YAKKA_REVIEW_TRIAL_ENABLED must be true or false")
-		}
-		c.ReviewTrialEnabled = v
 	}
 	c.ReviewRepositories = map[string]bool{}
 	for _, entry := range strings.Split(getenv("YAKKA_REVIEW_REPOS"), ",") {
@@ -723,7 +715,7 @@ func (s *Server) auth(h tenantHandler) http.HandlerFunc {
 }
 
 func (s *Server) reviewAvailability() review.Availability {
-	return review.Availability{Token: s.cfg.ReviewToken, Model: s.cfg.ReviewModel, Effort: s.cfg.ReviewEffort, TrialEnabled: s.cfg.ReviewTrialEnabled, USDCap: s.cfg.ReviewUSDCap, Repositories: s.cfg.ReviewRepositories, Local: s.cfg.Local()}
+	return review.Availability{Token: s.cfg.ReviewToken, Model: s.cfg.ReviewModel, Effort: s.cfg.ReviewEffort, USDCap: s.cfg.ReviewUSDCap, Repositories: s.cfg.ReviewRepositories, Local: s.cfg.Local()}
 }
 
 func (s *Server) reviewsRoute(w http.ResponseWriter, r *http.Request) {
