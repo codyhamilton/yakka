@@ -1,4 +1,12 @@
-import { BASE_KEY, safeReturnPath, TOKEN_KEY, type MeResponse, type Tenant } from './api';
+import {
+	BASE_KEY,
+	isLifecycleTracked,
+	safeReturnPath,
+	tenantLifecycleState,
+	TOKEN_KEY,
+	type MeResponse,
+	type Tenant
+} from './api';
 
 function readStorage(key: string): string {
 	try {
@@ -102,8 +110,12 @@ export function tenantsFromMe(me: MeFetchResult | null): Tenant[] {
 	return me && me.kind === 'ok' ? me.body.tenants : [];
 }
 
-/** The tenant views query: the remembered choice when the user still owns it, else the first. */
+/**
+ * The tenant views query: the remembered choice when the user still owns it, else the first.
+ * `INVALIDATED_TENANT` means an explicit re-selection is required, so no automatic fallback applies.
+ */
 export function currentTenantFromMe(me: MeFetchResult | null, remembered: string): Tenant | null {
+	if (remembered === INVALIDATED_TENANT) return null;
 	const tenants = tenantsFromMe(me);
 	return tenants.find((t) => t.id === remembered) ?? tenants[0] ?? null;
 }
@@ -129,15 +141,138 @@ export function initialTenantChoice(tenants: Tenant[], chosen: string, remembere
 }
 
 export const TENANT_KEY = 'yakka-analytics-tenant';
+export const TENANT_GENERATION_KEY = 'yakka-analytics-tenant-generation';
+export const TENANT_INVALIDATED_KEY = 'yakka-analytics-tenant-invalidated';
+
+/**
+ * Runtime stand-in for a selection that must be re-made explicitly. It is never a real tenant id,
+ * so consumers resolving it get no tenant and the automatic first-tenant fallback stays suppressed.
+ */
+export const INVALIDATED_TENANT = '\u0000invalidated';
+
+function writeStorage(key: string, value: string): void {
+	try {
+		localStorage.setItem(key, value);
+	} catch {
+		// Per-viewer convenience only; the choice still holds for this page load.
+	}
+}
+
+function removeStorage(key: string): void {
+	try {
+		localStorage.removeItem(key);
+	} catch {
+		// Storage may be unavailable (private mode); nothing to clear.
+	}
+}
 
 export function readRememberedTenant(): string {
 	return readStorage(TENANT_KEY);
 }
 
-export function rememberTenant(id: string): void {
-	try {
-		localStorage.setItem(TENANT_KEY, id);
-	} catch {
-		// Per-viewer convenience only; the choice still holds for this page load.
+export function readRememberedGeneration(): string {
+	return readStorage(TENANT_GENERATION_KEY);
+}
+
+export function readSelectionInvalidated(): boolean {
+	return readStorage(TENANT_INVALIDATED_KEY) === '1';
+}
+
+/** Remember an explicit choice with the generation it was observed at. */
+export function rememberTenant(id: string, generation = ''): void {
+	writeStorage(TENANT_KEY, id);
+	if (generation !== '') writeStorage(TENANT_GENERATION_KEY, generation);
+	else removeStorage(TENANT_GENERATION_KEY);
+	removeStorage(TENANT_INVALIDATED_KEY);
+}
+
+export function forgetTenant(): void {
+	removeStorage(TENANT_KEY);
+	removeStorage(TENANT_GENERATION_KEY);
+}
+
+/**
+ * Clear a stale/absent/changed selection and persist the invalidation, so a reload does not
+ * silently adopt the first remaining tenant. Only an explicit re-selection clears it.
+ */
+export function invalidateTenantSelection(): void {
+	forgetTenant();
+	writeStorage(TENANT_INVALIDATED_KEY, '1');
+}
+
+export function clearSelectionInvalidation(): void {
+	removeStorage(TENANT_INVALIDATED_KEY);
+}
+
+export class TenantSelectionError extends Error {
+	constructor(message: string) {
+		super(message);
+		this.name = 'TenantSelectionError';
+	}
+}
+
+export type SelectionOutcome =
+	| { kind: 'selected'; tenant: Tenant }
+	| { kind: 'pending'; tenant: Tenant; state: 'resetting' | 'deleting' }
+	| { kind: 'invalidate'; reason: 'absent' | 'changed' | 'needs-generation' }
+	| { kind: 'unselected' }
+	| { kind: 'none' };
+
+/**
+ * Compare the remembered id/generation with `GET /v1/me`.
+ * - absent/changed: the tenant went away or completed a reset under a new generation.
+ * - needs-generation: a pre-lifecycle remembered selection cannot silently adopt a post-reset generation.
+ * - pending: reset/delete is still running, so target reads stay suspended.
+ * - unselected: invalidation was already recorded, so no automatic first-tenant fallback applies.
+ * A pre-lifecycle payload (no lifecycle fields) keeps the old usable-selection behavior.
+ */
+export function validateSelection(params: {
+	me: MeFetchResult | null;
+	rememberedId: string;
+	rememberedGeneration: string;
+	invalidated: boolean;
+}): SelectionOutcome {
+	const tenants = tenantsFromMe(params.me);
+	if (params.rememberedId === INVALIDATED_TENANT || params.invalidated) {
+		return { kind: 'unselected' };
+	}
+	if (tenants.length === 0) {
+		if (params.rememberedId !== '') return { kind: 'invalidate', reason: 'absent' };
+		return { kind: 'none' };
+	}
+	const explicit = params.rememberedId !== '';
+	const candidate = explicit ? tenants.find((t) => t.id === params.rememberedId) : tenants[0];
+	if (!candidate) return { kind: 'invalidate', reason: 'absent' };
+
+	const state = tenantLifecycleState(candidate);
+	if (state === 'resetting' || state === 'deleting') {
+		return { kind: 'pending', tenant: candidate, state };
+	}
+	if (explicit && isLifecycleTracked(candidate)) {
+		if (params.rememberedGeneration === '') return { kind: 'invalidate', reason: 'needs-generation' };
+		if ((candidate.lifecycle_generation ?? '') !== params.rememberedGeneration) {
+			return { kind: 'invalidate', reason: 'changed' };
+		}
+	}
+	return { kind: 'selected', tenant: candidate };
+}
+
+/** Why a tenant data read must not be issued yet, or null when it may proceed. */
+export function selectionReadBlock(outcome: SelectionOutcome): string | null {
+	switch (outcome.kind) {
+		case 'selected':
+			return null;
+		case 'pending':
+			return outcome.state === 'resetting'
+				? 'This tenant is being reset. Analytics will resume after it completes.'
+				: 'This tenant is being deleted. Analytics will resume if the deletion does not complete.';
+		case 'invalidate':
+			if (outcome.reason === 'changed') return 'This tenant was reset. Choose a tenant again before loading analytics.';
+			if (outcome.reason === 'needs-generation') return 'Confirm your tenant selection again before loading analytics.';
+			return 'Your selected tenant is no longer available. Choose a tenant on your profile.';
+		case 'unselected':
+			return 'Choose a tenant on your profile before loading analytics.';
+		case 'none':
+			return 'You do not have a tenant yet. Create one on your profile.';
 	}
 }
