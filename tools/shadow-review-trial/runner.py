@@ -19,6 +19,9 @@ VALID_COMPLETION = {"ok", "ok_partial"}
 RUN_ID = re.compile(r"[A-Za-z0-9_-]{1,32}")
 TAG = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/=-]{0,95}")
 MAX_TAGS = 16
+EVIDENCE_PAGE_SIZE = 500
+EVIDENCE_MAX_PAGES = 10000
+EVIDENCE_MAX_ROWS = 1000000
 
 
 class RunnerError(RuntimeError):
@@ -220,14 +223,72 @@ class TrialRunner:
             raise RunnerError("review receipt has no status")
         return result
 
-    def get_reviews(self, manifest_hash: str, run_id: str) -> list[dict[str, Any]]:
-        query = urllib.parse.urlencode([("tag", "manifest:" + manifest_hash), ("tag", "trial:" + run_id),
-                                        ("limit", "500")])
-        result = self._request("GET", "/v1/reviews?" + query)
-        rows = result.get("reviews") if isinstance(result, dict) else None
+    @staticmethod
+    def _review_page(result: Any) -> tuple[list[dict[str, Any]], str | None, bool]:
+        """Validate one cursor page's protocol fields before any row is trusted."""
+        if not isinstance(result, dict):
+            raise RunnerError("review read page is not an object")
+        rows = result.get("reviews")
         if not isinstance(rows, list):
-            raise RunnerError("review read has no reviews array")
-        return [r for r in rows if isinstance(r, dict)]
+            raise RunnerError("review read page has no reviews array")
+        for row in rows:
+            if not isinstance(row, dict):
+                raise RunnerError("review read page has a malformed review row")
+            identity = row.get("id")
+            if not isinstance(identity, str) or not identity:
+                raise RunnerError("review read page row has no identity")
+        cursor = result.get("next_cursor")
+        if cursor is not None and not isinstance(cursor, str):
+            raise RunnerError("review read page cursor is not a string or null")
+        complete = result.get("complete")
+        if not isinstance(complete, bool):
+            raise RunnerError("review read page has no boolean complete field")
+        if complete and cursor is not None:
+            raise RunnerError("complete review page still carries a cursor")
+        if not complete and cursor is None:
+            raise RunnerError("nonterminal review page has no advancing cursor")
+        return rows, cursor, complete
+
+    def get_reviews(self, manifest_hash: str, run_id: str, tenant_id: str | None = None,
+                    *, limit: int = EVIDENCE_PAGE_SIZE) -> dict[str, Any]:
+        """Follow full-detail cursor pages to exhaustion and return saved-export evidence."""
+        if not isinstance(limit, int) or isinstance(limit, bool) or limit < 1 or limit > 500:
+            raise RunnerError("review page size must be between 1 and 500")
+        tags = sorted(["manifest:" + manifest_hash, "trial:" + run_id])
+        rows: list[dict[str, Any]] = []
+        pages: list[dict[str, Any]] = []
+        seen_ids: set[str] = set()
+        seen_cursors: set[str] = set()
+        cursor: str | None = None
+        while True:
+            if len(pages) >= EVIDENCE_MAX_PAGES:
+                raise RunnerError("review read exceeded the evidence page safety ceiling")
+            query: list[tuple[str, str]] = [("tag", tag) for tag in tags]
+            query += [("detail", "full"), ("limit", str(limit))]
+            if cursor is not None:
+                query.append(("cursor", cursor))
+            result = self._request("GET", "/v1/reviews?" + urllib.parse.urlencode(query))
+            page_rows, next_cursor, complete = self._review_page(result)
+            for row in page_rows:
+                identity = row["id"]
+                if identity in seen_ids:
+                    raise RunnerError(f"duplicate review identity across pages: {identity}")
+                seen_ids.add(identity)
+            rows.extend(page_rows)
+            pages.append({"cursor_in": cursor, "cursor_out": next_cursor, "complete": complete,
+                          "row_count": len(page_rows),
+                          "row_ids_sha256": _sha(_canonical([row["id"] for row in page_rows]))})
+            if len(rows) > EVIDENCE_MAX_ROWS:
+                raise RunnerError("review read exceeded the evidence row safety ceiling")
+            if complete:
+                break
+            if next_cursor is None or next_cursor == cursor or next_cursor in seen_cursors:
+                raise RunnerError("review read cursor did not advance (cycle or missing cursor)")
+            seen_cursors.add(next_cursor)
+            cursor = next_cursor
+        return {"schema_version": 1, "manifest_sha256": manifest_hash, "run_id": run_id,
+                "tenant_id": tenant_id, "filters": {"tags": tags}, "detail": "full", "limit": limit,
+                "pages": pages, "complete": True, "reviews": rows}
 
 
 def _load_ledger(path: pathlib.Path, manifest_hash: str, run_id: str, tenant_id: str) -> dict[str, Any]:
@@ -337,7 +398,7 @@ def run(manifest_path: pathlib.Path, ledger_path: pathlib.Path, runner: TrialRun
         return summary
 
     # Reconcile existing server records first; duplicate receipts carry their own canonical body.
-    records = runner.get_reviews(manifest_hash, run_id)
+    records = runner.get_reviews(manifest_hash, run_id, tenant_id)["reviews"]
     for case_id in manifest["run_order"]:
         for effort in EFFORTS:
             req = build_request(manifest, cases[case_id], effort, False, run_id)
@@ -381,11 +442,12 @@ def run(manifest_path: pathlib.Path, ledger_path: pathlib.Path, runner: TrialRun
                 entry["state"] = "complete" if resolved else "duplicate_unresolved"
             else:
                 entry["state"] = "awaiting_record" if receipt["status"] in VALID_COMPLETION else "finished_incomplete"
-                records = runner.get_reviews(manifest_hash, run_id)
+                records = runner.get_reviews(manifest_hash, run_id, tenant_id)["reviews"]
             _save_ledger(ledger_path, ledger)
 
     # Final reconciliation is authoritative; status receipts alone never fill an arm.
-    records = runner.get_reviews(manifest_hash, run_id)
+    evidence = runner.get_reviews(manifest_hash, run_id, tenant_id)
+    records = evidence["reviews"]
     arm = {}
     completed = {}
     for effort in EFFORTS:

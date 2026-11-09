@@ -11,12 +11,14 @@ import sys
 import tempfile
 import threading
 import unittest
+import urllib.parse
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 TOOL = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(TOOL))
 import cli
 import report
+import runner
 
 
 def git(repo, *args):
@@ -29,6 +31,7 @@ class RehearsalHandler(http.server.BaseHTTPRequestHandler):
     model_calls = 0
     tenant = "fixture-tenant"
     case_by_hash = {}
+    page_size = 3
 
     def log_message(self, *_args):
         pass
@@ -71,7 +74,16 @@ class RehearsalHandler(http.server.BaseHTTPRequestHandler):
         if self.path.split("?", 1)[0] == "/v1/whoami":
             self._send(200, {"tenant": type(self).tenant, "scope": "read_write", "expires_at": 0})
             return
-        self._send(200, {"reviews": type(self).records})
+        params = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+        cursor = params.get("cursor", [None])[0]
+        start = int(cursor) if cursor else 0
+        requested = int(params.get("limit", [str(type(self).page_size)])[0])
+        size = min(requested, type(self).page_size)
+        page = type(self).records[start:start + size]
+        end = start + len(page)
+        complete = end >= len(type(self).records)
+        self._send(200, {"reviews": page, "next_cursor": None if complete else str(end),
+                         "complete": complete})
 
 
 class Phase7Tests(unittest.TestCase):
@@ -103,6 +115,35 @@ class Phase7Tests(unittest.TestCase):
         self.assertTrue(result["read_scope_refused"])
         self.assertNotIn("fixture-write-only", raw)
         self.assertNotIn("fixture-read-only", raw)
+
+    def _serve(self):
+        server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), RehearsalHandler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        self.addCleanup(thread.join, 3)
+        return server
+
+    def test_fake_endpoint_pages_exact_multiple_and_empty_populations(self):
+        server = self._serve()
+        client = runner.TrialRunner(f"http://127.0.0.1:{server.server_port}",
+                                    lambda: "fixture-auth")
+        RehearsalHandler.records = []
+        empty = client.get_reviews("m" * 64, "run-pages", RehearsalHandler.tenant)
+        self.assertEqual(empty["reviews"], [])
+        self.assertEqual(len(empty["pages"]), 1)
+        self.assertTrue(empty["pages"][0]["complete"])
+        self.assertIsNone(empty["pages"][0]["cursor_out"])
+
+        RehearsalHandler.records = [{"id": f"row-{i}"} for i in range(9)]
+        export = client.get_reviews("m" * 64, "run-pages", RehearsalHandler.tenant)
+        self.assertEqual(len(export["reviews"]), 9)
+        self.assertEqual(len({row["id"] for row in export["reviews"]}), 9)
+        self.assertEqual(len(export["pages"]), 3)
+        self.assertTrue(export["pages"][-1]["complete"])
+        self.assertIsNone(export["pages"][-1]["cursor_out"])
+        self.assertTrue(all(not page["complete"] for page in export["pages"][:-1]))
 
     def _historical_repo(self):
         repo = self.root / "repo"

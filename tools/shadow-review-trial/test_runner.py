@@ -6,6 +6,7 @@ import pathlib
 import sys
 import tempfile
 import unittest
+import urllib.parse
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 runner = importlib.import_module("runner")
@@ -45,11 +46,14 @@ def rehash(body):
 
 
 class FakeREST:
-    def __init__(self, behavior=None, estimate=0.25, tenant="tenant-trial", scope="read_write"):
+    def __init__(self, behavior=None, estimate=0.25, tenant="tenant-trial", scope="read_write",
+                 page_size=None, get_handler=None):
         self.behavior = behavior or (lambda case, effort: ("ok", "claude-haiku-5-5"))
         self.estimate = estimate
         self.tenant = tenant
         self.scope = scope
+        self.page_size = page_size
+        self.get_handler = get_handler
         self.requests = []
         self.records = []
         self.case_ids = {}
@@ -57,9 +61,20 @@ class FakeREST:
         self.model_calls = 0
         self.new_calls = 0
         self.get_calls = 0
+        self.get_urls = []
 
     def bind(self, case_ids):
         self.case_ids = {runner._sha(cid.encode()): cid for cid in case_ids}
+
+    def _serve_reviews(self, url):
+        params = urllib.parse.parse_qs(urllib.parse.urlparse(url).query)
+        cursor = params.get("cursor", [None])[0]
+        start = int(cursor) if cursor else 0
+        size = self.page_size or len(self.records) or 1
+        page = self.records[start:start + size]
+        end = start + len(page)
+        complete = end >= len(self.records)
+        return {"reviews": page, "next_cursor": None if complete else str(end), "complete": complete}
 
     def request(self, method, url, headers, body, timeout):
         if headers.get("Authorization") != "Bearer fixture-auth":
@@ -70,7 +85,10 @@ class FakeREST:
                 return 200, json.dumps({"tenant": self.tenant, "scope": self.scope, "expires_at": 0}).encode()
             self.events.append("get")
             self.get_calls += 1
-            return 200, json.dumps({"reviews": self.records}).encode()
+            self.get_urls.append(url)
+            if self.get_handler is not None:
+                return self.get_handler(url, len(self.get_urls))
+            return 200, json.dumps(self._serve_reviews(url)).encode()
         payload = json.loads(body)
         self.requests.append(payload)
         tags = payload["tags"]
@@ -342,6 +360,125 @@ class RunnerTests(unittest.TestCase):
                             run_id="run-1", tenant_id="tenant-trial", execute=True)
         self.assertEqual(result["paired_completed"], 1)
         self.assertEqual(fake.model_calls, 3)
+
+    def _client(self, fake):
+        return runner.TrialRunner("http://fixture.invalid", lambda: "fixture-auth", fake)
+
+    def test_paged_read_consumes_over_500_records_once_with_export_evidence(self):
+        fake = FakeREST(page_size=100)
+        fake.records = [{"id": f"row-{i:04d}"} for i in range(1205)]
+        export = self._client(fake).get_reviews("m" * 64, "run-1", "tenant-trial")
+        self.assertEqual(len(export["reviews"]), 1205)
+        self.assertEqual(len({row["id"] for row in export["reviews"]}), 1205)
+        self.assertEqual(export["schema_version"], 1)
+        self.assertEqual(export["manifest_sha256"], "m" * 64)
+        self.assertEqual(export["run_id"], "run-1")
+        self.assertEqual(export["tenant_id"], "tenant-trial")
+        self.assertEqual(export["detail"], "full")
+        self.assertEqual(export["limit"], 500)
+        self.assertEqual(export["filters"], {"tags": ["manifest:" + "m" * 64, "trial:run-1"]})
+        self.assertTrue(export["complete"])
+        self.assertGreater(len(export["pages"]), 1)
+        self.assertIsNone(export["pages"][0]["cursor_in"])
+        self.assertEqual(sum(page["row_count"] for page in export["pages"]), 1205)
+        for index, page in enumerate(export["pages"]):
+            chunk = fake.records[index * 100:(index + 1) * 100]
+            self.assertEqual(page["row_ids_sha256"],
+                             runner._sha(runner._canonical([row["id"] for row in chunk])))
+            if index < len(export["pages"]) - 1:
+                self.assertFalse(page["complete"])
+                self.assertIsNotNone(page["cursor_out"])
+        self.assertTrue(export["pages"][-1]["complete"])
+        self.assertIsNone(export["pages"][-1]["cursor_out"])
+        for url in fake.get_urls:
+            params = urllib.parse.parse_qs(urllib.parse.urlparse(url).query)
+            self.assertEqual(params["detail"], ["full"])
+            self.assertEqual(params["limit"], ["500"])
+            self.assertEqual(params["tag"], ["manifest:" + "m" * 64, "trial:run-1"])
+        self.assertNotIn("cursor", urllib.parse.parse_qs(urllib.parse.urlparse(fake.get_urls[0]).query))
+        self.assertIn("cursor", urllib.parse.parse_qs(urllib.parse.urlparse(fake.get_urls[1]).query))
+
+    def test_exact_multiple_and_empty_populations_end_complete(self):
+        fake = FakeREST(page_size=50)
+        fake.records = [{"id": f"row-{i:04d}"} for i in range(150)]
+        export = self._client(fake).get_reviews("m" * 64, "run-1", "tenant-trial")
+        self.assertEqual(len(export["pages"]), 3)
+        self.assertEqual(len(export["reviews"]), 150)
+        self.assertTrue(export["complete"])
+        self.assertTrue(export["pages"][-1]["complete"])
+        self.assertIsNone(export["pages"][-1]["cursor_out"])
+
+        empty = FakeREST()
+        empty_export = self._client(empty).get_reviews("m" * 64, "run-1", "tenant-trial")
+        self.assertEqual(empty_export["reviews"], [])
+        self.assertEqual(len(empty_export["pages"]), 1)
+        self.assertTrue(empty_export["pages"][0]["complete"])
+        self.assertIsNone(empty_export["pages"][0]["cursor_out"])
+
+    def test_cycle_missing_cursor_and_missing_completion_fail(self):
+        def cycle(_url, _call):
+            return 200, json.dumps({"reviews": [], "next_cursor": "same", "complete": False}).encode()
+        with self.assertRaisesRegex(runner.RunnerError, "did not advance"):
+            self._client(FakeREST(get_handler=cycle)).get_reviews("m" * 64, "run-1")
+
+        def missing_cursor(_url, _call):
+            return 200, json.dumps({"reviews": [], "next_cursor": None, "complete": False}).encode()
+        with self.assertRaisesRegex(runner.RunnerError, "no advancing cursor"):
+            self._client(FakeREST(get_handler=missing_cursor)).get_reviews("m" * 64, "run-1")
+
+        def missing_complete(_url, _call):
+            return 200, json.dumps({"reviews": [{"id": "row-1"}], "next_cursor": None}).encode()
+        with self.assertRaisesRegex(runner.RunnerError, "boolean complete"):
+            self._client(FakeREST(get_handler=missing_complete)).get_reviews("m" * 64, "run-1")
+
+    def test_duplicate_row_identity_across_pages_fails(self):
+        def duplicate(url, _call):
+            if "cursor=c" in url:
+                return 200, json.dumps({"reviews": [{"id": "dup"}], "next_cursor": None,
+                                        "complete": True}).encode()
+            return 200, json.dumps({"reviews": [{"id": "dup"}], "next_cursor": "c",
+                                    "complete": False}).encode()
+        with self.assertRaisesRegex(runner.RunnerError, "duplicate review identity"):
+            self._client(FakeREST(get_handler=duplicate)).get_reviews("m" * 64, "run-1")
+
+    def test_http_json_and_row_errors_fail_the_read(self):
+        def http(_url, _call):
+            return 500, b'{"error":"fixture"}'
+        with self.assertRaisesRegex(runner.RunnerError, "HTTP 500"):
+            self._client(FakeREST(get_handler=http)).get_reviews("m" * 64, "run-1")
+
+        def bad_json(_url, _call):
+            return 200, b"not json"
+        with self.assertRaisesRegex(runner.RunnerError, "invalid JSON"):
+            self._client(FakeREST(get_handler=bad_json)).get_reviews("m" * 64, "run-1")
+
+        def bad_row(_url, _call):
+            return 200, json.dumps({"reviews": [42], "next_cursor": None, "complete": True}).encode()
+        with self.assertRaisesRegex(runner.RunnerError, "malformed review row"):
+            self._client(FakeREST(get_handler=bad_row)).get_reviews("m" * 64, "run-1")
+
+        def no_identity(_url, _call):
+            return 200, json.dumps({"reviews": [{"status": "ok"}], "next_cursor": None,
+                                    "complete": True}).encode()
+        with self.assertRaisesRegex(runner.RunnerError, "no identity"):
+            self._client(FakeREST(get_handler=no_identity)).get_reviews("m" * 64, "run-1")
+
+    def test_operator_safety_ceiling_never_reports_complete(self):
+        fake = FakeREST(page_size=1)
+        fake.records = [{"id": f"row-{i:04d}"} for i in range(10)]
+        original = runner.EVIDENCE_MAX_PAGES
+        runner.EVIDENCE_MAX_PAGES = 2
+        try:
+            with self.assertRaisesRegex(runner.RunnerError, "safety ceiling"):
+                self._client(fake).get_reviews("m" * 64, "run-1")
+        finally:
+            runner.EVIDENCE_MAX_PAGES = original
+
+    def test_legacy_bare_500_row_response_cannot_certify_completeness(self):
+        def legacy(_url, _call):
+            return 200, json.dumps({"reviews": [{"id": f"row-{i:04d}"} for i in range(500)]}).encode()
+        with self.assertRaisesRegex(runner.RunnerError, "boolean complete"):
+            self._client(FakeREST(get_handler=legacy)).get_reviews("m" * 64, "run-1")
 
 
 if __name__ == "__main__":
