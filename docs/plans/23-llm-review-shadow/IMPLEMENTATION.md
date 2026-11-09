@@ -33,7 +33,7 @@ Run: Codex execute, harness refine/build sub-runs; branch `feat/23-llm-review-sh
 - Built: registered `review_change` over the shared review orchestrator with the declared `read_write` scope, 150-second timeout, `project_dir`/`cwd`/`git`/`change` context order, no local actions, and `capture_unsupported` translation. Added fake-endpoint route coverage for uncommitted and range captures plus REST parity, detail behavior, explicit high effort and refusal paths. Only the owned MCP server files, report and this implementation record changed.
 - Checks: under `prlimit --as=8589934592`, `go test -p=3 ./internal/serve` passed (`9.311s`); `python3 -m unittest test_mcp_shim` passed all 21 tests (`6.431s`); `git diff --check` passed.
 - Departures and concerns: registration is conditional on review model configuration and a server timeout ceiling of at least 150 seconds, to preserve existing conformance fixtures and the tool timeout contract. REST replay of the same capture returns `skipped_duplicate`, not a byte-identical receipt; the same capture id is used and the duplicate names the MCP result. The report records no unfinished work or other known problems.
-- Feedback: brief delivered, Jev screening pass. Report feedback returned not delivered because `https://api.yakka.build` was unreachable; recorded here. Harness turn/final-context figures were unavailable.
+- Feedback: brief and report delivered, Jev screening pass. The worker's first report feedback call was unreachable; the runner's follow-up returned delivered. Harness turn/final-context figures were unavailable.
 
 ## Phase 4 — Review handler, single call, record and availability
 
