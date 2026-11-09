@@ -47,6 +47,16 @@ The entry point `tools/shadow-review-trial manifest` → local-history enumerati
 - Deviations/concerns: no contract departure or unfinished work was reported. The GET endpoint returns at most 500 records; the report flags `record_limit_may_truncate` at that boundary, and the caller must supply the complete filtered set for a complete denominator.
 - Feedback: brief and report delivered; Jev 1.13.0 screening pass.
 
+### 7-03-cli-smoke-rehearsal
+
+- Status: done with concerns; committed as `9bde2f9` (`Add shadow review trial CLI rehearsal`).
+- Brief: `briefs/7-03-cli-smoke-rehearsal.md`.
+- Report: `reports/7-03-cli-smoke-rehearsal.md`.
+- Built: added `run`, `report`, and fake-endpoint `smoke` CLI commands while retaining `manifest`; documented command and fixture semantics; added a three-case × three-effort fake REST rehearsal and read-scope refusal proof.
+- Checks: before implementation, the combined command failed to import `test_phase7.py` while the other 20 tests passed. After implementation, the same command passed all 21 tests; `git diff --check` passed. README required fields are present. The repository layout suite had 6/7 pass with the same existing unrelated Svelte import violation recorded in Phase 6.
+- Deviations/concerns: the rehearsal used a fixture-only adapter because Phase 6 stores the range tip in `capture.resolved_head`, while 7-01 expected it in `capture.head`; a fresh frozen manifest therefore failed at the runner boundary. Fresh fixer `7-04-runner-manifest-boundary.md` owns reconciliation; do not consider Phase 7 integration verified until it passes without that adapter.
+- Feedback: brief and report delivered; Jev 1.13.0 screening pass.
+
 ## Phase 5 — The MCP tool, shim registration and stage wiring
 
 ### 5-04-stage-wiring-docs
