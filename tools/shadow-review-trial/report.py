@@ -25,6 +25,8 @@ HISTORICAL = ("matched", "partial", "unmatched")
 NEW = ("matched", "partial", "disputed", "new-valid", "unadjudicated")
 CATEGORIES = set(HISTORICAL) | set(NEW)
 REVIEWER_MODEL = "claude-haiku-5-5"
+RETRY_EXPOSURE = 2  # mirrors runner.py: one bounded retry per started review
+UNKNOWN_STATES = ("started", "started_unknown")
 
 
 def _canonical_hash(value: Any) -> str:
@@ -195,6 +197,42 @@ def _validate_export(export: dict[str, Any], manifest: dict[str, Any]) -> None:
                     raise ValueError(f"invalid {field} in reviews[{index}].attempts[{a_index}]")
 
 
+def _finite_amount(value: Any, label: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value < 0:
+        raise ValueError(f"{label} must be a finite non-negative number")
+    return float(value)
+
+
+def _token_count(value: Any, label: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise ValueError(f"{label} must be a non-negative integer")
+    return value
+
+
+def _validate_receipt(receipt: Any, label: str) -> None:
+    """Reject malformed or impossible usage before it can reach cost totals."""
+    receipt = _mapping(receipt, label)
+    raw_attempts = receipt.get("attempts")
+    if raw_attempts is not None:
+        for index, raw in enumerate(_list(raw_attempts, label + ".attempts")):
+            attempt = _mapping(raw, f"{label}.attempts[{index}]")
+            if "cost_usd" in attempt:
+                _finite_amount(attempt["cost_usd"], f"{label}.attempts[{index}].cost_usd")
+            if "estimated_usd" in attempt:
+                _finite_amount(attempt["estimated_usd"], f"{label}.attempts[{index}].estimated_usd")
+            if "latency_ms" in attempt:
+                _finite_amount(attempt["latency_ms"], f"{label}.attempts[{index}].latency_ms")
+            for field in ("input_tokens", "output_tokens"):
+                if field in attempt:
+                    _token_count(attempt[field], f"{label}.attempts[{index}].{field}")
+    for field in ("cost_usd", "estimated_usd", "latency_ms"):
+        if field in receipt:
+            _finite_amount(receipt[field], f"{label}.{field}")
+    for field in ("input_tokens", "output_tokens"):
+        if field in receipt:
+            _token_count(receipt[field], f"{label}.{field}")
+
+
 def _validate_ledger(ledger: dict[str, Any], manifest: dict[str, Any], export: dict[str, Any]) -> None:
     _mapping(ledger, "run ledger")
     if ledger.get("schema_version") != 1:
@@ -206,12 +244,26 @@ def _validate_ledger(ledger: dict[str, Any], manifest: dict[str, Any], export: d
     if ledger.get("tenant_id") != export["tenant_id"]:
         raise ValueError("run ledger tenant_id does not match the review export")
     entries = _mapping(ledger.get("entries"), "run ledger entries")
+    case_ids = {case["case_id"] for case in manifest["cases"]}
     canonical_ids: set[str] = set()
     for key, raw in entries.items():
         entry = _mapping(raw, f"run ledger entry {key}")
-        _required_text(entry.get("case_id"), "run ledger entry case_id")
+        case_id = _required_text(entry.get("case_id"), "run ledger entry case_id")
+        if case_id not in case_ids:
+            raise ValueError(f"run ledger entry {key} references a case outside the frozen manifest")
         if entry.get("effort") not in EFFORTS:
             raise ValueError(f"run ledger entry {key} has an invalid effort")
+        attempts = entry.get("attempts", [])
+        if not isinstance(attempts, list):
+            raise ValueError(f"run ledger entry {key} attempts must be an array")
+        for index, raw_attempt in enumerate(attempts):
+            attempt = _mapping(raw_attempt, f"run ledger entry {key} attempt {index}")
+            if "receipt" in attempt:
+                _validate_receipt(attempt["receipt"], f"run ledger entry {key} attempt {index} receipt")
+        if "duplicate_receipt" in entry:
+            _validate_receipt(entry["duplicate_receipt"], f"run ledger entry {key} duplicate_receipt")
+        if "preflight_receipt" in entry:
+            _validate_receipt(entry["preflight_receipt"], f"run ledger entry {key} preflight_receipt")
         identity = entry.get("canonical_review_id")
         if identity is None:
             continue
@@ -220,6 +272,82 @@ def _validate_ledger(ledger: dict[str, Any], manifest: dict[str, Any], export: d
         if identity in canonical_ids:
             raise ValueError("run ledger references a canonical review id more than once")
         canonical_ids.add(identity)
+
+
+def _receipt_usage(receipt: dict[str, Any]) -> dict[str, Any]:
+    """Sum one run receipt's real usage; a missing amount stays unknown, never zero."""
+    raw_attempts = receipt.get("attempts")
+    items = [a for a in raw_attempts if isinstance(a, dict)] if isinstance(raw_attempts, list) and raw_attempts else []
+    usage: dict[str, Any] = {"cost_usd": None, "input_tokens": None, "output_tokens": None, "latencies": [],
+                             "missing": {"cost_usd": 0, "input_tokens": 0, "output_tokens": 0, "latency_ms": 0}}
+    scopes = items or [receipt]
+    for field in ("cost_usd", "input_tokens", "output_tokens"):
+        values = [scope[field] for scope in scopes if field in scope]
+        if values:
+            usage[field] = sum(values)
+            usage["missing"][field] = len(scopes) - len(values)
+        elif field in receipt:
+            usage[field] = receipt[field]
+        else:
+            usage["missing"][field] = max(1, len(scopes))
+    usage["latencies"] = [int(scope["latency_ms"]) for scope in scopes if "latency_ms" in scope]
+    usage["missing"]["latency_ms"] = len(scopes) - len(usage["latencies"])
+    return usage
+
+
+def _empty_spend() -> dict[str, Any]:
+    return {"cost_usd": 0.0, "input_tokens": 0, "output_tokens": 0, "latencies": [],
+            "missing": {"cost_usd": 0, "input_tokens": 0, "output_tokens": 0, "latency_ms": 0},
+            "unknown_entries": 0}
+
+
+def _add_usage(target: dict[str, Any], usage: dict[str, Any]) -> None:
+    for field in ("cost_usd", "input_tokens", "output_tokens"):
+        if usage[field] is not None:
+            target[field] += usage[field]
+    target["latencies"].extend(usage["latencies"])
+    for field, count in usage["missing"].items():
+        target["missing"][field] += count
+
+
+def _ledger_spend(ledger: dict[str, Any], case_ids: set[str]) -> dict[str, Any]:
+    """Actual spend from real run receipts only, plus explicitly-unknown started claims."""
+    total, per_effort = _empty_spend(), {effort: _empty_spend() for effort in EFFORTS}
+    unknown: list[str] = []
+    has_receipts = False
+    reservation, reservation_known, reservation_complete = 0.0, False, True
+    for key in sorted(ledger["entries"]):
+        entry = ledger["entries"][key]
+        if entry["case_id"] not in case_ids or entry["effort"] not in EFFORTS:
+            continue
+        effort = entry["effort"]
+        receipts = [attempt["receipt"] for attempt in entry.get("attempts", [])
+                    if isinstance(attempt, dict) and attempt.get("kind") == "run"
+                    and isinstance(attempt.get("receipt"), dict)]
+        duplicate = entry.get("duplicate_receipt")
+        if isinstance(duplicate, dict) and not any(_canonical_hash(r) == _canonical_hash(duplicate) for r in receipts):
+            receipts.append(duplicate)
+        if receipts:
+            has_receipts = True
+        for receipt in receipts:
+            usage = _receipt_usage(receipt)
+            _add_usage(total, usage)
+            _add_usage(per_effort[effort], usage)
+        if entry.get("state") in UNKNOWN_STATES and not receipts:
+            unknown.append(key)
+            per_effort[effort]["unknown_entries"] += 1
+            preflight = entry.get("preflight_receipt")
+            estimate = preflight.get("estimated_usd") if isinstance(preflight, dict) else None
+            if isinstance(estimate, (int, float)) and not isinstance(estimate, bool) \
+                    and math.isfinite(estimate) and estimate >= 0:
+                reservation += float(estimate) * RETRY_EXPOSURE
+                reservation_known = True
+            else:
+                reservation_complete = False
+    return {"has_receipts": has_receipts, "total": total, "by_effort": per_effort,
+            "unknown_entries": unknown,
+            "reservation_usd": round(reservation, 12) if reservation_known and reservation_complete else None,
+            "retry_exposure": RETRY_EXPOSURE}
 
 
 def validate_inputs(manifest: dict[str, Any], export: dict[str, Any], ledger: dict[str, Any],
@@ -354,6 +482,7 @@ def build_report(manifest: dict[str, Any], export: dict[str, Any], ledger: dict[
                                      or not math.isfinite(cost_cap_usd) or cost_cap_usd < 0):
         raise ValueError("cost_cap_usd must be a finite non-negative number or null")
     cases = {case["case_id"]: case for case in manifest["cases"]}
+    spend = _ledger_spend(ledger, set(cases))
     target = manifest.get("target_per_effort", 50)
     if not isinstance(target, int) or target < 1:
         raise ValueError("manifest.target_per_effort must be a positive integer")
@@ -478,6 +607,18 @@ def build_report(manifest: dict[str, Any], export: dict[str, Any], ledger: dict[
                                  "output_tokens": None if missing_case_usage["output_tokens"] else sum(a["output_tokens"] for a in case_attempts),
                                  "missing_usage_fields": missing_case_usage,
                                  "latency_ms": _distribution(sorted(int(a["latency_ms"]) for a in case_attempts if "latency_ms" in a))}
+        arm_spend = spend["by_effort"][effort]
+        if spend["has_receipts"]:
+            cost = arm_spend["cost_usd"]
+            input_tokens = arm_spend["input_tokens"]
+            output_tokens = arm_spend["output_tokens"]
+            missing_cost = arm_spend["missing"]["cost_usd"]
+            missing_input = arm_spend["missing"]["input_tokens"]
+            missing_output = arm_spend["missing"]["output_tokens"]
+            latencies = sorted(arm_spend["latencies"])
+            spend_unknown = arm_spend["unknown_entries"]
+        else:
+            spend_unknown = 0
         arm_reports[effort] = {"eligible": len(cases), "eligible_shortfall": max(0, target - len(cases)),
                                "completed": len(available), "completion_shortfall": max(0, target - len(available)),
                                "partial_records": sum(valid_by_arm[effort][case_id].get("status") == "ok_partial" for case_id in available),
@@ -487,7 +628,9 @@ def build_report(manifest: dict[str, Any], export: dict[str, Any], ledger: dict[
                                "partial_coverage_case_ids": sorted(case_id for case_id in available
                                                                     if valid_by_arm[effort][case_id].get("status") == "ok_partial"
                                                                     or valid_by_arm[effort][case_id].get("coverage", {}).get("state") == "partial"),
-                               "cost_usd": None if missing_cost else round(cost, 12),
+                               "cost_usd": None if missing_cost or spend_unknown else round(cost, 12),
+                               "known_cost_usd": round(cost, 12),
+                               "unknown_cost_entries": spend_unknown,
                                "input_tokens": None if missing_input else input_tokens,
                                "output_tokens": None if missing_output else output_tokens,
                                "missing_usage_fields": {"cost_usd": missing_cost, "input_tokens": missing_input, "output_tokens": missing_output},
@@ -561,6 +704,31 @@ def build_report(manifest: dict[str, Any], export: dict[str, Any], ledger: dict[
     missing_input_fields = sum("input_tokens" not in a for a in all_attempts)
     missing_output_fields = sum("output_tokens" not in a for a in all_attempts)
     missing_latency_fields = sum("latency_ms" not in a for a in all_attempts)
+    if spend["has_receipts"]:
+        receipt_total = spend["total"]
+        known_cost = round(receipt_total["cost_usd"], 12)
+        cost_unknown = bool(receipt_total["missing"]["cost_usd"] or spend["unknown_entries"])
+        usage_cost = None if cost_unknown else known_cost
+        usage_input = None if receipt_total["missing"]["input_tokens"] else receipt_total["input_tokens"]
+        usage_output = None if receipt_total["missing"]["output_tokens"] else receipt_total["output_tokens"]
+        usage_latency = _distribution(sorted(receipt_total["latencies"]))
+        missing_data = {"attempt_records": len(spend["unknown_entries"]),
+                        "cost_fields": receipt_total["missing"]["cost_usd"],
+                        "input_token_fields": receipt_total["missing"]["input_tokens"],
+                        "output_token_fields": receipt_total["missing"]["output_tokens"],
+                        "latency_fields": receipt_total["missing"]["latency_ms"]}
+        cost_basis = "ledger_run_receipts"
+    else:
+        known_cost = round(all_cost, 12)
+        cost_unknown = bool(missing_cost_fields or missing_attempt_records or spend["unknown_entries"])
+        usage_cost = None if cost_unknown else known_cost
+        usage_input = None if missing_input_fields else all_input_tokens
+        usage_output = None if missing_output_fields else all_output_tokens
+        usage_latency = _distribution(sorted(all_latencies))
+        missing_data = {"attempt_records": missing_attempt_records, "cost_fields": missing_cost_fields,
+                        "input_token_fields": missing_input_fields, "output_token_fields": missing_output_fields,
+                        "latency_fields": missing_latency_fields}
+        cost_basis = "canonical_record_attempts"
     statuses = {status: status_counts.get(status, 0) for status in STATUSES}
     statuses.update({k: v for k, v in sorted(status_counts.items()) if k not in statuses})
     pages = [{key: page[key] for key in ("cursor_in", "cursor_out", "complete", "row_count", "row_ids_sha256")}
@@ -588,15 +756,15 @@ def build_report(manifest: dict[str, Any], export: dict[str, Any], ledger: dict[
             "historical_findings": {"by_category": {k: category_counts.get(k, 0) for k in (*HISTORICAL, "unadjudicated")}, "items": historical_rows},
             "new_findings": {"by_category": {k: new_counts.get(k, 0) for k in NEW}, "items": finding_rows,
                              "low_sample_rate": adjudications["low_sample_rate"], "sampling_seed": manifest.get("seed", 0)},
-            "usage": {"cost_usd": None if missing_cost_fields or missing_attempt_records else round(all_cost, 12),
-                      "input_tokens": None if missing_input_fields else all_input_tokens,
-                      "output_tokens": None if missing_output_fields else all_output_tokens,
-                      "latency_ms": _distribution(sorted(all_latencies)),
-                      "missing_data": {"attempt_records": missing_attempt_records, "cost_fields": missing_cost_fields,
-                                       "input_token_fields": missing_input_fields, "output_token_fields": missing_output_fields,
-                                       "latency_fields": missing_latency_fields}, "cap_usd": cost_cap_usd,
-                      "cap_comparison": "unknown" if cost_cap_usd is None or missing_cost_fields or missing_attempt_records
-                      else ("within" if all_cost <= cost_cap_usd else "exceeded")}}
+            "usage": {"cost_usd": usage_cost, "known_cost_usd": known_cost,
+                      "cost_basis": cost_basis, "input_tokens": usage_input,
+                      "output_tokens": usage_output, "latency_ms": usage_latency,
+                      "missing_data": missing_data, "cap_usd": cost_cap_usd,
+                      "unknown_cost_entries": len(spend["unknown_entries"]),
+                      "unknown_reservation_usd": spend["reservation_usd"],
+                      "reservation_retry_exposure": spend["retry_exposure"],
+                      "cap_comparison": "unknown" if cost_cap_usd is None or cost_unknown
+                      else ("within" if known_cost <= cost_cap_usd else "exceeded")}}
 
 
 def _distribution(values: list[int]) -> dict[str, int | float | None]:
