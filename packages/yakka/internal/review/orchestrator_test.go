@@ -12,6 +12,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strings"
 	"sync"
@@ -130,7 +131,7 @@ func TestRunTreatsReceiptDetailAsSummary(t *testing.T) {
 	req := reviewRequest(true)
 	req.DryRun = true
 	req.Detail = "receipt"
-	out, err := Run(context.Background(), tenant, "tenant", req, RunConfig{})
+	out, err := Run(context.Background(), tenant, "tenant", req, availableConfig("http://127.0.0.1:1"))
 	if err != nil || out.Status != "dry_run" || out.Result != nil {
 		t.Fatalf("receipt detail=%+v err=%v", out, err)
 	}
@@ -1106,5 +1107,292 @@ func TestStoreFalseBypassesCacheAndPersistence(t *testing.T) {
 		if n := countReviewInputs(t, tenant); n != 0 {
 			t.Fatalf("review inputs=%d", n)
 		}
+	})
+}
+
+func usageRecord(t *testing.T, tenant *store.Tenant) map[string]any {
+	t.Helper()
+	rows, err := tenant.ReviewUsageRecords(context.Background())
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("usage rows=%d err=%v", len(rows), err)
+	}
+	var rec map[string]any
+	if err := json.Unmarshal(rows[0].Raw, &rec); err != nil {
+		t.Fatal(err)
+	}
+	return rec
+}
+
+func assertContentFreeUsage(t *testing.T, rec map[string]any) {
+	t.Helper()
+	for _, k := range []string{"usage_id", "configured_model", "returned_model", "configured_effort", "requested_effort", "effective_effort", "input_tokens", "output_tokens", "cost_usd", "pricing_table_id", "ts", "tags", "store", "status", "attempts", "reservation_outcome", "reservation_usd"} {
+		if _, ok := rec[k]; !ok {
+			t.Fatalf("usage fact missing %s: %v", k, rec)
+		}
+	}
+	for _, k := range []string{"repo_id", "plan", "session_id", "capture_id", "input_hash", "content_hash", "conversation_id", "prompt", "criteria", "findings", "result", "payload", "error", "reason", "manifest_hash", "case_id", "key"} {
+		if _, ok := rec[k]; ok {
+			t.Fatalf("usage fact contains forbidden %s: %v", k, rec)
+		}
+	}
+	if rec["store"] != false {
+		t.Fatalf("usage store=%v", rec["store"])
+	}
+	if id, _ := rec["usage_id"].(string); id == "" {
+		t.Fatalf("usage id empty: %v", rec)
+	}
+}
+
+func TestStoreFalseWritesContentFreeUsageFact(t *testing.T) {
+	tenant := reviewTenant(t)
+	ctx := context.Background()
+	hook, _ := json.Marshal(map[string]any{"id": "h#0", "type": "hook_event", "conversation_id": "c1", "harness": "opencode", "event": "session.idle", "ts": 1.0, "payload": map[string]any{"a": "b"}})
+	if res, err := ingest.Ingest(ctx, tenant, []json.RawMessage{hook}); err != nil || res[0].Status != ingest.Accepted {
+		t.Fatalf("hook seed = %+v, %v", res, err)
+	}
+	window := store.AnalyticsFilter{From: time.Unix(0, 0), To: time.Unix(100, 0)}
+	beforeSummary, err := tenant.Summary(ctx, window)
+	if err != nil {
+		t.Fatal(err)
+	}
+	beforeFacets, err := tenant.Facets(ctx, window)
+	if err != nil {
+		t.Fatal(err)
+	}
+	beforeConvs, err := tenant.Conversations(ctx, window)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
+		io.WriteString(w, providerReply([]any{}, []any{}, []any{}, "complete"))
+	}))
+	defer srv.Close()
+	cfg := availableConfig(srv.URL)
+	cfg.Now = func() time.Time { return time.Unix(1000, 0) }
+	off := false
+	req := reviewRequest(true)
+	req.Store = &off
+	req.Tags = []string{"beta", "alpha"}
+	out, err := Run(ctx, tenant, "tenant", req, cfg)
+	if err != nil || out.Status != "ok" || out.Result == nil || calls.Load() != 1 {
+		t.Fatalf("store=false = %+v, %v, calls=%d", out, err, calls.Load())
+	}
+	rec := usageRecord(t, tenant)
+	assertContentFreeUsage(t, rec)
+	if rec["status"] != "ok" || rec["reservation_outcome"] != "settled" {
+		t.Fatalf("usage status=%v outcome=%v", rec["status"], rec["reservation_outcome"])
+	}
+	if got := recordTags(t, rec); strings.Join(got, ",") != "alpha,beta" {
+		t.Fatalf("usage tags=%v", got)
+	}
+	if rec["ts"] != float64(1000) {
+		t.Fatalf("usage ts=%v", rec["ts"])
+	}
+	if cost, _ := rec["cost_usd"].(float64); cost <= 0 {
+		t.Fatalf("usage cost=%v", rec["cost_usd"])
+	}
+	if spend, err := tenant.ReviewSpend(ctx); err != nil || spend <= 0 {
+		t.Fatalf("review spend=%v err=%v", spend, err)
+	}
+	if rows, err := tenant.ReviewRecords(ctx, store.ReviewRecordFilter{Limit: 10}); err != nil || len(rows) != 0 {
+		t.Fatalf("review rows=%d err=%v", len(rows), err)
+	}
+	if n := countReviewInputs(t, tenant); n != 0 {
+		t.Fatalf("review inputs=%d", n)
+	}
+	afterSummary, err := tenant.Summary(ctx, window)
+	if err != nil || !reflect.DeepEqual(beforeSummary, afterSummary) {
+		t.Fatalf("summary changed: before=%+v after=%+v err=%v", beforeSummary, afterSummary, err)
+	}
+	afterFacets, err := tenant.Facets(ctx, window)
+	if err != nil || !reflect.DeepEqual(beforeFacets, afterFacets) {
+		t.Fatalf("facets changed: before=%+v after=%+v err=%v", beforeFacets, afterFacets, err)
+	}
+	afterConvs, err := tenant.Conversations(ctx, window)
+	if err != nil || !reflect.DeepEqual(beforeConvs, afterConvs) {
+		t.Fatalf("conversations changed: before=%+v after=%+v err=%v", beforeConvs, afterConvs, err)
+	}
+}
+
+func TestStoreFalseUsageForProviderErrorAndTimeout(t *testing.T) {
+	t.Run("provider error", func(t *testing.T) {
+		tenant := reviewTenant(t)
+		var calls atomic.Int32
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			calls.Add(1)
+			w.WriteHeader(http.StatusTooManyRequests)
+		}))
+		defer srv.Close()
+		cfg := availableConfig(srv.URL)
+		off := false
+		req := reviewRequest(true)
+		req.Store = &off
+		out, err := Run(context.Background(), tenant, "tenant", req, cfg)
+		if err != nil || out.Status != "api_error" || calls.Load() != 2 {
+			t.Fatalf("provider error = %+v, %v, calls=%d", out, err, calls.Load())
+		}
+		rec := usageRecord(t, tenant)
+		assertContentFreeUsage(t, rec)
+		if rec["status"] != "api_error" || rec["reservation_outcome"] != "conservative" {
+			t.Fatalf("usage status=%v outcome=%v", rec["status"], rec["reservation_outcome"])
+		}
+		if charge, _ := rec["reservation_usd"].(float64); charge <= 0 {
+			t.Fatalf("conservative charge=%v", rec["reservation_usd"])
+		}
+		if reservationsClaimCount(cfg.Reservations) != 0 {
+			t.Fatal("store=false created a durable claim")
+		}
+		if rows, err := tenant.ReviewRecords(context.Background(), store.ReviewRecordFilter{Limit: 10}); err != nil || len(rows) != 0 {
+			t.Fatalf("review rows=%d err=%v", len(rows), err)
+		}
+	})
+
+	t.Run("timeout", func(t *testing.T) {
+		tenant := reviewTenant(t)
+		srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+			time.Sleep(60 * time.Millisecond)
+		}))
+		defer srv.Close()
+		cfg := availableConfig(srv.URL)
+		cfg.AttemptTimeout = 5 * time.Millisecond
+		cfg.Reservations = NewReservations(.25, 2)
+		off := false
+		req := reviewRequest(true)
+		req.Store = &off
+		out, err := Run(context.Background(), tenant, "tenant", req, cfg)
+		if err != nil || out.Status != "timeout" {
+			t.Fatalf("timeout = %+v, %v", out, err)
+		}
+		rec := usageRecord(t, tenant)
+		assertContentFreeUsage(t, rec)
+		if rec["status"] != "timeout" || rec["reservation_outcome"] != "conservative" {
+			t.Fatalf("usage status=%v outcome=%v", rec["status"], rec["reservation_outcome"])
+		}
+		if err := cfg.Reservations.begin("after-timeout", "later", "tenant", .04); !errors.Is(err, ErrBudget) {
+			t.Fatalf("timeout reservation released: %v", err)
+		}
+		if reservationsClaimCount(cfg.Reservations) != 0 {
+			t.Fatal("store=false created a durable claim")
+		}
+		if rows, err := tenant.ReviewRecords(context.Background(), store.ReviewRecordFilter{Limit: 10}); err != nil || len(rows) != 0 {
+			t.Fatalf("review rows=%d err=%v", len(rows), err)
+		}
+	})
+}
+
+func TestDryRunValidatesReadinessWithoutEffects(t *testing.T) {
+	ctx := context.Background()
+	counts := func(t *testing.T, tenant *store.Tenant, cfg RunConfig) (int, int, int, int) {
+		t.Helper()
+		usage, err := tenant.ReviewUsageRecords(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		reviews, err := tenant.ReviewRecords(ctx, store.ReviewRecordFilter{Limit: 10})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return len(usage), len(reviews), countReviewInputs(t, tenant), reservationsClaimCount(cfg.Reservations)
+	}
+	assertUnchanged := func(t *testing.T, tenant *store.Tenant, cfg RunConfig, want [4]int) {
+		t.Helper()
+		u, r, i, c := counts(t, tenant, cfg)
+		if [4]int{u, r, i, c} != want {
+			t.Fatalf("effects changed: got usage=%d reviews=%d inputs=%d claims=%d want %v", u, r, i, c, want)
+		}
+	}
+
+	for _, storeFalse := range []bool{false, true} {
+		name := "store=true"
+		if storeFalse {
+			name = "store=false"
+		}
+		t.Run(name, func(t *testing.T) {
+			tenant := reviewTenant(t)
+			var calls atomic.Int32
+			srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { calls.Add(1) }))
+			defer srv.Close()
+			cfg := availableConfig(srv.URL)
+			before := [4]int{}
+			if u, r, i, c := counts(t, tenant, cfg); [4]int{u, r, i, c} != before {
+				t.Fatalf("unexpected seeded effects: %v", [4]int{u, r, i, c})
+			}
+			req := reviewRequest(true)
+			req.DryRun = true
+			req.Detail = "full"
+			off := storeFalse
+			req.Store = &off
+			out, err := Run(ctx, tenant, "tenant", req, cfg)
+			if err != nil || out.Status != "dry_run" || out.EstimatedUSD <= 0 || out.Result != nil {
+				t.Fatalf("dry run = %+v, %v", out, err)
+			}
+			if calls.Load() != 0 {
+				t.Fatalf("dry run provider calls=%d", calls.Load())
+			}
+			assertUnchanged(t, tenant, cfg, before)
+		})
+	}
+
+	t.Run("bad allowlist refuses", func(t *testing.T) {
+		tenant := reviewTenant(t)
+		var calls atomic.Int32
+		srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { calls.Add(1) }))
+		defer srv.Close()
+		cfg := availableConfig(srv.URL)
+		cfg.Availability.Repositories = map[string]bool{}
+		req := reviewRequest(true)
+		req.DryRun = true
+		out, err := Run(ctx, tenant, "tenant", req, cfg)
+		if err != nil || out.Status != "unavailable" || out.Reason != "YAKKA_REVIEW_REPOS" {
+			t.Fatalf("bad allowlist = %+v, %v", out, err)
+		}
+		if calls.Load() != 0 {
+			t.Fatalf("provider calls=%d", calls.Load())
+		}
+		assertUnchanged(t, tenant, cfg, [4]int{})
+	})
+
+	t.Run("bad effort and tag refuse", func(t *testing.T) {
+		for _, tc := range []struct {
+			name   string
+			mutate func(*Request)
+		}{
+			{"effort", func(r *Request) { r.Effort = "min" }},
+			{"tag", func(r *Request) { r.Tags = []string{"a b"} }},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				tenant := reviewTenant(t)
+				cfg := availableConfig("http://127.0.0.1:1")
+				req := reviewRequest(true)
+				req.DryRun = true
+				tc.mutate(&req)
+				if _, err := Run(ctx, tenant, "tenant", req, cfg); err == nil {
+					t.Fatal("invalid dry run argument accepted")
+				}
+				assertUnchanged(t, tenant, cfg, [4]int{})
+			})
+		}
+	})
+
+	t.Run("bad disclosure refuses", func(t *testing.T) {
+		tenant := reviewTenant(t)
+		var calls atomic.Int32
+		srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { calls.Add(1) }))
+		defer srv.Close()
+		cfg := availableConfig(srv.URL)
+		req := reviewRequest(true)
+		req.DryRun = true
+		req.Capture = rangeCapture(fileDiff("pkg/a.go", "AKIA1234567890ABCDEF"), true)
+		out, err := Run(ctx, tenant, "tenant", req, cfg)
+		if err != nil || out.Status != "refused_disclosure" {
+			t.Fatalf("bad disclosure = %+v, %v", out, err)
+		}
+		if calls.Load() != 0 {
+			t.Fatalf("provider calls=%d", calls.Load())
+		}
+		assertUnchanged(t, tenant, cfg, [4]int{})
 	})
 }

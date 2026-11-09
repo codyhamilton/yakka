@@ -285,7 +285,13 @@ func Run(ctx context.Context, tenant *store.Tenant, tenantID string, req Request
 		return persistRefusal(ctx, tenant, tenantID, req, repo, "refused_criteria", ce.Code, resolved.Record, packet, "", cfg, controls)
 	}
 	if req.DryRun {
-		est, _ := store.ReservationCost(cfg.Availability.Model, maxReviewInputTokens, maxReviewOutputTokens, true)
+		est, ok := store.ReservationCost(cfg.Availability.Model, maxReviewInputTokens, maxReviewOutputTokens, true)
+		if err := CheckAvailability(cfg.Availability, tenantID, repo, controls.effective); err != nil {
+			return Receipt{Status: "unavailable", Reason: safeReason(err), CaptureID: packet.CaptureID, Coverage: packet.Coverage, Manifest: packet.Manifest}, nil
+		}
+		if !ok || est < 0 {
+			return Receipt{Status: "unavailable", Reason: "priced model required", CaptureID: packet.CaptureID, Coverage: packet.Coverage, Manifest: packet.Manifest}, nil
+		}
 		return Receipt{Status: "dry_run", CaptureID: packet.CaptureID, Coverage: packet.Coverage, Manifest: packet.Manifest, EstimatedUSD: est}, nil
 	}
 
@@ -877,6 +883,11 @@ func persistRecord(ctx context.Context, t *store.Tenant, tenant string, r Reques
 		out.Result = &result
 	}
 	if !write {
+		if !ctl.store && len(attempts) > 0 {
+			if err := persistReviewUsage(ctx, t, status, result, attempts, cfg, ctl); err != nil {
+				return Receipt{}, err
+			}
+		}
 		return out, nil
 	}
 	out.ID = id
@@ -935,4 +946,56 @@ func persistRecord(ctx context.Context, t *store.Tenant, tenant string, r Reques
 		return Receipt{}, fmt.Errorf("review record rejected: %s", facts[0].Reason)
 	}
 	return out, nil
+}
+
+// persistReviewUsage writes one content-free review_usage fact for a store=false call that
+// reached the provider. It carries no repository, plan, session, capture, prompt, criteria,
+// finding, error-body or content-derived hash field. charge is the settled actual cost on
+// success and the conservative reservation for an error or unknown outcome.
+func persistReviewUsage(ctx context.Context, t *store.Tenant, status string, result Result, attempts []Attempt, cfg RunConfig, ctl callControls) error {
+	var charge float64
+	for _, a := range attempts {
+		charge += a.CostUSD
+	}
+	outcome := "conservative"
+	if status == "ok" || status == "ok_partial" {
+		outcome = "settled"
+	}
+	tags := ctl.tags
+	if tags == nil {
+		tags = []string{}
+	}
+	now := time.Now()
+	if cfg.Now != nil {
+		now = cfg.Now()
+	}
+	rec := map[string]any{
+		"type":                "review_usage",
+		"usage_id":            makeID(),
+		"configured_model":    cfg.Availability.Model,
+		"returned_model":      result.Model,
+		"configured_effort":   ctl.configured,
+		"requested_effort":    ctl.requested,
+		"effective_effort":    ctl.effective,
+		"input_tokens":        result.InputTokens,
+		"output_tokens":       result.OutputTokens,
+		"cost_usd":            charge,
+		"pricing_table_id":    store.PricingTableID(),
+		"ts":                  float64(now.Unix()),
+		"tags":                tags,
+		"store":               false,
+		"status":              status,
+		"attempts":            attempts,
+		"reservation_outcome": outcome,
+		"reservation_usd":     charge,
+	}
+	b, _ := json.Marshal(rec)
+	facts, err := ingest.IngestReviewUsage(ctx, t, []json.RawMessage{json.RawMessage(b)})
+	if err != nil {
+		return errors.New("review usage persistence failed")
+	}
+	if len(facts) != 1 || facts[0].Status != ingest.Accepted {
+		return errors.New("review usage rejected")
+	}
+	return nil
 }
