@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/codyhamilton/yakka/packages/yakka/internal/keys"
 	"github.com/codyhamilton/yakka/packages/yakka/internal/store"
@@ -118,5 +119,59 @@ func TestPrecheckPaths(t *testing.T) {
 	r := Precheck(obj)
 	if !strings.Contains(r, "payload.l[1] line 1") {
 		t.Fatal(r)
+	}
+}
+
+func TestReviewRunAcceptanceValidationAndIdempotency(t *testing.T) {
+	tn := open(t)
+	review := map[string]any{"id": "r#0", "type": "review_run", "conversation_id": "review:abc", "repo_id": "repo",
+		"kind": "phase", "plan": "23-llm-review-shadow", "phase": 4, "capture_id": "abc", "status": "unavailable",
+		"effective_effort": "high", "review_profile": "shadow", "ts": 10}
+	good := marshal(t, review)
+	first, err := Ingest(context.Background(), tn, good)
+	if err != nil || first[0].Status != Accepted {
+		t.Fatalf("first ingest = %+v, %v", first, err)
+	}
+	second, err := Ingest(context.Background(), tn, good)
+	if err != nil || second[0].Status != Duplicate {
+		t.Fatalf("duplicate ingest = %+v, %v", second, err)
+	}
+	for name, mutate := range map[string]func(map[string]any){
+		"repo":    func(m map[string]any) { delete(m, "repo_id") },
+		"kind":    func(m map[string]any) { m["kind"] = "other" },
+		"capture": func(m map[string]any) { delete(m, "capture_id") },
+		"status":  func(m map[string]any) { m["status"] = "surprise" },
+	} {
+		bad := map[string]any{}
+		for k, v := range review {
+			bad[k] = v
+		}
+		bad["id"] = "bad-" + name
+		mutate(bad)
+		got, err := Ingest(context.Background(), tn, marshal(t, bad))
+		if err != nil || got[0].Status != Rejected || !strings.HasPrefix(got[0].Reason, "invalid:") {
+			t.Fatalf("%s invalid review = %+v, %v", name, got, err)
+		}
+	}
+	secret := map[string]any{}
+	for k, v := range review {
+		secret[k] = v
+	}
+	secret["id"], secret["attempts"] = "secret", []any{map[string]any{"error": "key " + secretText()}}
+	got, err := Ingest(context.Background(), tn, marshal(t, secret))
+	if err != nil || got[0].Status != Rejected || !strings.HasPrefix(got[0].Reason, "precheck:") {
+		t.Fatalf("secret review = %+v, %v", got, err)
+	}
+	rows, err := tn.ReviewRecords(context.Background(), store.ReviewRecordFilter{})
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("stored review records = %d, %v", len(rows), err)
+	}
+	summary, err := tn.Summary(context.Background(), store.AnalyticsFilter{From: time.Unix(0, 0), To: time.Unix(20, 0)})
+	if err != nil || summary.Conversations != 0 || summary.HookEvents != 0 || summary.ArtifactVersions != 0 {
+		t.Fatalf("review_run altered summary: %+v, %v", summary, err)
+	}
+	facets, err := tn.Facets(context.Background(), store.AnalyticsFilter{From: time.Unix(0, 0), To: time.Unix(20, 0)})
+	if err != nil || len(facets.Repos)+len(facets.Harnesses)+len(facets.Kinds)+len(facets.Plans)+len(facets.Events) != 0 {
+		t.Fatalf("review_run altered facets: %+v, %v", facets, err)
 	}
 }
