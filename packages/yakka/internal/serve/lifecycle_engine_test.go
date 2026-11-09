@@ -269,6 +269,7 @@ func TestDeleteTenantErasesEverythingAndRefusesLazyAdmission(t *testing.T) {
 	if _, ok := s.registry.TenantLifecycle(a); ok {
 		t.Fatal("deleted tenant still has lifecycle metadata")
 	}
+	assertNoTenantGate(t, s, a)
 	if s.grants.tenantResidue(a) || s.reviewReservations.TenantResidue(a) {
 		t.Fatal("deleted tenant has grant/claim residue")
 	}
@@ -389,6 +390,7 @@ func TestLifecycleDeleteFaultResume(t *testing.T) {
 	if _, ok := s2.registry.TenantLifecycle(a); ok {
 		t.Fatal("resume left lifecycle metadata")
 	}
+	assertNoTenantGate(t, s2, a)
 	if _, err := os.Stat(filepath.Join(dir, a)); !os.IsNotExist(err) {
 		t.Fatalf("resume left the directory: %v", err)
 	}

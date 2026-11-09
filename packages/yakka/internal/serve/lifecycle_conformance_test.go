@@ -15,6 +15,17 @@ import (
 	"github.com/codyhamilton/yakka/packages/yakka/internal/store"
 )
 
+// assertNoTenantGate proves a deleted id has no in-memory admission-gate entry.
+func assertNoTenantGate(t *testing.T, s *Server, tenant string) {
+	t.Helper()
+	s.mu.Lock()
+	_, ok := s.gates[tenant]
+	s.mu.Unlock()
+	if ok {
+		t.Fatalf("deleted tenant %q still has an admission gate", tenant)
+	}
+}
+
 func conformanceLifecycleRequest(origin string, sess []*http.Cookie, method, tenant, action string) *http.Request {
 	path := "/v1/tenants/" + tenant
 	if action == "reset" {
@@ -167,6 +178,7 @@ func TestLifecycleConformanceResetDeleteThroughHTTP(t *testing.T) {
 	if _, ok := s.registry.TenantLifecycle(tg.tenant); ok {
 		t.Fatal("deleted tenant still has lifecycle metadata")
 	}
+	assertNoTenantGate(t, s, tg.tenant)
 	if _, err := os.Stat(filepath.Join(dir, tg.tenant)); !os.IsNotExist(err) {
 		t.Fatalf("delete left the directory: %v", err)
 	}

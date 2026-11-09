@@ -75,6 +75,16 @@ func (s *Server) tenantGate(name string) *sync.RWMutex {
 	return gate
 }
 
+// evictTenantGate drops the per-tenant admission gate after a completed delete.
+// The caller holds the gate's write lock, so no admitted work can still be using
+// it. A later request creates a fresh gate and is refused by the registry
+// unregistered check before any storage is opened.
+func (s *Server) evictTenantGate(name string) {
+	s.mu.Lock()
+	delete(s.gates, name)
+	s.mu.Unlock()
+}
+
 // beginTenantUse starts request work that can reach tenant storage. It holds the
 // tenant's read gate until release is called and refuses a tenant that is
 // unregistered (deleted) or mid-cleanup. TryRLock makes admission during a
@@ -267,6 +277,11 @@ func (s *Server) executeTenantLifecycle(ctx context.Context, tenant, op string) 
 		if _, ok := s.registry.TenantLifecycle(tenant); ok {
 			return incomplete(errors.New("deleted tenant still has a lifecycle record"))
 		}
+		// The id is now unregistered, so a fresh gate created by a racing
+		// post-delete request will fail the registry check before opening
+		// storage. Evicting while the write lock is held keeps the gate
+		// meaningful for any request that already reached it.
+		s.evictTenantGate(tenant)
 	}
 	return nil
 }
