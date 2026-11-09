@@ -13,10 +13,12 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import re
 from collections import Counter, defaultdict
 from typing import Any
 
 EFFORTS = ("high", "xhigh", "max")
+RUN_ID = re.compile(r"[A-Za-z0-9_-]{1,32}")
 STATUSES = ("ok", "ok_partial", "timeout", "api_error", "invalid_output", "unavailable",
             "refused_capture", "refused_disclosure", "refused_criteria", "skipped_budget", "skipped_duplicate")
 HISTORICAL = ("matched", "partial", "unmatched")
@@ -27,6 +29,10 @@ REVIEWER_MODEL = "claude-haiku-5-5"
 
 def _canonical_hash(value: Any) -> str:
     return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()
+
+
+def _case_tag(case_id: str) -> str:
+    return "case:" + hashlib.sha256(case_id.encode("utf-8")).hexdigest()
 
 
 def _mapping(value: Any, label: str) -> dict[str, Any]:
@@ -47,9 +53,7 @@ def _required_text(value: Any, label: str) -> str:
     return value
 
 
-def validate_inputs(manifest: dict[str, Any], reviews: list[dict[str, Any]],
-                    comparator_evidence: dict[str, Any], adjudications: dict[str, Any]) -> None:
-    """Validate frozen identity and human decisions before calculating anything."""
+def _validate_manifest(manifest: dict[str, Any]) -> None:
     _mapping(manifest, "manifest")
     if manifest.get("schema_version") != 1:
         raise ValueError("unsupported manifest schema_version")
@@ -58,6 +62,18 @@ def validate_inputs(manifest: dict[str, Any], reviews: list[dict[str, Any]],
     unhashed.pop("manifest_sha256", None)
     if not isinstance(digest, str) or _canonical_hash(unhashed) != digest:
         raise ValueError("manifest_sha256 does not match frozen manifest content")
+    history = manifest.get("history")
+    if not isinstance(history, dict):
+        raise ValueError("manifest has no certified full-history evidence")
+    if history.get("shallow") is not False or history.get("object_complete") is not True:
+        raise ValueError("manifest history is not certified complete")
+    if not history.get("repository") or not history.get("tip_sha"):
+        raise ValueError("manifest history has no verified repository or tip")
+    verified = history.get("verified_count")
+    enumerated = history.get("enumerated_commits")
+    if isinstance(verified, bool) or isinstance(enumerated, bool) or not isinstance(verified, int) \
+            or not isinstance(enumerated, int) or verified != enumerated:
+        raise ValueError("manifest history commit counts are not certified")
     cases = _list(manifest.get("cases"), "manifest.cases")
     case_ids: set[str] = set()
     for raw in cases:
@@ -70,7 +86,101 @@ def validate_inputs(manifest: dict[str, Any], reviews: list[dict[str, Any]],
             raise ValueError(f"manifest.cases contains ineligible case: {case_id}")
         if case.get("stratum") not in ("phase", "pr", "unaccompanied"):
             raise ValueError(f"invalid stratum for case {case_id}")
-    for index, raw in enumerate(_list(reviews, "reviews")):
+
+
+def _validate_export(export: dict[str, Any], manifest: dict[str, Any]) -> None:
+    """Refuse anything that is not a complete, certified 3-03 saved export."""
+    _mapping(export, "review export")
+    if export.get("schema_version") != 1:
+        raise ValueError("review export is not a certified saved export (missing schema_version 1)")
+    manifest_hash = manifest["manifest_sha256"]
+    if export.get("manifest_sha256") != manifest_hash:
+        raise ValueError("review export manifest_sha256 does not match the frozen manifest")
+    run_id = export.get("run_id")
+    if not isinstance(run_id, str) or not RUN_ID.fullmatch(run_id):
+        raise ValueError("review export run_id is missing or invalid")
+    tenant_id = export.get("tenant_id")
+    if not isinstance(tenant_id, str) or not tenant_id:
+        raise ValueError("review export tenant_id is missing")
+    if export.get("detail") != "full":
+        raise ValueError("review export detail must be full")
+    filters = _mapping(export.get("filters"), "review export filters")
+    tags = _list(filters.get("tags"), "review export filters.tags")
+    if not all(isinstance(tag, str) and tag for tag in tags):
+        raise ValueError("review export filters.tags must be non-empty strings")
+    if not {"manifest:" + manifest_hash, "trial:" + run_id}.issubset(set(tags)):
+        raise ValueError("review export filters do not carry the frozen trial tags")
+    limit = export.get("limit")
+    if isinstance(limit, bool) or not isinstance(limit, int) or limit < 1 or limit > 500:
+        raise ValueError("review export limit must be a page size between 1 and 500")
+    if export.get("error") or export.get("truncated"):
+        raise ValueError("review export reports an error or truncation")
+    if export.get("complete") is not True:
+        raise ValueError("review export is not complete")
+    pages = _list(export.get("pages"), "review export pages")
+    if not pages:
+        raise ValueError("review export has no page evidence")
+    rows = _list(export.get("reviews"), "review export reviews")
+    seen_ids: set[str] = set()
+    seen_cursors: set[str] = set()
+    offset = 0
+    previous_cursor = None
+    for index, raw in enumerate(pages):
+        page = _mapping(raw, f"review export pages[{index}]")
+        cursor_in, cursor_out = page.get("cursor_in"), page.get("cursor_out")
+        complete, row_count, digest = page.get("complete"), page.get("row_count"), page.get("row_ids_sha256")
+        if cursor_in is not None and not isinstance(cursor_in, str):
+            raise ValueError("review export page cursor_in is not a string or null")
+        if cursor_out is not None and not isinstance(cursor_out, str):
+            raise ValueError("review export page cursor_out is not a string or null")
+        if not isinstance(complete, bool):
+            raise ValueError("review export page is missing completion metadata")
+        if isinstance(row_count, bool) or not isinstance(row_count, int) or row_count < 0:
+            raise ValueError("review export page row_count is invalid")
+        if not isinstance(digest, str) or not digest:
+            raise ValueError("review export page row-id digest is missing")
+        if page.get("error") or page.get("truncated") or page.get("status") in ("error", "truncated"):
+            raise ValueError("review export contains an error or truncated page")
+        if index == 0:
+            if cursor_in is not None:
+                raise ValueError("review export first page has a cursor_in")
+        elif cursor_in != previous_cursor:
+            raise ValueError("review export page cursors are not continuous")
+        if complete:
+            if index != len(pages) - 1:
+                raise ValueError("review export has a page after the terminal page")
+            if cursor_out is not None:
+                raise ValueError("terminal review export page still carries a cursor")
+        else:
+            if index == len(pages) - 1:
+                raise ValueError("last review export page is not terminal")
+            if not isinstance(cursor_out, str) or not cursor_out:
+                raise ValueError("nonterminal review export page has no advancing cursor")
+            if cursor_out == cursor_in or cursor_out in seen_cursors:
+                raise ValueError("review export cursor does not progress (cycle)")
+            seen_cursors.add(cursor_out)
+        slice_rows = rows[offset:offset + row_count]
+        if len(slice_rows) != row_count:
+            raise ValueError("review export page row_count does not match the reviews array")
+        ids: list[str] = []
+        for row in slice_rows:
+            _mapping(row, "review export row")
+            identity = row.get("id")
+            if not isinstance(identity, str) or not identity:
+                raise ValueError("review export has a malformed or unidentified row")
+            if identity in seen_ids:
+                raise ValueError(f"duplicate review identity in export: {identity}")
+            seen_ids.add(identity)
+            ids.append(identity)
+        if _canonical_hash(ids) != digest:
+            raise ValueError("review export page row-id digest does not match its rows")
+        offset += row_count
+        previous_cursor = cursor_out
+    if offset != len(rows):
+        raise ValueError("review export page counts do not cover all reviews")
+    if pages[-1].get("complete") is not True:
+        raise ValueError("review export terminal page is not complete")
+    for index, raw in enumerate(rows):
         review = _mapping(raw, f"reviews[{index}]")
         if "attempts" in review and not isinstance(review["attempts"], list):
             raise ValueError(f"reviews[{index}].attempts must be an array")
@@ -83,6 +193,41 @@ def validate_inputs(manifest: dict[str, Any], reviews: list[dict[str, Any]],
             for field in ("input_tokens", "output_tokens"):
                 if field in attempt and (isinstance(attempt[field], bool) or not isinstance(attempt[field], int) or attempt[field] < 0):
                     raise ValueError(f"invalid {field} in reviews[{index}].attempts[{a_index}]")
+
+
+def _validate_ledger(ledger: dict[str, Any], manifest: dict[str, Any], export: dict[str, Any]) -> None:
+    _mapping(ledger, "run ledger")
+    if ledger.get("schema_version") != 1:
+        raise ValueError("unsupported run ledger schema_version")
+    if ledger.get("manifest_hash") != manifest["manifest_sha256"]:
+        raise ValueError("run ledger manifest_hash does not match the frozen manifest")
+    if ledger.get("run_id") != export["run_id"]:
+        raise ValueError("run ledger run_id does not match the review export")
+    if ledger.get("tenant_id") != export["tenant_id"]:
+        raise ValueError("run ledger tenant_id does not match the review export")
+    entries = _mapping(ledger.get("entries"), "run ledger entries")
+    canonical_ids: set[str] = set()
+    for key, raw in entries.items():
+        entry = _mapping(raw, f"run ledger entry {key}")
+        _required_text(entry.get("case_id"), "run ledger entry case_id")
+        if entry.get("effort") not in EFFORTS:
+            raise ValueError(f"run ledger entry {key} has an invalid effort")
+        identity = entry.get("canonical_review_id")
+        if identity is None:
+            continue
+        if not isinstance(identity, str) or not identity:
+            raise ValueError(f"run ledger entry {key} has an invalid canonical review id")
+        if identity in canonical_ids:
+            raise ValueError("run ledger references a canonical review id more than once")
+        canonical_ids.add(identity)
+
+
+def validate_inputs(manifest: dict[str, Any], export: dict[str, Any], ledger: dict[str, Any],
+                    comparator_evidence: dict[str, Any], adjudications: dict[str, Any]) -> None:
+    """Validate frozen identity, export provenance and human decisions before calculating."""
+    _validate_manifest(manifest)
+    _validate_export(export, manifest)
+    _validate_ledger(ledger, manifest, export)
     _mapping(comparator_evidence, "comparator_evidence")
     adjudications = _mapping(adjudications, "adjudications")
     if adjudications.get("version") != 1:
@@ -200,11 +345,11 @@ def _models(record: dict[str, Any]) -> list[str]:
     return models or ["unknown"]
 
 
-def build_report(manifest: dict[str, Any], reviews: list[dict[str, Any]],
+def build_report(manifest: dict[str, Any], export: dict[str, Any], ledger: dict[str, Any],
                  comparator_evidence: dict[str, Any], adjudications: dict[str, Any],
                  cost_cap_usd: float | None = None) -> dict[str, Any]:
     """Build a JSON-serializable report. No input is mutated and no I/O occurs."""
-    validate_inputs(manifest, reviews, comparator_evidence, adjudications)
+    validate_inputs(manifest, export, ledger, comparator_evidence, adjudications)
     if cost_cap_usd is not None and (isinstance(cost_cap_usd, bool) or not isinstance(cost_cap_usd, (int, float))
                                      or not math.isfinite(cost_cap_usd) or cost_cap_usd < 0):
         raise ValueError("cost_cap_usd must be a finite non-negative number or null")
@@ -213,36 +358,74 @@ def build_report(manifest: dict[str, Any], reviews: list[dict[str, Any]],
     if not isinstance(target, int) or target < 1:
         raise ValueError("manifest.target_per_effort must be a positive integer")
     manifest_hash = manifest["manifest_sha256"]
+    run_id = export["run_id"]
+    tenant_id = export["tenant_id"]
+    rows = export["reviews"]
+    rows_by_id = {row["id"]: row for row in rows}
+    manifest_tag, run_tag = "manifest:" + manifest_hash, "trial:" + run_id
     comps = _normalize_comparators(manifest, comparator_evidence)
     adj = _adjudication_index(adjudications)
     valid_adjudication_ids = {(c["source"], c["case_id"], "", c["finding_id"]) for c in comps}
     for identity in adj:
         if identity[0] != "review" and identity not in valid_adjudication_ids:
             raise ValueError(f"adjudication does not match an input finding: {identity[1]}/{identity[3]}")
-    attempts_by_arm: dict[str, list[dict[str, Any]]] = {e: [] for e in EFFORTS}
-    valid_by_arm: dict[str, dict[str, dict[str, Any]]] = {e: {} for e in EFFORTS}
+
+    canonical_refs: list[tuple[str, str, str]] = []
+    for key in sorted(ledger["entries"]):
+        entry = ledger["entries"][key]
+        identity = entry.get("canonical_review_id")
+        if identity is not None:
+            canonical_refs.append((entry["case_id"], entry["effort"], identity))
+    canonical_refs.sort()
+    canonical_ids = {identity for _, _, identity in canonical_refs}
+    for case_id, effort, identity in canonical_refs:
+        record = rows_by_id.get(identity)
+        if record is None:
+            raise ValueError(f"canonical review id from the run ledger is missing from the export: {identity}")
+        if not isinstance(record.get("tags"), list):
+            raise ValueError(f"canonical review {identity} has no trial tags")
+        expected = {manifest_tag, run_tag, "effort:" + effort, _case_tag(case_id)}
+        if not expected.issubset(set(record["tags"])):
+            raise ValueError(f"canonical review {identity} does not belong to this run and tenant")
+        if record.get("tenant_id") not in (None, tenant_id):
+            raise ValueError(f"canonical review {identity} belongs to another tenant")
+        if record.get("effective_effort") not in (None, effort) or record.get("case_id") not in (None, case_id):
+            raise ValueError(f"canonical review {identity} identity disagrees with the run ledger")
+
     status_counts = Counter()
     exclusions = Counter()
+    for record in rows:
+        status_counts[record.get("status", "unknown")] += 1
+    for record in rows:
+        identity = record["id"]
+        if identity in canonical_ids:
+            continue
+        if record.get("tenant_id") not in (None, tenant_id):
+            exclusions["unrelated_tenant"] += 1
+            continue
+        record_tags = set(record["tags"]) if isinstance(record.get("tags"), list) else set()
+        if run_tag not in record_tags or manifest_tag not in record_tags:
+            exclusions["unrelated_run"] += 1
+            continue
+        if record.get("duplicate_of") or record.get("original_review_id") or any(
+                {_case_tag(case_id), "effort:" + effort}.issubset(record_tags)
+                for case_id, effort, _ in canonical_refs):
+            exclusions["duplicate_receipt"] += 1
+            continue
+        exclusions["non_canonical_record"] += 1
+
+    attempts_by_arm: dict[str, list[dict[str, Any]]] = {e: [] for e in EFFORTS}
+    valid_by_arm: dict[str, dict[str, dict[str, Any]]] = {e: {} for e in EFFORTS}
     completed_records = []
-    for index, record in enumerate(reviews):
-        if not isinstance(record, dict):
-            raise ValueError(f"review record {index} must be an object")
+    for case_id, effort, identity in canonical_refs:
+        record = rows_by_id[identity]
         status = record.get("status", "unknown")
-        status_counts[status] += 1
-        case_id = record.get("case_id", "")
-        effort = record.get("effective_effort", "")
-        trial = effort in EFFORTS
-        if trial:
-            attempts_by_arm[effort].extend(_attempts(record))
         reason = None
-        if "attempts" not in record or not isinstance(record.get("attempts"), list): reason = "missing_attempt_data"
+        if not isinstance(record.get("attempts"), list): reason = "missing_attempt_data"
         elif status in ("ok", "ok_partial") and (not record.get("attempts") or not isinstance(record.get("payload"), dict)
                                                      or not isinstance(record["payload"].get("findings"), list)):
             reason = "missing_completion_data"
-        elif record.get("profile") != "historical_trial": reason = "wrong_profile"
-        elif record.get("manifest_hash") != manifest_hash: reason = "wrong_manifest"
         elif case_id not in cases: reason = "wrong_case"
-        elif effort not in EFFORTS: reason = "wrong_effort"
         elif status not in ("ok", "ok_partial"): reason = "non_completed_status"
         elif record.get("configured_model") != REVIEWER_MODEL: reason = "wrong_configured_model"
         elif not record.get("returned_model"): reason = "missing_returned_model"
@@ -251,8 +434,10 @@ def build_report(manifest: dict[str, Any], reviews: list[dict[str, Any]],
         if reason:
             exclusions[reason] += 1
             continue
-        valid_by_arm[effort][case_id] = record
-        completed_records.append((case_id, effort, record))
+        normalized = {**record, "case_id": case_id, "effective_effort": effort}
+        valid_by_arm[effort][case_id] = normalized
+        attempts_by_arm[effort].extend(_attempts(normalized))
+        completed_records.append((case_id, effort, normalized))
 
     valid_review_finding_ids = {("review", case_id, effort, f.get("id"))
                                 for case_id, effort, r in completed_records
@@ -260,6 +445,15 @@ def build_report(manifest: dict[str, Any], reviews: list[dict[str, Any]],
     for identity in adj:
         if identity[0] == "review" and identity not in valid_review_finding_ids:
             raise ValueError(f"adjudication does not match a completed review finding: {identity[1]}/{identity[3]}")
+
+    attempted_by_arm = Counter()
+    for record in rows:
+        record_tags = set(record["tags"]) if isinstance(record.get("tags"), list) else set()
+        if manifest_tag in record_tags and run_tag in record_tags:
+            for effort in EFFORTS:
+                if "effort:" + effort in record_tags:
+                    attempted_by_arm[effort] += 1
+                    break
 
     arm_reports = {}
     for effort in EFFORTS:
@@ -288,7 +482,7 @@ def build_report(manifest: dict[str, Any], reviews: list[dict[str, Any]],
                                "completed": len(available), "completion_shortfall": max(0, target - len(available)),
                                "partial_records": sum(valid_by_arm[effort][case_id].get("status") == "ok_partial" for case_id in available),
                                "shortfall": max(0, target - len(available)),
-                               "target": target, "attempted_records": sum(1 for r in reviews if isinstance(r, dict) and r.get("effective_effort") == effort),
+                               "target": target, "attempted_records": attempted_by_arm[effort],
                                "completed_case_ids": sorted(available), "per_case": per_case,
                                "partial_coverage_case_ids": sorted(case_id for case_id in available
                                                                     if valid_by_arm[effort][case_id].get("status") == "ok_partial"
@@ -355,28 +549,38 @@ def build_report(manifest: dict[str, Any], reviews: list[dict[str, Any]],
         effort_strata.setdefault(effort, _empty_summary()); _merge_summary(effort_strata[effort], summaries)
     for d in (model_strata, reviewer_strata, effort_strata):
         for summary in d.values(): _finish_summary(summary)
-    attempt_status_counts = Counter(a.get("status", "unknown") for r in reviews if isinstance(r, dict)
-                                    for a in _attempts(r) if isinstance(a, dict))
-    all_attempts = [a for r in reviews if isinstance(r, dict) for a in _attempts(r) if isinstance(a, dict)]
+    all_attempts = [a for effort in EFFORTS for a in attempts_by_arm[effort] if isinstance(a, dict)]
+    attempt_status_counts = Counter(a.get("status", "unknown") for a in all_attempts)
     all_cost = sum(float(a["cost_usd"]) for a in all_attempts if "cost_usd" in a)
     all_input_tokens = sum(a["input_tokens"] for a in all_attempts if "input_tokens" in a)
     all_output_tokens = sum(a["output_tokens"] for a in all_attempts if "output_tokens" in a)
     all_latencies = [int(a["latency_ms"]) for a in all_attempts if "latency_ms" in a and a["latency_ms"] >= 0]
-    missing_attempt_records = sum(not isinstance(r, dict) or "attempts" not in r for r in reviews)
-    missing_cost_fields = sum("cost_usd" not in a for r in reviews if isinstance(r, dict) for a in _attempts(r) if isinstance(a, dict))
-    missing_input_fields = sum("input_tokens" not in a for r in reviews if isinstance(r, dict) for a in _attempts(r) if isinstance(a, dict))
-    missing_output_fields = sum("output_tokens" not in a for r in reviews if isinstance(r, dict) for a in _attempts(r) if isinstance(a, dict))
-    missing_latency_fields = sum("latency_ms" not in a for r in reviews if isinstance(r, dict) for a in _attempts(r) if isinstance(a, dict))
+    missing_attempt_records = sum(not isinstance(rows_by_id[identity].get("attempts"), list)
+                                  for _, _, identity in canonical_refs)
+    missing_cost_fields = sum("cost_usd" not in a for a in all_attempts)
+    missing_input_fields = sum("input_tokens" not in a for a in all_attempts)
+    missing_output_fields = sum("output_tokens" not in a for a in all_attempts)
+    missing_latency_fields = sum("latency_ms" not in a for a in all_attempts)
     statuses = {status: status_counts.get(status, 0) for status in STATUSES}
     statuses.update({k: v for k, v in sorted(status_counts.items()) if k not in statuses})
+    pages = [{key: page[key] for key in ("cursor_in", "cursor_out", "complete", "row_count", "row_ids_sha256")}
+             for page in export["pages"]]
     return {"schema_version": 1, "manifest_sha256": manifest_hash,
-            "denominators": {"attempted_records": len(reviews), "eligible_cases": len(cases),
+            "denominators": {"attempted_records": len(rows), "eligible_cases": len(cases),
+                             "canonical_records": len(canonical_refs),
                              "completed_valid_records": len(completed_records), "historical_findings": len(historical_rows),
                              "new_findings": len(finding_rows), "adjudicated_findings": adjudicated_count,
                              "required_adjudications": required_count,
                              "unadjudicated_required": required_count - sum(r["category"] != "unadjudicated" and r["required_adjudication"] for r in finding_rows)},
             "records_by_status": statuses, "attempts_by_status": dict(sorted(attempt_status_counts.items())),
-            "record_limit_may_truncate": len(reviews) >= 500,
+            "provenance": {"schema_version": export["schema_version"], "manifest_sha256": export["manifest_sha256"],
+                           "run_id": run_id, "tenant_id": tenant_id, "detail": export["detail"],
+                           "filters": export["filters"], "limit": export["limit"],
+                           "complete": True, "page_count": len(pages),
+                           "row_count": len(rows), "canonical_records": len(canonical_refs),
+                           "completed_records": len(completed_records),
+                           "terminal": {"complete": pages[-1]["complete"], "cursor_out": pages[-1]["cursor_out"]},
+                           "pages": pages},
             "excluded_records": dict(sorted(exclusions.items())),
             "arms": arm_reports, "paired_intersection": {"completed_cases": len(intersection), "case_ids": sorted(intersection)},
             "outcomes": {"by_build_model": dict(sorted(model_strata.items())), "by_reviewer_model": dict(sorted(reviewer_strata.items())),

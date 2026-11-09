@@ -125,7 +125,8 @@ def _parser():
 
     report = commands.add_parser("report", help="build a deterministic alignment report from saved inputs")
     report.add_argument("--manifest", type=pathlib.Path, required=True)
-    report.add_argument("--records", type=pathlib.Path, required=True, help="saved GET /v1/reviews response or reviews array")
+    report.add_argument("--records", type=pathlib.Path, required=True, help="certified saved trial export from the paged reader")
+    report.add_argument("--ledger", type=pathlib.Path, required=True, help="frozen run ledger/journal")
     report.add_argument("--adjudication", type=pathlib.Path, required=True)
     report.add_argument("--output", type=pathlib.Path, required=True)
     report.add_argument("--comparators", type=pathlib.Path, help="optional saved comparator evidence JSON")
@@ -153,13 +154,11 @@ def main(argv=None):
             print(json.dumps(summary, sort_keys=True))
         elif args.command == "report":
             frozen = _json_file(args.manifest, "manifest")
-            raw_records = _json_file(args.records, "review records")
-            records = raw_records.get("reviews") if isinstance(raw_records, dict) else raw_records
-            if not isinstance(records, list):
-                raise ValueError("review records must be a list or an object with a reviews list")
+            export = _json_file(args.records, "review export")
+            ledger = _json_file(args.ledger, "run ledger")
             adjudication = _json_file(args.adjudication, "adjudication")
             comparators = _json_file(args.comparators, "comparators") if args.comparators else {}
-            result = alignment_report.build_report(frozen, records, comparators, adjudication, args.cap_usd)
+            result = alignment_report.build_report(frozen, export, ledger, comparators, adjudication, args.cap_usd)
             _write_json(args.output, result)
             print(json.dumps({"report": str(args.output.resolve()), "manifest_sha256": frozen["manifest_sha256"],
                               "arms": result["arms"], "usage": result["usage"]}, sort_keys=True))

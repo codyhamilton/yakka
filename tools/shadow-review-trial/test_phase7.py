@@ -230,17 +230,22 @@ class Phase7Tests(unittest.TestCase):
         records_path = self.root / "get-records.json"
         adjudication_path = self.root / "adjudication.json"
         report_path = self.root / "alignment-report.json"
-        records_path.write_text(json.dumps({"reviews": RehearsalHandler.records}), encoding="utf-8")
+        client = runner.TrialRunner(endpoint, lambda: "fixture-auth")
+        export = client.get_reviews(manifest_hash, "rehearsal-1", RehearsalHandler.tenant)
+        records_path.write_text(json.dumps(export), encoding="utf-8")
         adjudication_path.write_text(json.dumps({"version": 1, "low_sample_rate": 1.0, "findings": []}), encoding="utf-8")
         output = io.StringIO()
         with contextlib.redirect_stdout(output):
             self.assertEqual(cli.main(["report", "--manifest", str(manifest_path), "--records", str(records_path),
+                                       "--ledger", str(ledger_path),
                                        "--adjudication", str(adjudication_path), "--output", str(report_path)]), 0)
         result = json.loads(report_path.read_text())
         self.assertEqual(result["paired_intersection"]["completed_cases"], 3)
         self.assertEqual({effort: row["completed"] for effort, row in result["arms"].items()},
                          {"high": 3, "xhigh": 3, "max": 3})
-        self.assertEqual(result, report.build_report(frozen, RehearsalHandler.records, {},
+        self.assertTrue(result["provenance"]["complete"])
+        self.assertIsNone(result["provenance"]["terminal"]["cursor_out"])
+        self.assertEqual(result, report.build_report(frozen, export, json.loads(ledger_path.read_text()), {},
                                                       {"version": 1, "low_sample_rate": 1.0, "findings": []}))
 
 
