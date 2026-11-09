@@ -35,6 +35,24 @@ Run: Codex execute, harness-dispatched unit 3-01; session: hlaunch build on feat
 - Feedback: brief and report delivered, Jev screening pass. Harness reported 88,421 tokens; no turn/final-context figures were available.
 - Deviation/concern: `TestBuildPackageHasNoNetworkOrEnvironmentImports` originally scanned every production file in the package, preventing the new HTTP transport. It now constrains the offline-import check to `build.go`, preserving the pure packet-builder contract. No unfinished work or other known problems.
 
+### 4-04-review-orchestration-rest
+
+- Status: done; committed with report in `fd3c0ec` (`Add review orchestration REST routes`).
+- Brief: `briefs/4-04-review-orchestration-rest.md`.
+- Report: `reports/4-04-review-orchestration-rest.md`.
+- Built: added server-only config and availability checks, review orchestration with criteria/build/provider/persistence composition, persisted tenant-scoped claims and rolling spend reservations, retry settlement, and authenticated `POST /v1/reviews` and filtered `GET /v1/reviews`. Dry run records nothing and makes no provider request. Updated only the matching review fact and environment contract sections in `docs/design/01` and `03`.
+- Checks: worker and runner both passed the focused suite under the 8 GiB cap and `-p=3`: `go test ./internal/review ./internal/serve ./internal/ingest ./internal/store`; runner output was review `2.084s`, serve `11.794s`, ingest `0.304s`, store `7.525s`. `git diff --check` passed. Fake fixtures cover each terminal status and the auth, retry, redaction, support, idempotency/resume, budget/in-flight concurrency, dry-run, tenant filter and explicit model/effort cases.
+- Feedback: brief and report delivered, Jev screening pass. Harness reported 316,935 tokens; no turn/final-context figures were available.
+- Deviations, unfinished work, known problems: none reported.
+
+### Phase 4 verification
+
+The `POST /v1/reviews` fixture entry point exercises argument/auth checks → repo-scoped criteria and packet → fake Claude endpoint → validated result → tenant-local `review_run` and captured-input persistence → `GET /v1/reviews`. Fake fixtures exercise all terminal statuses (`ok`, `ok_partial`, `timeout`, `api_error`, `invalid_output`, `unavailable`, `refused_capture`, `refused_disclosure`, `refused_criteria`, `skipped_budget`, `skipped_duplicate`), including zero-call preflight resume, bounded retry and reservation settlement, unchanged-key concurrency, read/write scope, tenant isolation, and dry-run with no call or record. Unit reports and the runner's combined capped test run pass. Phase 4 outcome verified; feedback checks on all four briefs and reports returned delivered, Jev screening pass.
+
+### Carried
+
+- Keep the static no-network/environment guarantee scoped to `internal/review/build.go`; the provider transport intentionally uses HTTP, while packet construction remains offline.
+
 ## Phase 3 — Criteria resolution from the artifact store
 
 ### 3-01-criteria-resolution
@@ -53,7 +71,7 @@ The fixture entry point `ResolveCriteria` → tenant-scoped design-path/version 
 
 ### Carried
 
-- During Phase 4 refinement, clarify whether the design's two-repository ambiguity case applies only when no captured `repo_id` exists; Phase 3 keeps all reads scoped to the supplied repository.
+None. During Phase 4 refinement, the outcome was aligned to the settled repo-scoped contract: ambiguity remains for duplicate bare slugs in the selected repo and duplicate phase headings; criteria resolution never searches across repos.
 
 ## Phase 2 — Review packet and prompt policy
 
