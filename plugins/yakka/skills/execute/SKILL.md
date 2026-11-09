@@ -29,7 +29,7 @@ Read `DESIGN.md`, `IMPLEMENTATION.md`, and the briefs cold from the committed ar
 After the phase's closing commit, make exactly one non-gating advisory `review_change` call alongside the existing verification:
 
 ```json
-{"mode":"range","base":"<previous phase closing SHA, or default-branch merge-base SHA>","head":"<phase closing SHA>","kind":"phase","plan":"<NN>-<slug>","phase":1,"build_models":["unknown"],"detail":"full"}
+{"mode":"range","base":"<previous phase closing SHA, or default-branch merge-base SHA>","head":"<phase closing SHA>","kind":"phase","plan":"<NN>-<slug>","phase":1,"build_models":[{"id":"unknown"}],"detail":"full"}
 ```
 
 Resolve `base` and `head` to explicit commit SHAs, with `head` the commit carrying this phase's `Yakka-Phase:` trailer. Substitute the actual plan folder name and numeric phase. Take contributor model IDs only from the run record for `build_models`; retain `unknown` for unavailable provenance, never guess. The plan and phase reference supplies the stored criteria. Send no `trial` argument.

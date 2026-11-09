@@ -39,7 +39,7 @@ You did not build this; that independence is the value. Your output is read by a
 Alongside this independent review, at its settled reviewed head after any in-place fixes and review artifacts are committed, make exactly one non-gating advisory `review_change` call:
 
 ```json
-{"mode":"range","base":"<default-branch merge-base SHA>","head":"<reviewed head SHA>","kind":"pr","plan":"<NN>-<slug>","build_models":["unknown"],"detail":"full"}
+{"mode":"range","base":"<default-branch merge-base SHA>","head":"<reviewed head SHA>","kind":"pr","plan":"<NN>-<slug>","build_models":[{"id":"unknown"}],"detail":"full"}
 ```
 
 Resolve `base` and `head` to explicit commit SHAs, including for local execution, and add the numeric `pr` when available. Substitute the actual plan folder name to use all stored phase outcomes as criteria. Omit `plan` for a recovered intent or legacy plan without a stored design and let the receipt expose missing criteria. Take contributor model IDs only from the run record for `build_models`; retain `unknown` for unavailable provenance, never guess. Send no `trial` argument.

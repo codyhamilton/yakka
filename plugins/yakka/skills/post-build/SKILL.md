@@ -60,7 +60,7 @@ A worker that returns nothing usable is relaunched once with its partial output;
 At the final candidate PR head, after every artifact and fix is committed, make exactly one non-gating advisory `review_change` call alongside the existing review work, including absorbed runs:
 
 ```json
-{"mode":"range","base":"<default-branch merge-base SHA>","head":"<candidate SHA>","kind":"pr","plan":"<NN>-<slug>","pr":1,"build_models":["unknown"],"detail":"full"}
+{"mode":"range","base":"<default-branch merge-base SHA>","head":"<candidate SHA>","kind":"pr","plan":"<NN>-<slug>","pr":1,"build_models":[{"id":"unknown"}],"detail":"full"}
 ```
 
 Resolve `base` and `head` to explicit commit SHAs. Substitute the actual PR number and plan folder name; the plan reference supplies all stored phase outcomes for PR criteria. Omit `plan` when no stored design exists and let the receipt expose missing criteria. Take contributor model IDs only from the run record for `build_models`; retain `unknown` for unavailable provenance, never guess. Send no `trial` argument. The independent reviewer owns its separate stage call; do not repeat either stage's call to force fresh findings.
