@@ -264,6 +264,7 @@ command, path, URL or script.
 | `git` | `of`: `resolved_path`, `project_dir` or `cwd` | the work tree top and identity of that path's directory, by the drain's `RepoID`/`RepoPath` rules | `{"repo_id","rel_path","error"}`; `error` is `no_repo`, `no_commit` or `git_unavailable`, a fact and not a failure |
 | `queue` | `of`: `git`; `path`: `resolved_path` | spool and `rejected/` entries whose normalised write path equals `(repo_id, rel_path)` or the absolute `resolved_path`, by the drain's path function | `{"pending":[{"age_s","mtime"}],"rejected":[{"reason","mtime"}]}`, at most 50 of each; `reason` is the drain's `.reason` text; no payloads, no paths, no entries for other files |
 | `drain` | none | a non-blocking probe of `<queue>/.drain.lock` | `{"running"}` |
+| `change` (Phase 1 contract; registration deferred to Phase 5) | mode, view, untracked policy, optional range refs, expected repo id, server policy, `bulk`, `budget_bytes` | bounded Git diff and omission manifest from `project_dir`; no `cwd` fallback | content-bearing value with `repo_id`, linked-worktree identity, branch, `HEAD`, dirty counts, mode, diff, `diff_sha256`, manifest and completeness |
 
 `git.top` is absent on purpose. The server needs the identity and the relative path, and an absolute
 repository path adds egress with no use. The `queue` reader reports what is on disk at call time, and
@@ -284,7 +285,8 @@ Safety, for every reader including later plans':
    a repository, and nothing else.
 5. A reader whose value can contain file or diff content is marked `content` in the table. It must run
    the secret scan before returning, withhold a file with a hit (naming the pattern and line, never the
-   match), and carry a `budget_bytes`. No v1 reader returns content. `file` returns a hash and has no
+   match), and carry a `budget_bytes`. No currently registered v1 reader returns content; `change`
+   is a future registered reader whose contract is content-bearing. `file` returns a hash and has no
    content parameter. A declaration that asks for content from a reader that does not offer it is
    `bad_params`.
 6. Non-bulk readers return at most 64 KiB. A bulk reader declares `bulk` and `budget_bytes`, truncates by
@@ -294,6 +296,23 @@ Safety, for every reader including later plans':
    reader's value with `secret_in_context`.
 8. No environment variable, hostname, username or other value is sent unless a declared reader's table
    entry names it.
+9. `change` validates mode, view, booleans, refs and policy limits. It resolves refs with
+   `rev-parse --verify --end-of-options <ref>^{commit}` and reads range content from Git objects. It
+   uses fixed Git argument arrays without a shell, fetch, index writes or object writes. It uses only
+   `project_dir` to locate a repository, reports linked-worktree identity, and checks `HEAD` plus a
+   status fingerprint before and after capture, retrying once before returning `changed_during_capture`.
+10. `change` disables external diff, textconv and fsmonitor helpers. It discovers filter attributes
+   before status or diff, disables each discovered clean command for those operations, and withholds
+   affected worktree paths as `filter_driver`. It does not follow symlinks or return non-regular files.
+   Untracked paths come from `ls-files --others --exclude-standard`; ignored paths are listed as
+   `ignored` and never included. The existing secret scan checks added and removed diff lines and
+   added-file content before return. A hit withholds the whole path and records only pattern and line.
+11. `change` receives exclusions, per-file, total-byte and file-count caps, truncation class order and
+   context lines from the server declaration. It embeds no policy values in the shim registration.
+   Excluded, secret, filtered, invalid-encoding, symlink, ignored, untracked-not-included and capped
+   paths have manifest entries with no captured content. Truncation drops whole files by code, tests,
+   config, then docs; `docs/` is never excluded as noise. `diff_sha256` covers the exact UTF-8 diff
+   bytes returned.
 
 Failure codes form a closed set: `unsupported_reader` (not in the table), `unsupported_reader_version`
 (a known reader at a higher `v`), `unsupported_declaration` (the declaration's `v` is above what the shim

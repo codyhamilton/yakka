@@ -6,6 +6,8 @@ from __future__ import annotations
 import argparse
 import calendar
 import fcntl
+import fnmatch
+import difflib
 import hashlib
 import http.client
 import ipaddress
@@ -466,6 +468,374 @@ def Patterns() -> List[str]:
         if not names or names[-1] != name:
             names.append(name)
     return names
+
+
+# --- local change capture (kept independent of MCP registration) ---
+
+class CaptureError(ValueError):
+    """A structured refusal to capture a local change."""
+
+    def __init__(self, code: str, argument: str = "") -> None:
+        self.code = code
+        self.argument = argument
+        super().__init__(code + (":" + argument if argument else ""))
+
+
+_CAPTURE_EXCLUDED = (
+    re.compile(r"(^|/)(vendor|node_modules|third_party|dist|build|coverage)(/|$)"),
+    re.compile(r"(^|/)(package-lock\.json|yarn\.lock|pnpm-lock\.yaml|Cargo\.lock|go\.sum)$"),
+    re.compile(r"\.(min\.js|min\.css|map|png|jpe?g|gif|webp|ico|pdf|zip|gz|wasm)$", re.I),
+    re.compile(r"(^|/)(snapshots?|__snapshots__)(/|$)"),
+)
+_CAPTURE_CLASSES = ("code", "tests", "config", "docs")
+
+
+def _capture_class(path: str) -> str:
+    if path.startswith("docs/") or path.lower().endswith((".md", ".rst", ".txt")):
+        return "docs"
+    if re.search(r"(^|/)(test|tests|__tests__)(/|$)|(^|/)test_[^/]+$", path):
+        return "tests"
+    if path.lower().endswith((".json", ".yaml", ".yml", ".toml", ".ini", ".cfg")):
+        return "config"
+    return "code"
+
+
+def _capture_policy(policy: Optional[dict[str, Any]]) -> dict[str, Any]:
+    if policy is not None and not isinstance(policy, dict):
+        raise CaptureError("bad_argument", "policy")
+    p = dict(policy or {})
+    out = {
+        "exclude": tuple(p.get("exclude", ())),
+        "max_file_bytes": p.get("max_file_bytes", 256 * 1024),
+        "max_total_bytes": p.get("max_total_bytes", 2 * 1024 * 1024),
+        "max_files": p.get("max_files", 200),
+        "context_lines": p.get("context_lines", 3),
+    }
+    for key in ("max_file_bytes", "max_total_bytes", "max_files", "context_lines"):
+        if type(out[key]) is not int or out[key] < (0 if key == "context_lines" else 1):
+            raise CaptureError("bad_argument", key)
+    if not isinstance(out["exclude"], (list, tuple)) or any(not isinstance(x, str) for x in out["exclude"]):
+        raise CaptureError("bad_argument", "exclude")
+    return out
+
+
+def _capture_env() -> dict[str, str]:
+    env = {k: os.environ[k] for k in ("PATH", "HOME", "LANG", "LC_ALL") if os.environ.get(k)}
+    env.update({"GIT_TERMINAL_PROMPT": "0", "GIT_OPTIONAL_LOCKS": "0", "GIT_PAGER": "cat"})
+    return env
+
+
+def _capture_git(root: str, *args: str, input_bytes: Optional[bytes] = None, limit: int = 8 * 1024 * 1024,
+                 filter_names: Tuple[str, ...] = ()) -> bytes:
+    # All callers below use a fixed verb/flag table. Agent values occupy only
+    # validated ref operands or NUL-delimited literal pathspec stdin.
+    cmd = ["git", "-c", "core.fsmonitor=false"]
+    for name in filter_names:
+        if re.fullmatch(r"[A-Za-z0-9_.-]+", name):
+            cmd.extend(("-c", f"filter.{name}.clean="))
+    cmd.extend(("-C", root, *args))
+    try:
+        p = subprocess.run(cmd, input=input_bytes, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                           timeout=10, env=_capture_env(), shell=False)
+    except FileNotFoundError as exc:
+        raise CaptureError("git_unavailable") from exc
+    except subprocess.TimeoutExpired as exc:
+        raise CaptureError("git_unavailable") from exc
+    if len(p.stdout) > limit:
+        raise CaptureError("over_budget")
+    if p.returncode:
+        raise CaptureError("not_a_repository")
+    return p.stdout
+
+
+def _capture_state(root: str, filter_names: Tuple[str, ...] = ()) -> tuple[str, bytes]:
+    head = _capture_git(root, "rev-parse", "--verify", "HEAD^{commit}").decode().strip()
+    status = _capture_git(root, "status", "--porcelain=v2", "-z", "--untracked-files=all", limit=1024 * 1024,
+                          filter_names=filter_names)
+    return head, status
+
+
+def _capture_ref(root: str, value: Any, name: str) -> str:
+    if not isinstance(value, str) or not value or value.startswith("-") or any(ord(c) < 32 or c.isspace() for c in value):
+        raise CaptureError("bad_ref", name)
+    try:
+        return _capture_git(root, "rev-parse", "--verify", "--end-of-options", value + "^{commit}").decode().strip()
+    except CaptureError as exc:
+        if exc.code == "not_a_repository":
+            raise CaptureError("bad_ref", name) from exc
+        raise
+
+
+def _capture_paths(root: str, mode: str, view: str, base: Optional[str], head: Optional[str], merge_base: bool,
+                   filter_names: Tuple[str, ...] = ()) -> list[str]:
+    if mode == "range":
+        assert base is not None and head is not None
+        left = _capture_ref(root, base, "base")
+        right = _capture_ref(root, head, "head")
+        if merge_base:
+            left = _capture_git(root, "merge-base", left, right).decode().strip()
+        raw = _capture_git(root, "diff", "--no-ext-diff", "--no-textconv", "--no-color", "--name-only", "-z", left, right,
+                           filter_names=filter_names)
+    else:
+        args = ["diff", "--no-ext-diff", "--no-textconv", "--no-color", "--name-only", "-z"]
+        if view == "staged":
+            args.insert(1, "--cached")
+        raw = _capture_git(root, *args, filter_names=filter_names)
+        if view == "combined":
+            staged = _capture_git(root, "diff", "--no-ext-diff", "--no-textconv", "--no-color", "--cached", "--name-only", "-z",
+                                  filter_names=filter_names)
+            raw += staged
+    return sorted({x.decode("utf-8", "surrogateescape") for x in raw.split(b"\0") if x})
+
+
+def _capture_blob(root: str, path: str, mode: str, view: str, base: Optional[str], head: Optional[str]) -> bytes:
+    # For range and staged views content comes from Git objects/index. Combined
+    # view uses the working tree bytes, opened without following symlinks.
+    if mode == "range":
+        assert head is not None and base is not None
+        try:
+            return _capture_git(root, "show", head + ":" + path)
+        except CaptureError:
+            return _capture_git(root, "show", base + ":" + path)
+    if mode == "uncommitted" and view == "staged":
+        try:
+            return _capture_git(root, "show", ":0:" + path)
+        except CaptureError:
+            return _capture_git(root, "show", "HEAD:" + path)
+    full = os.path.join(root, path)
+    try:
+        st = os.lstat(full)
+    except FileNotFoundError:
+        return _capture_git(root, "show", "HEAD:" + path)
+    if not stat.S_ISREG(st.st_mode):
+        raise CaptureError("unsafe_file")
+    fd = os.open(full, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0))
+    try:
+        current = os.fstat(fd)
+        if not stat.S_ISREG(current.st_mode) or (st.st_dev, st.st_ino) != (current.st_dev, current.st_ino):
+            raise CaptureError("unsafe_file")
+        with os.fdopen(fd, "rb") as f:
+            return f.read()
+    except BaseException:
+        os.close(fd)
+        raise
+
+
+def _capture_diff(root: str, path: str, mode: str, view: str, base: Optional[str], head: Optional[str], context: int,
+                  filter_names: Tuple[str, ...] = ()) -> bytes:
+    args = ["diff", "--no-ext-diff", "--no-textconv", "--no-color", "--no-renames", f"--unified={context}"]
+    if mode == "range":
+        assert base is not None and head is not None
+        args.extend((base, head))
+    elif view == "staged":
+        args.append("--cached")
+    else:
+        args.append("HEAD")
+    args.extend(("--", ":(literal)" + path))
+    return _capture_git(root, *args, filter_names=filter_names)
+
+
+def _capture_has_filter(root: str, path: str) -> bool:
+    raw = _capture_git(root, "check-attr", "-z", "filter", "--", path)
+    fields = raw.split(b"\0")
+    return len(fields) >= 3 and fields[-2] not in (b"unspecified", b"unset", b"")
+
+
+def _capture_is_symlink(root: str, path: str, mode: str, view: str, head: Optional[str]) -> bool:
+    if mode == "range":
+        assert head is not None
+        raw = _capture_git(root, "ls-tree", "-z", head, "--", ":(literal)" + path)
+        return raw.startswith(b"120000 ")
+    if view == "staged":
+        raw = _capture_git(root, "ls-files", "--stage", "-z", "--", ":(literal)" + path)
+        return raw.startswith(b"120000 ")
+    try:
+        return stat.S_ISLNK(os.lstat(os.path.join(root, path)).st_mode)
+    except FileNotFoundError:
+        return False
+
+
+def _capture_filter_names(root: str) -> Tuple[str, ...]:
+    tracked = _capture_git(root, "ls-files", "-z").split(b"\0")
+    names = set()
+    for raw_path in tracked:
+        if not raw_path:
+            continue
+        raw = _capture_git(root, "check-attr", "-z", "filter", "--", raw_path.decode("utf-8", "surrogateescape"))
+        fields = raw.split(b"\0")
+        if len(fields) >= 3 and fields[-2] not in (b"unspecified", b"unset", b"") and fields[-2] != b"set":
+            name = fields[-2].decode("ascii", "ignore")
+            if re.fullmatch(r"[A-Za-z0-9_.-]+", name):
+                names.add(name)
+    return tuple(sorted(names))
+
+
+def _capture_change_once(project_dir: Optional[str], mode: str = "uncommitted", view: str = "combined",
+                  include_untracked: bool = False, base: Optional[str] = None, head: Optional[str] = None,
+                  merge_base: bool = False, repo_id: Optional[str] = None,
+                  policy: Optional[dict[str, Any]] = None) -> dict[str, Any]:
+    """Capture a bounded local Git change. Does not consult environment config or MCP."""
+    if not isinstance(project_dir, str) or not project_dir or not os.path.isdir(project_dir):
+        raise CaptureError("no_project_dir")
+    if mode not in ("uncommitted", "range"):
+        raise CaptureError("bad_argument", "mode")
+    if view not in ("combined", "staged") or (mode == "range" and view != "combined"):
+        raise CaptureError("bad_argument", "view")
+    if type(include_untracked) is not bool or type(merge_base) is not bool:
+        raise CaptureError("bad_argument", "boolean")
+    p = _capture_policy(policy)
+    try:
+        root = _capture_git(os.path.realpath(project_dir), "rev-parse", "--show-toplevel").decode().strip()
+    except CaptureError as exc:
+        if exc.code == "not_a_repository":
+            raise CaptureError("not_a_repository") from exc
+        raise
+    root = os.path.realpath(root)
+    filter_names = _capture_filter_names(root)
+    head_before, status_before = _capture_state(root, filter_names)
+    remotes = _capture_git(root, "remote").decode().splitlines()
+    remote = "origin" if "origin" in remotes else (sorted(remotes)[0] if remotes else "")
+    if remote:
+        url = _capture_git(root, "remote", "get-url", remote).decode().strip()
+        captured_repo_id = NormalizeRemote(url)
+    else:
+        roots = _capture_git(root, "rev-list", "--max-parents=0", "HEAD").decode().splitlines()
+        captured_repo_id = sorted(roots)[0] if roots else ""
+    if repo_id is not None and repo_id != captured_repo_id:
+        raise CaptureError("wrong_checkout")
+    git_dir = os.path.realpath(_capture_git(root, "rev-parse", "--absolute-git-dir").decode().strip())
+    linked = os.path.dirname(git_dir) != root and os.path.basename(git_dir) != ".git"
+    branch_raw = _capture_git(root, "branch", "--show-current").decode().strip()
+    branch = branch_raw or "detached"
+    if mode == "range":
+        if base is None or head is None:
+            raise CaptureError("bad_argument", "base/head")
+        resolved_base = _capture_ref(root, base, "base")
+        resolved_head = _capture_ref(root, head, "head")
+        if merge_base:
+            resolved_base = _capture_git(root, "merge-base", resolved_base, resolved_head).decode().strip()
+    else:
+        resolved_base = resolved_head = None
+    paths = _capture_paths(root, mode, view, base, head, merge_base, filter_names)
+    manifest: list[dict[str, Any]] = []
+    included: list[tuple[str, bytes]] = []
+    untracked_raw = _capture_git(root, "ls-files", "--others", "--exclude-standard", "-z") if mode == "uncommitted" else b""
+    untracked = [x.decode("utf-8", "surrogateescape") for x in untracked_raw.split(b"\0") if x]
+    ignored_raw = _capture_git(root, "ls-files", "--others", "--ignored", "--exclude-standard", "-z") if mode == "uncommitted" else b""
+    ignored = [x.decode("utf-8", "surrogateescape") for x in ignored_raw.split(b"\0") if x]
+    if mode == "uncommitted" and view == "combined":
+        # Staged paths are present in HEAD-to-index but not always in worktree diff.
+        paths = sorted(set(paths) | set(x.decode("utf-8", "surrogateescape") for x in _capture_git(root, "diff", "--cached", "--name-only", "-z").split(b"\0") if x))
+    if mode == "uncommitted" and include_untracked:
+        paths = sorted(set(paths) | set(untracked))
+    elif untracked:
+        for path in untracked:
+            manifest.append({"path": path, "reason": "untracked_not_included", "added": 0, "removed": 0, "blob_sha256": None})
+    for path in ignored:
+        manifest.append({"path": path, "reason": "ignored", "added": 0, "removed": 0, "blob_sha256": None})
+    for path in paths:
+        if path.startswith("docs/"):
+            excluded = False
+        else:
+            excluded = any(rx.search(path) for rx in _CAPTURE_EXCLUDED) or any(fnmatch.fnmatchcase(path, x) for x in p["exclude"])
+        is_untracked = path in untracked
+        if not is_untracked and _capture_is_symlink(root, path, mode, view, resolved_head):
+            manifest.append({"path": path, "reason": "symlink", "added": 0, "removed": 0, "blob_sha256": None})
+            continue
+        if mode == "uncommitted" and view != "staged" and _capture_has_filter(root, path):
+            manifest.append({"path": path, "reason": "filter_driver", "added": 0, "removed": 0, "blob_sha256": None})
+            continue
+        try:
+            if is_untracked:
+                full = os.path.join(root, path)
+                st = os.lstat(full)
+                if stat.S_ISLNK(st.st_mode):
+                    raise CaptureError("symlink")
+                if not stat.S_ISREG(st.st_mode):
+                    raise CaptureError("not_regular")
+                content = _capture_blob(root, path, "uncommitted", "combined", None, None)
+                lines = content.decode("utf-8", "replace").splitlines(keepends=True)
+                patch_lines = list(difflib.unified_diff([], lines, fromfile="/dev/null", tofile="b/" + path))
+                if len(patch_lines) >= 2:
+                    patch_lines[0] = "--- /dev/null\n"
+                    patch_lines[1] = "+++ b/" + path + "\n"
+                diff = ("diff --git a/" + path + " b/" + path + "\nnew file mode 100644\n" + "".join(patch_lines)).encode()
+            else:
+                diff = _capture_diff(root, path, mode, view, resolved_base, resolved_head, p["context_lines"], filter_names)
+                content = _capture_blob(root, path, mode, view, resolved_base, resolved_head)
+        except CaptureError as exc:
+            manifest.append({"path": path, "reason": exc.code, "added": 0, "removed": 0, "blob_sha256": None})
+            continue
+        except (OSError, UnicodeError):
+            manifest.append({"path": path, "reason": "unsafe_file", "added": 0, "removed": 0, "blob_sha256": None})
+            continue
+        try:
+            text = diff.decode("utf-8", "strict")
+            content.decode("utf-8", "strict")
+        except UnicodeError:
+            text = diff.decode("utf-8", "replace")
+        added = sum(1 for l in text.splitlines() if l.startswith("+") and not l.startswith("+++"))
+        removed = sum(1 for l in text.splitlines() if l.startswith("-") and not l.startswith("---"))
+        blob_hash = hashlib.sha256(content).hexdigest()
+        reason = "excluded" if excluded else ""
+        if not reason and len(content) > p["max_file_bytes"]:
+            reason = "file_cap"
+        try:
+            diff.decode("utf-8", "strict")
+            content.decode("utf-8", "strict")
+        except UnicodeError:
+            reason = reason or "encoding"
+        hits = Scan(text + "\n" + content.decode("utf-8", "replace"))
+        if hits:
+            reason = "secret"
+        if reason:
+            entry = {"path": path, "reason": reason, "added": added, "removed": removed, "blob_sha256": blob_hash}
+            if hits:
+                entry.update({"pattern": hits[0].Pattern, "line": hits[0].Line})
+            manifest.append(entry)
+            continue
+        included.append((path, diff))
+    included.sort(key=lambda pair: (_CAPTURE_CLASSES.index(_capture_class(pair[0])), pair[0]))
+    selected: list[tuple[str, bytes]] = []
+    total = 0
+    for path, diff in included:
+        if len(selected) >= p["max_files"] or total + len(diff) > p["max_total_bytes"]:
+            manifest.append({"path": path, "reason": "truncated_budget", "added": 0, "removed": 0,
+                             "blob_sha256": hashlib.sha256(_capture_blob(root, path, mode, view, resolved_base, resolved_head)).hexdigest()})
+        else:
+            selected.append((path, diff)); total += len(diff)
+    head_after, status_after = _capture_state(root, filter_names)
+    if head_before != head_after or status_before != status_after:
+        raise CaptureError("changed_during_capture")
+    diff_bytes = b"".join(diff for _, diff in selected)
+    counts = {"staged": 0, "unstaged": 0, "untracked": len(untracked)}
+    for line in status_before.decode("utf-8", "replace").split("\0"):
+        if line.startswith("1 ") or line.startswith("2 "):
+            xy = line.split(" ", 2)[1]
+            counts["staged"] += xy[0] != "."
+            counts["unstaged"] += xy[1] != "."
+    changed_locks = sorted(x["path"] for x in manifest if x["path"].endswith(("package-lock.json", "yarn.lock", "pnpm-lock.yaml", "Cargo.lock", "go.sum")))
+    return {"repo_id": captured_repo_id, "linked_worktree": linked, "branch": branch, "head": head_before,
+            "dirty_counts": counts, "mode": mode, "view": view, "include_untracked": include_untracked,
+            "base": resolved_base, "requested_base": base, "resolved_head": resolved_head, "requested_head": head,
+            "merge_base": merge_base, "diff": diff_bytes.decode("utf-8", "replace"),
+            "diff_sha256": hashlib.sha256(diff_bytes).hexdigest(), "manifest": manifest,
+            "manifest_summary": {"changed_lockfiles": changed_locks},
+            "complete": not bool(manifest), "files": [path for path, _ in selected]}
+
+
+def CaptureChange(project_dir: Optional[str], mode: str = "uncommitted", view: str = "combined",
+                  include_untracked: bool = False, base: Optional[str] = None, head: Optional[str] = None,
+                  merge_base: bool = False, repo_id: Optional[str] = None,
+                  policy: Optional[dict[str, Any]] = None) -> dict[str, Any]:
+    """Capture a bounded local Git change, retrying once if repository state moves."""
+    for attempt in range(2):
+        try:
+            return _capture_change_once(project_dir, mode, view, include_untracked, base, head, merge_base, repo_id, policy)
+        except CaptureError as exc:
+            if exc.code != "changed_during_capture" or attempt:
+                raise
+    raise CaptureError("changed_during_capture")
 
 
 # --- facts ---
