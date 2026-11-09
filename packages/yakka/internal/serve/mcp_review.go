@@ -209,8 +209,7 @@ func (s *Server) mcpReviewChange(ctx context.Context, tenant string, ts *tenantS
 	if req.Capture.Diff == "" {
 		return nil, errors.New("capture_unsupported")
 	}
-	availability := review.Availability{Token: s.cfg.ReviewToken, Model: s.cfg.ReviewModel, Effort: s.cfg.ReviewEffort, TrialEnabled: s.cfg.ReviewTrialEnabled, USDCap: s.cfg.ReviewUSDCap, Repositories: s.cfg.ReviewRepositories, Local: s.cfg.Local()}
-	receipt, err := review.Run(ctx, ts.t, tenant, req, review.RunConfig{Availability: availability, Reservations: s.reviewReservations, Endpoint: s.opts.ReviewEndpoint})
+	receipt, err := review.Run(ctx, ts.t, tenant, req, review.RunConfig{Availability: s.reviewAvailability(), Reservations: s.reviewReservations, Endpoint: s.opts.ReviewEndpoint})
 	if err != nil {
 		return nil, err
 	}

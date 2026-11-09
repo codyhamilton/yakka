@@ -120,6 +120,17 @@ func receiptInputHash(t *testing.T, tenant *store.Tenant) string {
 	return m["input_hash"].(string)
 }
 
+func TestRunTreatsReceiptDetailAsSummary(t *testing.T) {
+	tenant := reviewTenant(t)
+	req := reviewRequest(true)
+	req.DryRun = true
+	req.Detail = "receipt"
+	out, err := Run(context.Background(), tenant, "tenant", req, RunConfig{})
+	if err != nil || out.Status != "dry_run" || out.Result != nil {
+		t.Fatalf("receipt detail=%+v err=%v", out, err)
+	}
+}
+
 func TestRunRetriesThenDuplicateAndChangedBuildModel(t *testing.T) {
 	var calls atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

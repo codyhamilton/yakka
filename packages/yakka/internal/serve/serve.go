@@ -722,6 +722,10 @@ func (s *Server) auth(h tenantHandler) http.HandlerFunc {
 	}
 }
 
+func (s *Server) reviewAvailability() review.Availability {
+	return review.Availability{Token: s.cfg.ReviewToken, Model: s.cfg.ReviewModel, Effort: s.cfg.ReviewEffort, TrialEnabled: s.cfg.ReviewTrialEnabled, USDCap: s.cfg.ReviewUSDCap, Repositories: s.cfg.ReviewRepositories, Local: s.cfg.Local()}
+}
+
 func (s *Server) reviewsRoute(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodPost {
 		s.reviewsPostRoute(w, r)
@@ -785,8 +789,7 @@ func (s *Server) reviewsPostRoute(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 503, map[string]string{"error": "tenant unavailable"})
 		return
 	}
-	availability := review.Availability{Token: s.cfg.ReviewToken, Model: s.cfg.ReviewModel, Effort: s.cfg.ReviewEffort, TrialEnabled: s.cfg.ReviewTrialEnabled, USDCap: s.cfg.ReviewUSDCap, Repositories: s.cfg.ReviewRepositories, Local: s.cfg.Local()}
-	receipt, err := review.Run(r.Context(), ts.t, res.tenant, req, review.RunConfig{Availability: availability, Reservations: s.reviewReservations, Endpoint: s.opts.ReviewEndpoint})
+	receipt, err := review.Run(r.Context(), ts.t, res.tenant, req, review.RunConfig{Availability: s.reviewAvailability(), Reservations: s.reviewReservations, Endpoint: s.opts.ReviewEndpoint})
 	if err != nil {
 		writeJSON(w, 400, map[string]string{"error": err.Error()})
 		return

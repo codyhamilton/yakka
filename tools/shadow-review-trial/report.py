@@ -262,10 +262,6 @@ def build_report(manifest: dict[str, Any], reviews: list[dict[str, Any]],
             raise ValueError(f"adjudication does not match a completed review finding: {identity[1]}/{identity[3]}")
 
     arm_reports = {}
-    all_cost = 0.0
-    all_input_tokens = 0
-    all_output_tokens = 0
-    all_latencies: list[int] = []
     for effort in EFFORTS:
         arm_attempts = attempts_by_arm[effort]
         cost = sum(float(a["cost_usd"]) for a in arm_attempts if "cost_usd" in a)
@@ -275,7 +271,6 @@ def build_report(manifest: dict[str, Any], reviews: list[dict[str, Any]],
         missing_output = sum("output_tokens" not in a for a in arm_attempts)
         missing_cost = sum("cost_usd" not in a for a in arm_attempts)
         latencies = sorted(int(a["latency_ms"]) for a in arm_attempts if "latency_ms" in a and a["latency_ms"] >= 0)
-        all_cost += cost; all_input_tokens += input_tokens; all_output_tokens += output_tokens; all_latencies += latencies
         available = set(valid_by_arm[effort])
         per_case = {}
         for case_id in sorted(available):
@@ -328,7 +323,7 @@ def build_report(manifest: dict[str, Any], reviews: list[dict[str, Any]],
             identity = f"{case_id}:{effort}:{record.get('id', '')}:{fid}"
             required = severity in ("blocker", "high", "medium") or _low_sample(identity, int(manifest.get("seed", 0)), float(adjudications["low_sample_rate"]))
             selected_low = severity == "low" and _low_sample(identity, int(manifest.get("seed", 0)), float(adjudications["low_sample_rate"]))
-            category = decision.get("category") if decision else ("unadjudicated" if required else "unadjudicated")
+            category = decision.get("category") if decision else "unadjudicated"
             if severity == "low" and decision and not selected_low:
                 raise ValueError(f"low finding is outside the seeded adjudication sample: {case_id}/{effort}/{fid}")
             finding_rows.append({"case_id": case_id, "stratum": cases[case_id]["stratum"], "effort": effort,

@@ -621,11 +621,11 @@ def _capture_blob(root: str, path: str, mode: str, view: str, base: Optional[str
         current = os.fstat(fd)
         if not stat.S_ISREG(current.st_mode) or (st.st_dev, st.st_ino) != (current.st_dev, current.st_ino):
             raise CaptureError("unsafe_file")
-        with os.fdopen(fd, "rb") as f:
-            return f.read()
     except BaseException:
         os.close(fd)
         raise
+    with os.fdopen(fd, "rb") as f:
+        return f.read()
 
 
 def _capture_diff(root: str, path: str, mode: str, view: str, base: Optional[str], head: Optional[str], context: int,
@@ -663,15 +663,18 @@ def _capture_is_symlink(root: str, path: str, mode: str, view: str, head: Option
 
 
 def _capture_filter_names(root: str) -> Tuple[str, ...]:
-    tracked = _capture_git(root, "ls-files", "-z").split(b"\0")
+    tracked = [p for p in _capture_git(root, "ls-files", "-z").split(b"\0") if p]
     names = set()
-    for raw_path in tracked:
-        if not raw_path:
-            continue
-        raw = _capture_git(root, "check-attr", "-z", "filter", "--", raw_path.decode("utf-8", "surrogateescape"))
+    # One check-attr per batch. A process per tracked path blows the reader deadline.
+    for start in range(0, len(tracked), 400):
+        chunk = tracked[start:start + 400]
+        raw = _capture_git(root, "check-attr", "-z", "--stdin", "filter", input_bytes=b"\0".join(chunk) + b"\0")
         fields = raw.split(b"\0")
-        if len(fields) >= 3 and fields[-2] not in (b"unspecified", b"unset", b"") and fields[-2] != b"set":
-            name = fields[-2].decode("ascii", "ignore")
+        for i in range(0, len(fields) - 2, 3):
+            value = fields[i + 2]
+            if value in (b"unspecified", b"unset", b"", b"set"):
+                continue
+            name = value.decode("ascii", "ignore")
             if re.fullmatch(r"[A-Za-z0-9_.-]+", name):
                 names.add(name)
     return tuple(sorted(names))
@@ -730,9 +733,6 @@ def _capture_change_once(project_dir: Optional[str], mode: str = "uncommitted", 
     untracked = [x.decode("utf-8", "surrogateescape") for x in untracked_raw.split(b"\0") if x]
     ignored_raw = _capture_git(root, "ls-files", "--others", "--ignored", "--exclude-standard", "-z") if mode == "uncommitted" else b""
     ignored = [x.decode("utf-8", "surrogateescape") for x in ignored_raw.split(b"\0") if x]
-    if mode == "uncommitted" and view == "combined":
-        # Staged paths are present in HEAD-to-index but not always in worktree diff.
-        paths = sorted(set(paths) | set(x.decode("utf-8", "surrogateescape") for x in _capture_git(root, "diff", "--cached", "--name-only", "-z").split(b"\0") if x))
     if mode == "uncommitted" and include_untracked:
         paths = sorted(set(paths) | set(untracked))
     elif untracked:

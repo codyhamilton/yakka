@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"path"
-	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -137,6 +136,10 @@ func Run(ctx context.Context, tenant *store.Tenant, tenantID string, req Request
 	}
 	if (req.Kind == "phase" && (req.Plan == "" || req.Phase < 1)) || (req.Kind == "pr" && req.PR < 1) {
 		return Receipt{}, errors.New("review kind identity is incomplete")
+	}
+	// MCP advertises detail=receipt for the summary shape. Empty means the same thing.
+	if req.Detail == "receipt" {
+		req.Detail = ""
 	}
 	if req.Detail != "" && req.Detail != "full" {
 		return Receipt{}, errors.New("detail must be full")
@@ -352,9 +355,6 @@ func validSHA(s string) bool {
 }
 func validHash(s string) bool { return len(s) == 64 && validSHA(s) }
 
-var reviewPhaseHeading = regexp.MustCompile(`^### Phase ([0-9]+) — .+$`)
-var numberedPlanFolder = regexp.MustCompile(`^[0-9]{2}-(.+)$`)
-
 func resolvePRCriteria(ctx context.Context, t *store.Tenant, repo, plan, contentHash string, allowSuperseded bool) (CriteriaResolution, error) {
 	paths, err := t.PlanDesignPaths(ctx, repo, 1000)
 	if err != nil {
@@ -363,11 +363,7 @@ func resolvePRCriteria(ctx context.Context, t *store.Tenant, repo, plan, content
 	var matches []string
 	for _, p := range paths {
 		folder := path.Base(path.Dir(p))
-		bare := folder
-		if m := numberedPlanFolder.FindStringSubmatch(folder); len(m) == 2 {
-			bare = m[1]
-		}
-		if folder == plan || bare == plan {
+		if folder == plan || barePlanSlug(folder) == plan {
 			matches = append(matches, p)
 		}
 	}
@@ -397,7 +393,7 @@ func resolvePRCriteria(ctx context.Context, t *store.Tenant, repo, plan, content
 	}
 	var phases []string
 	for _, line := range strings.Split(string(design.Body), "\n") {
-		if m := reviewPhaseHeading.FindStringSubmatch(line); len(m) == 2 {
+		if m := phaseHeading.FindStringSubmatch(line); len(m) == 2 {
 			phases = append(phases, m[1])
 		}
 	}
@@ -433,7 +429,6 @@ func safeReason(err error) string {
 	}
 	return "configuration unavailable"
 }
-func criteriaRefusalCode(s string) string { return s }
 func errorStatus(err error) string {
 	var p *ProviderError
 	if errors.As(err, &p) {
