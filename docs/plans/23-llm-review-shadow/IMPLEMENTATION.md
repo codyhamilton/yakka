@@ -2,6 +2,19 @@ Run: Codex execute, harness-dispatched unit 3-01; session: hlaunch build on feat
 
 # Implementation
 
+## Phase 4 — Review handler, single call, record and availability
+
+### 4-01-shared-haiku-pricing
+
+- Status: done; committed with report in `5b4f051` (`Add tiered Haiku 5.5 pricing`).
+- Brief: `briefs/4-01-shared-haiku-pricing.md`.
+- Report: `reports/4-01-shared-haiku-pricing.md`.
+- Built: added the exact `claude-haiku-5-5` entry to the shared Go/Python pricing source; tier-aware settlement and transcript aggregation; a pricing table identity and conservative upper-tier reservation API. Existing flat rates remain unchanged.
+- Checks: `GOMEMLIMIT=8GiB GOMAXPROCS=3 go test -p=3 ./internal/store` passed; two Python `unittest` pricing tests passed, including below/at/above the 100,000-token boundary; table parity and `git diff --check` passed. The initial pytest invocation could not run because pytest is absent; the standard-library fixtures passed.
+- Source: Anthropic Haiku 5.5 pricing, checked 2026-11-09. Table SHA-256 `0c0dfc73d2cbe45eec340ff4eb596dfe1a2ddc88f4238ca78eadc45a2a3e88c7`.
+- Feedback: brief and report delivered, Jev screening pass. Harness reported 108,937 tokens; no turn/final-context figures were available.
+- Deviations, unfinished work, known problems: only the pytest-to-unittest runner adjustment; none unfinished.
+
 ## Phase 3 — Criteria resolution from the artifact store
 
 ### 3-01-criteria-resolution
