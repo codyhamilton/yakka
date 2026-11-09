@@ -12,6 +12,7 @@ import urllib.request
 
 from manifest import ManifestFrozenError, create_manifest
 from runner import RunnerError, TrialRunner, run as run_trial
+import approval
 import report as alignment_report
 
 
@@ -119,8 +120,10 @@ def _parser():
     run_mode.add_argument("--dry-run", dest="execute", action="store_false",
                           help="estimate all three effort arms without model calls (default)")
     run_mode.add_argument("--execute", dest="execute", action="store_true",
-                          help="run reviews after dry-run preflight")
+                          help="run reviews after dry-run preflight and a valid approval record")
     run.set_defaults(execute=False)
+    run.add_argument("--approval", type=pathlib.Path,
+                     help="local Cody spend-approval JSON required by --execute")
     run.add_argument("--config-id", default="default")
 
     report = commands.add_parser("report", help="build a deterministic alignment report from saved inputs")
@@ -150,7 +153,8 @@ def main(argv=None):
             client = TrialRunner(args.base_url, lambda: args.auth_token)
             summary = run_trial(args.manifest, args.ledger, client, args.cap_usd, args.reviewer_model,
                                 run_id=args.run_id, tenant_id=args.tenant_id,
-                                execute=args.execute, config_id=args.config_id)
+                                execute=args.execute, config_id=args.config_id,
+                                approval_path=args.approval)
             print(json.dumps(summary, sort_keys=True))
         elif args.command == "report":
             frozen = _json_file(args.manifest, "manifest")
@@ -165,7 +169,8 @@ def main(argv=None):
         elif args.command == "smoke":
             print(json.dumps(smoke_record(), sort_keys=True))
         return 0
-    except (ManifestFrozenError, RunnerError, ValueError, OSError, KeyError, RuntimeError) as exc:
+    except (ManifestFrozenError, RunnerError, approval.ApprovalError, ValueError, OSError, KeyError,
+            RuntimeError) as exc:
         parser.error(str(exc))
 
 

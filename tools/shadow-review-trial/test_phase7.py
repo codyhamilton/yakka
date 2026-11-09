@@ -16,6 +16,7 @@ import urllib.parse
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 TOOL = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(TOOL))
+import approval
 import cli
 import report
 import runner
@@ -101,6 +102,7 @@ class Phase7Tests(unittest.TestCase):
             pass
 
     def test_smoke_only_prints_fixture_receipt_fields_and_read_scope_refusal(self):
+        self.assertFalse(hasattr(cli._parser().parse_args(["smoke"]), "approval"))
         output = io.StringIO()
         with contextlib.redirect_stdout(output):
             self.assertEqual(cli.main(["smoke"]), 0)
@@ -200,15 +202,45 @@ class Phase7Tests(unittest.TestCase):
 
         ledger_path = self.root / "run-ledger.json"
         endpoint = f"http://127.0.0.1:{server.server_port}"
+        run_args = ["run", "--manifest", str(manifest_path), "--ledger", str(ledger_path),
+                    "--base-url", endpoint, "--auth-token", "fixture-auth", "--cap-usd", "1",
+                    "--reviewer-model", report.REVIEWER_MODEL, "--run-id", "rehearsal-1",
+                    "--tenant-id", RehearsalHandler.tenant]
         output = io.StringIO()
         with contextlib.redirect_stdout(output):
-            self.assertEqual(cli.main(["run", "--manifest", str(manifest_path), "--ledger", str(ledger_path),
-                                       "--base-url", endpoint, "--auth-token", "fixture-auth", "--cap-usd", "1",
-                                       "--reviewer-model", report.REVIEWER_MODEL, "--run-id", "rehearsal-1",
-                                       "--tenant-id", RehearsalHandler.tenant, "--execute"]), 0)
+            self.assertEqual(cli.main(run_args + ["--dry-run"]), 0)
+        preflight = json.loads(output.getvalue())
+        self.assertTrue(preflight["readiness"]["ready"])
+        self.assertEqual(RehearsalHandler.model_calls, 0)
+
+        with self.assertRaises(SystemExit):
+            with contextlib.redirect_stderr(io.StringIO()):
+                cli.main(run_args + ["--execute"])
+        self.assertEqual(RehearsalHandler.model_calls, 0)
+
+        approval_path = self.root / "approval.json"
+        approval_path.write_text(json.dumps({
+            "schema_version": 1,
+            "approval_reference": "cody-fixture-rehearsal",
+            "tenant_id": RehearsalHandler.tenant,
+            "endpoint": endpoint,
+            "manifest_sha256": manifest_hash,
+            "run_id": "rehearsal-1",
+            "preflight_sha256": approval.preflight_digest(preflight),
+            "authorized_max_usd": 1.0,
+            "expires_at": "2999-01-01T00:00:00+00:00",
+        }), encoding="utf-8")
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            self.assertEqual(cli.main(run_args + ["--execute", "--approval", str(approval_path)]), 0)
         summary = json.loads(output.getvalue())
         self.assertEqual({effort: row["completed"] for effort, row in summary["arms"].items()},
                          {"high": 3, "xhigh": 3, "max": 3})
+        self.assertEqual(summary["authorized_max_usd"], 1.0)
+        self.assertLessEqual(summary["approval_required_usd"], 1.0)
+        self.assertLessEqual(summary["projected_usd"], 1.0)
+        self.assertNotIn("live_trial", summary)
+        self.assertNotIn("deployed_smoke", summary)
         self.assertEqual(RehearsalHandler.model_calls, 9)
         cases = {case["case_id"]: case for case in frozen["cases"]}
         run_requests = [request for request in RehearsalHandler.requests if not request["dry_run"]]
@@ -240,6 +272,8 @@ class Phase7Tests(unittest.TestCase):
                                        "--ledger", str(ledger_path),
                                        "--adjudication", str(adjudication_path), "--output", str(report_path)]), 0)
         result = json.loads(report_path.read_text())
+        self.assertNotIn("live_trial", result)
+        self.assertNotIn("deployed_smoke", result)
         self.assertEqual(result["paired_intersection"]["completed_cases"], 3)
         self.assertEqual({effort: row["completed"] for effort, row in result["arms"].items()},
                          {"high": 3, "xhigh": 3, "max": 3})
