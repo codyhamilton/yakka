@@ -1,3 +1,5 @@
+> The review below through the automation section records merged PR #218. The appended owner-authority review assesses the current amendment; earlier admin-reset conclusions are historical and superseded only for lifecycle authority/semantics.
+
 # Plan 23 follow-up design review
 
 Recommendation: **proceed with the docs-only PR after the compatibility correction recorded below**. No unresolved material design finding remains. This is a design assessment, not implementation or deployed-service validation.
@@ -73,3 +75,60 @@ Ten owner decisions map to domains with 28 ledger entries; the prior adversarial
 ### Residual risks
 
 Implementation phases carry real complexity (cursor high-water, global reservation ownership, admin reset concurrency). Open questions on deploy readiness, eligible population and xhigh/max cost remain operator concerns, as recorded in `DESIGN.md`.
+
+
+---
+
+## Owner-authority amendment: independent design review
+
+Recommendation: **proceed with the docs-only PR after the two bounded corrections below**.
+No unresolved material design finding remains after author verification. This assesses a pending
+contract, not implementation or deployed behavior. Final DESIGN.md SHA-256: `937cbf9e6fa3d9fd9821ef370d21f3ca2e0a2674b2f217925b1e1f4d8d0fe38b`.
+
+One clean-context `gpt-6-astra` agent at high reasoning effort independently challenged value,
+intent alignment (including both new Cody quotes), scope, ownership/auth, the web-UI-only gate,
+confirmation, reset/delete semantics, selected-tenant behavior, legacy refusal, spoofability,
+phase outcomes/order and the ledger. Narrow read-only Ground used the inherited model because
+Haiku is unavailable in this harness. No second independent pass is claimed: the reviewer found
+the gaps in the first draft and the author applied and checked the corrections.
+
+- **Medium, applied — cross-origin selection invalidation.** API-origin tabs cannot erase Pages
+  localStorage, and the current selection helper auto-chooses the first tenant. The amendment now
+  distinguishes immediate same-origin tab notification from Pages/other-browser revalidation.
+  Clients compare owner-visible lifecycle generation/state on return, focus/pageshow and before
+  tenant reads; absent/changed selections clear caches/cursors and require explicit selection
+  without fallback. Pending state suspends reads/actions. Phase 2 proves separate-origin views,
+  a suspended Pages tab and the only-tenant case. Ledger 32/36/38 records the boundary.
+- **Medium, applied — observable ambiguous-response recovery.** Existing `/v1/me` id/name cannot
+  distinguish a completed reset from pending cleanup. Phase 2 additively exposes owned-tenant
+  lifecycle state/generation from registry/journal metadata without lazy-open: pending operations
+  remain visible, reset becomes active with a new generation, completed delete disappears.
+  Unresolved recovery disables lifecycle actions; later operations require fresh typed confirmation,
+  never automatic replay. Lost reset responses and interrupted reset/delete recovery are explicit
+  Phase 2 proofs. Ledger 37/38 records the contract.
+
+The pass found no high or critical issue. It verified prior Intent text and all seven LANDED.md
+outcomes remain intact; unrelated review/read/trial contracts and Phase 1 are unchanged; all three
+amendment-local phases retain their order. It accepted API-origin profile serving as bounded,
+ledgered scope needed for strict same-origin rejection rather than a dependency on paused UI work.
+
+### Author verification and feedback for this amendment
+
+Author checks compare prior Intent as an exact prefix, both new verbatim quotes, LANDED.md bytes,
+unrelated contract sections and Phase 1 against `f605df0`; check all 38 ledger rows, phase numbering,
+local links, whitespace and docs-only scope. No implementation test or live behavior is claimed.
+The new mandatory human-owner/no-agent wording appears in the API/endpoint descriptions, UI copy,
+agent advisory/MCP docs and trial operator README. No skill previously directs lifecycle calls,
+so no plugin/skill/version edit is needed.
+
+`artifact_feedback` was called after the initial draft and after the final material corrections.
+The final call for the digest above returned **stale**: current content not yet delivered; the
+service holds hash prefix `1f9698b056cc` from `2026-11-09T12:55:55Z`. No rejection, scores or outlier
+checks were returned. This is a delivery gap, not a quality pass. No paid submission or workaround
+was attempted.
+
+The design is sufficient for Executor/refine to consume amended Phase 2 once this amendment lands
+and Phase 1 dependencies are proved on its build branch. This docs-only invocation neither builds
+nor unpauses that work. Other holds remain, including `~/workspace/.briefs/yakka/HOLD`.
+Publication is limited to this worktree/branch, an ordinary push and a new ready PR into master;
+PRs #179/#218, other plans/checkouts, secrets, deployments and paid APIs remain untouched.

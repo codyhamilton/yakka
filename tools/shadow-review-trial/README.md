@@ -2,6 +2,29 @@
 
 Local tools for freezing Phase 6 historical cases, running the Phase 7 trial, and building its alignment report. The `manifest` command uses local Git objects and the Phase 1 `CaptureChange` range API; it makes no network or provider calls and needs no credentials. The `run` command talks only to the configured Yakka REST endpoint. Tests and `smoke` use loopback fake endpoints and synthetic fixture auth; they never call a provider.
 
+## Pending owner-only trial cleanup (Plan 23 follow-up)
+
+Only the human owner may reset or delete a tenant. Agents must not perform or attempt this on a user's behalf.
+The [amended Phase 2](../../docs/plans/23-llm-review-shadow/DESIGN.md) designs these operations;
+this documentation does not claim they are implemented. There is no lifecycle MCP tool or runner
+cleanup command. The trial's `wk_` key is for reviews, never reset/delete.
+
+Recommended operator path after implementation: preserve needed trial exports/evidence, then the
+human opens the API-origin profile UI (navigate there from Pages), chooses the disposable trial
+tenant, selects **Delete**, types its immutable id and confirms. Delete removes the entire tenant
+and all assets. Optional **Reset** keeps id/name/ownership but wipes data and revokes all old keys;
+reuse requires deliberate re-selection and a newly issued key. Both require the owner cookie,
+exact API Origin, same-origin Fetch-Site when present, `X-Yakka-UI: tenant-lifecycle`, JSON and
+matching `confirm_tenant_id`. The UI sends no bearer; key calls, including key-plus-cookie, fail
+specifically with `403 tenant_lifecycle_ui_only`. Do not automate cleanup or spoof these headers.
+
+Deleting/resetting the selected or only tenant is permitted with confirmation. Success clears
+selection/caches/cursors and forces explicit re-selection/create while keeping global sign-in;
+rejection/cancellation has no effects. Legacy tenants without trustworthy creation/ownership
+coverage return `409 legacy_tenant_cleanup_unsupported` before cleanup; use a fresh eligible trial
+tenant. The gate is a spoofable guardrail, not proof of personhood; future human verification/captcha
+is explicitly deferred. A timeout is not proof of success and must not trigger automatic replay.
+
 ## Manifest
 
 ```bash

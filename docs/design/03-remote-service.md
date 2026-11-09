@@ -192,11 +192,61 @@ review reservations/claims also live outside the tenant directory. There is curr
 DeleteTenant API or registry method. Raw directory deletion leaves orphaned registry entries,
 and a still-valid token can lazily recreate the directory.
 
-The [Plan 23 follow-up amendment](../plans/23-llm-review-shadow/DESIGN.md) designs a bounded,
-authenticated reset for freshly provisioned synthetic tenants, including registry and global
-asset cleanup. It also designs per-call effort/tags/store controls, removal of the trial env
-gate and complete paged review reads. These follow-up contracts are not implemented by that
-design PR; the configuration/API descriptions above describe the landed implementation.
+The [Plan 23 follow-up amendment](../plans/23-llm-review-shadow/DESIGN.md) designs owner
+self-serve reset and delete with complete tenant/global cleanup, plus per-call effort/tags/store
+controls and complete paged review reads. These are **pending implementation**; PR #218 changed
+docs only and did not ship an admin reset. The API/configuration table above remains the landed
+baseline.
+
+### Pending owner tenant lifecycle API (Plan 23 Phase 2)
+
+Only the human owner may reset or delete a tenant. Agents must not perform or attempt this on a user's behalf.
+This language is required in both endpoint descriptions and their UI confirmations. No reset/delete
+MCP tool, CLI command or admin alias is added.
+
+| Endpoint (pending) | Description / success |
+| --- | --- |
+| `POST /v1/tenants/<tenant-id>/reset` | Only the human owner may reset or delete a tenant. Agents must not perform or attempt this on a user's behalf. `204` wipes all assets and revokes all keys/grants, retaining tenant id/name/owner/trustworthy marker and a fresh store generation for explicit re-selection and rekeying. |
+| `DELETE /v1/tenants/<tenant-id>` | Only the human owner may reset or delete a tenant. Agents must not perform or attempt this on a user's behalf. `204` removes the entire tenant: storage, reviews, usage, tokens, tenant-bound sessions if any, owner/name/marker, grants, attributed claims/reservations and cleanup journal. |
+
+Both require a valid owner `workflow_session` cookie, JSON body
+`{"confirm_tenant_id":"<exact path id>"}`, exact `Origin` equal to the public API origin,
+`Sec-Fetch-Site: same-origin` when present, and **`X-Yakka-UI: tenant-lifecycle`**. Missing/null or
+other Origin, conflicting Fetch-Site or missing/wrong UI header is `403 tenant_lifecycle_ui_only`.
+These routes tighten the admin JSON/Origin pattern: Pages and configured CORS origins cannot call
+them cross-origin. Phase 2 must serve a bounded profile lifecycle UI at the API origin, including
+production; Pages navigates the person there. This does not change other routes' browser policy.
+
+Reject **any** supplied Authorization/API-key/token credential first with
+`403` JSON `{"error":"tenant_lifecycle_ui_only","message":"Only the human owner may reset or delete a tenant. Agents must not perform or attempt this on a user's behalf. Open the profile UI."}`, even when a valid owner
+cookie and UI headers are also present. Local mode has the same refusal. With no key credential,
+an absent/invalid cookie is `401 session_required` with sign-in guidance. After the UI gate,
+non-JSON is `415 json_required`; absent ids are `404 tenant_not_found`; existing tenants owned by
+someone else are `403 tenant_owner_required`, including for an admin non-owner. Malformed JSON,
+missing/wrong-type/mismatched confirmation is `400 tenant_confirmation_mismatch`. After those
+checks, legacy tenants without a trustworthy ownership/creation marker return
+`409 legacy_tenant_cleanup_unsupported`. All rejections are no-ops before destructive work or
+selection changes. Busy work that cannot safely quiesce returns `409 tenant_busy`; partial cleanup
+is `503 tenant_cleanup_incomplete`, unavailable until operation-bound durable recovery finishes.
+Neither operation returns `204` before its full cleanup proof and journal removal. Repeated delete
+or reset of an absent id is `404`; repeated confirmed reset wipes its current assets again.
+
+The current selected/only owned tenant may be reset or deleted with confirmation. On success the
+profile clears its selection/caches/cursors, refreshes owned tenants and requires explicit
+re-selection or creation; it preserves global login and other tenants. Reset retains only the
+listed identity metadata; delete leaves zero target references. Old credentials, cursors, queued
+work and restarts cannot resurrect erased assets. Anonymous provider safety exposure remains,
+without target identity or tenant analytics residue. Phase 2 also extends each owned `/v1/me` tenant with `lifecycle_state`
+(`active`, `resetting`, `deleting`, `unsupported`) and `lifecycle_generation` (opaque string, null
+for unsupported legacy). Read from registry/journal metadata without lazy-open; disable lifecycle actions while recovery is
+unresolved. Pending entries remain owner-visible until completion; reset changes
+generation, delete disappears. Both API-origin and Pages UI revalidate selection/generation on
+return/focus/pageshow and before tenant reads, clearing absent/changed selections and cached reads
+without auto-selecting another tenant. In-progress state suspends target reads. An eligible
+remembered selection lacking a generation requires explicit re-selection. Failed recovery reads
+show completion unknown and never trigger automatic mutation replay. The gate is a **spoofable guardrail, not proof
+of a human**; future human verification/captcha is explicitly out of scope. Detailed concurrency,
+recovery and no-cross-tenant proofs are in the plan's Phase 2.
 
 ### Writer
 
