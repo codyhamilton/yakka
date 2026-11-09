@@ -127,6 +127,12 @@ func (s *Server) adminTenantStatus(ctx context.Context, id string) adminTenant {
 		ID: id, Name: s.registry.TenantName(id), Failures: []store.RejectionEntry{},
 		Screens: store.ScreenSummary{Verdicts: map[string]int{}},
 	}
+	release, uerr := s.beginTenantUse(id)
+	if uerr != nil {
+		out.Error = shortCause(uerr)
+		return out
+	}
+	defer release()
 	ts, err := s.tenant(id)
 	if err != nil {
 		out.Error = shortCause(err)
@@ -195,6 +201,10 @@ func (s *Server) handleAdminRescore(w http.ResponseWriter, r *http.Request, _ *S
 		writeJSON(w, 404, map[string]string{"error": "no such tenant"})
 		return
 	}
+	if rec, ok := s.registry.TenantLifecycle(body.Tenant); ok && (rec.State == lifecycleStateResetting || rec.State == lifecycleStateDeleting) {
+		writeJSON(w, 409, map[string]string{"error": "tenant_busy"})
+		return
+	}
 	ts, err := s.tenant(body.Tenant)
 	if err != nil {
 		writeJSON(w, 503, map[string]string{"error": "tenant unavailable"})
@@ -210,26 +220,35 @@ func (s *Server) handleAdminRescore(w http.ResponseWriter, r *http.Request, _ *S
 		return
 	}
 	s.mu.Lock()
-	if s.closed {
+	if s.closed || ts.stop == nil {
 		s.mu.Unlock()
 		ts.rescore.end(store.ErrClosed)
 		writeJSON(w, 503, map[string]string{"error": "shutting down"})
 		return
 	}
+	stop, done := ts.stop, make(chan struct{})
+	ts.rescoreDone = done
 	s.wg.Add(1)
 	s.mu.Unlock()
-	go s.runRescore(ts, hashes)
+	go s.runRescore(ts, stop, done, hashes)
 	writeJSON(w, 202, ts.rescore.snapshot())
 }
 
 // runRescore screens each hash in turn. A scorer that is unreachable ends the job; any other
 // failure is counted and the job moves on, so one bad blob cannot hold the rest back.
 // end always runs, including on panic, so a failed step cannot leave the job slot stuck running.
-func (s *Server) runRescore(ts *tenantState, hashes []string) {
+func (s *Server) runRescore(ts *tenantState, stop <-chan struct{}, done chan struct{}, hashes []string) {
 	defer s.wg.Done()
+	defer close(done)
 	var abort error
 	defer func() { ts.rescore.end(abort) }()
 	for _, h := range hashes {
+		select {
+		case <-stop:
+			abort = context.Canceled
+			return
+		default:
+		}
 		if err := s.ctx.Err(); err != nil {
 			abort = err
 			return

@@ -2,6 +2,7 @@ package serve
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 	"time"
@@ -83,6 +84,16 @@ func (s *Server) handleCreateToken(w http.ResponseWriter, r *http.Request, sess 
 		writeJSON(w, 400, map[string]string{"error": "invalid token name"})
 		return
 	}
+	release, uerr := s.beginTenantUse(body.Tenant)
+	if uerr != nil {
+		if errors.Is(uerr, ErrTenantLifecycleBusy) {
+			writeJSON(w, 409, map[string]string{"error": "tenant_busy"})
+			return
+		}
+		writeJSON(w, 403, map[string]string{"error": "forbidden"})
+		return
+	}
+	defer release()
 	created, err := s.registry.CreateToken(body.Tenant, body.Scope, name, exp, sess.GitHubID, now)
 	if err != nil {
 		if err.Error() == "forbidden tenant" {
@@ -155,6 +166,12 @@ func (s *Server) handleRevokeToken(w http.ResponseWriter, r *http.Request, sess 
 		writeJSON(w, 403, map[string]string{"error": "forbidden"})
 		return
 	}
+	release, uerr := s.beginTenantUse(rec.Tenant)
+	if uerr != nil {
+		writeJSON(w, 409, map[string]string{"error": "tenant_busy"})
+		return
+	}
+	defer release()
 	found, already := s.registry.RevokeToken(tokenID)
 	if !found {
 		writeJSON(w, 404, map[string]string{"error": "not found"})

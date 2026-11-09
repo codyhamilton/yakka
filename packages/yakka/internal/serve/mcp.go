@@ -624,6 +624,14 @@ func (s *Server) mcpCall(parent context.Context, tenant, scope, name string, p m
 	}
 	ctx, cancel := context.WithTimeout(parent, time.Duration(t.TimeoutS)*time.Second)
 	defer cancel()
+	release, uerr := s.beginTenantUse(tenant)
+	if uerr != nil {
+		if errors.Is(uerr, ErrTenantLifecycleBusy) {
+			return mcpToolError("tenant_busy")
+		}
+		return mcpToolError("tenant unavailable")
+	}
+	defer release()
 	ts, err := s.tenant(tenant)
 	if err != nil {
 		return mcpToolError("tenant unavailable")

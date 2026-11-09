@@ -167,6 +167,18 @@ func (s *Server) handleDeviceAuthorize(w http.ResponseWriter, r *http.Request, s
 			return
 		}
 	}
+	if !deny {
+		release, uerr := s.beginTenantUse(body.Tenant)
+		if uerr != nil {
+			if errors.Is(uerr, ErrTenantLifecycleBusy) {
+				writeJSON(w, 409, map[string]string{"error": "tenant_busy"})
+				return
+			}
+			writeJSON(w, 403, map[string]string{"error": "forbidden"})
+			return
+		}
+		defer release()
+	}
 	var verr error
 	found, blocked, _ := s.grants.decide(sess.ID, body.UserCode, func(gr *deviceGrant) error {
 		if deny {
@@ -238,6 +250,16 @@ func (s *Server) handleDeviceTokenRoute(w http.ResponseWriter, r *http.Request) 
 // concurrent second poll sees expired_token. A persist failure therefore loses the grant and the
 // token; the user runs login again.
 func (s *Server) redeemDeviceGrant(w http.ResponseWriter, gr deviceGrant) {
+	release, uerr := s.beginTenantUse(gr.tenant)
+	if uerr != nil {
+		if errors.Is(uerr, ErrTenantLifecycleBusy) {
+			writeJSON(w, 409, map[string]string{"error": "tenant_busy"})
+			return
+		}
+		writeJSON(w, 400, map[string]string{"error": "access_denied"})
+		return
+	}
+	defer release()
 	created, err := s.registry.CreateToken(gr.tenant, gr.scope, gr.name, gr.expiresAt, gr.githubID, s.grants.now())
 	if err != nil {
 		writeJSON(w, 400, map[string]string{"error": "access_denied"})

@@ -239,6 +239,10 @@ type Options struct {
 	GitHubHTTPBase     string         // tests: mock GitHub authorize/token/api base URL
 	ReviewEndpoint     string         // tests: fake provider endpoint; production uses the fixed URL
 	ReviewReservations *review.Reservations
+	// LifecycleFault is a test-only seam that stops a reset/delete at a named
+	// cleanup stage so crash/restart resume can be exercised. Production leaves
+	// it nil; there is no configuration or CLI for it.
+	LifecycleFault func(stage string) error
 }
 
 // ScreenFunc is the screen step applied to one pending hash. Phase 3 replaces it.
@@ -255,6 +259,10 @@ type tenantState struct {
 	gaps    atomic.Int64            // screen gaps counted at worker start
 	fails   map[string]*hashFailure // worker-only: pending hashes whose screen step keeps failing
 	rescore rescoreState            // the admin rescore job
+
+	stop        chan struct{} // closed to stop this tenant's worker and rescore
+	workerDone  chan struct{} // closed when the worker exits; nil while not started
+	rescoreDone chan struct{} // closed when the current rescore exits; nil when none
 }
 
 // hashFailure is the in-memory retry state of one pending hash. A restart forgets it, which gives
@@ -276,6 +284,7 @@ type Server struct {
 
 	mu      sync.Mutex
 	tenants map[string]*tenantState
+	gates   map[string]*sync.RWMutex // per-tenant admission gate; write side only by cleanup
 	closed  bool
 	stop    chan struct{}
 	ctx     context.Context // cancelled by Close, so an in-flight screen does not hold up shutdown
@@ -299,7 +308,7 @@ func New(cfg Config, opts Options) *Server {
 	if err != nil {
 		panic("serve: registry: " + err.Error())
 	}
-	s := &Server{cfg: cfg, opts: opts, registry: reg, mcpTools: mcpTools, grants: newDeviceGrants(), tenants: map[string]*tenantState{}, stop: make(chan struct{}), screen: opts.ScreenStep}
+	s := &Server{cfg: cfg, opts: opts, registry: reg, mcpTools: mcpTools, grants: newDeviceGrants(), tenants: map[string]*tenantState{}, gates: map[string]*sync.RWMutex{}, stop: make(chan struct{}), screen: opts.ScreenStep}
 	// A review tool is advertised only when its declared 150-second contract
 	// fits this server's configured MCP call ceiling and review is configured.
 	// This keeps an unavailable optional capability out of minimal/local servers.
@@ -320,6 +329,8 @@ func New(cfg Config, opts Options) *Server {
 	if s.screen == nil {
 		s.screen = unscreened
 	}
+	// A journaled reset/delete is already authorized; finish it before serving.
+	s.resumeTenantLifecycles()
 	if cfg.Remote() {
 		if err := reg.Persist(); err != nil {
 			panic("serve: registry: " + err.Error())
@@ -340,20 +351,23 @@ func (s *Server) StartWorker() {
 }
 
 func (s *Server) startWorkerLocked(ts *tenantState) {
-	if s.opts.DisableWorker || ts.started {
+	if s.opts.DisableWorker || ts.started || ts.stop == nil {
 		return
 	}
 	ts.started = true
+	done := make(chan struct{})
+	ts.workerDone = done
 	s.wg.Add(1)
-	go s.worker(ts)
+	go s.worker(ts, ts.stop, done)
 }
 
 const maxBackoff = 5 * time.Minute
 
 const maxScreenAttempts = 5
 
-func (s *Server) worker(ts *tenantState) {
+func (s *Server) worker(ts *tenantState, stop <-chan struct{}, done chan struct{}) {
 	defer s.wg.Done()
+	defer close(done)
 	tick := time.NewTicker(s.opts.PollInterval)
 	defer tick.Stop()
 	reconciled := false
@@ -361,9 +375,9 @@ func (s *Server) worker(ts *tenantState) {
 	for {
 		unreachable := false
 		if !reconciled {
-			var done bool
-			done, unreachable = s.reconcile(ts)
-			reconciled = done
+			var ready bool
+			ready, unreachable = s.reconcile(ts)
+			reconciled = ready
 		}
 		if !unreachable {
 			unreachable = s.drainPending(ts)
@@ -377,6 +391,8 @@ func (s *Server) worker(ts *tenantState) {
 			select { // wakes are ignored while backing off
 			case <-s.stop:
 				return
+			case <-stop:
+				return
 			case <-time.After(backoff):
 			}
 			continue
@@ -384,6 +400,8 @@ func (s *Server) worker(ts *tenantState) {
 		backoff = 0
 		select {
 		case <-s.stop:
+			return
+		case <-stop:
 			return
 		case <-ts.wake:
 		case <-tick.C:
@@ -493,6 +511,16 @@ func (s *Server) tenant(name string) (*tenantState, error) {
 	if s.closed {
 		return nil, store.ErrClosed
 	}
+	if s.cfg.Remote() {
+		if !s.registry.tenantRegistered(name) {
+			return nil, ErrTenantNotFound
+		}
+		if rec, ok := s.registry.TenantLifecycle(name); ok {
+			if rec.State == lifecycleStateResetting || rec.State == lifecycleStateDeleting {
+				return nil, ErrTenantLifecycleBusy
+			}
+		}
+	}
 	if ts, ok := s.tenants[name]; ok {
 		return ts, nil
 	}
@@ -500,7 +528,7 @@ func (s *Server) tenant(name string) (*tenantState, error) {
 	if err != nil {
 		return nil, err
 	}
-	ts := &tenantState{t: t, wake: make(chan struct{}, 1)}
+	ts := &tenantState{t: t, wake: make(chan struct{}, 1), stop: make(chan struct{})}
 	s.tenants[name] = ts
 	s.startWorkerLocked(ts) // the worker's first pass handles leftover pending files
 	return ts, nil
@@ -701,6 +729,12 @@ func (s *Server) auth(h tenantHandler) http.HandlerFunc {
 			return
 		}
 		name := res.tenant
+		release, err := s.beginTenantUse(name)
+		if err != nil {
+			writeTenantUseError(w, err)
+			return
+		}
+		defer release()
 		ts, err := s.tenant(name)
 		if err != nil {
 			if errors.Is(err, store.ErrLocked) {
@@ -776,6 +810,12 @@ func (s *Server) reviewsPostRoute(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 400, map[string]string{"error": "invalid review arguments"})
 		return
 	}
+	release, uerr := s.beginTenantUse(res.tenant)
+	if uerr != nil {
+		writeTenantUseError(w, uerr)
+		return
+	}
+	defer release()
 	ts, err := s.tenant(res.tenant)
 	if err != nil {
 		writeJSON(w, 503, map[string]string{"error": "tenant unavailable"})
@@ -842,6 +882,12 @@ func (s *Server) reviewsGetRoute(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	filters := reviewCursorFilter{RepoID: q.Get("repo_id"), Plan: q.Get("plan"), Phase: phase, Kind: q.Get("kind"), Status: q.Get("status"), Effort: q.Get("effort"), Profile: q.Get("profile"), ManifestHash: q.Get("manifest_hash"), Since: since, Tags: tags, Detail: detail}
+	release, uerr := s.beginTenantUse(res.tenant)
+	if uerr != nil {
+		writeTenantUseError(w, uerr)
+		return
+	}
+	defer release()
 	ts, err := s.tenant(res.tenant)
 	if err != nil {
 		writeJSON(w, 503, map[string]string{"error": "tenant unavailable"})
