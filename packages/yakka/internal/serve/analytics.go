@@ -213,7 +213,8 @@ func parseFilter(w http.ResponseWriter, r *http.Request, o filterOpts) (store.An
 			return f, false
 		}
 	}
-	if q.Get("all") == "1" {
+	all := q.Get("all") == "1"
+	if all {
 		from, hasFrom = minAnalyticsTime, true
 		if !hasTo {
 			to = time.Now().UTC()
@@ -254,7 +255,8 @@ func parseFilter(w http.ResponseWriter, r *http.Request, o filterOpts) (store.An
 		excludes[dim] = append(excludes[dim], value)
 	}
 	f = store.AnalyticsFilter{From: from.UTC(), To: to.UTC(), Repos: q["repo_id"], Harnesses: q["harness"], Kinds: q["kind"], Plans: q["plan"],
-		NormEvents: q["norm_event"], Events: q["event"], Tools: q["tool"], Models: q["model"], Sources: q["source"], ConversationIDs: q["conversation_id"], TZ: loc}
+		NormEvents: q["norm_event"], Events: q["event"], Tools: q["tool"], Models: q["model"], Sources: q["source"], ConversationIDs: q["conversation_id"], TZ: loc,
+		All: all && o.cur == nil}
 	f.Excludes = excludes
 	if o.scoresKind && len(f.Kinds) != 1 {
 		errJSON(w, 400, "kind required")
@@ -267,6 +269,51 @@ func parseFilter(w http.ResponseWriter, r *http.Request, o filterOpts) (store.An
 		}
 	}
 	return f, true
+}
+
+func plainWindow(f store.AnalyticsFilter) map[string]any {
+	bounds := map[string]string{"from": f.From.Format(time.RFC3339Nano), "to": f.To.Format(time.RFC3339Nano)}
+	return map[string]any{"requested": bounds, "effective": bounds, "clipped": false}
+}
+
+// resolveRouteWindow moves an all=1 filter's start to the earliest retained timestamp of the
+// named populations. Empty coverage returns a null effective window and empty=true. Explicit
+// from/to requests are unchanged so resolution still follows the requested span.
+func resolveRouteWindow(ctx context.Context, tn *store.Tenant, populations []string, f store.AnalyticsFilter) (store.AnalyticsFilter, map[string]any, bool, error) {
+	if !f.All {
+		return f, plainWindow(f), false, nil
+	}
+	requested := map[string]string{"from": f.From.Format(time.RFC3339Nano), "to": f.To.Format(time.RFC3339Nano)}
+	var first float64
+	found := false
+	for _, population := range populations {
+		lo, _, ok, err := tn.PopulationBounds(ctx, population, f)
+		if err != nil {
+			return f, nil, false, err
+		}
+		if !ok {
+			continue
+		}
+		if !found || lo < first {
+			first = lo
+			found = true
+		}
+	}
+	if !found {
+		return f, map[string]any{"requested": requested, "effective": map[string]any{"from": nil, "to": nil}, "clipped": nil}, true, nil
+	}
+	sec, frac := math.Modf(first)
+	start := time.Unix(int64(sec), int64(math.Round(frac*1e9))).UTC()
+	clip := any(false)
+	if start.After(f.From) {
+		f.From = start
+		clip = "before_first_data"
+	}
+	return f, map[string]any{
+		"requested": requested,
+		"effective": map[string]string{"from": f.From.Format(time.RFC3339Nano), "to": f.To.Format(time.RFC3339Nano)},
+		"clipped":   clip,
+	}, false, nil
 }
 
 // pageParams reads limit (clamped to 1..500) and cursor.

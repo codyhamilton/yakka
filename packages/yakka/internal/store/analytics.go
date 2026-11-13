@@ -75,6 +75,9 @@ type AnalyticsFilter struct {
 	Excludes                       map[string][]string
 	SessionRanges                  []SessionRange
 	TZ                             *time.Location // nil means UTC
+	// All is set for all=1 with no cursor. Handlers resolve From to retained coverage
+	// before choosing a bucket; the stored minimum is only the requested bound.
+	All bool
 }
 
 // SessionRange is an inclusive numeric predicate over a session measure. Nil bounds are open.
@@ -199,6 +202,72 @@ func (f AnalyticsFilter) factWhere() (string, []any) {
 		}
 	}
 	return w, args
+}
+
+// matchWithoutTime is factWhere without the time bounds, so coverage can see every retained row.
+func (f AnalyticsFilter) matchWithoutTime() (string, []any) {
+	w, args := f.factWhere()
+	rest := strings.TrimPrefix(w, "ts >= ? AND ts <= ?")
+	if rest == "" {
+		return "1=1", nil
+	}
+	return "1=1" + rest, args[2:]
+}
+
+func (f AnalyticsFilter) rejMatchWithoutTime() (string, []any) {
+	w, args := f.rejWhere()
+	rest := strings.TrimPrefix(w, "at >= ? AND at <= ?")
+	if rest == "" {
+		return "1=1", nil
+	}
+	return "1=1" + rest, args[2:]
+}
+
+// PopulationBounds reports the earliest and latest retained timestamps, in Unix seconds, for a
+// route population. population is "facts", "rejections", or "measure:<name>". ok is false when
+// that population is empty. Non-time filters still apply.
+func (t *Tenant) PopulationBounds(ctx context.Context, population string, f AnalyticsFilter) (first, last float64, ok bool, err error) {
+	switch {
+	case population == "rejections":
+		return t.rejectionBounds(ctx, f)
+	case strings.HasPrefix(population, "measure:"):
+		def, found := measureByName(strings.TrimPrefix(population, "measure:"))
+		if !found {
+			return 0, 0, false, fmt.Errorf("unknown measure %s", strings.TrimPrefix(population, "measure:"))
+		}
+		if def.table == "rejections" {
+			return t.rejectionBounds(ctx, f)
+		}
+		pred := "1=1"
+		if def.usage {
+			pred = "type='hook_event' AND norm_event='usage'"
+		} else if def.pred != "" {
+			pred = def.pred
+		}
+		return t.factBounds(ctx, pred, f)
+	default:
+		return t.factBounds(ctx, "1=1", f)
+	}
+}
+
+func (t *Tenant) factBounds(ctx context.Context, pred string, f AnalyticsFilter) (float64, float64, bool, error) {
+	match, args := f.matchWithoutTime()
+	var lo, hi sql.NullFloat64
+	err := t.rdb.QueryRowContext(ctx, `SELECT MIN(ts), MAX(ts) FROM facts WHERE (`+pred+`) AND (`+match+`)`, args...).Scan(&lo, &hi)
+	if err != nil || !lo.Valid {
+		return 0, 0, false, err
+	}
+	return lo.Float64, hi.Float64, true, nil
+}
+
+func (t *Tenant) rejectionBounds(ctx context.Context, f AnalyticsFilter) (float64, float64, bool, error) {
+	match, args := f.rejMatchWithoutTime()
+	var lo, hi sql.NullInt64
+	err := t.rdb.QueryRowContext(ctx, `SELECT MIN(at), MAX(at) FROM rejections WHERE `+match, args...).Scan(&lo, &hi)
+	if err != nil || !lo.Valid {
+		return 0, 0, false, err
+	}
+	return float64(lo.Int64) / 1e9, float64(hi.Int64) / 1e9, true, nil
 }
 
 // rejWhere is the shared filter over a rejections row: window on at (ns), repo_id and harness are

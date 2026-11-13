@@ -573,6 +573,19 @@ func (s *Server) analyticsTimeEntities(w http.ResponseWriter, r *http.Request, t
 	if !ok {
 		return
 	}
+	populations := make([]string, len(fields))
+	for i, measure := range fields {
+		populations[i] = "measure:" + measure
+	}
+	f, window, empty, err := resolveRouteWindow(r.Context(), ts.t, populations, f)
+	if err != nil {
+		readFailed(w)
+		return
+	}
+	if empty {
+		writeJSON(w, 200, map[string]any{"grain": "time", "bucket": "none", "fields": fields, "rows": []any{}, "population": map[string]any{"grain": "time", "unit": "bucket", "scope_n": 0, "cohort_n": 0, "eligible_n": 0, "returned_n": 0, "missing_by_reason": map[string]int{}}, "window": window})
+		return
+	}
 	bucket := q.Get("bucket")
 	cellBudget := 20000
 	if v := q.Get("max_cells"); v != "" {
@@ -631,7 +644,7 @@ func (s *Server) analyticsTimeEntities(w http.ResponseWriter, r *http.Request, t
 		}
 		rows = append(rows, map[string]any{"id": map[string]any{"t": k, "tz": fTZ(f)}, "m": m, "l": map[string]any{}, "flags": map[string]any{}})
 	}
-	writeJSON(w, 200, map[string]any{"grain": "time", "bucket": bucket, "fields": fields, "rows": rows, "population": map[string]any{"grain": "time", "unit": "bucket", "scope_n": len(rows), "cohort_n": len(rows), "eligible_n": len(rows), "returned_n": len(rows), "missing_by_reason": map[string]int{}}, "window": map[string]any{"requested": map[string]string{"from": f.From.Format(time.RFC3339Nano), "to": f.To.Format(time.RFC3339Nano)}, "effective": map[string]string{"from": f.From.Format(time.RFC3339Nano), "to": f.To.Format(time.RFC3339Nano)}, "clipped": false}})
+	writeJSON(w, 200, map[string]any{"grain": "time", "bucket": bucket, "fields": fields, "rows": rows, "population": map[string]any{"grain": "time", "unit": "bucket", "scope_n": len(rows), "cohort_n": len(rows), "eligible_n": len(rows), "returned_n": len(rows), "missing_by_reason": map[string]int{}}, "window": window})
 }
 
 func fTZ(f store.AnalyticsFilter) string {

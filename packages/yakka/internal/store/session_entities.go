@@ -378,10 +378,61 @@ func sessionRangeWhere(ranges []SessionRange, args *[]any) string {
 }
 
 func (t *Tenant) SessionCallConversationCount(ctx context.Context, f AnalyticsFilter) (int, error) {
+	if len(f.SessionRanges) > 0 {
+		cte, args := sessionAggregateCTE(f)
+		var n int
+		err := t.rdb.QueryRowContext(ctx, cte+` SELECT COUNT(*) FROM filtered WHERE model_calls>0`, args...).Scan(&n)
+		return n, err
+	}
 	cte, args := usageRowsWhere(f)
 	var n int
 	err := t.rdb.QueryRowContext(ctx, cte+` SELECT COUNT(DISTINCT conversation_id) FROM kept`, args...).Scan(&n)
 	return n, err
+}
+
+// sessionPredicateSQL keeps conversation-grain rows whose session measures match
+// f.SessionRanges. The surrounding statement must already define the kept usage CTE.
+func sessionPredicateSQL(f AnalyticsFilter, perAlias string, args *[]any) string {
+	if len(f.SessionRanges) == 0 {
+		return ""
+	}
+	factWhere, factArgs := f.factWhere()
+	*args = append(*args, factArgs...)
+	ranges := sessionRangeWhere(f.SessionRanges, args)
+	return ` WHERE ` + perAlias + `.conversation_id IN (
+		SELECT conversation_id FROM (
+			SELECT base.conversation_id,
+				COALESCE(usage.model_calls,0) model_calls,
+				COALESCE(usage.unpriced_calls,0) unpriced_calls,
+				COALESCE(usage.cost_usd,0) cost_usd,
+				COALESCE(usage.tokens_in,0) tokens_in,
+				COALESCE(usage.tokens_out,0) tokens_out,
+				COALESCE(usage.tokens_cache_read,0) tokens_cache_read,
+				COALESCE(usage.tokens_cache_write,0) tokens_cache_write,
+				COALESCE(usage.tokens_reasoning,0) tokens_reasoning,
+				base.hook_events hook_events, base.artifact_versions artifact_versions,
+				base.commits commits, base.distinct_content distinct_content,
+				base.first_ts first_ts, base.last_ts last_ts,
+				(base.last_ts-base.first_ts) duration_s
+			FROM (
+				SELECT conversation_id, MIN(ts) first_ts, MAX(ts) last_ts,
+					SUM(CASE WHEN type='hook_event' THEN 1 ELSE 0 END) hook_events,
+					SUM(CASE WHEN type='artifact_version' THEN 1 ELSE 0 END) artifact_versions,
+					SUM(CASE WHEN type='commit' THEN 1 ELSE 0 END) commits,
+					COUNT(DISTINCT CASE WHEN type='artifact_version' THEN content_hash END) distinct_content
+				FROM facts WHERE ` + factWhere + ` GROUP BY conversation_id
+			) base
+			LEFT JOIN (
+				SELECT conversation_id, COUNT(*) model_calls,
+					SUM(1-wf_usage_priced(harness,model,tok_in,tok_out,tok_cache_read,tok_cache_write,tok_reasoning,cost_reported)) unpriced_calls,
+					COALESCE(SUM(wf_usage_cost(harness,model,tok_in,tok_out,tok_cache_read,tok_cache_write,tok_reasoning,cost_reported)),0) cost_usd,
+					COALESCE(SUM(tok_in),0) tokens_in, COALESCE(SUM(tok_out),0) tokens_out,
+					COALESCE(SUM(tok_cache_read),0) tokens_cache_read,
+					COALESCE(SUM(tok_cache_write),0) tokens_cache_write,
+					COALESCE(SUM(tok_reasoning),0) tokens_reasoning
+				FROM kept GROUP BY conversation_id
+			) usage USING(conversation_id)
+		) WHERE 1=1` + ranges + `)`
 }
 
 // AnalyticsCoverage reports tenant-wide facts and derived-session coverage without returning facts.

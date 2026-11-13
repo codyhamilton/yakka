@@ -217,3 +217,19 @@ Carried
 
 - `gate: Cody define the artifact file-to-time-bucket assignment in the design before artifact bucket grouping can be implemented or advertised.`
 - Score lens exact aggregation retains observations in memory under request deadlines; no cross-size memory-growth proof is recorded. A later bounded-query review should measure or replace that retention without changing the signed population semantics.
+
+## Follow-up fixes on the open branch
+
+Phases 1–5 stay closed. These three review bugs are fixed on the same branch; phases 6–13 are not started. The workspace shell still names later-phase destinations and does not render their panels.
+
+### Issue 207 — ScoreSeries retained heap
+
+UTC `ScoreSeries` now groups bucket membership in SQL and returns only the bounded check/bucket result. A non-UTC zone still labels buckets one row at a time because the label includes that zone's offset. `TestScoreSeriesGoHeapDoesNotScaleWithScannedRows` measured Go allocations of 2,936 bytes for 128 scored hashes and 2,456 bytes for 2,048, inside the same 16× tolerance used for usage and distribution.
+
+### Issue 208 — all-time coverage
+
+`all=1` on `/query` and time entities resolves the effective start from the route population's earliest retained timestamp before `bucket=auto` is chosen. Empty coverage returns null effective bounds and no rows. An explicit `from`/`to` still keeps its requested span, including the multi-century auto case. Populated recent commits resolve to an hour bucket with `clipped: before_first_data`.
+
+### Issue 209 — session scatter marginals
+
+Conversation-grain distribution histograms and the no-call count now apply the same session `where` predicate as the scatter points and `population_n`. A two-session fixture filtered to `tokens_out:0..100` reports marginal `n` of 1.

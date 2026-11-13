@@ -514,6 +514,59 @@ func TestAnalyticsQueryPartial(t *testing.T) {
 	}
 }
 
+func TestAnalyticsAllTimeUsesRouteCoverage(t *testing.T) {
+	s, ts := queryTenant(t)
+	empty := aok(t, s, "/v1/analytics/query?measure=commits&bucket=auto&all=1")
+	emptyWindow := empty["window"].(map[string]any)
+	emptyEffective := emptyWindow["effective"].(map[string]any)
+	if emptyEffective["from"] != nil || emptyEffective["to"] != nil || len(rowsOf(empty, "rows")) != 0 {
+		t.Fatalf("empty all-time coverage: %#v", empty)
+	}
+	if empty["bucket"] == "year" || strings.HasPrefix(fmt.Sprint(empty["bucket"]), "year:") {
+		t.Fatalf("empty all-time chose a resolution from the 1677 bound: %v", empty["bucket"])
+	}
+
+	at := time.Date(2026, 6, 15, 12, 0, 0, 0, time.UTC)
+	qadd(t, ts, store.FactRow{Type: "commit", ConversationID: "recent", Harness: "claude", RepoID: "r1", Event: "commit", TS: float64(at.Unix())}, nil)
+	got := aok(t, s, "/v1/analytics/query?measure=commits&bucket=auto&all=1")
+	window := got["window"].(map[string]any)
+	effective := window["effective"].(map[string]any)
+	if effective["from"] != at.UTC().Format(time.RFC3339Nano) || window["clipped"] != "before_first_data" {
+		t.Fatalf("populated all-time window: %#v", window)
+	}
+	if got["bucket"] != "hour" {
+		t.Fatalf("all-time auto bucket = %v, want hour for recent coverage; window=%v", got["bucket"], window)
+	}
+	if rows := rowsOf(got, "rows"); len(rows) != 1 || rows[0]["v"] != 1.0 {
+		t.Fatalf("all-time rows: %v", rows)
+	}
+}
+
+func TestAnalyticsSessionScatterMarginalsHonorWhere(t *testing.T) {
+	s, ts := queryTenant(t)
+	now := time.Now().UTC().Add(-time.Hour)
+	add := func(conv string, out int64) {
+		qadd(t, ts, store.FactRow{Type: "hook_event", ConversationID: conv, Harness: "h", RepoID: "r", Event: "usage", NormEvent: "usage", Model: "m", TS: float64(now.Unix()), TokIn: 1, TokOut: out}, nil)
+	}
+	add("low", 10)
+	add("high", 5000)
+	from := now.Add(-time.Hour).Format(time.RFC3339)
+	to := now.Add(time.Hour).Format(time.RFC3339)
+	got := aok(t, s, "/v1/analytics/entities?grain=session&mode=scatter&field=tokens_out&field=tokens_in&where=tokens_out:0..100&from="+from+"&to="+to)
+	if got["population_n"] != 1.0 {
+		t.Fatalf("population_n=%v", got["population_n"])
+	}
+	marginals := got["marginals"].(map[string]any)["tokens_out"].([]any)
+	total := 0.0
+	for _, raw := range marginals {
+		bin := raw.(map[string]any)
+		total += bin["n"].(float64)
+	}
+	if total != 1 {
+		t.Fatalf("tokens_out marginal n=%v, want 1 for the filtered population; bins=%v", total, marginals)
+	}
+}
+
 func TestAnalyticsQueryAcceptsWideWindowAndRejectsOutOfNanosecondBounds(t *testing.T) {
 	s, ts := queryTenant(t)
 	qadd(t, ts, store.FactRow{Type: "commit", ConversationID: "old", Harness: "claude", RepoID: "r1", Event: "commit",

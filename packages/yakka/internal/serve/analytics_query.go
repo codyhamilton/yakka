@@ -135,12 +135,29 @@ func (s *Server) analyticsQuery(w http.ResponseWriter, r *http.Request, _ string
 	if !ok {
 		return
 	}
+	f, window, empty, err := resolveRouteWindow(r.Context(), ts.t, []string{"measure:" + measure}, f)
+	if err != nil {
+		readFailed(w)
+		return
+	}
+	if empty {
+		step := bucketStep(bucket)
+		if bucket == "auto" {
+			bucket = "none"
+			step = bucketStep(bucket)
+		}
+		out := map[string]any{"measure": measure, "bucket": bucket, "requested_bucket": requestedBucket,
+			"bucket_step": step, "coarsened": false, "cells": 0, "max_cells": cellBudget, "dims": nz(dims), "rows": []any{},
+			"window": window}
+		addAnalyticsPartial(out, ts)
+		writeJSON(w, 200, out)
+		return
+	}
 	auto := bucket == "auto"
 	if auto {
 		bucket = resolveAutoBucket(f.From, f.To, f.TZ, cellBudget)
 	}
 	var res store.QueryResult
-	var err error
 	for {
 		res, err = ts.t.Query(r.Context(), f, store.QueryParams{Measure: measure, Dims: dims, Bucket: bucket, Top: top})
 		if err != nil || !auto || (!res.Truncated && len(res.Rows) <= cellBudget) || distinctSeries(res.Rows) > cellBudget {
@@ -184,8 +201,7 @@ func (s *Server) analyticsQuery(w http.ResponseWriter, r *http.Request, _ string
 	out := map[string]any{"measure": res.Measure, "bucket": res.Bucket, "requested_bucket": requestedBucket,
 		"bucket_step": step, "coarsened": requestedBucket == "auto" && res.Bucket != "hour",
 		"cells": len(rows), "max_cells": cellBudget, "dims": nz(res.Dims), "rows": rows,
-		"window": map[string]any{"requested": map[string]string{"from": f.From.Format(time.RFC3339Nano), "to": f.To.Format(time.RFC3339Nano)},
-			"effective": map[string]string{"from": f.From.Format(time.RFC3339Nano), "to": f.To.Format(time.RFC3339Nano)}, "clipped": false}}
+		"window": window}
 	if len(res.Ignored) > 0 {
 		out["ignored_filters"] = res.Ignored
 	}
