@@ -1,5 +1,9 @@
 # Changelog
 
+## 3.4.6 — 2026-11-14 — Cursor `mcp.json` standard layout
+
+- The Cursor plugin uses `plugins/yakka/mcp.json` (replacing `.cursor-mcp.json`). The stdio shim sets `cwd` to `${CURSOR_PLUGIN_ROOT}` and runs `python3` with `./client/yakka.py mcp`. Claude keeps `plugins/yakka/.mcp.json`; Codex keeps `.codex-mcp.json`. All three manifests are `3.4.6`.
+
 ## 3.4.5 — 2026-11-14 — Cursor MCP config
 
 - The Cursor plugin manifest points at `.cursor-mcp.json`, which expands `${CURSOR_PLUGIN_ROOT}` for the stdio shim. Claude keeps `plugins/yakka/.mcp.json` with `${CLAUDE_PLUGIN_ROOT}`; Codex keeps `.codex-mcp.json`. All three manifests are `3.4.5`.
