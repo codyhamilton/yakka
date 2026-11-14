@@ -1,8 +1,12 @@
 # Changelog
 
+## 3.4.5 — 2026-11-14 — Cursor MCP config
+
+- The Cursor plugin manifest points at `.cursor-mcp.json`, which expands `${CURSOR_PLUGIN_ROOT}` for the stdio shim. Claude keeps `plugins/yakka/.mcp.json` with `${CLAUDE_PLUGIN_ROOT}`; Codex keeps `.codex-mcp.json`. All three manifests are `3.4.5`.
+
 ## 3.4.4 — 2026-11-14 — Cursor loads the Yakka MCP
 
-- The Cursor plugin manifest points at `.mcp.json`, so Cursor starts the same MCP server as Claude and expands `${CLAUDE_PLUGIN_ROOT}`. Claude, Cursor, and Codex manifests are all `3.4.4`.
+- The Cursor plugin manifest pointed at `.mcp.json`, so Cursor tried to expand `${CLAUDE_PLUGIN_ROOT}` and the shim did not start. Superseded by 3.4.5.
 
 ## 3.4.0 — 2026-10-30 — token lifetime and name
 
