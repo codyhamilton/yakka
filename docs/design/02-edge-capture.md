@@ -127,18 +127,29 @@ The drain and the shim resolve endpoint and bearer key the same way on every bat
 needed to pick up a change):
 
 1. **`YAKKA_ENDPOINT` and `YAKKA_KEY` both set** — remote mode with those values. They win over
-   `client.toml`.
-2. **Exactly one of them set** — bad config. `yakka drain`, `yakka mcp`, and `yakka status`
-   exit before any request; they do not read the file and do not contact loopback.
-3. **Neither set, and `client.toml` present** — remote mode from the file (`endpoint`, `key`), mode
-   0600, default path `~/.config/yakka/client.toml`.
-4. **Neither set, and no file** — local mode: `http://127.0.0.1:8770` with no bearer.
+   `client.toml`; combining them with `YAKKA_MODE=local` is bad config.
+2. **Exactly one remote environment variable set** — bad config. `yakka drain` and `yakka status`
+   exit before any request; they do not read the file or contact loopback. `YAKKA_MODE=local` with
+   either remote variable is also bad config.
+3. **`YAKKA_MODE=local`, with neither remote variable** — explicit local mode at
+   `http://127.0.0.1:8770` with no bearer.
+4. **Neither remote variable set, and `client.toml` present** — `mode = "local"` selects local mode;
+   otherwise both `endpoint` and `key` select remote mode. Incomplete or invalid files are errors.
+   The default path is `~/.config/yakka/client.toml`, mode 0600.
+5. **Nothing set and no file** — bad config. Run `/yakka:login`, set the remote environment pair, or
+   set `mode = "local"` in `client.toml` for a local server.
 
 `YAKKA_CLIENT_CONFIG` overrides only the file path (tests and explicit installs).
 
 ```toml
 endpoint = "https://collector.example"
 key = "wk_…"                           # issued bearer for the collector (read or read_write)
+```
+
+For a local server, the file contains only:
+
+```toml
+mode = "local"
 ```
 
 - **`yakka login`** writes `client.toml` after the collector's device page issues a token (optional
@@ -173,12 +184,12 @@ existing kick rules may start that drain. The shim does not own a drain launcher
 policy. An enqueue acknowledgment alone does not establish that an item remains queued or was
 delivered; feedback uses current queue coverage and the service's content hash.
 
-The shared endpoint and bearer still come from the env pair, `client.toml`, or the local default
-above. Harness configuration holds neither endpoint nor key. The queue and drain readers provide
-bounded facts for server-side `artifact_feedback`; the shim does not decide queue, rejection or
-delivery wording ([design 4](04-advisory-surface.md#artifact_feedback)). The wire contract, the
-declaration and carrier format, the reader table and the v2 action are specified in
-[design 8](08-server-mcp-contract.md).
+The shared endpoint and bearer still come from the env pair, `client.toml`, or explicit local mode
+above. The client does not choose a local default. Harness configuration holds neither endpoint nor
+key. The queue and drain readers provide bounded facts for server-side `artifact_feedback`; the shim
+does not decide queue, rejection or delivery wording ([design
+4](04-advisory-surface.md#artifact_feedback)). The wire contract, the declaration and carrier
+format, the reader table and the v2 action are specified in [design 8](08-server-mcp-contract.md).
 
 ## No repair submit
 

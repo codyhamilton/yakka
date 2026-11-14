@@ -74,7 +74,7 @@ func TestMCPArtifactFeedbackCorpus(t *testing.T) {
 		t.Fatalf("feedback scope: %#v", meta["scope"])
 	}
 	readers := meta["context"].([]any)
-	wantReaders := []string{"cwd", "resolved_path", "file", "git", "queue", "drain"}
+	wantReaders := []string{"cwd", "project_dir", "resolved_path", "file", "git", "queue", "drain"}
 	if len(readers) != len(wantReaders) {
 		t.Fatalf("feedback readers: %#v", readers)
 	}
@@ -83,12 +83,12 @@ func TestMCPArtifactFeedbackCorpus(t *testing.T) {
 			t.Fatalf("reader %d: %#v", i, readers[i])
 		}
 	}
-	params := readers[1].(map[string]any)["params"].(map[string]any)
-	if params["path_arg"] != "path" || !reflect.DeepEqual(params["bases"], []any{"cwd"}) || readers[0].(map[string]any)["required"] != false {
+	params := readers[2].(map[string]any)["params"].(map[string]any)
+	if params["path_arg"] != "path" || !reflect.DeepEqual(params["bases"], []any{"project_dir"}) || readers[0].(map[string]any)["required"] != false || readers[1].(map[string]any)["required"] != false {
 		t.Fatalf("feedback reader declaration: %#v", readers)
 	}
 	init := mcpDecode(t, mcpRequest(t, h, "ka", `{"jsonrpc":"2.0","id":2,"method":"initialize","params":{}}`, nil))["result"].(map[string]any)
-	if init["instructions"] != "You are connected to yakka. "+statelessMCPInstruction {
+	if init["instructions"] != "You are connected to yakka. "+statelessMCPInstruction+" "+feedbackMCPInstruction {
 		t.Fatalf("feedback duplicated or changed the base instruction: %v", init["instructions"])
 	}
 	for _, tc := range golden.Calls {
@@ -190,6 +190,59 @@ func TestMCPArtifactFeedbackReaderFailuresAndTenantBoundary(t *testing.T) {
 		afterArtifact, err := before.t.Artifact(context.Background(), "r", "docs/plans/x/DESIGN.md")
 		if err != nil || !reflect.DeepEqual(beforeArtifact, afterArtifact) {
 			t.Fatalf("feedback wrote to tenant store: before=%#v after=%#v err=%v", beforeArtifact, afterArtifact, err)
+		}
+	}
+}
+
+func TestMCPArtifactFeedbackRelativePathNeedsProjectDir(t *testing.T) {
+	s := feedbackServer(t)
+	h := s.Handler()
+	list := mcpDecode(t, mcpRequest(t, h, "ka", `{"id":1,"method":"tools/list"}`, nil))["result"].(map[string]any)["tools"].([]any)
+	decl := list[2].(map[string]any)["_meta"].(map[string]any)["yakka/tool"].(map[string]any)
+	run := func(extra map[string]any) string {
+		local := map[string]any{
+			"_v": 1, "_rev": decl["rev"],
+			"resolved_path": map[string]any{"path": nil, "base": nil},
+			"file":          map[string]any{"skipped": "no_input"},
+			"git":           map[string]any{"skipped": "no_input"},
+			"queue":         map[string]any{"pending": []any{}, "rejected": []any{}},
+			"drain":         map[string]any{"running": false},
+		}
+		for k, v := range extra {
+			local[k] = v
+		}
+		body := mcpCallBody("artifact_feedback", map[string]any{"path": "docs/plans/x/DESIGN.md", "_local": local})
+		result := mcpDecode(t, mcpRequest(t, h, "ka", body, nil))["result"].(map[string]any)
+		if result["isError"] != true {
+			t.Fatalf("relative path without a project directory became a state: %#v", result)
+		}
+		return result["content"].([]any)[0].(map[string]any)["text"].(string)
+	}
+	cwd := map[string]any{"path": "/work"}
+	for _, tc := range []struct {
+		name  string
+		extra map[string]any
+		want  []string
+		not   []string
+	}{
+		{"no project dir, cwd named", map[string]any{"cwd": cwd, "project_dir": map[string]any{"path": nil}}, []string{"no project directory was supplied", "the shim ran in /work, which is not the project"}, nil},
+		{"no project dir, cwd not injected", map[string]any{"project_dir": map[string]any{"path": nil}}, []string{"no project directory was supplied"}, []string{"shim ran in"}},
+		{"project dir absent, cwd named", map[string]any{"cwd": cwd}, []string{"no project directory was supplied", "shim ran in /work"}, nil},
+		{"project dir unreadable, cwd named", map[string]any{"cwd": cwd, "project_dir": map[string]any{"_failed": map[string]any{"code": "io_error"}}}, []string{"could not be read (io_error)", "shim ran in /work"}, []string{"no project directory was supplied"}},
+	} {
+		text := run(tc.extra)
+		if !strings.HasPrefix(text, "path is relative and cannot be resolved: docs/plans/x/DESIGN.md;") || !strings.HasSuffix(text, "pass the absolute path of the file") {
+			t.Fatalf("%s: wrong frame: %q", tc.name, text)
+		}
+		for _, want := range tc.want {
+			if !strings.Contains(text, want) {
+				t.Fatalf("%s: missing %q in %q", tc.name, want, text)
+			}
+		}
+		for _, not := range tc.not {
+			if strings.Contains(text, not) {
+				t.Fatalf("%s: unexpected %q in %q", tc.name, not, text)
+			}
 		}
 	}
 }

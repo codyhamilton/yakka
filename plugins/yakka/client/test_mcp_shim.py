@@ -231,6 +231,40 @@ class RelayTests(unittest.TestCase):
         self.assertEqual(facts["file"]["withheld"], "symlink_out")
         self.assertNotIn("private file contents", json.dumps(facts))
 
+    def test_relative_path_resolves_only_under_project_dir(self) -> None:
+        project = os.path.join(self.temp.name, "project")
+        os.makedirs(os.path.join(project, "docs"))
+        Path(os.path.join(project, "docs", "DESIGN.md")).write_text("design")
+        plugin_cwd = os.path.join(self.temp.name, "plugin")
+        os.makedirs(plugin_cwd)
+        declaration = {"v": 1, "rev": "0123456789abcdef", "context": [
+            {"reader": "cwd", "v": 1, "params": {}},
+            {"reader": "project_dir", "v": 1, "params": {}},
+            {"reader": "resolved_path", "v": 1, "params": {"path_arg": "path", "bases": ["project_dir"]}},
+        ]}
+        request = {"params": {"arguments": {"path": "docs/DESIGN.md"}}}
+        harness_vars = ("CLAUDE_PROJECT_DIR", "CODEX_PROJECT_DIR", "CURSOR_PROJECT_DIR")
+        saved = {name: os.environ.get(name) for name in harness_vars}
+        try:
+            for name in harness_vars:
+                os.environ.pop(name, None)
+            facts, _ = yakka._mcp_readers(request, declaration, self.queue, getwd=lambda: (plugin_cwd, None))
+            self.assertEqual(facts["cwd"], {"path": plugin_cwd})
+            self.assertEqual(facts["project_dir"], {"path": None})
+            self.assertEqual(facts["resolved_path"], {"path": None, "base": None})
+
+            os.environ["CODEX_PROJECT_DIR"] = project
+            facts, _ = yakka._mcp_readers(request, declaration, self.queue, getwd=lambda: (plugin_cwd, None))
+            self.assertEqual(facts["project_dir"], {"path": project})
+            self.assertEqual(facts["resolved_path"], {"path": os.path.join(project, "docs", "DESIGN.md"), "base": project})
+            self.assertNotIn(plugin_cwd, json.dumps(facts["resolved_path"]))
+        finally:
+            for name, value in saved.items():
+                if value is None:
+                    os.environ.pop(name, None)
+                else:
+                    os.environ[name] = value
+
     def test_timeout_and_cancel_close_slow_http_call(self) -> None:
         self.server.close()
         self.server = MCPServer(delay=0.4)

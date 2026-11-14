@@ -148,7 +148,7 @@ Default Jev signal log: `${XDG_STATE_HOME:-~/.local/state}/yakka/jev-signal-log.
    1. Remove the old `workflow` plugin registration and any user-level `[mcp_servers.workflow]`
       entry from `~/.codex/config.toml`.
    2. Trust the `yakka` plugin at install root `plugins/yakka` (marketplace install) with hooks
-      `hooks/codex.json` and MCP via `plugins/yakka/.codex-mcp.json` → `./bin/yakka mcp`.
+      `hooks/codex.json` and MCP via `plugins/yakka/.codex-mcp.json` → `python3 ./client/yakka.py mcp`.
    3. Ensure hook commands resolve inside the plugin root (`bin/yakka`, `script/spool.sh`).
 
 4. **OpenCode**

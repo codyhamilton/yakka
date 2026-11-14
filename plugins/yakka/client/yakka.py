@@ -37,6 +37,9 @@ LocalEndpoint = "http://127.0.0.1:8770"
 
 _ENV_ENDPOINT = "YAKKA_ENDPOINT"
 _ENV_KEY = "YAKKA_KEY"
+_ENV_MODE = "YAKKA_MODE"
+
+_LOCAL_FIX = 'run /yakka:login, or set YAKKA_ENDPOINT and YAKKA_KEY, or set `mode = "local"` in client.toml for a local server'
 
 
 class ErrPartialEnv(Exception):
@@ -44,6 +47,10 @@ class ErrPartialEnv(Exception):
         super().__init__(
             "clientconfig: YAKKA_ENDPOINT and YAKKA_KEY must both be set or both unset"
         )
+
+
+class ErrBadConfig(ValueError):
+    """Configuration is absent, incomplete, or internally inconsistent."""
 
 
 class Config:
@@ -83,18 +90,28 @@ def SyncPath() -> str:
 def Load() -> Config:
     ep = os.environ.get(_ENV_ENDPOINT, "").strip()
     key = os.environ.get(_ENV_KEY, "").strip()
+    mode = os.environ.get(_ENV_MODE, "").strip().lower()
     ep_set = ep != ""
     key_set = key != ""
+    if mode and mode != "local":
+        raise ErrBadConfig(f"clientconfig: YAKKA_MODE must be 'local'; {_LOCAL_FIX}")
+    if mode == "local" and (ep_set or key_set):
+        raise ErrBadConfig(
+            "clientconfig: YAKKA_MODE=local conflicts with YAKKA_ENDPOINT or YAKKA_KEY; "
+            "unset YAKKA_MODE or both remote variables"
+        )
     if ep_set and key_set:
         return Config(Endpoint=ep, Key=key)
     if ep_set or key_set:
         raise ErrPartialEnv()
+    if mode == "local":
+        return Config(Endpoint=LocalEndpoint, Local=True)
     path = Path()
     try:
         with open(path, encoding="utf-8") as f:
             data = f.read()
     except FileNotFoundError:
-        return Config(Endpoint=LocalEndpoint, Local=True)
+        raise ErrBadConfig(f"clientconfig: yakka is not logged in; {_LOCAL_FIX}") from None
     except OSError as err:
         raise OSError(f"clientconfig: read {path}: {err}") from err
     return _parse_config(path, data)
@@ -118,7 +135,18 @@ def _parse_config(path: str, text: str) -> Config:
                 f"clientconfig: {path}: line {i + 1} has an invalid string"
             ) from None
         vals[m.group(1)] = v
-    cfg = Config(Endpoint=vals.get("endpoint", ""), Key=vals.get("key", ""))
+    mode = vals.get("mode", "").strip().lower()
+    if mode and mode != "local":
+        raise ErrBadConfig(f"clientconfig: {path}: mode must be \"local\" or omitted")
+    endpoint = vals.get("endpoint", "").strip()
+    key = vals.get("key", "").strip()
+    if mode == "local":
+        if key:
+            raise ErrBadConfig(f"clientconfig: {path}: mode = \"local\" cannot include key")
+        if endpoint:
+            raise ErrBadConfig(f"clientconfig: {path}: mode = \"local\" cannot include endpoint")
+        return Config(Endpoint=LocalEndpoint, Local=True)
+    cfg = Config(Endpoint=endpoint, Key=key)
     if not cfg.Endpoint:
         raise ValueError(f"clientconfig: {path}: missing endpoint")
     if not cfg.Key:
@@ -2192,7 +2220,7 @@ def _parse_go_duration(s: str) -> float:
 def RunStandalone(ctx: DrainContext, stderr: Any) -> int:
     try:
         Load()
-    except ErrPartialEnv as err:
+    except (ErrPartialEnv, OSError, ValueError) as err:
         print("yakka drain:", err, file=stderr)
         return 1
     o = Options(Sink=ConfigSink, Log=stderr, Poll=0.25)
@@ -3570,10 +3598,10 @@ def run_status(w: Any) -> int:
         print(f"config: {err}", file=w)
         print("endpoint: -", file=w)
         return 1
-    except (OSError, ValueError):
-        print(f"config: {Path()} (invalid)", file=w)
+    except (OSError, ValueError) as err:
+        print(f"config: bad config: {err}", file=w)
         print("endpoint: -", file=w)
-        return 0
+        return 1
     if cfg.Local:
         print("config: none (local mode)", file=w)
     elif os.environ.get(_ENV_ENDPOINT, "").strip() and os.environ.get(_ENV_KEY, "").strip():
@@ -3591,7 +3619,7 @@ def run_status(w: Any) -> int:
         except Exception:
             pass
     print(f"endpoint: {_shown_endpoint(cfg.Endpoint)} {reach}", file=w)
-    if reach == "unreachable" and st.Queued > 0:
+    if reach == "unreachable":
         return 1
     return 0
 
