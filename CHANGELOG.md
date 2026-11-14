@@ -1,5 +1,9 @@
 # Changelog
 
+## 3.4.4 — 2026-11-14 — Cursor loads the Yakka MCP
+
+- The Cursor plugin manifest points at `.mcp.json`, so Cursor starts the same MCP server as Claude and expands `${CLAUDE_PLUGIN_ROOT}`. Claude, Cursor, and Codex manifests are all `3.4.4`.
+
 ## 3.4.0 — 2026-10-30 — token lifetime and name
 
 - Tokens have a name and are issued for a lifetime chosen from a dropdown (1 day, 1 week, 1 month, 3 months, 6 months, 1 year; default 3 months) instead of a date. The server computes the expiry and rejects `expires_at`.
