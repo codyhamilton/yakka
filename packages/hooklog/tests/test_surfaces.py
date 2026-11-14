@@ -74,7 +74,10 @@ class SurfaceTests(unittest.TestCase):
     def test_cursor_manifest_selects_native_registration(self):
         manifest = json.loads((PLUGIN / '.cursor-plugin/plugin.json').read_text())
         self.assertEqual(manifest['hooks'], './hooks/cursor.json')
-        self.assertTrue((PLUGIN / manifest['hooks'].lstrip('./')).is_file())
+        for key in ('hooks', 'mcpServers'):
+            rel = manifest[key][2:] if manifest[key].startswith('./') else manifest[key]
+            rel = rel.rstrip('/')
+            self.assertTrue((PLUGIN / rel).exists(), key)
 
     def test_codex_manifest_selects_native_registration(self):
         # Without a Codex manifest, Codex loads hooks/hooks.json and records Codex events as claude.
