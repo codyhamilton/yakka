@@ -23,6 +23,7 @@ PHASE5_PREFIXES = (
 
 PHASE5_FILES = (
     "plugins/yakka/.mcp.json",
+    "plugins/yakka/.cursor-mcp.json",
     "plugins/yakka/.codex-mcp.json",
 )
 

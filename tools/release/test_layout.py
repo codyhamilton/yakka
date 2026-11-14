@@ -98,7 +98,7 @@ def _scan_plugin_executed_paths(repo: Path) -> list[Violation]:
     hooks = repo / "plugins" / "yakka" / "hooks"
     if hooks.is_dir():
         targets.extend(hooks.glob("*.json"))
-    for name in (".mcp.json", ".codex-mcp.json"):
+    for name in (".mcp.json", ".cursor-mcp.json", ".codex-mcp.json"):
         p = repo / "plugins" / "yakka" / name
         if p.is_file():
             targets.append(p)

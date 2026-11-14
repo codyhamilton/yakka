@@ -99,8 +99,8 @@ fetch or build it.
 | Harness | File | Registers |
 |---|---|---|
 | Claude Code | `plugins/yakka/hooks/hooks.json`, `plugins/yakka/.mcp.json` | `plugins/yakka/script/spool.sh --harness claude`; shim as stdio |
-| Cursor | `plugins/yakka/hooks/cursor.json`, `packages/hooklog/cursor-hooks.example.json` | `./script/spool.sh --harness cursor` |
-| Codex | `plugins/yakka/hooks/codex.json` | `plugins/yakka/script/spool.sh --harness codex` |
+| Cursor | `plugins/yakka/hooks/cursor.json`, `plugins/yakka/.cursor-mcp.json`, `packages/hooklog/cursor-hooks.example.json` | `./script/spool.sh --harness cursor`; shim as stdio |
+| Codex | `plugins/yakka/hooks/codex.json`, `plugins/yakka/.codex-mcp.json` | `plugins/yakka/script/spool.sh --harness codex`; shim as stdio |
 | OpenCode | `packages/opencode-yakka-hooks` | writes spool files with the design 2 name; kicks `python3 plugins/yakka/client/yakka.py drain` |
 
 All four drop the `artifact_submit.py` registration.

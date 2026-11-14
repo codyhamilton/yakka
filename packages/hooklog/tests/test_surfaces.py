@@ -74,10 +74,22 @@ class SurfaceTests(unittest.TestCase):
     def test_cursor_manifest_selects_native_registration(self):
         manifest = json.loads((PLUGIN / '.cursor-plugin/plugin.json').read_text())
         self.assertEqual(manifest['hooks'], './hooks/cursor.json')
+        self.assertEqual(manifest['mcpServers'], './.cursor-mcp.json')
         for key in ('hooks', 'mcpServers'):
             rel = manifest[key][2:] if manifest[key].startswith('./') else manifest[key]
             rel = rel.rstrip('/')
             self.assertTrue((PLUGIN / rel).exists(), key)
+
+    def test_harness_mcp_configs_use_matching_plugin_roots(self):
+        claude_mcp = (PLUGIN / '.mcp.json').read_text()
+        cursor_mcp = (PLUGIN / '.cursor-mcp.json').read_text()
+        codex_mcp = (PLUGIN / '.codex-mcp.json').read_text()
+        self.assertIn('${CLAUDE_PLUGIN_ROOT}', claude_mcp)
+        self.assertNotIn('${CURSOR_PLUGIN_ROOT}', claude_mcp)
+        self.assertIn('${CURSOR_PLUGIN_ROOT}', cursor_mcp)
+        self.assertNotIn('${CLAUDE_PLUGIN_ROOT}', cursor_mcp)
+        self.assertIn('./client/yakka.py', codex_mcp)
+        self.assertNotIn('PLUGIN_ROOT', codex_mcp)
 
     def test_codex_manifest_selects_native_registration(self):
         # Without a Codex manifest, Codex loads hooks/hooks.json and records Codex events as claude.
