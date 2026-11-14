@@ -1,0 +1,45 @@
+{
+  "experiment": "shape-qual-full-maps-v1",
+  "worker_id": "8e36f8e80baa",
+  "model": "Grok",
+  "narrative_shape": "Phase orchestrator whose visible work is record, dispatch, and standby. Turn 69 writes a unit outcome, turn 72 dispatches unit 2-15, and turn 74 waits on that agent before a phase-close commit. Turns 83–90 are a pytest/lint rerun watched with Monitor (\"I'll poll with Monitor rather than waiting blind\", then \"still running\"). Agent stays at 2. Monitor goes 3→5. This is parent standby, not a builder loop.",
+  "shape_label": "poll_monitor",
+  "phases": [
+    {
+      "range": "69-75",
+      "name": "record and dispatch",
+      "note": "IMPLEMENTATION.md edit, then a background agent for unit 2-15, then an explicit wait for its notification."
+    },
+    {
+      "range": "83-90",
+      "name": "wait on verification monitor",
+      "note": "Ledger check, then Monitor on pytest/lint. IMPLEMENTATION.md reread reaches 3. Still waiting at turn 90."
+    }
+  ],
+  "early_signals": [
+    {
+      "turn": 72,
+      "signal": "Dispatches unit 2-15 to a background agent."
+    },
+    {
+      "turn": 74,
+      "signal": "Will wait for that agent, then verify, record, and close the phase."
+    },
+    {
+      "turn": 75,
+      "signal": "Histogram is Bash plus Monitor/Agent/Skill, not an edit loop on parser files."
+    },
+    {
+      "turn": 84,
+      "signal": "Verification still running; switches to Monitor instead of a blind wait."
+    },
+    {
+      "turn": 88,
+      "signal": "Still running; waiting on the monitor event."
+    }
+  ],
+  "early_signal_window_respected": true,
+  "recommended_exit": null,
+  "earliness": null,
+  "rationale": "The shape inside ≤120 is dispatch-and-wait. That is poll/monitor as a parent session, distinct from code thrash. The run is still in that wait at the last checkpoint, so there is no later outcome to reclassify it."
+}

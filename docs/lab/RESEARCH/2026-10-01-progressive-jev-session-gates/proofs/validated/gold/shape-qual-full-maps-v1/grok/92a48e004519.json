@@ -1,0 +1,46 @@
+{
+  "experiment": "shape-qual-full-maps-v1",
+  "worker_id": "92a48e004519",
+  "model": "Grok",
+  "narrative_shape": "Silent Bash/Read loop from the first checkpoint. The same five parser files (_cenc.c, divide.py, _e2.c, build_alldata.py, osm_to_parcel_geometry.py) are re-read while compactions climb from 12 to 40 and assistant text stays frozen at 36 characters until past turn 210. The histogram never gains Edit or Write. A few short lines after turn 236 (tidy comments, add ctests, amendment while gates run) sit inside that same loop.",
+  "shape_label": "early_thrash",
+  "phases": [
+    {
+      "range": "75-120",
+      "name": "reread/bash loop",
+      "note": "Already dominant at turn 75: _cenc.c×10, divide.py×7, _e2.c×6, 12 compactions, empty tail. Through 120, bash 55→94, no new paths, text still 36, distinct reads stuck at 7."
+    },
+    {
+      "range": "135-210",
+      "name": "same loop, no new files",
+      "note": "Reread counts and compactions keep rising. delta_new_reads stays empty. Read grows only on the same paths. Outcome of the early loop, not a new phase."
+    },
+    {
+      "range": "225-285",
+      "name": "bash gates with scraps of prose",
+      "note": "Read count freezes at 81. Turns 236, 266, 270, and 284 are one-line test/amendment notes between silent Bash calls. One Monitor appears only at 279."
+    }
+  ],
+  "early_signals": [
+    {
+      "turn": 75,
+      "signal": "Reread cluster already set (_cenc.c 10, divide.py 7, _e2.c 6) with 12 compactions, assistant text 36 characters, and a silent Read/Bash tail."
+    },
+    {
+      "turn": 90,
+      "signal": "Bash +15, no new read paths, text still 36, compactions 14."
+    },
+    {
+      "turn": 105,
+      "signal": "Same files, higher reread counts (_cenc.c 13), still no new paths."
+    },
+    {
+      "turn": 120,
+      "signal": "Bash 94 vs Read 47, compactions 20, distinct reads still 7, text still 36."
+    }
+  ],
+  "early_signal_window_respected": true,
+  "recommended_exit": 75,
+  "earliness": "on time — the first checkpoint is already the loop, and later checkpoints only continue it",
+  "rationale": "Turn 75 already shows a non-progressing reread and compaction loop with no edits and no prose. Turns 90–120 intensify that loop. Anything after 120 is the same outcome."
+}

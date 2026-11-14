@@ -1,0 +1,24 @@
+{
+  "experiment": "shape-qual-full-maps-v1",
+  "worker_id": "07357f196666",
+  "model": "Grok",
+  "narrative_shape": "Bash plus two Writes, and no prose at all. Histogram at the only checkpoint is Bash 75 and Write 2. Distinct reads 0, reread table empty, assistant text 62, compactions 2. All eight tail turns are Bash with empty excerpts. Prefix bytes are about 1.5MB. The pack does not show a read, an edit, a wait sentence, or a result.",
+  "shape_label": "unclear",
+  "phases": [
+    {
+      "range": "68-75",
+      "name": "silent bash",
+      "note": "75 Bash calls and 2 Writes. Empty tail. 0 reads."
+    }
+  ],
+  "early_signals": [
+    {
+      "turn": 75,
+      "signal": "Bash 75, Write 2, 0 distinct reads, assistant text 62, compactions 2, and an empty eight-turn tail."
+    }
+  ],
+  "early_signal_window_respected": true,
+  "recommended_exit": null,
+  "earliness": null,
+  "rationale": "The only ≤120 evidence is a silent bash histogram. That is how the visible run looks, but it does not show a reread loop or a stated wait, so the failure labels are not established. The signal list is that histogram, not a richer foreshadowing."
+}

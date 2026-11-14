@@ -1,0 +1,37 @@
+{
+  "experiment": "shape-qual-full-maps-v1",
+  "worker_id": "15f24c7ba18c",
+  "model": "Grok",
+  "narrative_shape": "Parent orchestrator dominated by Monitor. At turn 75 Monitor is the top tool (28) ahead of Bash (25), with Agent 6 and Edit 6. Turn 70 has recorded units 2-05 and 2-07 and is waiting on 2-06. Turn 73 dispatches 2-08 and a small fixer. Checkpoint 90 still has Monitor at 28, more bash and edits, and an empty prose tail except the tool calls. The shape is standby on dispatched units.",
+  "shape_label": "poll_monitor",
+  "phases": [
+    {
+      "range": "68-75",
+      "name": "record and dispatch",
+      "note": "Monitor 28 already. Waiting on 2-06. Dispatches 2-08 and a fixer. Skill is loaded."
+    },
+    {
+      "range": "83-90",
+      "name": "still orchestrating",
+      "note": "Bash +11, Edit +2, Agent +1. No new prose in the tail. Monitor count unchanged at 28. Compactions become 2."
+    }
+  ],
+  "early_signals": [
+    {
+      "turn": 70,
+      "signal": "Units 2-05 and 2-07 recorded; waiting on 2-06."
+    },
+    {
+      "turn": 73,
+      "signal": "Dispatches 2-08 and a fixer for a bug 2-05 deferred."
+    },
+    {
+      "turn": 75,
+      "signal": "Monitor 28 is the largest tool count, ahead of Bash — standby is the histogram, not a parser reread loop."
+    }
+  ],
+  "early_signal_window_respected": true,
+  "recommended_exit": null,
+  "earliness": null,
+  "rationale": "The ≤120 prefix is an orchestrator poll: record, wait, dispatch. That is a distinct poll/monitor shape. Checkpoint 90 adds edits without prose, so it does not show a return to builder work."
+}

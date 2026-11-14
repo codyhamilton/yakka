@@ -1,0 +1,32 @@
+{
+  "experiment": "shape-qual-full-maps-v1",
+  "worker_id": "91a9aa8050fb",
+  "model": "Grok",
+  "narrative_shape": "Verification while other jobs run, and the spot-check already matches. Turn 68 drafts fixture JSON during a wait. Turn 71: done-evidence spot-check has every row found=true, with only expected reference-vs-OSM mismatches. Turn 73: pytest already 156 passed, and the worker is finalizing compare_disc. Monitor 5, Write 4, Edit 3, no reread table, compactions 0. Single checkpoint on a run that ends at T=86.",
+  "shape_label": "unclear",
+  "phases": [
+    {
+      "range": "68-75",
+      "name": "spot-check and parallel verify",
+      "note": "Fixture draft, reference spot-check satisfied, place-name monitor considered, full pytest already green, compare_disc being finalized."
+    }
+  ],
+  "early_signals": [
+    {
+      "turn": 68,
+      "signal": "Drafts fixture JSON while waiting — the wait is not an empty park."
+    },
+    {
+      "turn": 71,
+      "signal": "Spot-check matches the done-evidence expectation (found=true; a few expected mismatches)."
+    },
+    {
+      "turn": 73,
+      "signal": "Full pytest already 156 passed; remaining work is compare_disc, not a new design loop."
+    }
+  ],
+  "early_signal_window_respected": true,
+  "recommended_exit": null,
+  "earliness": null,
+  "rationale": "The only window is productive verification with a satisfied spot-check and a green suite. Monitor use is parallel to that work. No stall or thrash is visible, and there is no later checkpoint."
+}

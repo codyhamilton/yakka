@@ -1,0 +1,37 @@
+{
+  "experiment": "shape-qual-full-maps-v1",
+  "worker_id": "de5b76cc68a6",
+  "model": "Grok",
+  "narrative_shape": "Bash-only, like a scripted census. Histogram is Bash 76 then Bash 92. Distinct reads 0, no reread table, compactions stuck at 2, assistant text 109 then 168. The only sentence is turn 84: \"Now the census sha reproductions. Let me find the commands.\" Prefix bytes grow modestly. Nothing in the tail shows a read, an edit, or a stuck-wait formula.",
+  "shape_label": "unclear",
+  "phases": [
+    {
+      "range": "68-75",
+      "name": "silent bash",
+      "note": "76 Bash calls, empty tail, 0 reads."
+    },
+    {
+      "range": "83-90",
+      "name": "census sha commands",
+      "note": "Bash +16. Turn 84 looks up census sha reproduction commands. Still 0 reads."
+    }
+  ],
+  "early_signals": [
+    {
+      "turn": 75,
+      "signal": "Histogram is Bash-only (76) with about 100 assistant characters and an empty tail."
+    },
+    {
+      "turn": 84,
+      "signal": "The only prose is a search for census sha commands, still on the brief's evidence path."
+    },
+    {
+      "turn": 90,
+      "signal": "Another 16 bash calls, still 0 distinct reads and text of 168."
+    }
+  ],
+  "early_signal_window_respected": true,
+  "recommended_exit": null,
+  "earliness": null,
+  "rationale": "A bash-only census prefix is low-visibility, not a demonstrated reread loop. The one sentence is on-brief. Thrash is not established."
+}
