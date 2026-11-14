@@ -1,0 +1,127 @@
+{
+  "model": "jev-1.13.0",
+  "state": {
+    "scenario_id": "case.PR-VALIDATION-PHASE|worker.bb6165018de0|checkpoint.75",
+    "checkpoint_turn": 75,
+    "evidence_class": "validation-phase-earlycps-prefix",
+    "snapshot": {
+      "question_id": "PR-VALIDATION-PHASE",
+      "worker_id": "bb6165018de0",
+      "checkpoint_turn": 75,
+      "prior_checkpoint_turn": 60,
+      "evidence_class": "validation-phase-earlycps-prefix",
+      "brief_anchor": "READ-ONLY RESEARCH. Repo <REPO> (branch master). You must NOT edit, create or commit any file in the repo. Throwaway census scripts go in your scratchpad only; run with `<REPO>/.venv-rp/bin/python`. Reference disc R mounted read-only at <MOUNT>/… Spec PDFs at spec/format_english/pdf/ (index spec/INDEX.md; ch.7.2 = 0702122e.pdf is the Road Data Frame, ch.7.1 = 0701122e.pdf). Read PDFs with the Read tool's `pages` ",
+      "cumulative": {
+        "api_turns": 75,
+        "peak_ctx_tokens": 127123,
+        "prefix_bytes": 2912944,
+        "tool_histogram": {
+          "Bash": 66,
+          "Read": 8,
+          "Monitor": 2,
+          "ToolSearch": 1,
+          "Write": 1
+        },
+        "reread_paths": [
+          {
+            "path": "<REPO>/spec/format_english/pdf/0702122e.pdf",
+            "count": 3
+          }
+        ],
+        "distinct_read_paths": 6,
+        "compaction_event_count": 0,
+        "assistant_text_chars": 2174
+      },
+      "delta_since_prior": {
+        "new_read_paths": [],
+        "tool_histogram_delta": {
+          "Bash": 15
+        }
+      },
+      "thrash_top_rereads": [
+        {
+          "path": "<REPO>/spec/format_english/pdf/0702122e.pdf",
+          "count": 3
+        }
+      ],
+      "tail": [
+        {
+          "turn": 68,
+          "excerpt": "Standing by.",
+          "tool_names": [
+            "Bash"
+          ]
+        },
+        {
+          "turn": 69,
+          "excerpt": "Waiting for the census job — will resume analysis once it finishes.",
+          "tool_names": [
+            "Bash"
+          ]
+        },
+        {
+          "turn": 70,
+          "excerpt": "",
+          "tool_names": [
+            "Bash"
+          ]
+        },
+        {
+          "turn": 71,
+          "excerpt": "I'll wait for the next monitor event.",
+          "tool_names": [
+            "Bash"
+          ]
+        },
+        {
+          "turn": 72,
+          "excerpt": "",
+          "tool_names": [
+            "Bash"
+          ]
+        },
+        {
+          "turn": 73,
+          "excerpt": "",
+          "tool_names": [
+            "Bash"
+          ]
+        },
+        {
+          "turn": 74,
+          "excerpt": "",
+          "tool_names": [
+            "Bash"
+          ]
+        },
+        {
+          "turn": 75,
+          "excerpt": "",
+          "tool_names": [
+            "Bash"
+          ]
+        }
+      ]
+    }
+  },
+  "questions": {
+    "response": {
+      "type": "choice",
+      "instructions": "Is this worker already in validation (reactive read/fix/test loop) versus forward build? Answer exactly one of in_validation, building, or inconclusive from the supplied prefix only.",
+      "criteria": {
+        "in_validation": "A reactive read/fix/test loop is already the dominant pattern in this prefix.",
+        "building": "Forward implementation or construction is the dominant pattern in this prefix.",
+        "inconclusive": "The prefix does not distinguish validation from forward build with adequate confidence."
+      }
+    },
+    "pattern_note": {
+      "type": "choice",
+      "instructions": "Add one concise pattern note by choosing the best label from the prefix only.",
+      "criteria": {
+        "test_fix_loop": "Reactive tests, reads, fixes, retries, or verification dominate the recent pattern.",
+        "forward_edit": "Forward edits or implementation construction dominate the recent pattern.",
+        "mixed_or_unclear": "The pattern is mixed or cannot be distinguished from the prefix."
+      }
+    }
+  }
+}

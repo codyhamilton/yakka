@@ -1,0 +1,135 @@
+{
+  "model": "jev-1.13.0",
+  "state": {
+    "scenario_id": "case.PR-VALIDATION-PHASE|worker.87a380bc64ff|checkpoint.60",
+    "checkpoint_turn": 60,
+    "evidence_class": "validation-phase-earlycps-prefix",
+    "snapshot": {
+      "question_id": "PR-VALIDATION-PHASE",
+      "worker_id": "87a380bc64ff",
+      "checkpoint_turn": 60,
+      "prior_checkpoint_turn": 50,
+      "evidence_class": "validation-phase-earlycps-prefix",
+      "brief_anchor": "Repo: <REPO>, branch `master` (work directly on it, no new branch). You are a build worker for one unit of a larger plan-driven project (open-pajero-maps, reverse-engineering a proprietary map disc format).\n\nYour brief is the complete, self-sufficient spec for this unit: read it in full before doing anything else.\n\n  docs/plans/03-map-layer-parity-remediation/briefs/3-12-overlap-duplication-remeasure.md\n\nFollow it exactly — owned paths, contract, done evidence, ev",
+      "cumulative": {
+        "api_turns": 60,
+        "peak_ctx_tokens": 99541,
+        "prefix_bytes": 718453,
+        "tool_histogram": {
+          "Bash": 45,
+          "Read": 9,
+          "Monitor": 4,
+          "ToolSearch": 1
+        },
+        "reread_paths": [
+          {
+            "path": "<REPO>/parser/build_alldata.py",
+            "count": 4
+          },
+          {
+            "path": "<REPO>/parser/kiwiw/overlap.py",
+            "count": 3
+          }
+        ],
+        "distinct_read_paths": 4,
+        "compaction_event_count": 0,
+        "assistant_text_chars": 1761
+      },
+      "delta_since_prior": {
+        "new_read_paths": [],
+        "tool_histogram_delta": {
+          "Bash": 9,
+          "Monitor": 1
+        }
+      },
+      "thrash_top_rereads": [
+        {
+          "path": "<REPO>/parser/build_alldata.py",
+          "count": 4
+        },
+        {
+          "path": "<REPO>/parser/kiwiw/overlap.py",
+          "count": 3
+        }
+      ],
+      "tail": [
+        {
+          "turn": 53,
+          "excerpt": "",
+          "tool_names": [
+            "Bash"
+          ]
+        },
+        {
+          "turn": 54,
+          "excerpt": "",
+          "tool_names": [
+            "Monitor"
+          ]
+        },
+        {
+          "turn": 55,
+          "excerpt": "While waiting, let's set up the mirror-probe script copy and run compare_disc/roundtrip against the already-completed full disc.",
+          "tool_names": [
+            "Bash"
+          ]
+        },
+        {
+          "turn": 56,
+          "excerpt": "",
+          "tool_names": [
+            "Bash"
+          ]
+        },
+        {
+          "turn": 57,
+          "excerpt": "",
+          "tool_names": [
+            "Bash"
+          ]
+        },
+        {
+          "turn": 58,
+          "excerpt": "",
+          "tool_names": [
+            "Bash"
+          ]
+        },
+        {
+          "turn": 59,
+          "excerpt": "I'll wait for compare_disc, roundtrip, and probe to complete.",
+          "tool_names": [
+            "Bash"
+          ]
+        },
+        {
+          "turn": 60,
+          "excerpt": "I'll wait for these three background tasks (compare_disc, roundtrip, mirror probe) to finish via their completion notifications.",
+          "tool_names": [
+            "Bash"
+          ]
+        }
+      ]
+    }
+  },
+  "questions": {
+    "response": {
+      "type": "choice",
+      "instructions": "Is this worker already in validation (reactive read/fix/test loop) versus forward build? Answer exactly one of in_validation, building, or inconclusive from the supplied prefix only.",
+      "criteria": {
+        "in_validation": "A reactive read/fix/test loop is already the dominant pattern in this prefix.",
+        "building": "Forward implementation or construction is the dominant pattern in this prefix.",
+        "inconclusive": "The prefix does not distinguish validation from forward build with adequate confidence."
+      }
+    },
+    "pattern_note": {
+      "type": "choice",
+      "instructions": "Add one concise pattern note by choosing the best label from the prefix only.",
+      "criteria": {
+        "test_fix_loop": "Reactive tests, reads, fixes, retries, or verification dominate the recent pattern.",
+        "forward_edit": "Forward edits or implementation construction dominate the recent pattern.",
+        "mixed_or_unclear": "The pattern is mixed or cannot be distinguished from the prefix."
+      }
+    }
+  }
+}

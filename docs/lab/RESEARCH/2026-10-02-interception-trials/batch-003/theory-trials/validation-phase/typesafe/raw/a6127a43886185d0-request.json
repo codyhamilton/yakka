@@ -1,0 +1,153 @@
+{
+  "model": "jev-1.13.0",
+  "state": {
+    "scenario_id": "case.PR-VALIDATION-PHASE|worker.ca977b9ca0dd|checkpoint.50",
+    "checkpoint_turn": 50,
+    "evidence_class": "validation-phase-earlycps-prefix",
+    "snapshot": {
+      "question_id": "PR-VALIDATION-PHASE",
+      "worker_id": "ca977b9ca0dd",
+      "checkpoint_turn": 50,
+      "prior_checkpoint_turn": null,
+      "evidence_class": "validation-phase-earlycps-prefix",
+      "brief_anchor": "Execute the brief `docs/plans/03-map-layer-parity-remediation/briefs/3C-09-division-into-e2.md` in repo <REPO>, branch master. Its dependency 3C-08 is committed (965dcfc). Read the outcome records for 3C-06, 3C-07 and 3C-08 in `docs/plans/03-map-layer-parity-remediation/IMPLEMENTATION.md`, and the amendments at the end of the 3C-06, 3C-07 and 3C-08 briefs. Follow the brief exactly, including its step gates and committed stop point (full-disc sha 87a01b14… at -j 12",
+      "cumulative": {
+        "api_turns": 50,
+        "peak_ctx_tokens": 123714,
+        "prefix_bytes": 2457119,
+        "tool_histogram": {
+          "Read": 35,
+          "Bash": 24
+        },
+        "reread_paths": [
+          {
+            "path": "<REPO>/parser/kiwiw/divide.py",
+            "count": 8
+          },
+          {
+            "path": "<REPO>/parser/kiwiw/_cenc.c",
+            "count": 6
+          },
+          {
+            "path": "<REPO>/parser/build_alldata.py",
+            "count": 4
+          },
+          {
+            "path": "<REPO>/parser/kiwiw/_e2.c",
+            "count": 3
+          },
+          {
+            "path": "<REPO>/parser/kiwiw/cenc.py",
+            "count": 3
+          }
+        ],
+        "distinct_read_paths": 13,
+        "compaction_event_count": 8,
+        "assistant_text_chars": 111
+      },
+      "delta_since_prior": {},
+      "thrash_top_rereads": [
+        {
+          "path": "<REPO>/parser/kiwiw/divide.py",
+          "count": 8
+        },
+        {
+          "path": "<REPO>/parser/kiwiw/_cenc.c",
+          "count": 6
+        },
+        {
+          "path": "<REPO>/parser/build_alldata.py",
+          "count": 4
+        },
+        {
+          "path": "<REPO>/parser/kiwiw/_e2.c",
+          "count": 3
+        },
+        {
+          "path": "<REPO>/parser/kiwiw/cenc.py",
+          "count": 3
+        }
+      ],
+      "tail": [
+        {
+          "turn": 43,
+          "excerpt": "",
+          "tool_names": [
+            "Read",
+            "Read"
+          ]
+        },
+        {
+          "turn": 44,
+          "excerpt": "",
+          "tool_names": [
+            "Read"
+          ]
+        },
+        {
+          "turn": 45,
+          "excerpt": "",
+          "tool_names": [
+            "Read",
+            "Read"
+          ]
+        },
+        {
+          "turn": 46,
+          "excerpt": "",
+          "tool_names": [
+            "Bash"
+          ]
+        },
+        {
+          "turn": 47,
+          "excerpt": "",
+          "tool_names": [
+            "Read"
+          ]
+        },
+        {
+          "turn": 48,
+          "excerpt": "",
+          "tool_names": [
+            "Bash"
+          ]
+        },
+        {
+          "turn": 49,
+          "excerpt": "",
+          "tool_names": [
+            "Bash"
+          ]
+        },
+        {
+          "turn": 50,
+          "excerpt": "",
+          "tool_names": [
+            "Read"
+          ]
+        }
+      ]
+    }
+  },
+  "questions": {
+    "response": {
+      "type": "choice",
+      "instructions": "Is this worker already in validation (reactive read/fix/test loop) versus forward build? Answer exactly one of in_validation, building, or inconclusive from the supplied prefix only.",
+      "criteria": {
+        "in_validation": "A reactive read/fix/test loop is already the dominant pattern in this prefix.",
+        "building": "Forward implementation or construction is the dominant pattern in this prefix.",
+        "inconclusive": "The prefix does not distinguish validation from forward build with adequate confidence."
+      }
+    },
+    "pattern_note": {
+      "type": "choice",
+      "instructions": "Add one concise pattern note by choosing the best label from the prefix only.",
+      "criteria": {
+        "test_fix_loop": "Reactive tests, reads, fixes, retries, or verification dominate the recent pattern.",
+        "forward_edit": "Forward edits or implementation construction dominate the recent pattern.",
+        "mixed_or_unclear": "The pattern is mixed or cannot be distinguished from the prefix."
+      }
+    }
+  }
+}

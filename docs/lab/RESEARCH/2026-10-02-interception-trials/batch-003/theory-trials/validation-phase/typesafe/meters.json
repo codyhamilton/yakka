@@ -1,0 +1,61 @@
+{
+  "schema_version": "validation-phase-typesafe-meters-v1",
+  "case_id": "PR-VALIDATION-PHASE",
+  "driver": "typesafe",
+  "model": "jev-1.13.0",
+  "stratum": "maps-5h",
+  "measurement_only": true,
+  "unlock_called": false,
+  "checkout_scoring": false,
+  "pack_sha256": "81908d76b4d435a4b6d430390ce5b93b917f57d3d3239901b078251200d9978d",
+  "n_cells_planned": 63,
+  "n_cells_recorded": 63,
+  "n_successful": 63,
+  "n_errors": 0,
+  "response_counts": {
+    "in_validation": 63
+  },
+  "pattern_note_counts": {
+    "test_fix_loop": 57,
+    "mixed_or_unclear": 6
+  },
+  "response_class_equals_response_label": true,
+  "by_checkpoint": {
+    "50": {
+      "in_validation": 21
+    },
+    "60": {
+      "in_validation": 21
+    },
+    "75": {
+      "in_validation": 21
+    }
+  },
+  "by_worker": {
+    "0677f597286e": {
+      "in_validation": 9
+    },
+    "074c8cf22927": {
+      "in_validation": 9
+    },
+    "15f24c7ba18c": {
+      "in_validation": 9
+    },
+    "87a380bc64ff": {
+      "in_validation": 9
+    },
+    "92a48e004519": {
+      "in_validation": 9
+    },
+    "bb6165018de0": {
+      "in_validation": 9
+    },
+    "ca977b9ca0dd": {
+      "in_validation": 9
+    }
+  },
+  "missing_cells": [],
+  "error_cells": [],
+  "missing_packs": [],
+  "generated_at": "2026-10-02T06:23:40.743+00:00"
+}

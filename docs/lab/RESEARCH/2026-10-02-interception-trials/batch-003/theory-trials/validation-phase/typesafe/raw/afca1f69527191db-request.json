@@ -1,0 +1,121 @@
+{
+  "model": "jev-1.13.0",
+  "state": {
+    "scenario_id": "case.PR-VALIDATION-PHASE|worker.074c8cf22927|checkpoint.60",
+    "checkpoint_turn": 60,
+    "evidence_class": "validation-phase-earlycps-prefix",
+    "snapshot": {
+      "question_id": "PR-VALIDATION-PHASE",
+      "worker_id": "074c8cf22927",
+      "checkpoint_turn": 60,
+      "prior_checkpoint_turn": 50,
+      "evidence_class": "validation-phase-earlycps-prefix",
+      "brief_anchor": "You are an implementation worker on the open-pajero-maps repo. Read and implement, in order:\n\n1. docs/plans/01-eval-harness-and-map-layer/briefs/24-dune-drop-and-selection-vocab-consistency.md (primary fix)\n2. docs/plans/01-eval-harness-and-map-layer/briefs/19-container-pdmdh-blob-tail.md (documents the downstream symptom this same fix resolves — confirm it actually does resolve, don't assume)\n\nFollow each brief's own \"Required reading\", \"Goal\", \"Contract\", \"Changes\", and \"Done evidence\" section",
+      "cumulative": {
+        "api_turns": 60,
+        "peak_ctx_tokens": 130063,
+        "prefix_bytes": 927976,
+        "tool_histogram": {
+          "Bash": 44,
+          "Read": 11,
+          "Edit": 4,
+          "Write": 2,
+          "ToolSearch": 1
+        },
+        "reread_paths": [],
+        "distinct_read_paths": 10,
+        "compaction_event_count": 0,
+        "assistant_text_chars": 1876
+      },
+      "delta_since_prior": {
+        "new_read_paths": [
+          "<TMP_REPO>/f06c7365-e8be-4dbf-b6c3-730a03ecdc0d/tasks/b85wrl5z5.output",
+          "<TMP_REPO>/f06c7365-e8be-4dbf-b6c3-730a03ecdc0d/tasks/bsdmpdzcv.output"
+        ],
+        "tool_histogram_delta": {
+          "Bash": 8,
+          "Read": 2
+        }
+      },
+      "thrash_top_rereads": [],
+      "tail": [
+        {
+          "turn": 53,
+          "excerpt": "",
+          "tool_names": [
+            "Read"
+          ]
+        },
+        {
+          "turn": 54,
+          "excerpt": "Levels 10/12 background counts land in range (26 vs 25, ratio 1.04x). Now let's attempt a Perth-fixture build to test the container/PDMDH mechanism for brief 19.",
+          "tool_names": [
+            "Bash"
+          ]
+        },
+        {
+          "turn": 55,
+          "excerpt": "",
+          "tool_names": [
+            "Bash"
+          ]
+        },
+        {
+          "turn": 56,
+          "excerpt": "Good — supports `--levels`. Let's run a Perth-fixture extraction restricted to levels 10 and 12 to verify content is now spooled (fast, small scope).",
+          "tool_names": [
+            "Bash"
+          ]
+        },
+        {
+          "turn": 57,
+          "excerpt": "I'll wait for this task to finish.",
+          "tool_names": [
+            "Bash"
+          ]
+        },
+        {
+          "turn": 58,
+          "excerpt": "",
+          "tool_names": [
+            "Bash"
+          ]
+        },
+        {
+          "turn": 59,
+          "excerpt": "",
+          "tool_names": [
+            "Bash"
+          ]
+        },
+        {
+          "turn": 60,
+          "excerpt": "",
+          "tool_names": [
+            "Read"
+          ]
+        }
+      ]
+    }
+  },
+  "questions": {
+    "response": {
+      "type": "choice",
+      "instructions": "Is this worker already in validation (reactive read/fix/test loop) versus forward build? Answer exactly one of in_validation, building, or inconclusive from the supplied prefix only.",
+      "criteria": {
+        "in_validation": "A reactive read/fix/test loop is already the dominant pattern in this prefix.",
+        "building": "Forward implementation or construction is the dominant pattern in this prefix.",
+        "inconclusive": "The prefix does not distinguish validation from forward build with adequate confidence."
+      }
+    },
+    "pattern_note": {
+      "type": "choice",
+      "instructions": "Add one concise pattern note by choosing the best label from the prefix only.",
+      "criteria": {
+        "test_fix_loop": "Reactive tests, reads, fixes, retries, or verification dominate the recent pattern.",
+        "forward_edit": "Forward edits or implementation construction dominate the recent pattern.",
+        "mixed_or_unclear": "The pattern is mixed or cannot be distinguished from the prefix."
+      }
+    }
+  }
+}

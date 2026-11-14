@@ -1,0 +1,120 @@
+{
+  "model": "jev-1.13.0",
+  "state": {
+    "scenario_id": "case.PR-VALIDATION-PHASE|worker.074c8cf22927|checkpoint.75",
+    "checkpoint_turn": 75,
+    "evidence_class": "validation-phase-earlycps-prefix",
+    "snapshot": {
+      "question_id": "PR-VALIDATION-PHASE",
+      "worker_id": "074c8cf22927",
+      "checkpoint_turn": 75,
+      "prior_checkpoint_turn": 60,
+      "evidence_class": "validation-phase-earlycps-prefix",
+      "brief_anchor": "You are an implementation worker on the open-pajero-maps repo. Read and implement, in order:\n\n1. docs/plans/01-eval-harness-and-map-layer/briefs/24-dune-drop-and-selection-vocab-consistency.md (primary fix)\n2. docs/plans/01-eval-harness-and-map-layer/briefs/19-container-pdmdh-blob-tail.md (documents the downstream symptom this same fix resolves — confirm it actually does resolve, don't assume)\n\nFollow each brief's own \"Required reading\", \"Goal\", \"Contract\", \"Changes\", and \"Done evidence\" section",
+      "cumulative": {
+        "api_turns": 75,
+        "peak_ctx_tokens": 152501,
+        "prefix_bytes": 1097434,
+        "tool_histogram": {
+          "Bash": 58,
+          "Read": 12,
+          "Edit": 4,
+          "Write": 2,
+          "ToolSearch": 1
+        },
+        "reread_paths": [],
+        "distinct_read_paths": 11,
+        "compaction_event_count": 0,
+        "assistant_text_chars": 2586
+      },
+      "delta_since_prior": {
+        "new_read_paths": [
+          "<TMP_REPO>/f06c7365-e8be-4dbf-b6c3-730a03ecdc0d/tasks/bte46fhjd.output"
+        ],
+        "tool_histogram_delta": {
+          "Bash": 14,
+          "Read": 1
+        }
+      },
+      "thrash_top_rereads": [],
+      "tail": [
+        {
+          "turn": 68,
+          "excerpt": "",
+          "tool_names": [
+            "Bash"
+          ]
+        },
+        {
+          "turn": 69,
+          "excerpt": "",
+          "tool_names": [
+            "Bash"
+          ]
+        },
+        {
+          "turn": 70,
+          "excerpt": "That note was just confirming my own append landed as expected. Now amend brief 19 similarly.",
+          "tool_names": [
+            "Bash"
+          ]
+        },
+        {
+          "turn": 71,
+          "excerpt": "Good, the amendment landed. Now let's clean up scratch build artifacts and run the full test suite once more to confirm everything is green after all edits.",
+          "tool_names": [
+            "Bash"
+          ]
+        },
+        {
+          "turn": 72,
+          "excerpt": "I'll wait for tests to finish.",
+          "tool_names": [
+            "Bash"
+          ]
+        },
+        {
+          "turn": 73,
+          "excerpt": "",
+          "tool_names": [
+            "Read"
+          ]
+        },
+        {
+          "turn": 74,
+          "excerpt": "All 229 tests pass. Now let's commit. Scratch build artifacts were all written outside the worktree (in the scratchpad tmp dir), so nothing extra to clean up in the repo itself.",
+          "tool_names": [
+            "Bash"
+          ]
+        },
+        {
+          "turn": 75,
+          "excerpt": "",
+          "tool_names": [
+            "Bash"
+          ]
+        }
+      ]
+    }
+  },
+  "questions": {
+    "response": {
+      "type": "choice",
+      "instructions": "Is this worker already in validation (reactive read/fix/test loop) versus forward build? Answer exactly one of in_validation, building, or inconclusive from the supplied prefix only.",
+      "criteria": {
+        "in_validation": "A reactive read/fix/test loop is already the dominant pattern in this prefix.",
+        "building": "Forward implementation or construction is the dominant pattern in this prefix.",
+        "inconclusive": "The prefix does not distinguish validation from forward build with adequate confidence."
+      }
+    },
+    "pattern_note": {
+      "type": "choice",
+      "instructions": "Add one concise pattern note by choosing the best label from the prefix only.",
+      "criteria": {
+        "test_fix_loop": "Reactive tests, reads, fixes, retries, or verification dominate the recent pattern.",
+        "forward_edit": "Forward edits or implementation construction dominate the recent pattern.",
+        "mixed_or_unclear": "The pattern is mixed or cannot be distinguished from the prefix."
+      }
+    }
+  }
+}

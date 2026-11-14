@@ -1,0 +1,86 @@
+{
+  "case_id": "PR-VALIDATION-PHASE",
+  "wsm_status": "GO",
+  "freeze_date": "2026-10-02",
+  "dependency": "CLEARED \u2014 early-prefix packs at cps 50/60/75 on disk (see packs/MANIFEST.md)",
+  "question": {
+    "choices": [
+      "in_validation",
+      "building",
+      "inconclusive"
+    ],
+    "plus": "pattern note (test/fix loop vs forward edit)",
+    "text": "Is this worker already in validation (reactive read/fix/test loop) vs forward build? Answer in_validation | building | inconclusive + one pattern note."
+  },
+  "checkpoints": [
+    50,
+    60,
+    75
+  ],
+  "measurement_only": true,
+  "forbid": [
+    "--call-jev unlock",
+    "behaviour ship",
+    "checkout scoring"
+  ],
+  "session_inventory_target": {
+    "n_workers": "6\u20138 Maps with raw available",
+    "include": [
+      "92a48e004519 (long thrash)",
+      "87a380bc64ff or bb6165018de0 (poll)"
+    ],
+    "strata": "thrash / poll / productive-edit"
+  },
+  "trial_runner": "Packs ready. Seat 3 \u00d7 7 workers \u00d7 {50,60,75} = 63 calls. Q locked: in_validation | building | inconclusive + pattern note. No checkout scoring. No --call-jev unlock.",
+  "kill": "Seats cannot distinguish validation from productive test-fix on poll/monitor workers (false steer risk).",
+  "packs_status": "READY_FOR_SEATS",
+  "packs": {
+    "dir": "/workspace/corpus-ops/registry/validation-phase/packs/",
+    "manifest": "/workspace/corpus-ops/registry/validation-phase/packs/MANIFEST.md",
+    "summary": "/workspace/corpus-ops/registry/validation-phase/packs/SUMMARY-earlycps-20261002-earlycps.json",
+    "combined": "/workspace/corpus-ops/registry/validation-phase/packs/validation-phase-earlycps-judge-packs-20261002-earlycps.jsonl",
+    "combined_sha256": "81908d76b4d435a4b6d430390ce5b93b917f57d3d3239901b078251200d9978d",
+    "run_id": "20261002-earlycps",
+    "n_workers": 7,
+    "n_rows": 21,
+    "checkpoints": [
+      50,
+      60,
+      75
+    ],
+    "snapshot_mode": "hybrid_v0",
+    "workers": [
+      {
+        "id": "92a48e004519",
+        "stratum": "thrash"
+      },
+      {
+        "id": "ca977b9ca0dd",
+        "stratum": "thrash"
+      },
+      {
+        "id": "87a380bc64ff",
+        "stratum": "poll"
+      },
+      {
+        "id": "bb6165018de0",
+        "stratum": "poll"
+      },
+      {
+        "id": "15f24c7ba18c",
+        "stratum": "poll"
+      },
+      {
+        "id": "0677f597286e",
+        "stratum": "productive-edit"
+      },
+      {
+        "id": "074c8cf22927",
+        "stratum": "productive-edit"
+      }
+    ],
+    "built_at_brisbane": "2026-10-02 16:12:09 AEST",
+    "builder": "/workspace/corpus-ops/tools/build_early_cps_judge_packs.py",
+    "leak_scan": "clean"
+  }
+}
