@@ -1,0 +1,28 @@
+{
+  "experiment": "shape-qual-full-maps-v1",
+  "worker_id": "87a380bc64ff",
+  "model": "Composer",
+  "narrative_shape": "Poll/monitor class: dual Monitor arms on compare_disc and roundtrip jobs; Bash/Read prep on build_alldata/overlap with explicit wait-on-monitors tail at cp75 (T~89).",
+  "shape_label": "unclear",
+  "phases": [
+    {
+      "range": "75",
+      "name": "dual_monitor_wait",
+      "note": "Monitor=6; waiting on both monitors; no later cp in pack."
+    }
+  ],
+  "early_signals": [
+    {
+      "turn": 75,
+      "signal": "Monitor=6 at sole cp; 'waiting on both monitors' excerpt."
+    },
+    {
+      "turn": 75,
+      "signal": "Bash+Read on build_alldata/overlap\u2014not bash-only thrash."
+    }
+  ],
+  "early_signal_window_respected": true,
+  "recommended_exit": null,
+  "earliness": null,
+  "rationale": "Distinct poll/monitor shape per inventory note; insufficient post-75 prefix to call late_pivot vs sustained wait\u2014label unclear with monitor-forward early signals."
+}

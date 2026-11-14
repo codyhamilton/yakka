@@ -1,0 +1,28 @@
+{
+  "experiment": "shape-qual-full-maps-v1",
+  "worker_id": "a318f4b89a6a",
+  "model": "Composer",
+  "narrative_shape": "3C-04 unit worker: pytest-clean edits on walk/spool/roundtrip by cp75, relaunch roundtrip tooling by cp90\u2014thrash-expand (e) class resolves quickly.",
+  "shape_label": "unclear",
+  "phases": [
+    {
+      "range": "75-90",
+      "name": "roundtrip_implementation",
+      "note": "8\u219211 Edits; pytest pass excerpt at cp75."
+    }
+  ],
+  "early_signals": [
+    {
+      "turn": 75,
+      "signal": "Edit=8, pytest 7/7 pass excerpt at cp75."
+    },
+    {
+      "turn": 90,
+      "signal": "Edit=11; quantisation_roundtrip re-read focus with relaunch excerpt."
+    }
+  ],
+  "early_signal_window_respected": true,
+  "recommended_exit": null,
+  "earliness": null,
+  "rationale": "Prior wave flagged expand risk but packs show checkable progress immediately."
+}

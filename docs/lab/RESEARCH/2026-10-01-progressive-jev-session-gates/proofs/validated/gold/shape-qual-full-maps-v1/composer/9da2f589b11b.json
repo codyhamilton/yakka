@@ -1,0 +1,24 @@
+{
+  "experiment": "shape-qual-full-maps-v1",
+  "worker_id": "9da2f589b11b",
+  "model": "Composer",
+  "narrative_shape": "2-03 overlay-test brief: Edit-heavy (23 Edits) at cp75 with handoff append excerpt\u2014fast completion T~76.",
+  "shape_label": "unclear",
+  "phases": [
+    {
+      "range": "75",
+      "name": "overlay_test_closeout",
+      "note": "23 Edits; handoff append bash."
+    }
+  ],
+  "early_signals": [
+    {
+      "turn": 75,
+      "signal": "Edit=23 at cp75 on overlay brief\u2014high edit velocity."
+    }
+  ],
+  "early_signal_window_respected": true,
+  "recommended_exit": null,
+  "earliness": null,
+  "rationale": "Single-checkpoint success; no thrash or late pivot narrative."
+}

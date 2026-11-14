@@ -1,0 +1,37 @@
+{
+  "experiment": "shape-qual-full-maps-v1",
+  "worker_id": "0aab88c525de",
+  "model": "Composer",
+  "narrative_shape": "Brief 12-assemble worker moves steadily through Read/Edit/Bash with growing assistant narration, fixture checks, and a short Monitor tail waiting on background extraction\u2014productive build rather than thrash or pivot.",
+  "shape_label": "unclear",
+  "phases": [
+    {
+      "range": "75-120",
+      "name": "implement_and_verify",
+      "note": "Edits on alldata_writer; decode-back verification; tests pass."
+    },
+    {
+      "range": "135-180",
+      "name": "extended_validation_wait",
+      "note": "More Bash; Write; Monitor-armed wait on extraction."
+    }
+  ],
+  "early_signals": [
+    {
+      "turn": 75,
+      "signal": "Edit=3 and rich assistant text at cp75\u2014not zero-edit thrash."
+    },
+    {
+      "turn": 90,
+      "signal": "Delta +4 Edit; tail shows direct string edits on owned code."
+    },
+    {
+      "turn": 120,
+      "signal": "12 Edits; excerpt 'It builds. Now decode back to verify.'"
+    }
+  ],
+  "early_signal_window_respected": true,
+  "recommended_exit": null,
+  "earliness": null,
+  "rationale": "Shape-signal labels do not fit a clean thrash or late pivot; early turns show intentional implementation with only a brief external wait at the end."
+}

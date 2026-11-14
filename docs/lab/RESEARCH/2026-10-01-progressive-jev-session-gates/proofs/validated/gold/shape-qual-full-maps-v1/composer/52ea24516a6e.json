@@ -1,0 +1,37 @@
+{
+  "experiment": "shape-qual-full-maps-v1",
+  "worker_id": "52ea24516a6e",
+  "model": "Composer",
+  "narrative_shape": "Full-Australia extraction: substantive Edits by cp75, then Monitor-armed wait on long extraction, pivot to done-evidence and commit by cp105.",
+  "shape_label": "late_pivot",
+  "phases": [
+    {
+      "range": "75-90",
+      "name": "implement_then_wait",
+      "note": "Edits present; monitor re-arm on PID."
+    },
+    {
+      "range": "90-105",
+      "name": "results_and_commit",
+      "note": "Full run results; staged owned files; commit excerpt."
+    }
+  ],
+  "early_signals": [
+    {
+      "turn": 75,
+      "signal": "Edit=10, Write=2\u2014not zero-edit thrash despite wait tail."
+    },
+    {
+      "turn": 90,
+      "signal": "Monitor delta +2; 'full run results' excerpt begins pivot."
+    },
+    {
+      "turn": 75,
+      "signal": "Tail already says wait for Monitor not poll\u2014external runtime flagged early."
+    }
+  ],
+  "early_signal_window_respected": true,
+  "recommended_exit": null,
+  "earliness": "n/a \u2014 wait is on-brief extraction gate.",
+  "rationale": "Late pivot is extraction completion \u2192 evidence/commit; early window shows both implementation and explicit monitor wait foreshadowing."
+}

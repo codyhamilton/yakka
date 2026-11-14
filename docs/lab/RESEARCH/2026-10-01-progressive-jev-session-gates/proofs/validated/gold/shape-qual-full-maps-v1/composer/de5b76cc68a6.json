@@ -1,0 +1,28 @@
+{
+  "experiment": "shape-qual-full-maps-v1",
+  "worker_id": "de5b76cc68a6",
+  "model": "Composer",
+  "narrative_shape": "Unit 3-03: Bash-only tool histogram through cp90 with minimal assistant text and zero reads\u2014no narrowing visible in packs.",
+  "shape_label": "early_thrash",
+  "phases": [
+    {
+      "range": "75-90",
+      "name": "bash_only",
+      "note": "Bash 76\u219292; distinct_read_paths=0."
+    }
+  ],
+  "early_signals": [
+    {
+      "turn": 75,
+      "signal": "Only Bash in hist; assistant_text_chars=109; zero reads."
+    },
+    {
+      "turn": 90,
+      "signal": "Delta +16 Bash; still no Read/Edit tools."
+    }
+  ],
+  "early_signal_window_respected": true,
+  "recommended_exit": 90,
+  "earliness": "on_time vs bash-only continuation at cp90.",
+  "rationale": "Mirrors e28a2428b192 bash-only stall pattern on a code brief."
+}

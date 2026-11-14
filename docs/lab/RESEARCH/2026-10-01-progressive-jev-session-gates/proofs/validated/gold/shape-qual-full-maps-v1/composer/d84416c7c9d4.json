@@ -1,0 +1,28 @@
+{
+  "experiment": "shape-qual-full-maps-v1",
+  "worker_id": "d84416c7c9d4",
+  "model": "Composer",
+  "narrative_shape": "READ-ONLY L2 research: census Monitor waits, throwaway Edit for measurement, rich assistant text\u2014likely census-then-analysis shape within T~81 (single cp).",
+  "shape_label": "unclear",
+  "phases": [
+    {
+      "range": "75",
+      "name": "census_research",
+      "note": "Monitor=4; Edit=1 throwaway; L2 result excerpt."
+    }
+  ],
+  "early_signals": [
+    {
+      "turn": 75,
+      "signal": "READ-ONLY anchor with Monitor and substantive narration\u2014not zero-edit thrash."
+    },
+    {
+      "turn": 75,
+      "signal": "Edit excerpt for L2 measurement throwaway script."
+    }
+  ],
+  "early_signal_window_respected": true,
+  "recommended_exit": null,
+  "earliness": null,
+  "rationale": "Only cp75 in pack; research census class without enough prefix to separate late_pivot from on-brief wait."
+}

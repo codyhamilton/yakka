@@ -1,0 +1,32 @@
+{
+  "experiment": "shape-qual-full-maps-v1",
+  "worker_id": "ca977b9ca0dd",
+  "model": "Composer",
+  "narrative_shape": "Same 3C-09 brief class as the long runaway worker but compressed: never acquires Edit/Write; _cenc/divide re-reads and compactions dominate through cp105.",
+  "shape_label": "early_thrash",
+  "phases": [
+    {
+      "range": "75-105",
+      "name": "read_bash_loop",
+      "note": "Bash/Read only; assistant_text_chars frozen at 167."
+    }
+  ],
+  "early_signals": [
+    {
+      "turn": 75,
+      "signal": "Zero Edit/Write; _cenc 10\u00d7 at cp75."
+    },
+    {
+      "turn": 90,
+      "signal": "Still zero Edit/Write; +10 Bash/+6 Read delta."
+    },
+    {
+      "turn": 105,
+      "signal": "_cenc 14\u00d7, 16 compactions, narration still 167 chars."
+    }
+  ],
+  "early_signal_window_respected": true,
+  "recommended_exit": 90,
+  "earliness": "on_time vs first_clear_thrash@90.",
+  "rationale": "Classic thrash-screen signal: mistake to continue is already visible at second checkpoint."
+}

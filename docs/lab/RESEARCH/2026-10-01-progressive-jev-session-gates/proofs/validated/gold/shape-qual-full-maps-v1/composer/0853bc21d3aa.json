@@ -1,0 +1,41 @@
+{
+  "experiment": "shape-qual-full-maps-v1",
+  "worker_id": "0853bc21d3aa",
+  "model": "Composer",
+  "narrative_shape": "Divide/alldata_writer brief: continuous Edit/Bash/Write progression, tests added and passing, full build rerun\u2014straightforward implementation through T~155.",
+  "shape_label": "unclear",
+  "phases": [
+    {
+      "range": "75-120",
+      "name": "code_and_tests",
+      "note": "Edits on alldata_writer; test_divide.py written; suite passes."
+    },
+    {
+      "range": "120-150",
+      "name": "build_and_sweep",
+      "note": "Full build; concurrent-agent hygiene checks."
+    }
+  ],
+  "early_signals": [
+    {
+      "turn": 75,
+      "signal": "Edit=2, Write=1 with active edit excerpts on alldata_writer."
+    },
+    {
+      "turn": 90,
+      "signal": "Delta +8 Edit; compile-check bash after edits."
+    },
+    {
+      "turn": 105,
+      "signal": "New test_divide.py path; pattern-following excerpt."
+    },
+    {
+      "turn": 120,
+      "signal": "All five divide tests pass; full suite rerun excerpt."
+    }
+  ],
+  "early_signal_window_respected": true,
+  "recommended_exit": null,
+  "earliness": null,
+  "rationale": "No thrash pivot or late recovery pattern; early signals show healthy edit velocity throughout the \u2264120 window."
+}
