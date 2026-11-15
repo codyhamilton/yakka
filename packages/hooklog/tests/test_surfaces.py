@@ -71,6 +71,12 @@ class SurfaceTests(unittest.TestCase):
                     self.assertEqual(envelope['harness'], harness)
                 self.assertEqual(prefetch_seen, 0)
 
+    def test_claude_manifest_selects_native_registration(self):
+        manifest = json.loads((PLUGIN / '.claude-plugin/plugin.json').read_text())
+        self.assertEqual(manifest['mcpServers'], './claude-mcp.json')
+        rel = manifest['mcpServers'][2:]
+        self.assertTrue((PLUGIN / rel).exists())
+
     def test_cursor_manifest_selects_native_registration(self):
         manifest = json.loads((PLUGIN / '.cursor-plugin/plugin.json').read_text())
         self.assertEqual(manifest['hooks'], './hooks/cursor.json')
@@ -80,8 +86,11 @@ class SurfaceTests(unittest.TestCase):
             rel = rel.rstrip('/')
             self.assertTrue((PLUGIN / rel).exists(), key)
 
+    def test_plugin_root_has_no_dot_mcp_json(self):
+        self.assertFalse((PLUGIN / '.mcp.json').exists())
+
     def test_harness_mcp_configs_use_matching_plugin_roots(self):
-        claude_mcp = (PLUGIN / '.mcp.json').read_text()
+        claude_mcp = (PLUGIN / 'claude-mcp.json').read_text()
         cursor_mcp = (PLUGIN / 'mcp.json').read_text()
         codex_mcp = (PLUGIN / '.codex-mcp.json').read_text()
         self.assertIn('${CLAUDE_PLUGIN_ROOT}', claude_mcp)

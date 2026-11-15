@@ -99,7 +99,7 @@ fetch or build it.
 
 | Harness | File | Registers |
 |---|---|---|
-| Claude Code | `plugins/yakka/hooks/hooks.json`, `plugins/yakka/.mcp.json` | `plugins/yakka/script/spool.sh --harness claude`; shim as stdio |
+| Claude Code | `plugins/yakka/hooks/hooks.json`, `plugins/yakka/claude-mcp.json` | `plugins/yakka/script/spool.sh --harness claude`; shim as stdio |
 | Cursor | `plugins/yakka/hooks/cursor.json`, `plugins/yakka/mcp.json`, `packages/hooklog/cursor-mcp.example.json` | `./script/spool.sh --harness cursor`; shim as stdio |
 | Codex | `plugins/yakka/hooks/codex.json`, `plugins/yakka/.codex-mcp.json` | `plugins/yakka/script/spool.sh --harness codex`; shim as stdio |
 | OpenCode | `packages/opencode-yakka-hooks` | writes spool files with the design 2 name; kicks `python3 plugins/yakka/client/yakka.py drain` |

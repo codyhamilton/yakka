@@ -1,5 +1,10 @@
 # Changelog
 
+## 3.4.9 — 2026-11-15 — Split Claude MCP config from Cursor auto-discovery
+
+- Renamed `plugins/yakka/.mcp.json` to `claude-mcp.json` and declared it in `.claude-plugin/plugin.json` via `mcpServers`, so Claude Code still loads the shim with `${CLAUDE_PLUGIN_ROOT}` without relying on the default `.mcp.json` scan.
+- Removed the plugin-root `.mcp.json` so Cursor's agent-host does not prefer Claude's config: cloud runs scan only `PLUGIN_MCP_CONFIG_FILE_NAMES` (`.mcp.json`, then `mcp.json`); the manifest `mcpServers` override does not apply there. Cursor keeps `plugins/yakka/mcp.json` with `${CURSOR_PLUGIN_ROOT}` and env forwarding. All three manifests at `3.4.9`.
+
 ## 3.4.8 — 2026-11-15 — Cursor MCP uses expanded args (no PLUGIN_ROOT)
 
 - Cursor `plugins/yakka/mcp.json` matches Claude layout: `python3` with `${CURSOR_PLUGIN_ROOT}/client/yakka.py` in `args` (no `cwd`). Cursor does not expand `${PLUGIN_ROOT}` or shell `:-` fallbacks in `mcp.json`. Discovery still forwards `${env:YAKKA_ENDPOINT}` and `${env:YAKKA_KEY}`. Plugin manifests at `3.4.8`.
