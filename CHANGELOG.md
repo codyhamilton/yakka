@@ -1,8 +1,12 @@
 # Changelog
 
-## 3.4.7 — 2026-11-15 — Cursor MCP spawn without cwd
+## 3.4.8 — 2026-11-15 — Cursor MCP uses expanded args (no PLUGIN_ROOT)
 
-- Cursor `plugins/yakka/mcp.json` runs the shim via an expanded `${CURSOR_PLUGIN_ROOT:-${PLUGIN_ROOT}}/client/yakka.py` command (no `cwd`). Discovery forwards `${env:YAKKA_ENDPOINT}` and `${env:YAKKA_KEY}` into the MCP child. Plugin manifests at `3.4.7`.
+- Cursor `plugins/yakka/mcp.json` matches Claude layout: `python3` with `${CURSOR_PLUGIN_ROOT}/client/yakka.py` in `args` (no `cwd`). Cursor does not expand `${PLUGIN_ROOT}` or shell `:-` fallbacks in `mcp.json`. Discovery still forwards `${env:YAKKA_ENDPOINT}` and `${env:YAKKA_KEY}`. Plugin manifests at `3.4.8`.
+
+## 3.4.7 — 2026-11-15 — Cursor MCP spawn without cwd (superseded)
+
+- Attempted direct script `command` with `${CURSOR_PLUGIN_ROOT:-${PLUGIN_ROOT}}`; cloud spawn left literal `${PLUGIN_ROOT}`. Superseded by `3.4.8`.
 
 ## 3.4.6 — 2026-11-14 — Cursor `mcp.json` standard layout
 
