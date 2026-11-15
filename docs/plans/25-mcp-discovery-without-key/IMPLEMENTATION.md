@@ -19,3 +19,7 @@ Brief: `briefs/phase2-shim-default-strict-drain.md`
 **Closed** commit `571f1d9`. `LoadMCP`, status `mcp:` line, tests, design 2/4/5. Verification: client unittests pass. Report: `reports/phase2-shim-default-strict-drain.md`.
 
 **Carried:** None
+
+## Close-out
+
+Verified in checkout: `go test ./internal/serve/ -run 'TestMCP'` and client `python3 -m unittest test_clientconfig test_mcp_shim test_status test_drain test_mcp_guard`. Closed with `Yakka-Phase: mcp-discovery-without-key:done` on `b2d47a6`.
