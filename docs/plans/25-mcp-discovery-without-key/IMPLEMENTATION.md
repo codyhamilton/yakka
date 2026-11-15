@@ -8,10 +8,14 @@
 
 Brief: `briefs/phase1-anonymous-discovery-server.md`
 
-(outcomes recorded as units complete)
+**Closed** commit `ed9fd70`. Server anonymous gate, rate limit, tests, design 8/3 updates. Verification: `go test ./internal/serve/ -run 'TestMCP'` pass. Report: `reports/phase1-anonymous-discovery-server.md`.
+
+**Carried:** None
 
 ## Phase 2 — Shim default and the strict drain
 
 Brief: `briefs/phase2-shim-default-strict-drain.md`
 
-(pending)
+**Closed** commit pending push. `LoadMCP`, status `mcp:` line, tests, design 2/4/5. Verification: client unittests pass. Report: `reports/phase2-shim-default-strict-drain.md`.
+
+**Carried:** None

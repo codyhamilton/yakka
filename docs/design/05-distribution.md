@@ -51,8 +51,9 @@ for the plugin to presume one, and local mode needs no generated state:
   whether or not the GitHub OAuth env vars are set (they are ignored). Setting `YAKKA_SERVE_KEYS`
   to anything but empty makes the process exit before it listens. How loopback serve is kept running
   is the user's choice.
-- With no `~/.config/yakka/client.toml`, the drain and the shim use `http://127.0.0.1:8770`
-  with no key.
+- With no `~/.config/yakka/client.toml`, the drain still uses `http://127.0.0.1:8770` with no key.
+  The MCP shim targets `https://api.yakka.build` with no bearer until `yakka login` or env vars
+  supply credentials (`yakka status` prints both targets).
 - A non-loopback bind with `GITHUB_OAUTH_CLIENT_ID`, `GITHUB_OAUTH_CLIENT_SECRET`, and
   `YAKKA_PUBLIC_URL` set is a remote collector. `YAKKA_SERVE_KEYS` is not a credential there:
   any non-empty value makes the process exit before it listens, on loopback or not. The collector

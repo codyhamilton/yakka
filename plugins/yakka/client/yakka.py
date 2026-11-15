@@ -34,6 +34,7 @@ from typing import Any, Callable, List, Optional, Tuple
 # --- clientconfig ---
 
 LocalEndpoint = "http://127.0.0.1:8770"
+DefaultEndpoint = "https://api.yakka.build"
 
 _ENV_ENDPOINT = "YAKKA_ENDPOINT"
 _ENV_KEY = "YAKKA_KEY"
@@ -124,6 +125,87 @@ def _parse_config(path: str, text: str) -> Config:
     if not cfg.Key:
         raise ValueError(f"clientconfig: {path}: missing key")
     return cfg
+
+
+def _parse_mcp_file(path: str, text: str) -> dict[str, str]:
+    vals: dict[str, str] = {}
+    for i, line in enumerate(text.split("\n")):
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        m = _line_re.match(line)
+        if not m:
+            raise ValueError(
+                f'clientconfig: {path}: line {i + 1} is not a `name = "string"` line'
+            )
+        try:
+            v = json.loads(m.group(2))
+        except json.JSONDecodeError:
+            raise ValueError(
+                f"clientconfig: {path}: line {i + 1} has an invalid string"
+            ) from None
+        vals[m.group(1)] = v
+    return vals
+
+
+def _endpoint_is_loopback(endpoint: str) -> bool:
+    base = _request_base(endpoint)
+    if base is None:
+        return False
+    parts = urllib.parse.urlsplit(base)
+    host = parts.hostname or ""
+    if host.lower() == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
+def LoadMCP() -> Config:
+    """Endpoint and key for the MCP shim only; drain and login keep using Load()."""
+    ep_env = os.environ.get(_ENV_ENDPOINT, "").strip()
+    key_env = os.environ.get(_ENV_KEY, "").strip()
+    file_ep = ""
+    file_key = ""
+    path = Path()
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = f.read()
+        vals = _parse_mcp_file(path, data)
+        file_ep = vals.get("endpoint", "")
+        file_key = vals.get("key", "")
+    except FileNotFoundError:
+        pass
+    except OSError as err:
+        raise OSError(f"clientconfig: read {path}: {err}") from err
+
+    if ep_env:
+        ep = ep_env
+    elif file_ep:
+        ep = file_ep
+    else:
+        ep = DefaultEndpoint
+
+    if key_env:
+        key = key_env
+    elif ep_env:
+        key = ""
+    elif file_key:
+        key = file_key
+    else:
+        key = ""
+
+    if _request_base(ep) is None:
+        raise ValueError("invalid endpoint")
+    parts = urllib.parse.urlsplit(_request_base(ep) or ep)
+    if parts.path not in ("", "/"):
+        raise ValueError("endpoint must be an origin")
+    secure = parts.scheme == "https"
+    loopback = _endpoint_is_loopback(ep)
+    if key and not secure and not loopback:
+        raise ValueError("cleartext endpoint is not loopback")
+    return Config(Endpoint=ep, Key=key, Local=loopback)
 
 
 # --- keys ---
@@ -2721,7 +2803,7 @@ def _mcp_readers(request: dict[str, Any], declaration: Any, queue_dir: str, getw
             values[name] = _mcp_failed("internal")
     local.update(values)
     try:
-        cfg = Load()
+        cfg = LoadMCP()
         # Same encoding as the body the shim sends, so an escaped form cannot hide the key.
         encoded = json.dumps(local, separators=(",", ":"), ensure_ascii=False)
         if cfg.Key and cfg.Key in encoded:
@@ -2938,12 +3020,14 @@ class _McpRelay:
         cfg: Optional[Config] = None
         host = ""
         try:
-            cfg = Load()
+            cfg = LoadMCP()
             host, scheme, port, secure = self._endpoint(cfg)
-            auth = _bearer_header(cfg.Key) if not cfg.Local else ""
-            if auth is None:
-                raise ValueError("invalid bearer header")
-        except (ErrPartialEnv, OSError, ValueError) as exc:
+            auth = ""
+            if cfg.Key:
+                auth = _bearer_header(cfg.Key)
+                if auth is None:
+                    raise ValueError("invalid bearer header")
+        except (OSError, ValueError) as exc:
             return None, b"", "config:" + str(exc), host
         if cancelled.is_set():
             return None, b"", "cancelled", host
@@ -2986,6 +3070,8 @@ class _McpRelay:
                 # Name only the redirect target's host, never the Location URL.
                 target = _mcp_host(response.getheader("Location") or "") or host
                 return status, raw, "redirect", target
+            if status == 429:
+                return status, raw, "network", host
             return status, raw, "", host
         except (TimeoutError, socket.timeout):
             return None, b"", "timeout", host
@@ -3228,7 +3314,6 @@ def cmd_mcp(argv: List[str]) -> int:
 
 # --- login ---
 
-DefaultEndpoint = "https://api.yakka.build"
 _NO_DEVICE_LOGIN = "this endpoint has no device login"
 
 
@@ -3551,6 +3636,15 @@ def run_login(
 # --- status ---
 
 
+def _print_mcp_status(w: Any) -> None:
+    try:
+        mcfg = LoadMCP()
+        cred = "credential" if mcfg.Key else "no-credential"
+        print(f"mcp: {_shown_endpoint(mcfg.Endpoint)} {cred}", file=w)
+    except (OSError, ValueError):
+        print("mcp: -", file=w)
+
+
 def run_status(w: Any) -> int:
     st = QueueStatus(QueueDir())
     print(f"queue: {st.Dir}", file=w)
@@ -3569,10 +3663,12 @@ def run_status(w: Any) -> int:
     except ErrPartialEnv as err:
         print(f"config: {err}", file=w)
         print("endpoint: -", file=w)
+        _print_mcp_status(w)
         return 1
     except (OSError, ValueError):
         print(f"config: {Path()} (invalid)", file=w)
         print("endpoint: -", file=w)
+        _print_mcp_status(w)
         return 0
     if cfg.Local:
         print("config: none (local mode)", file=w)
@@ -3591,6 +3687,7 @@ def run_status(w: Any) -> int:
         except Exception:
             pass
     print(f"endpoint: {_shown_endpoint(cfg.Endpoint)} {reach}", file=w)
+    _print_mcp_status(w)
     if reach == "unreachable" and st.Queued > 0:
         return 1
     return 0
