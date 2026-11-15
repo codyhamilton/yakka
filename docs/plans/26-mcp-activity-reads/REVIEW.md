@@ -2,7 +2,7 @@
 
 Verdict: **PASS_WITH_FOLLOWUPS**
 
-Reviewed SHA: `53b92645bfacd618c1b6b749c2b9851071ff5740` (PR #235).
+Reviewed SHA: `e343a3c` (PR #235).
 
 Plan sufficiency: the design is enough to judge intent, phase outcomes, ledger entries, and downstream QA. Domains, store contracts, MCP registration posture, search hardening acceptance, and stable-doc surfaces are explicit and grounded in current code.
 
