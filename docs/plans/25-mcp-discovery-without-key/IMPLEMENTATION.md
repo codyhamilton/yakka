@@ -16,6 +16,6 @@ Brief: `briefs/phase1-anonymous-discovery-server.md`
 
 Brief: `briefs/phase2-shim-default-strict-drain.md`
 
-**Closed** commit pending push. `LoadMCP`, status `mcp:` line, tests, design 2/4/5. Verification: client unittests pass. Report: `reports/phase2-shim-default-strict-drain.md`.
+**Closed** commit `571f1d9`. `LoadMCP`, status `mcp:` line, tests, design 2/4/5. Verification: client unittests pass. Report: `reports/phase2-shim-default-strict-drain.md`.
 
 **Carried:** None
