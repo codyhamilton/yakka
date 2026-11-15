@@ -1,5 +1,9 @@
 # Changelog
 
+## 3.4.10 — 2026-11-15 — Cursor MCP without env overrides
+
+- Removed the `env` block from `plugins/yakka/mcp.json` so Cursor's MCP subprocess inherits `YAKKA_ENDPOINT` and `YAKKA_KEY` from the parent process only when they are already set. Unexpanded `${env:...}` placeholders and empty values no longer override `client.toml` in `Load()` and `LoadMCP()`. Fixes #236. All three manifests at `3.4.10`.
+
 ## 3.4.9 — 2026-11-15 — Split Claude MCP config from Cursor auto-discovery
 
 - Renamed `plugins/yakka/.mcp.json` to `claude-mcp.json` and declared it in `.claude-plugin/plugin.json` via `mcpServers`, so Claude Code still loads the shim with `${CLAUDE_PLUGIN_ROOT}` without relying on the default `.mcp.json` scan.

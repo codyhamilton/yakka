@@ -38,6 +38,15 @@ DefaultEndpoint = "https://api.yakka.build"
 
 _ENV_ENDPOINT = "YAKKA_ENDPOINT"
 _ENV_KEY = "YAKKA_KEY"
+_ENV_REF_RE = re.compile(r"^\$\{env:[^}]+\}$")
+
+
+def _env_config_value(name: str) -> str:
+    """Return an env override for client config, or empty when unset or placeholder."""
+    raw = os.environ.get(name, "").strip()
+    if not raw or _ENV_REF_RE.match(raw):
+        return ""
+    return raw
 
 
 class ErrPartialEnv(Exception):
@@ -82,8 +91,8 @@ def SyncPath() -> str:
 
 
 def Load() -> Config:
-    ep = os.environ.get(_ENV_ENDPOINT, "").strip()
-    key = os.environ.get(_ENV_KEY, "").strip()
+    ep = _env_config_value(_ENV_ENDPOINT)
+    key = _env_config_value(_ENV_KEY)
     ep_set = ep != ""
     key_set = key != ""
     if ep_set and key_set:
@@ -164,8 +173,8 @@ def _endpoint_is_loopback(endpoint: str) -> bool:
 
 def LoadMCP() -> Config:
     """Endpoint and key for the MCP shim only; drain and login keep using Load()."""
-    ep_env = os.environ.get(_ENV_ENDPOINT, "").strip()
-    key_env = os.environ.get(_ENV_KEY, "").strip()
+    ep_env = _env_config_value(_ENV_ENDPOINT)
+    key_env = _env_config_value(_ENV_KEY)
     file_ep = ""
     file_key = ""
     path = Path()

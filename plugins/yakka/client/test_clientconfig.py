@@ -115,6 +115,32 @@ class TestMalformed(ClientConfigTestCase):
         self.assertIn("missing endpoint", str(ctx.exception))
 
 
+class TestEmptyEnvFallsBack(ClientConfigTestCase):
+    def test_empty_env_uses_client_toml(self) -> None:
+        write_config('endpoint = "https://file.example"\nkey = "file-key"\n')
+        os.environ["YAKKA_ENDPOINT"] = ""
+        os.environ["YAKKA_KEY"] = ""
+        c = yakka.Load()
+        self.assertEqual(c.Endpoint, "https://file.example")
+        self.assertEqual(c.Key, "file-key")
+
+    def test_literal_env_placeholders_use_client_toml(self) -> None:
+        write_config('endpoint = "https://file.example"\nkey = "file-key"\n')
+        os.environ["YAKKA_ENDPOINT"] = "${env:YAKKA_ENDPOINT}"
+        os.environ["YAKKA_KEY"] = "${env:YAKKA_KEY}"
+        c = yakka.Load()
+        self.assertEqual(c.Endpoint, "https://file.example")
+        self.assertEqual(c.Key, "file-key")
+
+    def test_literal_env_placeholders_loadmcp(self) -> None:
+        write_config('endpoint = "https://file.example"\nkey = "file-key"\n')
+        os.environ["YAKKA_ENDPOINT"] = "${env:YAKKA_ENDPOINT}"
+        os.environ["YAKKA_KEY"] = "${env:YAKKA_KEY}"
+        c = yakka.LoadMCP()
+        self.assertEqual(c.Endpoint, "https://file.example")
+        self.assertEqual(c.Key, "file-key")
+
+
 class TestLoadMCP(ClientConfigTestCase):
     def test_missing_file_defaults_remote(self) -> None:
         os.environ["YAKKA_CLIENT_CONFIG"] = os.path.join(

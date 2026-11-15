@@ -100,8 +100,9 @@ class SurfaceTests(unittest.TestCase):
         self.assertNotIn('${CLAUDE_PLUGIN_ROOT}', cursor_mcp)
         self.assertNotIn('${PLUGIN_ROOT}', cursor_mcp)
         self.assertNotIn('"cwd"', cursor_mcp)
-        self.assertIn('"${env:YAKKA_KEY}"', cursor_mcp)
-        self.assertIn('"${env:YAKKA_ENDPOINT}"', cursor_mcp)
+        self.assertNotIn('"env"', cursor_mcp)
+        self.assertNotIn("YAKKA_KEY", cursor_mcp)
+        self.assertNotIn("YAKKA_ENDPOINT", cursor_mcp)
         self.assertIn('./client/yakka.py', codex_mcp)
         self.assertNotIn('PLUGIN_ROOT', codex_mcp)
 
