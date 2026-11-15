@@ -422,7 +422,7 @@ func (s *Server) mcpAuth(w http.ResponseWriter, r *http.Request) (mcpAuthResult,
 		res := s.authorizeBearer(r)
 		return mcpAuthResult{tenant: res.tenant, scope: res.scope}, true
 	}
-	if _, hasBearer := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer "); hasBearer {
+	if r.Header.Get("Authorization") != "" {
 		res := s.authorizeBearer(r)
 		if res.status != authOK {
 			writeJSON(w, 401, map[string]string{"error": res.msg})

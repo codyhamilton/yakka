@@ -80,6 +80,9 @@ func TestMCPAnonymousDiscoveryRemote(t *testing.T) {
 	if rec := mcpRequest(t, h, "bad-token", initBody, nil); rec.Code != 401 {
 		t.Fatalf("bad bearer initialize: %d", rec.Code)
 	}
+	if rec := mcpRequest(t, h, "", initBody, map[string]string{"Authorization": "Basic dXNlcjpwYXNz"}); rec.Code != 401 {
+		t.Fatalf("non-bearer authorization: %d %s", rec.Code, rec.Body.String())
+	}
 	spy := &mcpReadSpy{}
 	req := httptest.NewRequest("POST", "/v1/mcp", spy)
 	req.Header.Set("Authorization", "Bearer not-valid")
