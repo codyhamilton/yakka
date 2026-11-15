@@ -1,5 +1,9 @@
 # Changelog
 
+## 3.4.7 — 2026-11-15 — Cursor MCP spawn without cwd
+
+- Cursor `plugins/yakka/mcp.json` runs the shim via an expanded `${CURSOR_PLUGIN_ROOT:-${PLUGIN_ROOT}}/client/yakka.py` command (no `cwd`). Discovery forwards `${env:YAKKA_ENDPOINT}` and `${env:YAKKA_KEY}` into the MCP child. Plugin manifests at `3.4.7`.
+
 ## 3.4.6 — 2026-11-14 — Cursor `mcp.json` standard layout
 
 - The Cursor plugin uses `plugins/yakka/mcp.json` (replacing `.cursor-mcp.json`). The stdio shim sets `cwd` to `${CURSOR_PLUGIN_ROOT}` and runs `python3` with `./client/yakka.py mcp`. Claude keeps `plugins/yakka/.mcp.json`; Codex keeps `.codex-mcp.json`. All three manifests are `3.4.6`.
