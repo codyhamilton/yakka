@@ -1,8 +1,11 @@
 # Changelog
 
-## 3.4.10 — 2026-11-15 — Cursor MCP without env overrides
+## 3.4.11 — 2026-11-15 — Cloud user-level install, spool dedupe, Codex events
 
-- Removed the `env` block from `plugins/yakka/mcp.json` so Cursor's MCP subprocess inherits `YAKKA_ENDPOINT` and `YAKKA_KEY` from the parent process only when they are already set. Unexpanded `${env:...}` placeholders and empty values no longer override `client.toml` in `Load()` and `LoadMCP()`. Fixes #236. All three manifests at `3.4.10`.
+- Added `scripts/cloud-install.sh` for Cursor Cloud environment builds: installs the plugin client under `~/.local/share/yakka/install`, puts `yakka` on `~/.local/bin`, and writes workspace `.cursor/hooks.json` pointing at the installed `spool.sh` (no plugin cache; MCP stays on the plugin). The yakka repo commits `.cursor/environment.json` that runs this script plus the existing skills bootstrap.
+- `spool.sh` dedupes repeat events within `YAKKA_SPOOL_DEDUPE_SECS` (default 10) keyed on conversation id, event name and payload hash, so Cursor CLI double-fire and overlapping hook sources drop harmlessly.
+- Codex `hooks/codex.json` passes `--event` on every spool invocation so envelopes carry the hook name.
+- Cursor `mcp.json` omits the `env` block; the client treats literal `${env:YAKKA_*}` values as unset so empty Cursor expansions do not override `client.toml` in `Load()` and `LoadMCP()`. All three manifests at `3.4.11`.
 
 ## 3.4.9 — 2026-11-15 — Split Claude MCP config from Cursor auto-discovery
 

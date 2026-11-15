@@ -39,6 +39,38 @@ conv_id() {  # $1 = file; sets REPLY to the sanitised conversation ID, or empty
   done
 }
 
+# Drop repeats within YAKKA_SPOOL_DEDUPE_SECS (default 10) for the same conversation, event and payload hash.
+dedupe_secs=${YAKKA_SPOOL_DEDUPE_SECS:-10}
+dedupe_skip=
+
+payload_digest() {  # $1 = spool temp file (envelope + payload); sets REPLY to hex digest
+  REPLY=
+  if command -v sha256sum >/dev/null 2>&1; then
+    REPLY=$(tail -n +2 "$1" 2>/dev/null | sha256sum | awk '{print $1}')
+  elif command -v shasum >/dev/null 2>&1; then
+    REPLY=$(tail -n +2 "$1" 2>/dev/null | shasum -a 256 | awk '{print $1}')
+  else
+    REPLY=$(python3 - "$1" <<'PY'
+import hashlib, sys
+data = open(sys.argv[1], "rb").read().split(b"\n", 1)[-1]
+print(hashlib.sha256(data).hexdigest())
+PY
+    )
+  fi
+  REPLY=${REPLY:0:16}
+}
+
+dedupe_is_fresh() {  # $1 = marker path; uses dedupe_secs
+  python3 - "$1" "$dedupe_secs" <<'PY' 2>/dev/null
+import os, sys, time
+path, window = sys.argv[1], float(sys.argv[2])
+try:
+    raise SystemExit(0 if time.time() - os.path.getmtime(path) < window else 1)
+except OSError:
+    raise SystemExit(1)
+PY
+}
+
 spool() {
   case "${YAKKA_HOOKLOG:-}" in 0 | off | OFF | false | FALSE) return ;; esac
   case $harness in '' | auto) return ;; esac
@@ -52,7 +84,23 @@ spool() {
   conv_id "$dir/tmp/$name"
   local id=$REPLY
   if [ -z "$id" ]; then rm -f "$dir/tmp/$name"; return; fi
-  mv "$dir/tmp/$name" "$dir/$id-$name.evt" 2>/dev/null && spooled=1
+  payload_digest "$dir/tmp/$name"
+  local digest=$REPLY
+  if [ -n "$digest" ] && [ "$dedupe_secs" != 0 ] 2>/dev/null; then
+    local dedupe_dir="$dir/.dedupe" marker="$dir/.dedupe/${id}_${event}_${digest}"
+    mkdir -p "$dedupe_dir" 2>/dev/null || true
+    if [ -f "$marker" ] && dedupe_is_fresh "$marker"; then
+      dedupe_skip=1
+      rm -f "$dir/tmp/$name"
+      return
+    fi
+  fi
+  if mv "$dir/tmp/$name" "$dir/$id-$name.evt" 2>/dev/null; then
+    spooled=1
+    if [ -n "$digest" ] && [ "$dedupe_secs" != 0 ] 2>/dev/null; then
+      touch "$dir/.dedupe/${id}_${event}_${digest}" 2>/dev/null || true
+    fi
+  fi
 }
 
 start_drain() {  # $1 = optional prefix (setsid); detached, so $! is the drain's pid
