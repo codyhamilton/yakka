@@ -279,6 +279,7 @@ type Server struct {
 	screen             ScreenFunc
 	registry           *Registry
 	mcpTools           mcpRegistry
+	mcpDiscovery       mcpDiscoveryLimits
 	grants             *deviceGrants
 	reviewReservations *review.Reservations
 
@@ -308,7 +309,7 @@ func New(cfg Config, opts Options) *Server {
 	if err != nil {
 		panic("serve: registry: " + err.Error())
 	}
-	s := &Server{cfg: cfg, opts: opts, registry: reg, mcpTools: mcpTools, grants: newDeviceGrants(), tenants: map[string]*tenantState{}, gates: map[string]*sync.RWMutex{}, stop: make(chan struct{}), screen: opts.ScreenStep}
+	s := &Server{cfg: cfg, opts: opts, registry: reg, mcpTools: mcpTools, mcpDiscovery: newMCPDiscoveryLimits(), grants: newDeviceGrants(), tenants: map[string]*tenantState{}, gates: map[string]*sync.RWMutex{}, stop: make(chan struct{}), screen: opts.ScreenStep}
 	// A review tool is advertised only when its declared 150-second contract
 	// fits this server's configured MCP call ceiling and review is configured.
 	// This keeps an unavailable optional capability out of minimal/local servers.

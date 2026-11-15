@@ -363,10 +363,11 @@ func TestMCPRegistrationAndBudgets(t *testing.T) {
 	}
 	body := &mcpReadSpy{}
 	req := httptest.NewRequest("POST", "/v1/mcp", body)
+	req.Header.Set("Authorization", "Bearer not-a-valid-key")
 	rec := httptest.NewRecorder()
 	s.Handler().ServeHTTP(rec, req)
 	if rec.Code != 401 || body.read {
-		t.Fatalf("unauthenticated body read: %d %v", rec.Code, body.read)
+		t.Fatalf("rejected bearer body read: %d %v", rec.Code, body.read)
 	}
 }
 

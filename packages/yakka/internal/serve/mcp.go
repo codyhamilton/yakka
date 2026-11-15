@@ -408,17 +408,35 @@ func mcpAllowedString(value string, values []string) bool {
 	return false
 }
 
-func (s *Server) mcpAuth(w http.ResponseWriter, r *http.Request) (string, string, bool) {
+type mcpAuthResult struct {
+	tenant, scope string
+	anonymous     bool
+}
+
+func (s *Server) mcpAuth(w http.ResponseWriter, r *http.Request) (mcpAuthResult, bool) {
 	if _, present := r.Header["Origin"]; present {
 		writeJSON(w, 403, map[string]string{"error": "forbidden"})
-		return "", "", false
+		return mcpAuthResult{}, false
 	}
-	res := s.authorizeBearer(r)
-	if res.status != authOK {
-		writeJSON(w, 401, map[string]string{"error": res.msg})
-		return "", "", false
+	if s.cfg.Local() {
+		res := s.authorizeBearer(r)
+		return mcpAuthResult{tenant: res.tenant, scope: res.scope}, true
 	}
-	return res.tenant, res.scope, true
+	if _, hasBearer := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer "); hasBearer {
+		res := s.authorizeBearer(r)
+		if res.status != authOK {
+			writeJSON(w, 401, map[string]string{"error": res.msg})
+			return mcpAuthResult{}, false
+		}
+		return mcpAuthResult{tenant: res.tenant, scope: res.scope}, true
+	}
+	if err := s.mcpDiscovery.admit(deviceClientIP(r)); err != nil {
+		if errors.Is(err, errMCPDiscoveryRateLimited) {
+			writeJSON(w, 429, map[string]string{"error": "rate_limited"})
+		}
+		return mcpAuthResult{}, false
+	}
+	return mcpAuthResult{scope: TokenScopeRead, anonymous: true}, true
 }
 
 type mcpResponseWriter struct {
@@ -439,11 +457,14 @@ func (s *Server) mcp(w http.ResponseWriter, r *http.Request) {
 	defer func() {
 		slog.Info("mcp", "method", method, "tool", toolName, "tenant", tenant, "status", logged.status, "duration_ms", time.Since(started).Milliseconds())
 	}()
-	var scope string
-	var ok bool
-	tenant, scope, ok = s.mcpAuth(w, r)
+	auth, ok := s.mcpAuth(w, r)
 	if !ok {
 		return
+	}
+	tenant, scope := auth.tenant, auth.scope
+	bodyCap := s.mcpTools.maxBody
+	if auth.anonymous {
+		bodyCap = mcpDefaultBody
 	}
 	if mt := r.Header.Get("Content-Type"); mt != "" {
 		media, _, err := mime.ParseMediaType(mt)
@@ -452,7 +473,7 @@ func (s *Server) mcp(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, int64(s.mcpTools.maxBody)))
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, int64(bodyCap)))
 	if err != nil {
 		var tooBig *http.MaxBytesError
 		if errors.As(err, &tooBig) {
@@ -502,6 +523,14 @@ func (s *Server) mcp(w http.ResponseWriter, r *http.Request) {
 	}
 	if !hasID {
 		w.WriteHeader(202)
+		return
+	}
+	if auth.anonymous && requestedMethod == "tools/call" {
+		msg := "unauthorized: this service requires a key; run yakka login"
+		if s.cfg.Remote() {
+			msg = s.remoteUnauthorizedMsg()
+		}
+		writeJSON(w, 401, map[string]string{"error": msg})
 		return
 	}
 	var result any
