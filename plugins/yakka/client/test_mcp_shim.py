@@ -112,6 +112,101 @@ def change_declaration() -> dict:
     ]}
 
 
+class DiscoveryMCPServer:
+    """Fixture origin that accepts keyless discovery like phase-1 production."""
+
+    def __init__(self) -> None:
+        self.requests: list[tuple[dict, dict]] = []
+        self.lock = threading.Lock()
+        server = self
+
+        class Handler(BaseHTTPRequestHandler):
+            def log_message(self, *_: object) -> None:
+                pass
+
+            def do_POST(self) -> None:
+                size = int(self.headers.get("Content-Length", "0"))
+                request = json.loads(self.rfile.read(size))
+                with server.lock:
+                    server.requests.append((request, dict(self.headers)))
+                method = request.get("method")
+                if method == "tools/call":
+                    self.send_response(401)
+                    self.end_headers()
+                    self.wfile.write(b'{"error":"unauthorized"}')
+                    return
+                if method == "initialize":
+                    result = {"protocolVersion": "2025-11-25", "capabilities": {"tools": {"listChanged": False}}, "serverInfo": {"name": "yakka", "version": "fixture"}}
+                elif method == "tools/list":
+                    result = {"tools": [{"name": "fixture", "description": "test", "inputSchema": {"type": "object"}, "_meta": {"yakka/tool": DECLARATION}}]}
+                else:
+                    result = {}
+                payload = {"jsonrpc": "2.0", "id": request.get("id"), "result": result}
+                raw = json.dumps(payload, separators=(",", ":")).encode()
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(raw)))
+                self.end_headers()
+                self.wfile.write(raw)
+
+        self.http = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        self.thread = threading.Thread(target=self.http.serve_forever, daemon=True)
+        self.thread.start()
+        self.url = f"http://127.0.0.1:{self.http.server_port}"
+
+    def close(self) -> None:
+        self.http.shutdown()
+        self.http.server_close()
+        self.thread.join(timeout=2)
+
+
+class DiscoveryRelayTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.old_env = {name: os.environ.get(name) for name in ("YAKKA_ENDPOINT", "YAKKA_KEY", "YAKKA_CLIENT_CONFIG", "YAKKA_QUEUE")}
+        self.temp = tempfile.TemporaryDirectory()
+        self.server = DiscoveryMCPServer()
+        os.environ.pop("YAKKA_ENDPOINT", None)
+        os.environ.pop("YAKKA_KEY", None)
+        os.environ["YAKKA_CLIENT_CONFIG"] = os.path.join(self.temp.name, "missing.toml")
+        os.environ["YAKKA_QUEUE"] = os.path.join(self.temp.name, "queue")
+        self.relay = yakka._McpRelay(yakka.McpOptions(Version="test"))
+        self.relay.writer = io.BytesIO()
+
+    def tearDown(self) -> None:
+        self.server.close()
+        self.temp.cleanup()
+        for name, value in self.old_env.items():
+            if value is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = value
+
+    def test_keyless_default_posts_without_authorization(self) -> None:
+        with mock.patch.object(yakka, "DefaultEndpoint", self.server.url):
+            requests = [
+                {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-11-25", "capabilities": {}}},
+                {"jsonrpc": "2.0", "id": 2, "method": "tools/list"},
+            ]
+            for request in requests:
+                self.relay.writer = io.BytesIO()
+                body = json.dumps(request, separators=(",", ":")).encode()
+                self.relay._dispatch(body, request, request["id"], request["method"], True, threading.Event())
+                reply = json.loads(self.relay.writer.getvalue())
+                self.assertIn("result", reply)
+            auths = [headers.get("Authorization") for _, headers in self.server.requests]
+            self.assertTrue(all(a is None for a in auths))
+            hosts = {req[1].get("Host", "") for req in self.server.requests}
+            self.assertNotIn("127.0.0.1:8770", hosts)
+
+    def test_keyless_tools_call_unauthorized(self) -> None:
+        with mock.patch.object(yakka, "DefaultEndpoint", self.server.url):
+            self.relay.declarations = {"fixture": DECLARATION}
+            request = {"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "fixture", "arguments": {}}}
+            self.relay._dispatch(json.dumps(request).encode(), request, 3, "tools/call", True, threading.Event())
+            reply = json.loads(self.relay.writer.getvalue())
+            self.assertEqual(reply["error"]["data"]["code"], "unauthorized")
+
+
 class RelayTests(unittest.TestCase):
     def setUp(self) -> None:
         self.old_env = {name: os.environ.get(name) for name in ("YAKKA_ENDPOINT", "YAKKA_KEY", "YAKKA_CLIENT_CONFIG", "YAKKA_QUEUE", "YAKKA_HOOKLOG", "YAKKA_BIN")}
@@ -488,7 +583,7 @@ class ChangeReaderTests(unittest.TestCase):
             self.assertEqual(self.read(), {"_failed": {"code": "over_budget"}})
 
     def test_bearer_key_scan_still_withholds_capture(self) -> None:
-        with mock.patch.object(yakka, "CaptureChange", return_value={"diff": KEY}), mock.patch.object(yakka, "Load", return_value=yakka.Config(Key=KEY)):
+        with mock.patch.object(yakka, "CaptureChange", return_value={"diff": KEY}), mock.patch.object(yakka, "LoadMCP", return_value=yakka.Config(Key=KEY)):
             self.assertEqual(self.read(), {"_failed": {"code": "secret_in_context"}})
 
     def test_capture_git_uses_reader_deadline_and_cleans_up(self) -> None:

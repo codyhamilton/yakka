@@ -17,7 +17,8 @@ similar work exists.
 
 `python3 plugins/yakka/client/yakka.py mcp` is a stdio shim registered by each harness. The server
 owns all tool definitions, argument validation, state logic and user-facing wording. The
-shim forwards `initialize`, `tools/list` and `tools/call` to `POST /v1/mcp` using the shared login,
+shim forwards `initialize`, `tools/list` and `tools/call` to `POST /v1/mcp` using `LoadMCP`
+(default `https://api.yakka.build` when unconfigured, bearer only when a key resolves),
 injects the declared facts it reads from its fixed local reader table, and relays server replies.
 Local read failures are injected context, not synthesized tool results. A remote transport or
 configuration failure is the shim's own error; it never answers from local queue state while the

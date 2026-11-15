@@ -52,7 +52,13 @@ Any request carrying an `Origin` header is refused with `403`. Callers are progr
 closes browser cross-origin posts to the keyless loopback server.
 
 Tenant and scope come from the credential alone. Nothing in a request body, including `_local`,
-selects or changes either. A missing or bad credential is `401` with the REST error body. A valid key
+selects or changes either. On a non-local server, a request with no `Authorization` header is an
+anonymous discovery principal: it has no tenant and uses the `read` catalog for `initialize`,
+`ping`, and `tools/list`; notifications are accepted with `202` and no handler runs; `tools/call`
+with an `id` is `401` with the REST error body and no handler runs. The anonymous path admits bodies
+only up to the default MCP cap (256 KiB), enforces a per-client-IP rolling budget before the body is
+read, and does not accept cookies or `?tenant=` as identity. A present `Authorization` header that
+fails bearer resolution is `401` with the REST error body and the body is not read. A valid key
 that lacks a tool's scope gets a `200` JSON-RPC error `-32003` with data
 `{"code":"insufficient_scope","need":"read_write"}`, which the shim relays unchanged.
 
