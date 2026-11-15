@@ -84,6 +84,14 @@ class TestEnvRemoteNoFile(ClientConfigTestCase):
 
 
 class TestPartialEnv(ClientConfigTestCase):
+    def test_env_placeholder_treated_as_unset(self) -> None:
+        write_config('endpoint = "https://file.example"\nkey = "k"\n')
+        os.environ["YAKKA_ENDPOINT"] = "${env:YAKKA_ENDPOINT}"
+        os.environ["YAKKA_KEY"] = "${env:YAKKA_KEY}"
+        c = yakka.Load()
+        self.assertEqual(c.Endpoint, "https://file.example")
+        self.assertEqual(c.Key, "k")
+
     def test_partial_env(self) -> None:
         secret = "super-secret-key-value"
         os.environ["YAKKA_KEY"] = secret

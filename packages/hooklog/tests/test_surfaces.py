@@ -64,10 +64,7 @@ class SurfaceTests(unittest.TestCase):
                     self.assertEqual(len(new), 1, (event, new))
                     lines = next(iter(new)).read_text().splitlines()
                     envelope = json.loads(lines[0])
-                    # Codex registers no --event: its event is the payload's hook_event_name.
-                    self.assertEqual(envelope['event'] or json.loads(lines[1])['hook_event_name'], event)
-                    if harness != 'codex':
-                        self.assertEqual(envelope['event'], event)
+                    self.assertEqual(envelope['event'], event)
                     self.assertEqual(envelope['harness'], harness)
                 self.assertEqual(prefetch_seen, 0)
 
@@ -115,6 +112,9 @@ class SurfaceTests(unittest.TestCase):
             rel = rel.rstrip('/')
             self.assertTrue((PLUGIN / rel).exists(), key)
         self.assertNotIn('--harness claude', (PLUGIN / manifest['hooks'].lstrip('./')).read_text())
+        codex_hooks = (PLUGIN / manifest['hooks'].lstrip('./')).read_text()
+        self.assertIn('--event SessionStart', codex_hooks)
+        self.assertNotRegex(codex_hooks, r'spool\.sh" --harness codex"')
 
     def test_manifest_versions_match(self):
         versions = {f: json.loads((PLUGIN / f).read_text())['version']

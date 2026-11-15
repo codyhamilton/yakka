@@ -12,6 +12,17 @@ Cursor Cloud Agents discover **project** skills under `.cursor/skills/` when the
 
 Legacy alias: [`docs/lab/bootstrap/cursor-cloud-setup.sh`](../../docs/lab/bootstrap/cursor-cloud-setup.sh) execs this script.
 
+## Cloud install (hooks, CLI)
+
+For hook capture in Cursor Cloud Agents (where plugin hooks do not run), use
+[`scripts/cloud-install.sh`](../../scripts/cloud-install.sh). It installs the client under
+`~/.local/share/yakka/install`, adds `yakka` to `~/.local/bin`, and writes workspace
+`.cursor/hooks.json` with absolute paths to the installed spool script at environment build time.
+MCP is not registered by this script (use the Cursor plugin).
+
+The yakka repo commits [`.cursor/environment.json`](../../.cursor/environment.json) that chains
+`cloud-install.sh` with the skills bootstrap below.
+
 ## Commit `.cursor/environment.json` (recommended)
 
 Product repos should commit [`.cursor/environment.json`](https://cursor.com/docs/cloud-agent/environments) so Cursor **environment builds** run yakka bootstrap before any agent starts. A committed file takes **precedence** over the same `install` string configured only in the Cursor dashboard.
