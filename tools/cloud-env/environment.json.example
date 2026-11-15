@@ -1,3 +1,3 @@
 {
-  "install": "export YAKKA_WORKSPACE=\"${YAKKA_WORKSPACE:-$(pwd)}\" && curl -fsSL https://raw.githubusercontent.com/codyhamilton/yakka/master/tools/cloud-env/bootstrap-yakka-skills.sh | bash && python3 \"$HOME/.cache/yakka/src/tools/driver/check_skills.py\""
+  "install": "export PATH=\"$HOME/.local/bin:$PATH\" && export YAKKA_BIN=\"$HOME/.local/share/yakka/install/bin/yakka\" && curl -fsSL https://raw.githubusercontent.com/codyhamilton/yakka/master/scripts/cloud-install.sh | bash && python3 \"$HOME/.cache/yakka/src/tools/driver/check_skills.py\" --cursor-user"
 }
