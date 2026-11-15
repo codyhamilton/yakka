@@ -1,8 +1,14 @@
 #!/usr/bin/env bash
 # User-level Yakka install for Cursor Cloud Agent environment builds.
 # Installs the plugin client under ~/.local/share/yakka/install, puts `yakka` on PATH,
-# and writes workspace `.cursor/hooks.json` with absolute paths to the installed spool script.
-# MCP is not configured here (expected from the Cursor plugin).
+# writes workspace `.cursor/hooks.json` and `.cursor/mcp.json` with absolute paths (no env block;
+# credentials inherit from the environment). Plugin MCP/hooks do not run in cloud — only `static` skills sync.
+#
+# MCP server name defaults to `yakka` in workspace `.cursor/mcp.json` so tool names stay
+# `mcp__yakka__*`. Remove any stale account-level Yakka MCP in the Cursor dashboard that still
+# points at `${CLAUDE_PLUGIN_ROOT}/client/yakka.py`. Set YAKKA_CLOUD_MCP_SERVER=yakka-cloud to
+# use a distinct server name (e.g. when testing `~/.cursor/mcp.json` alongside workspace config).
+# YAKKA_CLOUD_MCP_TARGET: workspace (default) | user | both — `both` writes user config for install-time tests.
 #
 # Consuming repos: curl -fsSL …/scripts/cloud-install.sh | bash
 # Or commit .cursor/environment.json with the same curl, or call this script from a checkout.
@@ -13,6 +19,9 @@ INSTALL_BRANCH="${YAKKA_INSTALL_BRANCH:-master}"
 PLUGIN_CACHE="${YAKKA_PLUGIN_CACHE:-$HOME/.cache/yakka/src}"
 INSTALL_ROOT="${YAKKA_INSTALL_ROOT:-$HOME/.local/share/yakka/install}"
 LOCAL_BIN="${YAKKA_LOCAL_BIN:-$HOME/.local/bin}"
+MCP_SERVER="${YAKKA_CLOUD_MCP_SERVER:-yakka}"
+MCP_TARGET="${YAKKA_CLOUD_MCP_TARGET:-workspace}"
+MCP_USER_SERVER="${YAKKA_CLOUD_MCP_USER_SERVER:-yakka-cloud}"
 
 _SCRIPT_SRC="${BASH_SOURCE[0]:-}"
 if [[ -n "$_SCRIPT_SRC" && "$_SCRIPT_SRC" != "-" && -f "$_SCRIPT_SRC" ]]; then
@@ -95,11 +104,35 @@ install_path_shim() {
   cat >"$shim" <<EOF
 #!/usr/bin/env bash
 export YAKKA_ROOT='$INSTALL_ROOT'
-export YAKKA_BIN='$shim'
+# Do not set YAKKA_BIN on PATH shim — install/bin/yakka re-execs YAKKA_BIN when set.
 exec bash "\$YAKKA_ROOT/bin/yakka" "\$@"
 EOF
   chmod +x "$shim"
   echo "  yakka shim: $shim" >&2
+}
+
+write_mcp_json() {
+  local dest="$1"
+  local server_name="$2"
+  local client="$INSTALL_ROOT/client/yakka.py"
+  mkdir -p "$(dirname "$dest")"
+  python3 - "$dest" "$server_name" "$client" <<'PY'
+import json, os, sys
+dest, server, client = sys.argv[1:4]
+client = os.path.abspath(client)
+cfg = {
+    "mcpServers": {
+        server: {
+            "command": "python3",
+            "args": [client, "mcp"],
+        }
+    }
+}
+with open(dest, "w", encoding="utf-8") as f:
+    json.dump(cfg, f, indent=2)
+    f.write("\n")
+print(f"  MCP config ({server}): {dest}")
+PY
 }
 
 write_hooks_json() {
@@ -142,13 +175,27 @@ main() {
   export PATH="$LOCAL_BIN:$PATH"
 
   workspace="$(find_workspace_root)" || {
-    echo "ERROR: YAKKA_WORKSPACE or git root required for workspace hooks" >&2
+    echo "ERROR: YAKKA_WORKSPACE or git root required for workspace hooks/MCP" >&2
     exit 1
   }
-  write_hooks_json "$workspace/.cursor/hooks.json"
+
+  case "$MCP_TARGET" in
+    user)
+      write_mcp_json "$HOME/.cursor/mcp.json" "$MCP_USER_SERVER"
+      ;;
+    both)
+      write_mcp_json "$workspace/.cursor/mcp.json" "$MCP_SERVER"
+      write_hooks_json "$workspace/.cursor/hooks.json"
+      write_mcp_json "$HOME/.cursor/mcp.json" "$MCP_USER_SERVER"
+      ;;
+    *)
+      write_mcp_json "$workspace/.cursor/mcp.json" "$MCP_SERVER"
+      write_hooks_json "$workspace/.cursor/hooks.json"
+      ;;
+  esac
 
   verify_install
-  echo "  Cloud install complete (install_root=$INSTALL_ROOT)" >&2
+  echo "  Cloud install complete (install_root=$INSTALL_ROOT mcp_server=$MCP_SERVER mcp_target=$MCP_TARGET)" >&2
 }
 
 main "$@"
