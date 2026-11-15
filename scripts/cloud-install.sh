@@ -1,17 +1,8 @@
 #!/usr/bin/env bash
-# User-level Yakka install for Cursor Cloud Agent environment builds.
-# Installs the plugin client under ~/.local/share/yakka/install, puts `yakka` on PATH,
-# writes workspace `.cursor/hooks.json` and `.cursor/mcp.json` with absolute paths (no env block;
-# credentials inherit from the environment). Plugin MCP/hooks do not run in cloud — only `static` skills sync.
-#
-# MCP server name defaults to `yakka` in workspace `.cursor/mcp.json` so tool names stay
-# `mcp__yakka__*`. Remove any stale account-level Yakka MCP in the Cursor dashboard that still
-# points at `${CLAUDE_PLUGIN_ROOT}/client/yakka.py`. Set YAKKA_CLOUD_MCP_SERVER=yakka-cloud to
-# use a distinct server name (e.g. when testing `~/.cursor/mcp.json` alongside workspace config).
-# YAKKA_CLOUD_MCP_TARGET: workspace (default) | user | both — `both` writes user config for install-time tests.
-#
-# Consuming repos: curl -fsSL …/scripts/cloud-install.sh | bash
-# Or commit .cursor/environment.json with the same curl, or call this script from a checkout.
+# Full user-level Yakka install for Cursor Cloud environment builds (no plugin).
+# Installs client under ~/.local/share/yakka/install, yakka on PATH, merges
+# ~/.cursor/mcp.json and ~/.cursor/hooks.json, and syncs ~/.cursor/skills/<name>/.
+# Same install tree for client, hooks, MCP and skills. See cursor.com/docs/skills.
 set -euo pipefail
 
 DEFAULT_REPO_HTTPS_URL="https://github.com/codyhamilton/yakka"
@@ -19,9 +10,7 @@ INSTALL_BRANCH="${YAKKA_INSTALL_BRANCH:-master}"
 PLUGIN_CACHE="${YAKKA_PLUGIN_CACHE:-$HOME/.cache/yakka/src}"
 INSTALL_ROOT="${YAKKA_INSTALL_ROOT:-$HOME/.local/share/yakka/install}"
 LOCAL_BIN="${YAKKA_LOCAL_BIN:-$HOME/.local/bin}"
-MCP_SERVER="${YAKKA_CLOUD_MCP_SERVER:-yakka}"
-MCP_TARGET="${YAKKA_CLOUD_MCP_TARGET:-workspace}"
-MCP_USER_SERVER="${YAKKA_CLOUD_MCP_USER_SERVER:-yakka-cloud}"
+USER_SKILLS="${YAKKA_USER_SKILLS:-$HOME/.cursor/skills}"
 
 _SCRIPT_SRC="${BASH_SOURCE[0]:-}"
 if [[ -n "$_SCRIPT_SRC" && "$_SCRIPT_SRC" != "-" && -f "$_SCRIPT_SRC" ]]; then
@@ -31,22 +20,6 @@ else
   SCRIPT_DIR=""
   REPO_ROOT=""
 fi
-
-find_workspace_root() {
-  if [[ -n "${YAKKA_WORKSPACE:-}" ]]; then
-    cd "$YAKKA_WORKSPACE" && pwd -P
-    return 0
-  fi
-  if git rev-parse --show-toplevel &>/dev/null; then
-    git rev-parse --show-toplevel
-    return 0
-  fi
-  if [[ -d /workspace/.git ]]; then
-    echo /workspace
-    return 0
-  fi
-  return 1
-}
 
 refresh_git_checkout() {
   local dir="$1"
@@ -104,56 +77,100 @@ install_path_shim() {
   cat >"$shim" <<EOF
 #!/usr/bin/env bash
 export YAKKA_ROOT='$INSTALL_ROOT'
-# Do not set YAKKA_BIN on PATH shim — install/bin/yakka re-execs YAKKA_BIN when set.
 exec bash "\$YAKKA_ROOT/bin/yakka" "\$@"
 EOF
   chmod +x "$shim"
   echo "  yakka shim: $shim" >&2
 }
 
-write_mcp_json() {
-  local dest="$1"
-  local server_name="$2"
-  local client="$INSTALL_ROOT/client/yakka.py"
-  mkdir -p "$(dirname "$dest")"
-  python3 - "$dest" "$server_name" "$client" <<'PY'
-import json, os, sys
-dest, server, client = sys.argv[1:4]
-client = os.path.abspath(client)
-cfg = {
-    "mcpServers": {
-        server: {
-            "command": "python3",
-            "args": [client, "mcp"],
-        }
-    }
-}
-with open(dest, "w", encoding="utf-8") as f:
-    json.dump(cfg, f, indent=2)
-    f.write("\n")
-print(f"  MCP config ({server}): {dest}")
-PY
-}
-
-write_hooks_json() {
-  local dest="$1"
+merge_user_cursor_configs() {
   local spool="$INSTALL_ROOT/script/spool.sh"
   local template="$INSTALL_ROOT/hooks/cursor.json"
-  mkdir -p "$(dirname "$dest")"
-  python3 - "$dest" "$spool" "$template" <<'PY'
-import json, sys
-dest, spool, template = sys.argv[1:4]
+  local skills_src="$INSTALL_ROOT/skills"
+  local mcp_dest="$HOME/.cursor/mcp.json"
+  local hooks_dest="$HOME/.cursor/hooks.json"
+  mkdir -p "$HOME/.cursor" "$USER_SKILLS"
+  python3 - "$mcp_dest" "$hooks_dest" "$USER_SKILLS" "$INSTALL_ROOT" "$spool" "$template" "$skills_src" <<'PY'
+import json
+import os
+import shutil
+import sys
+
+mcp_dest, hooks_dest, user_skills, install_root, spool, template, skills_src = sys.argv[1:8]
+client = os.path.abspath(os.path.join(install_root, "client", "yakka.py"))
+spool = os.path.abspath(spool)
+skills_src = os.path.abspath(skills_src)
+
+def load_json(path, default):
+    if not os.path.isfile(path):
+        return default
+    with open(path, encoding="utf-8") as f:
+        return json.load(f)
+
+def write_json(path, data):
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2)
+        f.write("\n")
+
+def is_yakka_hook_cmd(cmd: str) -> bool:
+    if not cmd:
+        return False
+    if spool in cmd:
+        return True
+    if "/.local/share/yakka/install/script/spool.sh" in cmd and "--harness cursor" in cmd:
+        return True
+    return False
+
+mcp = load_json(mcp_dest, {})
+servers = mcp.setdefault("mcpServers", {})
+servers["yakka"] = {"command": "python3", "args": [client, "mcp"]}
+write_json(mcp_dest, mcp)
+print(f"  MCP config merged (yakka): {mcp_dest}")
+
 with open(template, encoding="utf-8") as f:
-    hooks = json.load(f)
-for entries in hooks.get("hooks", {}).values():
+    yakka_hooks = json.load(f)
+for entries in yakka_hooks.get("hooks", {}).values():
     for entry in entries:
         cmd = entry.get("command", "")
         if "./script/spool.sh" in cmd:
             entry["command"] = cmd.replace("./script/spool.sh", spool)
-with open(dest, "w", encoding="utf-8") as f:
-    json.dump(hooks, f, indent=2)
-    f.write("\n")
-print(f"  hooks config: {dest}")
+
+merged = load_json(hooks_dest, {"version": 1, "hooks": {}})
+if "version" not in merged:
+    merged["version"] = yakka_hooks.get("version", 1)
+dest_hooks = merged.setdefault("hooks", {})
+for event, new_entries in yakka_hooks.get("hooks", {}).items():
+    old = dest_hooks.get(event, [])
+    kept = [e for e in old if not is_yakka_hook_cmd(e.get("command", ""))]
+    dest_hooks[event] = kept + new_entries
+write_json(hooks_dest, merged)
+print(f"  hooks config merged: {hooks_dest}")
+
+yakka_skill_names = []
+if os.path.isdir(skills_src):
+    for name in sorted(os.listdir(skills_src)):
+        src = os.path.join(skills_src, name)
+        if not os.path.isdir(src) or not os.path.isfile(os.path.join(src, "SKILL.md")):
+            continue
+        yakka_skill_names.append(name)
+        dest = os.path.join(user_skills, name)
+        if os.path.isdir(dest):
+            shutil.rmtree(dest)
+        shutil.copytree(src, dest)
+        print(f"  skill installed: {dest}/SKILL.md")
+
+# Drop stale yakka skills from prior installs (same name set only).
+for name in yakka_skill_names:
+    legacy = os.path.join(user_skills, "yakka", name)
+    if os.path.isdir(legacy):
+        shutil.rmtree(legacy)
+legacy_parent = os.path.join(user_skills, "yakka")
+if os.path.isdir(legacy_parent) and not os.listdir(legacy_parent):
+    os.rmdir(legacy_parent)
+
+marker = os.path.join(user_skills, ".yakka-managed-skills.json")
+write_json(marker, {"install_root": install_root, "skills": yakka_skill_names})
+print(f"  skills synced ({len(yakka_skill_names)}): {user_skills}")
 PY
 }
 
@@ -162,40 +179,20 @@ verify_install() {
   command -v yakka >/dev/null 2>&1 || { echo "ERROR: yakka not on PATH" >&2; errors=$((errors + 1)); }
   [[ -x "$INSTALL_ROOT/script/spool.sh" ]] || { echo "ERROR: missing spool.sh" >&2; errors=$((errors + 1)); }
   [[ -f "$INSTALL_ROOT/client/yakka.py" ]] || { echo "ERROR: missing client" >&2; errors=$((errors + 1)); }
-  yakka version >/dev/null 2>&1 || { echo "ERROR: yakka version failed" >&2; errors=$((errors + 1)); }
+  (unset YAKKA_BIN; yakka version) >/dev/null 2>&1 || { echo "ERROR: yakka version failed" >&2; errors=$((errors + 1)); }
   return "$errors"
 }
 
 main() {
-  local checkout workspace
+  local checkout
   checkout="$(ensure_source_tree)"
   install_client_tree "$checkout"
   install_path_shim
 
   export PATH="$LOCAL_BIN:$PATH"
-
-  workspace="$(find_workspace_root)" || {
-    echo "ERROR: YAKKA_WORKSPACE or git root required for workspace hooks/MCP" >&2
-    exit 1
-  }
-
-  case "$MCP_TARGET" in
-    user)
-      write_mcp_json "$HOME/.cursor/mcp.json" "$MCP_USER_SERVER"
-      ;;
-    both)
-      write_mcp_json "$workspace/.cursor/mcp.json" "$MCP_SERVER"
-      write_hooks_json "$workspace/.cursor/hooks.json"
-      write_mcp_json "$HOME/.cursor/mcp.json" "$MCP_USER_SERVER"
-      ;;
-    *)
-      write_mcp_json "$workspace/.cursor/mcp.json" "$MCP_SERVER"
-      write_hooks_json "$workspace/.cursor/hooks.json"
-      ;;
-  esac
-
+  merge_user_cursor_configs
   verify_install
-  echo "  Cloud install complete (install_root=$INSTALL_ROOT mcp_server=$MCP_SERVER mcp_target=$MCP_TARGET)" >&2
+  echo "  Cloud install complete (install_root=$INSTALL_ROOT)" >&2
 }
 
 main "$@"

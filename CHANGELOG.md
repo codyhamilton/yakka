@@ -1,8 +1,8 @@
 # Changelog
 
-## 3.4.12 — 2026-11-15 — Cloud MCP and hooks from environment install
+## 3.4.12 — 2026-11-15 — Full user-level Cursor cloud install
 
-- `scripts/cloud-install.sh` now writes workspace `.cursor/mcp.json` at environment build time (gitignored) with server `yakka`, absolute path to the installed `client/yakka.py mcp`, and no `env` block. `YAKKA_CLOUD_MCP_TARGET=user|both` can write `~/.cursor/mcp.json` under server `yakka-cloud` for install-time comparison. Remove stale account-level Yakka MCP registrations that still expand `${CLAUDE_PLUGIN_ROOT}`.
+- `scripts/cloud-install.sh` is the single environment-build installer when the Yakka plugin is absent: client under `~/.local/share/yakka/install`, `yakka` on PATH, merged `~/.cursor/mcp.json` (server `yakka`, absolute `client/yakka.py mcp`, no `env` block), merged `~/.cursor/hooks.json` (absolute `spool.sh`, idempotent reruns), and core plugin skills under `~/.cursor/skills/<name>/` (per Cursor docs — not `skills-cursor/`). Removes stale `~/.cursor/skills/yakka/<name>/` layouts from older bootstraps. Plugin surface is skills, hooks and MCP only (no separate rules or agents manifest). Fix `skills/close-out/SKILL.md` YAML `description`. `check_skills.py --cursor-user` verifies the tree. Delete stale account-level Yakka MCP in the Cursor dashboard that still expands `${CLAUDE_PLUGIN_ROOT}`.
 - All three manifests at `3.4.12`.
 
 ## 3.4.11 — 2026-11-15 — Cloud user-level install, spool dedupe, Codex events

@@ -1,7 +1,5 @@
-# Installed by yakka install.sh / cloud-install.sh in cloud agent environments.
+# Installed by yakka install.sh in cloud agent environments.
 .cursor/skills/yakka/
-.cursor/hooks.json
-.cursor/mcp.json
 __pycache__/
 .scratch/
 output/

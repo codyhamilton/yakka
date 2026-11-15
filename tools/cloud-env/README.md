@@ -1,75 +1,52 @@
 # Cloud Agent environment bootstrap
 
-Cursor Cloud Agents discover **project** skills under `.cursor/skills/` when the agent process starts. Marketplace plugin installs under `~/.cursor/plugins/` are not enough on cloud VMs — core yakka skills must be copied into the consuming repo workspace.
+## Full install (recommended)
 
-## Script
+Yakka is **not** installed as a Cursor plugin in cloud. Use
+[`scripts/cloud-install.sh`](../../scripts/cloud-install.sh) from the repo's
+[`.cursor/environment.json`](../../.cursor/environment.json) (or curl it at build time).
 
-[`bootstrap-yakka-skills.sh`](bootstrap-yakka-skills.sh):
+The script installs in one tree (`~/.local/share/yakka/install`):
 
-1. Clones or updates `https://github.com/codyhamilton/yakka` on **`master`** in a cache directory (default `~/.cache/yakka/src`) via `git fetch` and `git reset --hard origin/master`.
-2. Runs `install.sh` with `YAKKA_INSTALL_MODE=cloud`, syncing the six core skills into `<workspace>/.cursor/skills/yakka/`.
-3. Is idempotent and non-interactive — safe on every environment setup run.
+| What | Where |
+|------|--------|
+| CLI / drain client | `~/.local/bin/yakka` → install copy |
+| MCP (no `env` block) | merged into `~/.cursor/mcp.json`, server `yakka` |
+| Hooks | merged into `~/.cursor/hooks.json` |
+| Skills | `~/.cursor/skills/<name>/SKILL.md` ([Cursor Agent Skills](https://cursor.com/docs/skills)) |
 
-Legacy alias: [`docs/lab/bootstrap/cursor-cloud-setup.sh`](../../docs/lab/bootstrap/cursor-cloud-setup.sh) execs this script.
+Reruns refresh yakka skills and replace yakka hook commands without duplicating them or touching unrelated user skills. Verify with:
 
-## Cloud install (hooks, MCP, CLI)
+```bash
+python3 tools/driver/check_skills.py --cursor-user
+```
 
-Cursor Cloud Agents sync plugins with the `static` capability only (skills); plugin MCP and hooks do not run. Use
-[`scripts/cloud-install.sh`](../../scripts/cloud-install.sh) at environment build time. It installs the client under
-`~/.local/share/yakka/install`, adds `yakka` to `~/.local/bin`, and writes gitignored workspace
-`.cursor/hooks.json` and `.cursor/mcp.json` with absolute paths (MCP server `yakka`, no `env` block — credentials inherit from `YAKKA_ENDPOINT` / `YAKKA_KEY`). Delete any stale **account-level** Yakka MCP in the Cursor dashboard that still references `${CLAUDE_PLUGIN_ROOT}`.
+Delete any stale **account-level** Yakka MCP in the Cursor dashboard that still references `${CLAUDE_PLUGIN_ROOT}`.
 
-The yakka repo commits [`.cursor/environment.json`](../../.cursor/environment.json) that chains
-`cloud-install.sh` with the skills bootstrap below.
+## Legacy workspace skills bootstrap
 
-## Commit `.cursor/environment.json` (recommended)
+[`bootstrap-yakka-skills.sh`](bootstrap-yakka-skills.sh) still copies skills into `<workspace>/.cursor/skills/yakka/` for repos that have not switched to the user-level installer. Prefer `cloud-install.sh` for new setups.
 
-Product repos should commit [`.cursor/environment.json`](https://cursor.com/docs/cloud-agent/environments) so Cursor **environment builds** run yakka bootstrap before any agent starts. A committed file takes **precedence** over the same `install` string configured only in the Cursor dashboard.
+## Commit `.cursor/environment.json`
 
-Copy [`environment.json.example`](environment.json.example) to `.cursor/environment.json` in the consuming repo (or merge its `install` into an existing `install` command — run bootstrap and `check_skills.py` in the same shell chain):
+Product repos should commit [`.cursor/environment.json`](https://cursor.com/docs/cloud-agent/environments) so environment builds run install before agents start.
+
+Yakka's committed install:
 
 ```json
 {
-  "install": "export YAKKA_WORKSPACE=\"${YAKKA_WORKSPACE:-$(pwd)}\" && curl -fsSL https://raw.githubusercontent.com/codyhamilton/yakka/master/tools/cloud-env/bootstrap-yakka-skills.sh | bash && python3 \"$HOME/.cache/yakka/src/tools/driver/check_skills.py\""
+  "install": "export PATH=\"$HOME/.local/bin:$PATH\" && export YAKKA_BIN=\"$HOME/.local/share/yakka/install/bin/yakka\" && bash scripts/cloud-install.sh && python3 tools/driver/check_skills.py --cursor-user"
 }
 ```
-
-On each **environment build** (including scheduled **daily rebuilds**), Cursor runs `install`, clones or updates yakka **master** in `~/.cache/yakka/src`, syncs core skills into `<workspace>/.cursor/skills/yakka/`, then verifies with `check_skills.py` (exit `0` when all six core skills are present). Skills are on disk before the agent process starts — no first-turn install gap.
-
-Add `<repo>/.cursor/skills/yakka/` to `.gitignore`.
-
-## Dashboard or shell fallback
-
-If the repo has no committed `.cursor/environment.json`, set the environment **install** command in the Cursor dashboard (field name may vary):
-
-```bash
-export YAKKA_WORKSPACE="${YAKKA_WORKSPACE:-/workspace}"
-bash -lc 'curl -fsSL https://raw.githubusercontent.com/codyhamilton/yakka/master/tools/cloud-env/bootstrap-yakka-skills.sh | bash'
-```
-
-If yakka is already vendored or cloned in the image:
-
-```bash
-export YAKKA_WORKSPACE="$(git rev-parse --show-toplevel)"
-bash /path/to/yakka/tools/cloud-env/bootstrap-yakka-skills.sh
-```
-
-After setup (no network required):
-
-```bash
-python3 /path/to/yakka/tools/driver/check_skills.py
-```
-
-Unattended cloud bootstrap installs **core only**. Maintainer skills under `.claude/skills/` are not copied into the consuming repo. Legacy install-lab environment settings are not read (backward compatibility).
 
 ## Environment variables
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `YAKKA_WORKSPACE` | git root or `/workspace` | Consuming repository |
-| `YAKKA_PLUGIN_CACHE` | `~/.cache/yakka/src` | Git checkout cache |
-| `YAKKA_REPO_URL` | yakka GitHub URL | Fork or mirror |
-| `YAKKA_INSTALL_BRANCH` | `master` | Tracked branch |
-| `YAKKA_INSTALL_SH` | — | Skip fetch; run alternate installer (tests) |
+| `YAKKA_INSTALL_ROOT` | `~/.local/share/yakka/install` | Installed plugin tree |
+| `YAKKA_USER_SKILLS` | `~/.cursor/skills` | User skill sync root |
+| `YAKKA_BIN` | — | Drain kick target (`install/bin/yakka`) |
+| `YAKKA_PLUGIN_CACHE` | `~/.cache/yakka/src` | Git checkout when not running from a repo |
+| `YAKKA_REPO_URL` / `YAKKA_INSTALL_BRANCH` | GitHub `master` | Source pin |
 
 More context: [`docs/lab/CONSUMING_REPO.md`](../../docs/lab/CONSUMING_REPO.md).
