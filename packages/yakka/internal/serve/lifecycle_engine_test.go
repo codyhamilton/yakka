@@ -74,11 +74,7 @@ func seedTenantReservations(t *testing.T, s *Server, amounts map[string]float64)
 	if err := os.WriteFile(path, []byte(doc), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	res, err := review.NewPersistentReservations(2, path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	s.reviewReservations = res
+	s.reviewReservations = review.NewPersistentReservations(2, path)
 }
 
 // reservationClaims reports how many saved claims each tenant owns and whether

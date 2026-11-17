@@ -95,41 +95,42 @@ func NewReservations(perTenant int) *Reservations {
 
 // NewPersistentReservations keeps claims across server restarts. A missing,
 // unreadable, corrupt or non-JSON file starts with empty claims and stays
-// usable; the path is kept for later saves.
-func NewPersistentReservations(perTenant int, path string) (*Reservations, error) {
+// usable; the path is kept for later saves. Loading never fails the caller:
+// a bad file used to disable review, and that gate is gone.
+func NewPersistentReservations(perTenant int, path string) *Reservations {
 	r := NewReservations(perTenant)
 	r.path = path
 	b, err := os.ReadFile(path)
 	if err != nil {
-		return r, nil
+		return r
 	}
 	var saved struct {
 		Claims  json.RawMessage `json:"claims"`
 		Claimed json.RawMessage `json:"claimed"`
 	}
 	if err := json.Unmarshal(b, &saved); err != nil {
-		return r, nil
+		return r
 	}
 	if saved.Claims != nil {
 		var claims map[string]claimRecord
 		if err := json.Unmarshal(saved.Claims, &claims); err != nil {
-			return r, nil
+			return r
 		}
 		if claims != nil {
 			r.claimed = claims
 		}
-		return r, nil
+		return r
 	}
 	if saved.Claimed != nil {
 		var legacy map[string]string
 		if err := json.Unmarshal(saved.Claimed, &legacy); err != nil {
-			return r, nil
+			return r
 		}
 		for key, id := range legacy {
 			r.claimed[key] = claimRecord{ID: id}
 		}
 	}
-	return r, nil
+	return r
 }
 
 func (r *Reservations) save() error {
@@ -209,19 +210,15 @@ func (r *Reservations) claimState(key string) (string, claimStatus) {
 	return claim.ID, claimDurable
 }
 
-// beginEphemeral takes an in-flight slot under a fresh non-cache identifier
-// without creating a durable dedupe claim.
-func (r *Reservations) beginEphemeral(key, tenant string) error {
+// beginEphemeral takes an in-memory in-flight slot without a durable dedupe
+// claim. Nothing is written: the slot is not part of the claims file.
+func (r *Reservations) beginEphemeral(tenant string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.inflight[tenant] >= r.limit {
 		return ErrBusy
 	}
 	r.inflight[tenant]++
-	if err := r.save(); err != nil {
-		r.inflight[tenant]--
-		return ErrClaimState
-	}
 	return nil
 }
 

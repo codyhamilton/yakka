@@ -50,10 +50,7 @@ type Config struct {
 
 // EffectiveReviewModel is the model reviews use: ReviewModel if set, otherwise review.LiveModel.
 func (c Config) EffectiveReviewModel() string {
-	if m := strings.TrimSpace(c.ReviewModel); m != "" {
-		return m
-	}
-	return review.LiveModel
+	return (review.Availability{Model: c.ReviewModel}).EffectiveModel()
 }
 
 // KeyPair maps one key to one tenant.
@@ -309,8 +306,7 @@ func New(cfg Config, opts Options) *Server {
 	}
 	s.reviewReservations = opts.ReviewReservations
 	if s.reviewReservations == nil {
-		reservations, _ := review.NewPersistentReservations(2, filepath.Join(cfg.Data, "review-reservations.json"))
-		s.reviewReservations = reservations
+		s.reviewReservations = review.NewPersistentReservations(2, filepath.Join(cfg.Data, "review-reservations.json"))
 	}
 	s.ctx, s.cancel = context.WithCancel(context.Background())
 	if s.screen == nil {

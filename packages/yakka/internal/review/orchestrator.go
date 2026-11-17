@@ -368,12 +368,8 @@ func Run(ctx context.Context, tenant *store.Tenant, tenantID string, req Request
 			} else {
 				release = func() { cfg.Reservations.finishClaim(key, tenantID) }
 			}
-		} else if err := cfg.Reservations.beginEphemeral(id, tenantID); err != nil {
-			if errors.Is(err, ErrClaimState) {
-				status, reason = "unavailable", "review claim state unavailable"
-			} else {
-				status, reason = "skipped_busy", "tenant in-flight limit"
-			}
+		} else if err := cfg.Reservations.beginEphemeral(tenantID); err != nil {
+			status, reason = "skipped_busy", "tenant in-flight limit"
 		} else {
 			release = func() { cfg.Reservations.finish(tenantID) }
 		}
@@ -409,14 +405,8 @@ func Run(ctx context.Context, tenant *store.Tenant, tenantID string, req Request
 				if resolved.Record.Source == "none" {
 					result.Limitations = append(result.Limitations, "No criteria were supplied for this review.")
 				}
-				a.InputTokens, a.OutputTokens = res.InputTokens, res.OutputTokens
 				a.Status = "ok"
-				a.CostKnown = true
-				inputSize := int64(res.InputTokens)
-				if tier, yes := store.PricingTier(model, inputSize, false); yes {
-					a.PricingTier = tier
-				}
-				a.CostUSD, _ = store.CostAtInputSize("claude", model, store.Tokens{In: int64(res.InputTokens), Out: int64(res.OutputTokens)}, inputSize, nil)
+				applyReportedUsage(&a, model, res.InputTokens, res.OutputTokens)
 				attempts = append(attempts, a)
 				status = "ok"
 				if packet.Coverage.State != "complete" || res.Coverage != "complete" {
@@ -427,13 +417,7 @@ func Run(ctx context.Context, tenant *store.Tenant, tenantID string, req Request
 			a.Status = errorStatus(err)
 			var pe *ProviderError
 			if errors.As(err, &pe) && pe.UsageReported {
-				a.InputTokens, a.OutputTokens = pe.InputTokens, pe.OutputTokens
-				a.CostKnown = true
-				inputSize := int64(pe.InputTokens)
-				if tier, yes := store.PricingTier(model, inputSize, false); yes {
-					a.PricingTier = tier
-				}
-				a.CostUSD, _ = store.CostAtInputSize("claude", model, store.Tokens{In: int64(pe.InputTokens), Out: int64(pe.OutputTokens)}, inputSize, nil)
+				applyReportedUsage(&a, model, pe.InputTokens, pe.OutputTokens)
 			}
 			attempts = append(attempts, a)
 			status = a.Status
@@ -833,6 +817,33 @@ func makeID() string {
 	return hex.EncodeToString(b)
 }
 
+// applyReportedUsage records provider-reported tokens. Cost is known only when
+// the embedded table prices the model; an unpriced override stays unknown
+// rather than a known zero.
+func applyReportedUsage(a *Attempt, model string, in, out int) {
+	a.InputTokens, a.OutputTokens = in, out
+	inputSize := int64(in)
+	if tier, ok := store.PricingTier(model, inputSize, false); ok {
+		a.PricingTier = tier
+	}
+	if cost, priced := store.CostAtInputSize("claude", model, store.Tokens{In: int64(in), Out: int64(out)}, inputSize, nil); priced {
+		a.CostUSD = cost
+		a.CostKnown = true
+	}
+}
+
+func attemptTotals(attempts []Attempt) (in, out int, cost float64, known bool) {
+	for _, a := range attempts {
+		in += a.InputTokens
+		out += a.OutputTokens
+		if a.CostKnown {
+			known = true
+			cost += a.CostUSD
+		}
+	}
+	return
+}
+
 func persistRefusal(ctx context.Context, t *store.Tenant, tenant string, r Request, repo, status, reason string, c CriteriaRecord, p Packet, inputHash string, cfg RunConfig, ctl callControls) (Receipt, error) {
 	if status == "refused_criteria" && inputHash == "" {
 		data := packetInput(p)
@@ -910,20 +921,10 @@ func persistRecord(ctx context.Context, t *store.Tenant, tenant string, r Reques
 		rec["model_mismatch"] = result.Model != model
 	}
 	if len(attempts) > 0 {
-		var cost float64
-		var in, out int
-		known := false
-		for _, a := range attempts {
-			in += a.InputTokens
-			out += a.OutputTokens
-			if a.CostKnown {
-				known = true
-				cost += a.CostUSD
-			}
-		}
+		in, outTok, cost, known := attemptTotals(attempts)
 		rec["pricing_table_id"] = store.PricingTableID()
 		rec["input_tokens"] = in
-		rec["output_tokens"] = out
+		rec["output_tokens"] = outTok
 		if known {
 			rec["cost_usd"] = cost
 			rec["cost_known"] = true
@@ -952,17 +953,7 @@ func persistRecord(ctx context.Context, t *store.Tenant, tenant string, r Reques
 // finding, error-body or content-derived hash field. Cost is the sum of known attempt costs;
 // with no known attempt it is null and cost_known is false.
 func persistReviewUsage(ctx context.Context, t *store.Tenant, status string, result Result, attempts []Attempt, cfg RunConfig, ctl callControls) error {
-	var charge float64
-	var in, out int
-	known := false
-	for _, a := range attempts {
-		in += a.InputTokens
-		out += a.OutputTokens
-		if a.CostKnown {
-			known = true
-			charge += a.CostUSD
-		}
-	}
+	in, out, charge, known := attemptTotals(attempts)
 	tags := ctl.tags
 	if tags == nil {
 		tags = []string{}

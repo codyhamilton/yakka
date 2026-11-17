@@ -293,17 +293,11 @@ func TestDuplicateClaimsReportActiveAndDurableWithoutReplay(t *testing.T) {
 		cfg := availableConfig(srv.URL)
 		key := executionKeyForTest(t, tenant, req, cfg)
 		path := filepath.Join(t.TempDir(), "reservations.json")
-		before, err := NewPersistentReservations(2, path)
-		if err != nil {
-			t.Fatal(err)
-		}
+		before := NewPersistentReservations(2, path)
 		if err := before.begin(key, "original-id", "tenant"); err != nil {
 			t.Fatal(err)
 		}
-		after, err := NewPersistentReservations(2, path)
-		if err != nil {
-			t.Fatal(err)
-		}
+		after := NewPersistentReservations(2, path)
 		cfg.Reservations = after
 		out, err := Run(context.Background(), tenant, "tenant", req, cfg)
 		if err != nil || out.Status != "outcome_unknown" || out.Cached == nil || *out.Cached || out.OriginalReviewID != "original-id" || out.Result != nil || calls.Load() != 0 {
@@ -701,17 +695,11 @@ func TestReservationClaimsAreAtomic(t *testing.T) {
 
 func TestPersistentReservationKeepsClaim(t *testing.T) {
 	path := t.TempDir() + "/reservations.json"
-	a, err := NewPersistentReservations(2, path)
-	if err != nil {
+	a := NewPersistentReservations(2, path)
+	if err := a.begin("tenant-key", "review-id", "tenant"); err != nil {
 		t.Fatal(err)
 	}
-	if err = a.begin("tenant-key", "review-id", "tenant"); err != nil {
-		t.Fatal(err)
-	}
-	b, err := NewPersistentReservations(2, path)
-	if err != nil {
-		t.Fatal(err)
-	}
+	b := NewPersistentReservations(2, path)
 	if _, dup := duplicateReview(b.begin("tenant-key", "second-id", "tenant")); !dup {
 		t.Fatal("started claim did not survive reload")
 	}
@@ -1473,6 +1461,30 @@ func TestRunRecordsOnlyActualCost(t *testing.T) {
 		rec := readReviewRecord(t, tenant)
 		if rec["cost_usd"] != nil || rec["cost_known"] != false {
 			t.Fatalf("cost=%v known=%v", rec["cost_usd"], rec["cost_known"])
+		}
+	})
+	t.Run("unpriced model usage is unknown", func(t *testing.T) {
+		tenant := reviewTenant(t)
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			io.WriteString(w, providerReply([]any{}, []any{}, []any{}, "complete"))
+		}))
+		defer srv.Close()
+		cfg := availableConfig(srv.URL)
+		cfg.Availability.Model = "claude-test-unpriced"
+		out, err := Run(context.Background(), tenant, "tenant", reviewRequest(true), cfg)
+		if err != nil || out.Status != "ok" {
+			t.Fatalf("%+v %v", out, err)
+		}
+		rec := readReviewRecord(t, tenant)
+		if rec["cost_usd"] != nil || rec["cost_known"] != false {
+			t.Fatalf("cost=%v known=%v", rec["cost_usd"], rec["cost_known"])
+		}
+		attempts := recordAttempts(t, tenant)
+		if len(attempts) != 1 || attempts[0]["cost_known"] != false || attempts[0]["input_tokens"] != float64(100) {
+			t.Fatalf("attempts=%v", attempts)
+		}
+		if _, ok := attempts[0]["cost_usd"]; ok {
+			t.Fatalf("unknown attempt carries cost: %v", attempts[0])
 		}
 	})
 	t.Run("retry then success costs the success", func(t *testing.T) {

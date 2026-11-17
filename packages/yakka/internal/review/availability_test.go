@@ -91,10 +91,7 @@ func TestReservationLoadsLegacyAndVersionTwoClaims(t *testing.T) {
 			if err := os.WriteFile(path, []byte(tc.body), 0o600); err != nil {
 				t.Fatal(err)
 			}
-			r, err := NewPersistentReservations(2, path)
-			if err != nil {
-				t.Fatal(err)
-			}
+			r := NewPersistentReservations(2, path)
 			if id, state := r.claimState(tc.key); id != tc.id || state != claimDurable {
 				t.Fatalf("loaded claim=%q state=%v want %q", id, state, tc.id)
 			}
@@ -109,10 +106,7 @@ func TestReservationLoadsLegacyAndVersionTwoClaims(t *testing.T) {
 			if claims[tc.key].ID != tc.id || claims["fresh-key"].ID != "fresh-id" || claims["fresh-key"].Tenant != "tenant-a" {
 				t.Fatalf("saved claims=%+v", claims)
 			}
-			reloaded, err := NewPersistentReservations(2, path)
-			if err != nil {
-				t.Fatal(err)
-			}
+			reloaded := NewPersistentReservations(2, path)
 			if id, state := reloaded.claimState(tc.key); id != tc.id || state != claimDurable {
 				t.Fatalf("reloaded claim=%q state=%v", id, state)
 			}
@@ -129,10 +123,7 @@ func TestReservationUnreadableOrCorruptFileStartsEmpty(t *testing.T) {
 		if err := os.WriteFile(path, []byte("{not json"), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		r, err := NewPersistentReservations(2, path)
-		if err != nil {
-			t.Fatalf("corrupt file disabled review: %v", err)
-		}
+		r := NewPersistentReservations(2, path)
 		if len(r.claimed) != 0 {
 			t.Fatalf("corrupt file produced claims: %+v", r.claimed)
 		}
@@ -144,10 +135,7 @@ func TestReservationUnreadableOrCorruptFileStartsEmpty(t *testing.T) {
 		}
 	})
 	t.Run("unreadable", func(t *testing.T) {
-		r, err := NewPersistentReservations(2, t.TempDir())
-		if err != nil {
-			t.Fatalf("unreadable path disabled review: %v", err)
-		}
+		r := NewPersistentReservations(2, t.TempDir())
 		if len(r.claimed) != 0 {
 			t.Fatalf("unreadable path produced claims: %+v", r.claimed)
 		}
@@ -165,7 +153,7 @@ func TestReservationBusyLimitAndDuplicate(t *testing.T) {
 	if err := r.begin("a3", "3", "tenant"); !errors.Is(err, ErrBusy) {
 		t.Fatalf("third durable call err=%v want ErrBusy", err)
 	}
-	if err := r.beginEphemeral("e3", "tenant"); !errors.Is(err, ErrBusy) {
+	if err := r.beginEphemeral("tenant"); !errors.Is(err, ErrBusy) {
 		t.Fatalf("third ephemeral call err=%v want ErrBusy", err)
 	}
 	if err := r.begin("a1", "duplicate", "tenant"); !errors.Is(err, ErrDuplicateClaim) {
@@ -179,17 +167,14 @@ func TestReservationBusyLimitAndDuplicate(t *testing.T) {
 	}
 	r.finishClaim("a1", "tenant")
 	r.finishClaim("a2", "tenant")
-	if err := r.beginEphemeral("e3", "tenant"); err != nil {
+	if err := r.beginEphemeral("tenant"); err != nil {
 		t.Fatalf("slot not released: %v", err)
 	}
 }
 
 func TestReservationPurgeIsClaimsOnlyAndIdempotent(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "reservations.json")
-	r, err := NewPersistentReservations(2, path)
-	if err != nil {
-		t.Fatal(err)
-	}
+	r := NewPersistentReservations(2, path)
 	if err := r.begin("a-key", "a-id", "a"); err != nil {
 		t.Fatal(err)
 	}
@@ -230,10 +215,7 @@ func TestReservationPurgeIsClaimsOnlyAndIdempotent(t *testing.T) {
 	if !bytes.Equal(before, after) {
 		t.Fatal("second purge rewrote reservations")
 	}
-	reloaded, err := NewPersistentReservations(2, path)
-	if err != nil {
-		t.Fatal(err)
-	}
+	reloaded := NewPersistentReservations(2, path)
 	if reloaded.TenantResidue("a") || !reloaded.TenantResidue("b") {
 		t.Fatal("reloaded tenant attribution wrong")
 	}
@@ -248,10 +230,7 @@ func TestReservationPurgeLeavesLegacyClaims(t *testing.T) {
 	if err := os.WriteFile(path, []byte(legacy), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	r, err := NewPersistentReservations(2, path)
-	if err != nil {
-		t.Fatal(err)
-	}
+	r := NewPersistentReservations(2, path)
 	if err := r.PurgeTenant("tenant-a"); err != nil {
 		t.Fatal(err)
 	}
@@ -305,7 +284,7 @@ func TestReservationWaitTenantQuiescence(t *testing.T) {
 
 	t.Run("ephemeral", func(t *testing.T) {
 		r := NewReservations(2)
-		if err := r.beginEphemeral("eph", "tenant-a"); err != nil {
+		if err := r.beginEphemeral("tenant-a"); err != nil {
 			t.Fatal(err)
 		}
 		done, cancel := wait(t, r, "tenant-a")
