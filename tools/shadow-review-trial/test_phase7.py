@@ -163,12 +163,15 @@ class Phase7Tests(unittest.TestCase):
         plan.mkdir(parents=True)
         (plan / "DESIGN.md").write_text("# Fixture criteria\nReview the changed value.\n")
         (plan / "IMPLEMENTATION.md").write_text("# Verification\n")
-        (plan / "REVIEW.md").write_text("# Historical comparison\n")
+        (plan / "REVIEW.md").write_text("# Historical comparison\n\n## Findings\n\n- **Medium:** base finding.\n\nVerdict: **pass**\n")
         git(repo, "add", ".")
         git(repo, "commit", "-qm", "base")
         for number in range(1, 4):
             (repo / "code.py").write_text(f"value = {number}\n")
-            git(repo, "add", "code.py")
+            (plan / "REVIEW.md").write_text(
+                "# Historical comparison\n\n## Findings\n\n"
+                f"- **Medium:** phase {number} finding.\n\nVerdict: **pass**\n")
+            git(repo, "add", "code.py", "docs/plans/demo/REVIEW.md")
             git(repo, "commit", "-qm", f"fixture phase {number}\n\nYakka-Phase: demo:{number}")
         remote = self.root / "remote.git"
         git(self.root, "init", "--bare", "-q", str(remote))

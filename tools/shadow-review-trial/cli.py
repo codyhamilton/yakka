@@ -10,8 +10,9 @@ import threading
 import urllib.error
 import urllib.request
 
-from manifest import ManifestFrozenError, create_manifest
+from manifest import ManifestFrozenError, compare_candidates, create_manifest
 from runner import RunnerError, TrialRunner, run as run_trial
+import history_profile
 import report as alignment_report
 
 
@@ -134,6 +135,13 @@ def _parser():
     report.add_argument("--comparators", type=pathlib.Path, help="optional saved comparator evidence JSON")
 
     commands.add_parser("smoke", help="print fake-endpoint fixture evidence; makes no provider call")
+
+    compare = commands.add_parser("compare", help="read-only comparison of the candidate extractors")
+    compare.add_argument("--repo", type=pathlib.Path, default=pathlib.Path.cwd())
+    compare.add_argument("--history-profile", default="garcia-music-workflow")
+    compare.add_argument("--seed", type=int, default=28)
+    compare.add_argument("--sample", type=int, default=30)
+    compare.add_argument("--now", help="freeze reference time (ISO-8601); defaults to the latest commit time")
     return parser
 
 
@@ -169,6 +177,10 @@ def main(argv=None):
                               "arms": result["arms"], "usage": result["usage"]}, sort_keys=True))
         elif args.command == "smoke":
             print(json.dumps(smoke_record(), sort_keys=True))
+        elif args.command == "compare":
+            result = compare_candidates(args.repo, history_profile.get_profile(args.history_profile),
+                                        seed=args.seed, now=args.now, sample=args.sample)
+            print(json.dumps(result, sort_keys=True, indent=2))
         return 0
     except (ManifestFrozenError, RunnerError, ValueError, OSError, KeyError,
             RuntimeError) as exc:

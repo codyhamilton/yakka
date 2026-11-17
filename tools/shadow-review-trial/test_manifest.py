@@ -32,7 +32,8 @@ class ManifestFixtures(unittest.TestCase):
         (self.repo / "docs/plans/demo").mkdir(parents=True)
         (self.repo / "docs/plans/demo/DESIGN.md").write_text("# Criteria at head\n")
         (self.repo / "docs/plans/demo/IMPLEMENTATION.md").write_text("# Phase verification\n")
-        (self.repo / "docs/plans/demo/REVIEW.md").write_text("# Historical review\n")
+        (self.repo / "docs/plans/demo/REVIEW.md").write_text(
+            "# Historical review\n\n## Findings\n\n- **High:** the changed value is unchecked.\n\nVerdict: **pass**\n")
         git(self.repo, "add", ".")
         git(self.repo, "commit", "-qm", "base")
         self.base = git(self.repo, "rev-parse", "HEAD")
@@ -40,7 +41,7 @@ class ManifestFixtures(unittest.TestCase):
         (self.repo / "code.py").write_text("base = 2\n")
         (self.repo / "docs/plans/demo/DESIGN.md").write_text("# Criteria amended at head, not base\n")
         git(self.repo, "add", "code.py", "docs/plans/demo/DESIGN.md")
-        git(self.repo, "commit", "-qm", "reviewed change\n\nYakka-Plan: docs/plans/demo\nYakka-Phase: llm-review-shadow:6")
+        git(self.repo, "commit", "-qm", "reviewed change\n\nYakka-Plan: docs/plans/demo\nYakka-Phase: demo:6")
         self.head = git(self.repo, "rev-parse", "HEAD")
         (self.repo / "code.py").write_text("base = 3\n")
         git(self.repo, "add", "code.py")
@@ -70,7 +71,11 @@ class ManifestFixtures(unittest.TestCase):
         self.assertEqual(case["capture"]["base"], case["base_sha"])
         self.assertEqual(case["capture"]["resolved_head"], case["head_sha"])
         self.assertEqual(case["capture"]["diff_sha256"], hashlib.sha256(case["capture"]["diff"].encode()).hexdigest())
+        self.assertEqual(case["capture"]["diff_bytes"], len(case["capture"]["diff"].encode()))
         self.assertNotIn("created after phase head", case["capture"]["diff"])
+        self.assertNotIn("Criteria amended at head", case["capture"]["diff"])
+        self.assertNotIn("docs/plans/demo/DESIGN.md", case["capture"]["files"])
+        self.assertIn("Criteria amended at head", git(self.repo, "show", f"{self.head}:docs/plans/demo/DESIGN.md"))
         self.assertEqual(case["criteria"]["source"], "base_blob")
         self.assertEqual(case["criteria"]["content_hash"], git(self.repo, "rev-parse", f"{self.base}:docs/plans/demo/DESIGN.md"))
         self.assertNotEqual(case["criteria"]["content_hash"], git(self.repo, "rev-parse", f"{self.head}:docs/plans/demo/DESIGN.md"))
@@ -108,6 +113,20 @@ class ManifestFixtures(unittest.TestCase):
         second = manifest.create_manifest(self.repo, pathlib.Path(self.tmp.name) / "same-seed.json", seed=19, target=50, expected_repository=self.identity)
         self.assertEqual(second["run_order"], persisted["run_order"])
 
+    def test_head_amended_design_is_stripped_from_the_capture(self):
+        frozen = manifest.create_manifest(self.repo, self.out, seed=11, target=50, expected_repository=self.identity)
+        case = next(c for c in frozen["cases"] if c["head_sha"] == self.head)
+        self.assertEqual(case["capture"]["base"], case["base_sha"])
+        self.assertEqual(case["capture"]["resolved_head"], case["head_sha"])
+        sections = [part for part in manifest._diff_sections(case["capture"]["diff"])]
+        self.assertTrue(sections)
+        self.assertFalse(any("docs/plans/demo/" in manifest._section_paths(part)[1] for part in sections))
+        self.assertTrue(any(manifest._section_paths(part)[1] == "code.py" for part in sections))
+        self.assertEqual(case["capture"]["diff_sha256"],
+                         hashlib.sha256(case["capture"]["diff"].encode()).hexdigest())
+        self.assertIn("Criteria amended at head", git(self.repo, "show", f"{self.head}:docs/plans/demo/DESIGN.md"))
+        self.assertNotIn("Criteria amended at head", case["capture"]["diff"])
+
     def test_comparator_citations_are_blob_and_line_bound_and_hashed(self):
         blob = git(self.repo, "rev-parse", f"{self.head}:docs/plans/demo/REVIEW.md")
         citations = [{"path": "docs/plans/demo/REVIEW.md", "sha": self.head, "blobhash": blob, "line_start": 1, "line_end": 1}]
@@ -142,7 +161,7 @@ class ManifestFixtures(unittest.TestCase):
         for head, number in phase_heads:
             case = next(c for c in frozen["cases"] if c["head_sha"] == head)
             self.assertEqual(case["tier"], "phase")
-            self.assertEqual(case["plan"], "demo")
+            self.assertEqual(case["plan"], "docs/plans/demo")
             self.assertEqual(case["phase"], number)
             self.assertEqual(case["criteria"]["source"], "base_blob")
             self.assertTrue(any("IMPLEMENTATION.md" in pointer for pointer in case["comparator_pointers"]))
@@ -172,7 +191,11 @@ class ManifestFixtures(unittest.TestCase):
                 elif sha == self.pr_head:
                     tier, plan, pr = "pr", "docs/plans/demo", "23"
                 data[sha] = {"tier": tier, "plan": plan, "phase": phase, "pr": pr, "base_sha": base,
-                             "outcomes": [], "later_fixes": [], "censored": False, "window_end": None}
+                             "outcomes": [{"kind": "review_finding", "source": "REVIEW.md",
+                                           "path": "docs/plans/demo/REVIEW.md", "commit": sha, "blob": None,
+                                           "line_start": 1, "line_end": 1, "severity": None,
+                                           "excerpt": "fixture finding"}] if tier else [],
+                             "later_fixes": [], "censored": False, "window_end": None}
             return data
 
         frozen = manifest.create_manifest(self.repo, self.out, seed=4, target=3,

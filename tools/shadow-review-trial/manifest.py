@@ -1,10 +1,12 @@
 """Offline, immutable historical case manifests and comparator evidence."""
 from __future__ import annotations
 
+import datetime
 import hashlib
 import json
 import pathlib
 import random
+import re
 import subprocess
 import sys
 from typing import Any
@@ -14,6 +16,10 @@ TOOL = pathlib.Path(__file__).resolve().parent
 if str(TOOL) not in sys.path:
     sys.path.insert(0, str(TOOL))
 import history_profile  # noqa: E402
+import history_extract_a  # noqa: E402
+
+# Selected after the phase3-04 comparison; see reports/phase3-04-compare-integrate.md.
+SELECTED_EXTRACT = history_extract_a.extract
 
 # The capture client lives in plugins/yakka/client today. Plan 27 (design only
 # on design/27-yakka-client-consolidation) would move it to
@@ -24,6 +30,11 @@ if str(CLIENT) not in sys.path:
 import yakka  # noqa: E402
 
 TIERS = ("phase", "unit", "pr")
+
+CODE_SUFFIXES = {".go", ".py", ".js", ".ts", ".tsx", ".jsx", ".rs", ".java", ".c", ".h", ".sh"}
+_DIFF_HEADER = re.compile(r"^diff --git a/(.*?) b/(.*)$")
+_COMMIT_EXISTS_CACHE: dict[tuple, bool] = {}
+_DIFF_PATHS_CACHE: dict[tuple, list[str]] = {}
 
 
 class ManifestFrozenError(RuntimeError):
@@ -57,8 +68,84 @@ def _blob(repo: pathlib.Path, path: str, sha: str) -> tuple[str, str] | None:
 
 
 def _changed_paths(repo: pathlib.Path, base: str, head: str) -> list[str]:
-    raw = _git(repo, "diff", "--name-only", "-z", base, head, text=False)
-    return [x.decode("utf-8", "replace") for x in bytes(raw).split(b"\0") if x]
+    key = (str(repo), base, head)
+    if key not in _DIFF_PATHS_CACHE:
+        raw = _git(repo, "diff", "--name-only", "-z", base, head, text=False)
+        _DIFF_PATHS_CACHE[key] = [x.decode("utf-8", "replace") for x in bytes(raw).split(b"\0") if x]
+    return list(_DIFF_PATHS_CACHE[key])
+
+
+def _has_code_change(paths: list[str]) -> bool:
+    return any(pathlib.PurePosixPath(path).suffix.lower() in CODE_SUFFIXES for path in paths)
+
+
+def _commit_exists(repo: pathlib.Path, sha: str | None) -> bool:
+    if not sha:
+        return False
+    key = (str(repo), sha)
+    if key not in _COMMIT_EXISTS_CACHE:
+        try:
+            _git(repo, "cat-file", "-e", f"{sha}^{{commit}}")
+            _COMMIT_EXISTS_CACHE[key] = True
+        except subprocess.CalledProcessError:
+            _COMMIT_EXISTS_CACHE[key] = False
+    return _COMMIT_EXISTS_CACHE[key]
+
+
+def _has_blob(repo: pathlib.Path, sha: str, path: str) -> bool:
+    try:
+        _git(repo, "rev-parse", f"{sha}:{path}")
+        return True
+    except subprocess.CalledProcessError:
+        return False
+
+
+def _now_reference(repo: pathlib.Path, refs: list[str], run=None) -> str:
+    """Deterministic freeze reference: the latest committer time across the refs."""
+    git = run or _git
+    output = str(git(repo, "log", "--format=%ct", *refs)).split()
+    stamps = [int(value) for value in output if value.strip().isdigit()]
+    epoch = max(stamps) if stamps else 0
+    return datetime.datetime.fromtimestamp(epoch, datetime.timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _diff_sections(diff: str) -> list[str]:
+    if not diff:
+        return []
+    parts = re.split(r"(?m)^(?=diff --git )", diff)
+    return [part for part in parts if part]
+
+
+def _section_paths(section: str) -> tuple[str, str]:
+    first = section.split("\n", 1)[0]
+    match = _DIFF_HEADER.match(first)
+    return (match.group(1), match.group(2)) if match else ("", "")
+
+
+def strip_plan_documents(capture: dict[str, Any], plan_root: str | None) -> dict[str, Any]:
+    """Remove every ``docs/plans/<plan>/`` section the capture client cannot exclude.
+
+    The client hard-codes ``excluded = False`` for ``docs/`` paths, so the trial's
+    plan-folder exclusion is enforced here, after capture and before eligibility.
+    """
+    if not plan_root:
+        return capture
+    prefix = plan_root.rstrip("/") + "/"
+    kept: list[str] = []
+    for section in _diff_sections(capture.get("diff", "")):
+        a_path, b_path = _section_paths(section)
+        if a_path.startswith(prefix) or b_path.startswith(prefix):
+            continue
+        kept.append(section)
+    diff = "".join(kept)
+    stripped = dict(capture)
+    stripped["diff"] = diff
+    stripped["diff_sha256"] = hashlib.sha256(diff.encode("utf-8")).hexdigest()
+    stripped["diff_bytes"] = len(diff.encode("utf-8"))
+    stripped["files"] = [p for p in capture.get("files", []) if not str(p).startswith(prefix)]
+    stripped["manifest"] = [entry for entry in capture.get("manifest", [])
+                            if not str(entry.get("path", "")).startswith(prefix)]
+    return stripped
 
 
 def _criteria(repo: pathlib.Path, base: str | None, plan: str | None,
@@ -227,7 +314,10 @@ def create_manifest(repo: pathlib.Path, output: pathlib.Path, seed: int = 1, tar
     if len(revs) != evidence["enumerated_commits"]:
         raise HistoryPreparationError(
             f"verified count {evidence['verified_count']} disagrees with manifest enumeration {len(revs)}")
-    metadata = (extractor or history_profile.default_extract)(repo, resolved_profile, now=now)
+    now_reference = now
+    if now_reference is None:
+        now_reference = _now_reference(repo, evidence["enumerated_refs"], run=run)
+    metadata = (extractor or SELECTED_EXTRACT)(repo, resolved_profile, now=now_reference)
     boundaries: list[str] = []
     policy = json.loads((ROOT / "packages/yakka/internal/review/policy.json").read_text())
     candidates = []
@@ -255,33 +345,31 @@ def create_manifest(repo: pathlib.Path, output: pathlib.Path, seed: int = 1, tar
             except subprocess.CalledProcessError:
                 reason = "shallow_history_boundary"
                 base = None
-        if reason == "eligible":
-            changed = _changed_paths(repo, base, head)
-            code_paths = [p for p in changed if pathlib.PurePosixPath(p).suffix.lower() in {".go", ".py", ".js", ".ts", ".tsx", ".jsx", ".rs", ".java", ".c", ".h", ".sh"}]
-            if not code_paths:
-                reason = "no_code_change"
-            else:
-                excluded = list(policy["change_exclude"])
-                prefix = resolved_profile.plan_root(plan) if plan else ""
-                if prefix:
-                    excluded += [f"{prefix}/IMPLEMENTATION.md", f"{prefix}/REVIEW.md", f"{prefix}/QA.md"]
-                capture_policy = {"exclude": tuple(excluded), "max_file_bytes": policy["change_max_file_bytes"],
-                                  "max_total_bytes": policy["change_max_total_bytes"], "max_files": policy["change_max_files"],
-                                  "context_lines": policy["context_lines"], "truncation_order": tuple(policy["truncation_order"])}
-                try:
-                    capture = yakka.CaptureChange(str(repo), mode="range", base=base, head=head, policy=capture_policy)
-                    base = capture["base"]
-                    if not capture["diff"]:
-                        reason = "empty_capture"
-                except yakka.CaptureError as exc:
-                    reason = f"capture_{exc.code}"
         crit = _criteria(repo, base, plan, resolved_profile)
         pointers = _comparators(repo, head, plan, tier, resolved_profile)
-        eligible = reason == "eligible" and bool(capture and capture["diff"])
+        eligible = reason == "eligible"
+        if eligible and not meta.get("outcomes"):
+            eligible, reason = False, "no_recorded_outcome"
         if eligible and crit["source"] == "unknown":
             eligible, reason = False, "criteria_unavailable"
-        if eligible and tier in {"phase", "pr"} and not pointers:
-            eligible, reason = False, "missing_comparator_source"
+        if eligible and not _has_code_change(_changed_paths(repo, base, head)):
+            eligible, reason = False, "no_code_change"
+        if eligible:
+            excluded = list(policy["change_exclude"])
+            prefix = resolved_profile.plan_root(plan) if plan else ""
+            if prefix:
+                excluded += [f"{prefix}/IMPLEMENTATION.md", f"{prefix}/REVIEW.md", f"{prefix}/QA.md"]
+            capture_policy = {"exclude": tuple(excluded), "max_file_bytes": policy["change_max_file_bytes"],
+                              "max_total_bytes": policy["change_max_total_bytes"], "max_files": policy["change_max_files"],
+                              "context_lines": policy["context_lines"], "truncation_order": tuple(policy["truncation_order"])}
+            try:
+                capture = yakka.CaptureChange(str(repo), mode="range", base=base, head=head, policy=capture_policy)
+                base = capture["base"]
+                capture = strip_plan_documents(capture, prefix)
+                if not capture["diff"]:
+                    eligible, reason = False, "empty_capture"
+            except yakka.CaptureError as exc:
+                eligible, reason = False, f"capture_{exc.code}"
         candidates.append({"case_id": head, "eligible": eligible, "eligibility_reason": reason,
                            "tier": tier, "stratum": tier or "unaccompanied",
                            "plan": plan or None, "phase": meta.get("phase"), "pr": meta.get("pr"),
@@ -342,7 +430,7 @@ def create_manifest(repo: pathlib.Path, output: pathlib.Path, seed: int = 1, tar
                "candidates": candidates, "cases": selected, "tiers": tiers,
                "exclusions": exclusions, "excluded_total": excluded_total, "censored": censored,
                "shortfall_against_floor": max(0, floor - len(selected)),
-               "window_reference": now, "run_order": order,
+               "window_reference": now_reference, "run_order": order,
                "settings": {"shared_case_set": True, "non_effort": {"kind": "range", "review_profile": "historical_trial",
                "trial_id": "phase-6-frozen", "merge_base": False}, "efforts": ["high", "xhigh", "max"]},
                "comparators": comparators}
@@ -351,3 +439,151 @@ def create_manifest(repo: pathlib.Path, output: pathlib.Path, seed: int = 1, tar
     with output.open("x", encoding="utf-8") as handle:
         handle.write(json.dumps(frozen, indent=2, sort_keys=True) + "\n")
     return frozen
+
+
+def _project_reason(repo: pathlib.Path, profile: history_profile.HistoryProfile,
+                    head: str, meta: dict[str, Any]) -> str:
+    """Project manifest eligibility without capturing any diff."""
+    tier = meta.get("tier")
+    if tier not in TIERS:
+        return "no_tier"
+    base = meta.get("base_sha")
+    if not base:
+        return "no_base_commit"
+    if not _commit_exists(repo, base):
+        return "shallow_history_boundary"
+    if not meta.get("outcomes"):
+        return "no_recorded_outcome"
+    if _criteria(repo, base, meta.get("plan"), profile)["source"] == "unknown":
+        return "criteria_unavailable"
+    if not _has_code_change(_changed_paths(repo, base, head)):
+        return "no_code_change"
+    return "eligible"
+
+
+def _normalise(text: str | None) -> str:
+    return re.sub(r"\s+", " ", text or "").strip()
+
+
+def _resolve_outcome(repo: pathlib.Path, outcome: dict[str, Any]) -> bool:
+    """True when an outcome's citation resolves to a real blob/commit and line range."""
+    commit = outcome.get("commit")
+    path = outcome.get("path")
+    blob = outcome.get("blob")
+    text = _normalise(outcome.get("excerpt") if outcome.get("excerpt") is not None else outcome.get("text"))
+    if outcome.get("source") in {"commit", "commit_subject"} or (path is None and blob is None):
+        if not _commit_exists(repo, commit):
+            return False
+        try:
+            subject = _normalise(_git(repo, "show", "-s", "--format=%s", commit))
+        except subprocess.CalledProcessError:
+            return False
+        return bool(text) and (text == subject or subject in text or text in subject)
+    if not commit or not path or not blob:
+        return False
+    if not _commit_exists(repo, commit):
+        return False
+    try:
+        blob_type = str(_git(repo, "cat-file", "-t", blob)).strip()
+        content = _git(repo, "show", f"{commit}:{path}", text=False)
+    except subprocess.CalledProcessError:
+        return False
+    if blob_type != "blob":
+        return False
+    lines = bytes(content).decode("utf-8", "replace").splitlines()
+    try:
+        start = int(outcome.get("line_start"))
+        end = int(outcome.get("line_end"))
+    except (TypeError, ValueError):
+        return False
+    if start < 1 or end < start or end > len(lines):
+        return False
+    if not text:
+        return False
+    return text in _normalise("\n".join(lines))
+
+
+def _resolve_later_fix(repo: pathlib.Path, base: str, head: str, fix: dict[str, Any]) -> bool:
+    if not _commit_exists(repo, fix.get("sha")):
+        return False
+    case_paths = set(_changed_paths(repo, base, head))
+    cited = set(fix.get("paths") or [])
+    return bool(cited & case_paths)
+
+
+def compare_candidates(repo: pathlib.Path, profile: history_profile.HistoryProfile,
+                       *, seed: int = 1, now: str | None = None, sample: int = 30) -> dict[str, Any]:
+    """Read-only comparison of the two candidate extractors over one history.
+
+    Returns aggregate counts, rates and tier labels only; never a diff, finding
+    text, path list or case SHA. Caches per-commit facts so repeated base/head
+    lookups are read once. ``now`` defaults to the latest committer time.
+    """
+    import history_extract_a
+    import history_extract_b
+
+    repo = pathlib.Path(repo).resolve()
+    if now is None:
+        base_refs = ["HEAD"]
+        listing = _git(repo, "for-each-ref", "--format=%(refname)", "refs/remotes")
+        base_refs.extend(sorted(line for line in listing.splitlines() if line))
+        now = _now_reference(repo, base_refs)
+
+    report: dict[str, Any] = {"now": now, "seed": seed, "sample": sample, "candidates": {}}
+    for label, module in (("A", history_extract_a), ("B", history_extract_b)):
+        metadata = module.extract(repo, profile, now=now)
+        tiers = {tier: {"candidates": 0, "with_plan": 0, "with_outcome": 0,
+                        "with_later_fixes": 0, "censored": 0, "projected_eligible": 0}
+                 for tier in TIERS}
+        exclusions: dict[str, int] = {}
+        outcome_bearing: list[str] = []
+        projected = 0
+        for sha, meta in metadata.items():
+            tier = meta.get("tier")
+            if tier in tiers:
+                bucket = tiers[tier]
+                bucket["candidates"] += 1
+                bucket["with_plan"] += bool(meta.get("plan"))
+                bucket["with_outcome"] += bool(meta.get("outcomes"))
+                bucket["with_later_fixes"] += bool(meta.get("later_fixes"))
+                bucket["censored"] += bool(meta.get("censored"))
+            if meta.get("outcomes"):
+                outcome_bearing.append(sha)
+            reason = _project_reason(repo, profile, sha, meta)
+            if tier in tiers and reason == "eligible":
+                tiers[tier]["projected_eligible"] += 1
+                projected += 1
+            else:
+                exclusions[reason] = exclusions.get(reason, 0) + 1
+        rng = random.Random(seed)
+        chosen = sorted(outcome_bearing)
+        rng.shuffle(chosen)
+        chosen = chosen[:sample]
+        outcomes_total = outcomes_resolved = cases_resolved = fixes_total = fixes_resolved = 0
+        for sha in chosen:
+            meta = metadata[sha]
+            case_ok = True
+            for outcome in meta.get("outcomes") or []:
+                outcomes_total += 1
+                if _resolve_outcome(repo, outcome):
+                    outcomes_resolved += 1
+                else:
+                    case_ok = False
+            if meta.get("base_sha"):
+                for fix in meta.get("later_fixes") or []:
+                    fixes_total += 1
+                    if _resolve_later_fix(repo, meta["base_sha"], sha, fix):
+                        fixes_resolved += 1
+            cases_resolved += case_ok
+        report["candidates"][label] = {
+            "name": getattr(module, "NAME", label), "commits": len(metadata),
+            "tiers": tiers, "with_outcome_total": len(outcome_bearing),
+            "exclusions": dict(sorted(exclusions.items())), "projected_eligible": projected,
+            "projected_shortfall_against_300": max(0, 300 - projected),
+            "sampled_cases": len(chosen), "sampled_outcomes": outcomes_total,
+            "outcome_resolution_rate": (outcomes_resolved / outcomes_total) if outcomes_total else None,
+            "case_resolution_rate": (cases_resolved / len(chosen)) if chosen else None,
+            "sampled_later_fixes": fixes_total,
+            "later_fix_resolution_rate": (fixes_resolved / fixes_total) if fixes_total else None,
+        }
+    return report
