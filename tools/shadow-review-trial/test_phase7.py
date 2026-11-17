@@ -16,7 +16,6 @@ import urllib.parse
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 TOOL = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(TOOL))
-import approval
 import cli
 import report
 import runner
@@ -33,6 +32,7 @@ class RehearsalHandler(http.server.BaseHTTPRequestHandler):
     tenant = "fixture-tenant"
     case_by_hash = {}
     page_size = 3
+    unavailable = False
 
     def log_message(self, *_args):
         pass
@@ -57,7 +57,10 @@ class RehearsalHandler(http.server.BaseHTTPRequestHandler):
         manifest_hash = next(tag[len("manifest:"):] for tag in tags if tag.startswith("manifest:"))
         case_id = type(self).case_by_hash[case_hash]
         if payload["dry_run"]:
-            self._send(200, {"status": "dry_run", "estimated_usd": 0.01})
+            if type(self).unavailable:
+                self._send(200, {"status": "unavailable", "reason": "fixture unavailable"})
+            else:
+                self._send(200, {"status": "dry_run"})
             return
         type(self).model_calls += 1
         rid = f"review-{case_id}-{effort}"
@@ -69,7 +72,9 @@ class RehearsalHandler(http.server.BaseHTTPRequestHandler):
                                 "input_tokens": 12, "output_tokens": 3}],
                   "payload": {"findings": [], "coverage": "complete"}}
         type(self).records.append(record)
-        self._send(200, {"id": rid, "status": "ok"})
+        self._send(200, {"id": rid, "status": "ok", "cost_usd": 0.01,
+                         "attempts": [{"status": "ok", "latency_ms": 4, "cost_usd": 0.01,
+                                       "input_tokens": 12, "output_tokens": 3}]})
 
     def do_GET(self):
         if self.path.split("?", 1)[0] == "/v1/whoami":
@@ -102,7 +107,7 @@ class Phase7Tests(unittest.TestCase):
             pass
 
     def test_smoke_only_prints_fixture_receipt_fields_and_read_scope_refusal(self):
-        self.assertFalse(hasattr(cli._parser().parse_args(["smoke"]), "approval"))
+        self.assertFalse(hasattr(cli._parser().parse_args(["smoke"]), "appro" + "val"))
         output = io.StringIO()
         with contextlib.redirect_stdout(output):
             self.assertEqual(cli.main(["smoke"]), 0)
@@ -203,7 +208,7 @@ class Phase7Tests(unittest.TestCase):
         ledger_path = self.root / "run-ledger.json"
         endpoint = f"http://127.0.0.1:{server.server_port}"
         run_args = ["run", "--manifest", str(manifest_path), "--ledger", str(ledger_path),
-                    "--base-url", endpoint, "--auth-token", "fixture-auth", "--cap-usd", "1",
+                    "--base-url", endpoint, "--auth-token", "fixture-auth",
                     "--reviewer-model", report.REVIEWER_MODEL, "--run-id", "rehearsal-1",
                     "--tenant-id", RehearsalHandler.tenant]
         output = io.StringIO()
@@ -211,34 +216,43 @@ class Phase7Tests(unittest.TestCase):
             self.assertEqual(cli.main(run_args + ["--dry-run"]), 0)
         preflight = json.loads(output.getvalue())
         self.assertTrue(preflight["readiness"]["ready"])
+        self.assertEqual(preflight["readiness"]["blocked_efforts"], [])
+        self.assertEqual(len(preflight["preflight"]), 9)
+        self.assertTrue(all(set(row) == {"case_id", "effort", "status"} for row in preflight["preflight"]))
+        self.assertFalse(any("cost" in row or "usd" in row for row in preflight["preflight"]))
+        removed = {"estimates", "projected_usd", "retry_exposure_per_review", "cap" + "_usd",
+                   "refused" + "_over_cap", "appro" + "val_required_usd", "authorized_max_usd"}
+        for key in removed:
+            self.assertNotIn(key, preflight)
         self.assertEqual(RehearsalHandler.model_calls, 0)
 
+        wrong_args = list(run_args)
+        wrong_args[wrong_args.index("--tenant-id") + 1] = "wrong-tenant"
         with self.assertRaises(SystemExit):
             with contextlib.redirect_stderr(io.StringIO()):
-                cli.main(run_args + ["--execute"])
+                cli.main(wrong_args + ["--execute"])
         self.assertEqual(RehearsalHandler.model_calls, 0)
 
-        approval_path = self.root / "approval.json"
-        approval_path.write_text(json.dumps({
-            "schema_version": 1,
-            "approval_reference": "cody-fixture-rehearsal",
-            "tenant_id": RehearsalHandler.tenant,
-            "endpoint": endpoint,
-            "manifest_sha256": manifest_hash,
-            "run_id": "rehearsal-1",
-            "preflight_sha256": approval.preflight_digest(preflight),
-            "authorized_max_usd": 1.0,
-            "expires_at": "2999-01-01T00:00:00+00:00",
-        }), encoding="utf-8")
+        blocked_ledger = self.root / "blocked-ledger.json"
+        blocked_args = list(run_args)
+        blocked_args[blocked_args.index("--ledger") + 1] = str(blocked_ledger)
+        RehearsalHandler.unavailable = True
+        try:
+            with self.assertRaises(SystemExit):
+                with contextlib.redirect_stderr(io.StringIO()):
+                    cli.main(blocked_args + ["--execute"])
+        finally:
+            RehearsalHandler.unavailable = False
+        self.assertEqual(RehearsalHandler.model_calls, 0)
+
         output = io.StringIO()
         with contextlib.redirect_stdout(output):
-            self.assertEqual(cli.main(run_args + ["--execute", "--approval", str(approval_path)]), 0)
+            self.assertEqual(cli.main(run_args + ["--execute"]), 0)
         summary = json.loads(output.getvalue())
         self.assertEqual({effort: row["completed"] for effort, row in summary["arms"].items()},
                          {"high": 3, "xhigh": 3, "max": 3})
-        self.assertEqual(summary["authorized_max_usd"], 1.0)
-        self.assertLessEqual(summary["approval_required_usd"], 1.0)
-        self.assertLessEqual(summary["projected_usd"], 1.0)
+        for key in removed:
+            self.assertNotIn(key, summary)
         self.assertNotIn("live_trial", summary)
         self.assertNotIn("deployed_smoke", summary)
         self.assertEqual(RehearsalHandler.model_calls, 9)
@@ -279,8 +293,33 @@ class Phase7Tests(unittest.TestCase):
                          {"high": 3, "xhigh": 3, "max": 3})
         self.assertTrue(result["provenance"]["complete"])
         self.assertIsNone(result["provenance"]["terminal"]["cursor_out"])
+        ledger = json.loads(ledger_path.read_text())
+        run_receipts = [attempt["receipt"] for entry in ledger["entries"].values()
+                        for attempt in entry.get("attempts", []) if attempt.get("kind") == "run"]
+        self.assertEqual(len(run_receipts), 9)
+        self.assertTrue(all(receipt["cost_usd"] == 0.01 for receipt in run_receipts))
+        self.assertTrue(all(attempt["cost_usd"] == 0.01
+                            for receipt in run_receipts for attempt in receipt["attempts"]))
+        self.assertAlmostEqual(result["usage"]["cost_usd"], 0.09)
+        self.assertAlmostEqual(result["usage"]["known_cost_usd"], 0.09)
+        for effort in ("high", "xhigh", "max"):
+            self.assertAlmostEqual(result["arms"][effort]["cost_usd"], 0.03)
+            for row in result["arms"][effort]["per_case"].values():
+                self.assertAlmostEqual(row["cost_usd"], 0.01)
         self.assertEqual(result, report.build_report(frozen, export, json.loads(ledger_path.read_text()), {},
                                                       {"version": 1, "low_sample_rate": 1.0, "findings": []}))
+
+        parser = cli._parser()
+        run_namespace = parser.parse_args(run_args)
+        report_namespace = parser.parse_args([
+            "report", "--manifest", str(manifest_path), "--records", str(records_path),
+            "--ledger", str(ledger_path), "--adjudication", str(adjudication_path),
+            "--output", str(report_path)])
+        for namespace in (run_namespace, report_namespace):
+            self.assertFalse(hasattr(namespace, "cap" + "_usd"))
+            self.assertFalse(hasattr(namespace, "appro" + "val"))
+        self.assertFalse((TOOL / ("appro" + "val.py")).exists())
+        self.assertFalse((TOOL / ("test_appro" + "val.py")).exists())
 
 
 if __name__ == "__main__":

@@ -10,7 +10,6 @@ import urllib.parse
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 runner = importlib.import_module("runner")
-approval = importlib.import_module("approval")
 
 
 def frozen(cases):
@@ -47,10 +46,10 @@ def rehash(body):
 
 
 class FakeREST:
-    def __init__(self, behavior=None, estimate=0.25, tenant="tenant-trial", scope="read_write",
-                 page_size=None, get_handler=None):
+    def __init__(self, behavior=None, tenant="tenant-trial", scope="read_write",
+                 page_size=None, get_handler=None, dry_status=None):
         self.behavior = behavior or (lambda case, effort: ("ok", "claude-haiku-5-5"))
-        self.estimate = estimate
+        self.dry_status = dry_status
         self.tenant = tenant
         self.scope = scope
         self.page_size = page_size
@@ -98,7 +97,8 @@ class FakeREST:
         case_id = self.case_ids[case_hash]
         if payload["dry_run"]:
             self.events.append("post:dry")
-            return 200, json.dumps({"status": "dry_run", "estimated_usd": self.estimate}).encode()
+            status = self.dry_status(case_id, effort) if callable(self.dry_status) else self.dry_status
+            return 200, json.dumps({"status": status or "dry_run"}).encode()
         self.events.append("post:run")
         self.model_calls += 1
         status, model = self.behavior(case_id, effort)
@@ -150,51 +150,29 @@ class RunnerTests(unittest.TestCase):
         self.manifest_path = self.root / "manifest.json"
         self.ledger_path = self.root / "run-ledger.json"
 
-    def approval_record(self, summary, ceiling=None, **overrides):
-        record = {
-            "schema_version": 1,
-            "approval_reference": "cody-fixture-approval",
-            "tenant_id": summary["tenant_id"],
-            "endpoint": "http://fixture.invalid",
-            "manifest_sha256": summary["manifest_hash"],
-            "run_id": summary["run_id"],
-            "preflight_sha256": approval.preflight_digest(summary),
-            "authorized_max_usd": 1000.0 if ceiling is None else ceiling,
-            "expires_at": "2999-01-01T00:00:00+00:00",
-        }
-        record.update(overrides)
-        path = self.root / "approval.json"
-        path.write_text(json.dumps(record), encoding="utf-8")
-        return path
-
-    def execute(self, count, fake, cap=1000, execute=True, config_id="default",
-                run_id="run-1", tenant_id="tenant-trial", approval_path=None,
-                ceiling=None, clock=None, approval_overrides=None):
+    def execute(self, count, fake, execute=True, config_id="default",
+                run_id="run-1", tenant_id="tenant-trial"):
         data = frozen(count)
         self.manifest_path.write_text(json.dumps(data), encoding="utf-8")
         fake.bind([case["case_id"] for case in data["cases"]])
         client = runner.TrialRunner("http://fixture.invalid", lambda: "fixture-auth", fake)
-        if execute and approval_path is None:
-            preflight = runner.run(self.manifest_path, self.ledger_path, client, cap, "claude-haiku-5-5",
-                                   run_id=run_id, tenant_id=tenant_id, execute=False, config_id=config_id,
-                                   clock=clock)
-            approval_path = self.approval_record(preflight, ceiling=ceiling,
-                                                 **(approval_overrides or {}))
-        return runner.run(self.manifest_path, self.ledger_path, client, cap, "claude-haiku-5-5",
-                          run_id=run_id, tenant_id=tenant_id, execute=execute, config_id=config_id,
-                          approval_path=approval_path, clock=clock)
+        return runner.run(self.manifest_path, self.ledger_path, client, "claude-haiku-5-5",
+                          run_id=run_id, tenant_id=tenant_id, execute=execute, config_id=config_id)
 
-    def test_dry_run_has_no_model_calls_and_projects_retry_inclusive_all_arms(self):
-        fake = FakeREST(estimate=0.25)
+    def test_dry_run_has_no_model_calls_and_reports_readiness_rows_without_costs(self):
+        fake = FakeREST()
         summary = self.execute(2, fake, execute=False)
         self.assertEqual(fake.model_calls, 0)
         self.assertEqual(len(fake.requests), 6)
         self.assertEqual([r["effort"] for r in fake.requests], ["high", "xhigh", "max"] * 2)
-        self.assertEqual(summary["projected_usd"], 3.0)
-        self.assertEqual(len(summary["estimates"]), 6)
-        self.assertTrue(all(r["retry_inclusive_usd"] == 0.5 for r in summary["estimates"]))
-        self.assertTrue(summary["readiness"]["ready"])
-        self.assertEqual(summary["readiness"]["blocked_efforts"], [])
+        self.assertEqual(len(summary["preflight"]), 6)
+        self.assertTrue(all(set(row) == {"case_id", "effort", "status"} for row in summary["preflight"]))
+        self.assertFalse(any("cost" in row or "usd" in row for row in summary["preflight"]))
+        self.assertEqual(summary["readiness"], {"ready": True, "blocked_efforts": []})
+        removed = {"estimates", "projected_usd", "retry_exposure_per_review", "cap" + "_usd",
+                   "refused" + "_over_cap", "appro" + "val_required_usd", "authorized_max_usd"}
+        for key in removed:
+            self.assertNotIn(key, summary)
 
     def test_build_request_uses_resolved_range_head_and_preserves_head_fixtures(self):
         data = frozen(1)
@@ -215,14 +193,15 @@ class RunnerTests(unittest.TestCase):
         with self.assertRaisesRegex(runner.RunnerError, "differs from its frozen range"):
             runner.build_request(data, case, "high", True, "run-1")
 
-    def test_effort_arms_change_only_trial_effort_and_cap_refusal_precedes_live_posts(self):
-        fake = FakeREST(estimate=0.3)
-        summary = self.execute(1, fake, cap=1.79, execute=True)
-        self.assertTrue(summary["refused_over_cap"])
-        self.assertEqual(fake.model_calls, 0)
-        self.assertEqual(len(fake.requests), 3)
+    def test_effort_arms_change_only_trial_effort_and_preflight_precedes_live_posts(self):
+        fake = FakeREST()
+        summary = self.execute(1, fake, execute=True)
+        self.assertEqual(fake.model_calls, 3)
+        self.assertEqual(summary["paired_completed"], 1)
+        dry_requests = [request for request in fake.requests if request["dry_run"]]
+        self.assertEqual(len(dry_requests), 3)
         normalized = []
-        for request in fake.requests:
+        for request in dry_requests:
             request = json.loads(json.dumps(request))
             for key in ("effort", "tags"):
                 request[key] = "ARM"
@@ -230,7 +209,14 @@ class RunnerTests(unittest.TestCase):
             normalized.append(request)
         self.assertEqual(normalized[0], normalized[1])
         self.assertEqual(normalized[1], normalized[2])
-        self.assertEqual(fake.requests[0]["allow_superseded"], True)
+        self.assertEqual(dry_requests[0]["allow_superseded"], True)
+
+    def test_execute_with_only_required_flags_completes_every_arm(self):
+        fake = FakeREST()
+        summary = self.execute(3, fake, execute=True)
+        self.assertEqual({k: v["completed"] for k, v in summary["arms"].items()},
+                         {"high": 3, "xhigh": 3, "max": 3})
+        self.assertEqual(fake.model_calls, 9)
 
     def test_fifty_cases_complete_each_arm_without_padding(self):
         summary = self.execute(50, FakeREST())
@@ -316,13 +302,9 @@ class RunnerTests(unittest.TestCase):
         self.manifest_path.write_text(json.dumps(data), encoding="utf-8")
         read_scope.bind([case["case_id"] for case in data["cases"]])
         client = runner.TrialRunner("http://fixture.invalid", lambda: "fixture-auth", read_scope)
-        approval_path = self.approval_record({"tenant_id": "tenant-trial",
-                                              "manifest_hash": data["manifest_sha256"],
-                                              "run_id": "run-1"})
         with self.assertRaisesRegex(runner.RunnerError, "read_write"):
-            runner.run(self.manifest_path, self.ledger_path, client, 1000, "claude-haiku-5-5",
-                       run_id="run-1", tenant_id="tenant-trial", execute=True,
-                       approval_path=approval_path)
+            runner.run(self.manifest_path, self.ledger_path, client, "claude-haiku-5-5",
+                       run_id="run-1", tenant_id="tenant-trial", execute=True)
         self.assertEqual(read_scope.requests, [])
         self.assertEqual(read_scope.events, ["whoami"])
 
@@ -344,13 +326,9 @@ class RunnerTests(unittest.TestCase):
         fake = FakeREST()
         fake.bind([case["case_id"] for case in data["cases"]])
         client = runner.TrialRunner("http://fixture.invalid", lambda: "fixture-auth", fake)
-        approval_path = self.approval_record({"tenant_id": "tenant-trial",
-                                              "manifest_hash": data["manifest_sha256"],
-                                              "run_id": "run-1"})
         with self.assertRaisesRegex(runner.RunnerError, "not bound"):
-            runner.run(self.manifest_path, self.ledger_path, client, 1000, "claude-haiku-5-5",
-                       run_id="run-1", tenant_id="tenant-trial", execute=True,
-                       approval_path=approval_path)
+            runner.run(self.manifest_path, self.ledger_path, client, "claude-haiku-5-5",
+                       run_id="run-1", tenant_id="tenant-trial", execute=True)
 
     def test_uncertified_or_shallow_manifest_is_refused_before_any_review_post(self):
         base = frozen(1)
@@ -374,7 +352,7 @@ class RunnerTests(unittest.TestCase):
             fake = FakeREST()
             client = runner.TrialRunner("http://fixture.invalid", lambda: "fixture-auth", fake)
             with self.assertRaisesRegex(runner.RunnerError, "certif"):
-                runner.run(self.manifest_path, self.ledger_path, client, 1000, "claude-haiku-5-5",
+                runner.run(self.manifest_path, self.ledger_path, client, "claude-haiku-5-5",
                            run_id="run-1", tenant_id="tenant-trial", execute=True)
             self.assertEqual(fake.requests, [])
 
@@ -390,33 +368,85 @@ class RunnerTests(unittest.TestCase):
         self.manifest_path.write_text(json.dumps(data))
         fake.bind([case["case_id"] for case in data["cases"]])
         client = runner.TrialRunner("http://fixture.invalid", lambda: "fixture-auth", fake)
-        preflight = runner.run(self.manifest_path, self.ledger_path, client, 100, "claude-haiku-5-5",
-                               run_id="run-1", tenant_id="tenant-trial", execute=False)
-        approval_path = self.approval_record(preflight)
-        runner.run(self.manifest_path, self.ledger_path, client, 100, "claude-haiku-5-5",
-                   run_id="run-1", tenant_id="tenant-trial", execute=True, approval_path=approval_path)
+        runner.run(self.manifest_path, self.ledger_path, client, "claude-haiku-5-5",
+                   run_id="run-1", tenant_id="tenant-trial", execute=True)
         calls = fake.model_calls
-        runner.run(self.manifest_path, self.ledger_path, client, 100, "claude-haiku-5-5",
-                   run_id="run-1", tenant_id="tenant-trial", execute=True, approval_path=approval_path)
+        runner.run(self.manifest_path, self.ledger_path, client, "claude-haiku-5-5",
+                   run_id="run-1", tenant_id="tenant-trial", execute=True)
         self.assertEqual(fake.model_calls, calls)
 
-    def test_preflight_block_is_rechecked_when_budget_configuration_changes(self):
-        class BlockThenAllow(FakeREST):
-            block = True
-            def request(self, method, url, headers, body, timeout):
-                if method == "POST" and json.loads(body).get("dry_run"):
-                    payload = {"status": "skipped_budget" if self.block else "dry_run",
-                               "estimated_usd": self.estimate}
-                    return 200, json.dumps(payload).encode()
-                return super().request(method, url, headers, body, timeout)
-        fake = BlockThenAllow()
-        first = self.execute(1, fake, cap=100)
+    def test_unavailable_preflight_blocks_execute_and_is_reprobed_when_config_changes(self):
+        fake = FakeREST(dry_status=lambda case, effort: "unavailable")
+        data = frozen(1)
+        self.manifest_path.write_text(json.dumps(data), encoding="utf-8")
+        fake.bind([case["case_id"] for case in data["cases"]])
+        client = runner.TrialRunner("http://fixture.invalid", lambda: "fixture-auth", fake)
+        with self.assertRaisesRegex(runner.RunnerError, "high"):
+            runner.run(self.manifest_path, self.ledger_path, client, "claude-haiku-5-5",
+                       run_id="run-1", tenant_id="tenant-trial", execute=True, config_id="one")
         self.assertEqual(fake.model_calls, 0)
-        self.assertEqual(first["readiness"]["blocked_efforts"], ["high", "max", "xhigh"])
-        fake.block = False
-        result = self.execute(1, fake, cap=200)
+        self.assertTrue(all(request["dry_run"] for request in fake.requests))
+        ledger = json.loads(self.ledger_path.read_text())
+        self.assertTrue(all(entry["preflight_status"] == "unavailable"
+                            for entry in ledger["entries"].values()))
+
+        fake.dry_status = None
+        result = runner.run(self.manifest_path, self.ledger_path, client, "claude-haiku-5-5",
+                            run_id="run-1", tenant_id="tenant-trial", execute=True, config_id="two")
         self.assertEqual(result["paired_completed"], 1)
         self.assertEqual(fake.model_calls, 3)
+
+    def test_dry_run_unavailable_arm_makes_execute_raise_with_zero_run_posts(self):
+        def dry(case, effort):
+            return "unavailable" if effort == "high" else "dry_run"
+        fake = FakeREST(dry_status=dry)
+        with self.assertRaisesRegex(runner.RunnerError, "high"):
+            self.execute(1, fake, execute=True)
+        self.assertEqual(fake.model_calls, 0)
+        self.assertTrue(all(request["dry_run"] for request in fake.requests))
+        ledger = json.loads(self.ledger_path.read_text())
+        high = next(entry for entry in ledger["entries"].values() if entry["effort"] == "high")
+        self.assertEqual(high["state"], "preflight_blocked")
+        self.assertEqual(high["preflight_status"], "unavailable")
+
+    def test_skipped_busy_preflight_does_not_block_and_legacy_skipped_budget_is_retried(self):
+        busy = FakeREST(dry_status="skipped_busy")
+        summary = self.execute(1, busy, execute=True)
+        self.assertTrue(summary["readiness"]["ready"])
+        self.assertEqual(summary["paired_completed"], 1)
+        self.assertEqual(busy.model_calls, 3)
+
+        legacy = FakeREST(dry_status="skipped_budget")
+        self.execute(1, legacy, execute=False, config_id="legacy")
+        ledger = json.loads(self.ledger_path.read_text())
+        for entry in ledger["entries"].values():
+            entry["state"] = "preflight_blocked"
+        self.ledger_path.write_text(json.dumps(ledger), encoding="utf-8")
+        result = self.execute(1, legacy, execute=True, config_id="legacy")
+        self.assertEqual(result["paired_completed"], 1)
+        self.assertEqual(legacy.model_calls, 3)
+
+    def test_skipped_busy_run_receipt_retries_on_the_next_invocation(self):
+        attempts = {"high": 0}
+
+        def behavior(case, effort):
+            if effort == "high" and attempts["high"] == 0:
+                attempts["high"] += 1
+                return "skipped_busy", "claude-haiku-5-5"
+            return "ok", "claude-haiku-5-5"
+
+        fake = FakeREST(behavior)
+        first = self.execute(1, fake, execute=True)
+        self.assertEqual(fake.model_calls, 3)
+        self.assertEqual(first["arms"]["high"]["completed"], 0)
+        ledger = json.loads(self.ledger_path.read_text())
+        high = next(entry for entry in ledger["entries"].values() if entry["effort"] == "high")
+        self.assertEqual(high["state"], "retry_pending")
+        self.assertEqual(high["attempts"][-1]["receipt"]["status"], "skipped_busy")
+
+        second = self.execute(1, fake, execute=True)
+        self.assertEqual(fake.model_calls, 4)
+        self.assertEqual(second["arms"]["high"]["completed"], 1)
 
     def _client(self, fake):
         return runner.TrialRunner("http://fixture.invalid", lambda: "fixture-auth", fake)
@@ -537,105 +567,10 @@ class RunnerTests(unittest.TestCase):
         with self.assertRaisesRegex(runner.RunnerError, "boolean complete"):
             self._client(FakeREST(get_handler=legacy)).get_reviews("m" * 64, "run-1")
 
-    def test_prior_spend_uses_recorded_attempt_or_receipt_cost(self):
-        ledger = {"entries": {
-            "a": {"attempts": [{"kind": "run", "receipt": {"cost_usd": 0.3}}]},
-            "b": {"attempts": [{"kind": "run", "receipt": {"attempts": [{"cost_usd": 0.2}]}}]},
-            "c": {"attempts": [{"kind": "dry_run", "receipt": {"estimated_usd": 9}}]},
-        }}
-        self.assertAlmostEqual(runner._prior_spend(ledger), 0.5)
-
-    def test_execute_without_approval_aborts_before_any_request(self):
-        fake = FakeREST()
-        data = frozen(1)
-        self.manifest_path.write_text(json.dumps(data), encoding="utf-8")
-        fake.bind([case["case_id"] for case in data["cases"]])
-        client = runner.TrialRunner("http://fixture.invalid", lambda: "fixture-auth", fake)
-        with self.assertRaisesRegex(approval.ApprovalError, "requires an explicit approval"):
-            runner.run(self.manifest_path, self.ledger_path, client, 1000, "claude-haiku-5-5",
-                       run_id="run-1", tenant_id="tenant-trial", execute=True)
-        self.assertEqual(fake.requests, [])
-        self.assertEqual(fake.events, [])
-
-    def test_missing_expired_and_mismatched_approvals_abort_with_zero_provider_calls(self):
-        fake = FakeREST()
-        data = frozen(1)
-        self.manifest_path.write_text(json.dumps(data), encoding="utf-8")
-        fake.bind([case["case_id"] for case in data["cases"]])
-        client = runner.TrialRunner("http://fixture.invalid", lambda: "fixture-auth", fake)
-        preflight = runner.run(self.manifest_path, self.ledger_path, client, 1000, "claude-haiku-5-5",
-                               run_id="run-1", tenant_id="tenant-trial", execute=False)
-        fake.events.clear()
-        fake.requests.clear()
-
-        def execute(path, clock=None):
-            return runner.run(self.manifest_path, self.ledger_path, client, 1000, "claude-haiku-5-5",
-                              run_id="run-1", tenant_id="tenant-trial", execute=True,
-                              approval_path=path, clock=clock)
-
-        with self.assertRaisesRegex(approval.ApprovalError, "requires an explicit approval"):
-            execute(None)
-        self.assertEqual(fake.events, [])
-
-        now = 1_700_000_000.0
-        variants = [
-            ({"tenant_id": "other-tenant"}, None, "tenant_id"),
-            ({"endpoint": "http://other.invalid"}, None, "endpoint"),
-            ({"manifest_sha256": "b" * 64}, None, "manifest_sha256"),
-            ({"run_id": "run-2"}, None, "run_id"),
-            ({"expires_at": "1970-01-01T00:00:01Z"}, now, "expired"),
-        ]
-        for overrides, clock, message in variants:
-            with self.subTest(overrides=overrides):
-                path = self.approval_record(preflight, **overrides)
-                with self.assertRaisesRegex(approval.ApprovalError, message):
-                    execute(path, clock=(lambda: now) if clock else None)
-                self.assertEqual(fake.model_calls, 0)
-                self.assertEqual(fake.events, [])
-
-        mismatch = self.approval_record(preflight, preflight_sha256="c" * 64)
-        with self.assertRaisesRegex(approval.ApprovalError, "preflight_sha256"):
-            execute(mismatch)
-        self.assertEqual(fake.model_calls, 0)
-
-    def test_exceeded_ceiling_counts_prior_spend_and_unknown_reservations_without_replay(self):
-        class InterruptHigh(FakeREST):
-            def request(self, method, url, headers, body, timeout):
-                if method == "POST" and not json.loads(body).get("dry_run"):
-                    if "effort:high" in json.loads(body)["tags"]:
-                        self.model_calls += 1
-                        raise TimeoutError("fixture timeout")
-                return super().request(method, url, headers, body, timeout)
-
-        fake = InterruptHigh(estimate=0.25)
-        data = frozen(1)
-        self.manifest_path.write_text(json.dumps(data), encoding="utf-8")
-        fake.bind([case["case_id"] for case in data["cases"]])
-        client = runner.TrialRunner("http://fixture.invalid", lambda: "fixture-auth", fake)
-        preflight = runner.run(self.manifest_path, self.ledger_path, client, 1000, "claude-haiku-5-5",
-                               run_id="run-1", tenant_id="tenant-trial", execute=False)
-        first = runner.run(self.manifest_path, self.ledger_path, client, 1000, "claude-haiku-5-5",
-                           run_id="run-1", tenant_id="tenant-trial", execute=True,
-                           approval_path=self.approval_record(preflight, ceiling=1000))
-        self.assertEqual(first["arms"]["high"]["completed"], 0)
-        self.assertEqual(fake.model_calls, 3)
-        calls = fake.model_calls
-        ledger = json.loads(self.ledger_path.read_text())
-        high = next(entry for entry in ledger["entries"].values() if entry["effort"] == "high")
-        self.assertEqual(high["state"], "started_unknown")
-
-        low = self.approval_record(preflight, ceiling=1.6)
-        with self.assertRaisesRegex(approval.ApprovalError, "below required"):
-            runner.run(self.manifest_path, self.ledger_path, client, 1000, "claude-haiku-5-5",
-                       run_id="run-1", tenant_id="tenant-trial", execute=True, approval_path=low)
-        self.assertEqual(fake.model_calls, calls)
-
-        resumed = runner.run(self.manifest_path, self.ledger_path, client, 1000, "claude-haiku-5-5",
-                             run_id="run-1", tenant_id="tenant-trial", execute=True,
-                             approval_path=self.approval_record(preflight, ceiling=3.0))
-        self.assertEqual(fake.model_calls, calls)
-        self.assertEqual(resumed["arms"]["high"]["completed"], 0)
-        self.assertAlmostEqual(resumed["approval_required_usd"], 2.04)
+    def test_runner_has_no_spend_gate_surface(self):
+        for name in ("Projection" + "OverCap", "_prior" + "_spend", "_unknown" + "_reservations",
+                     "_receipt" + "_cost", "RETRY" + "_EXPOSURE"):
+            self.assertFalse(hasattr(runner, name), name)
 
 
 if __name__ == "__main__":

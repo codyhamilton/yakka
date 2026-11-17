@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import math
 import os
 import pathlib
 import re
@@ -14,10 +13,7 @@ import urllib.parse
 import urllib.request
 from typing import Any, Callable
 
-import approval
-
 EFFORTS = ("high", "xhigh", "max")
-RETRY_EXPOSURE = 2  # Phase 4 reserves one bounded retry per started review.
 VALID_COMPLETION = {"ok", "ok_partial"}
 RUN_ID = re.compile(r"[A-Za-z0-9_-]{1,32}")
 TAG = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/=-]{0,95}")
@@ -28,10 +24,6 @@ EVIDENCE_MAX_ROWS = 1000000
 
 
 class RunnerError(RuntimeError):
-    pass
-
-
-class ProjectionOverCap(RunnerError):
     pass
 
 
@@ -356,57 +348,12 @@ def _duplicate_body(receipt: dict[str, Any]) -> dict[str, Any] | None:
             "tags": receipt.get("tags"), "attempts": receipt.get("attempts")}
 
 
-def _receipt_cost(receipt: Any) -> float:
-    """Sum recorded attempt charges, never inventing a price for a missing cost."""
-    if not isinstance(receipt, dict):
-        return 0.0
-    total = 0.0
-    attempts = receipt.get("attempts")
-    if isinstance(attempts, list) and attempts:
-        for attempt in attempts:
-            if not isinstance(attempt, dict):
-                continue
-            value = attempt.get("cost_usd")
-            if isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value):
-                total += float(value)
-    else:
-        value = receipt.get("cost_usd")
-        if isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value):
-            total += float(value)
-    return total
-
-
-def _prior_spend(ledger: dict[str, Any]) -> float:
-    """Charges already recorded by real run attempts, excluding dry-run estimates."""
-    total = 0.0
-    for entry in ledger.get("entries", {}).values():
-        if not isinstance(entry, dict):
-            continue
-        for attempt in entry.get("attempts", []):
-            if isinstance(attempt, dict) and attempt.get("kind") == "run":
-                total += _receipt_cost(attempt.get("receipt"))
-    return total
-
-
-def _unknown_reservations(ledger: dict[str, Any], retry_by_arm: dict[tuple[Any, Any], float]) -> float:
-    """Conservatively reserve the retry-inclusive estimate for unfinished claims."""
-    total = 0.0
-    for entry in ledger.get("entries", {}).values():
-        if not isinstance(entry, dict):
-            continue
-        if entry.get("state") in {"started", "started_unknown"}:
-            total += retry_by_arm.get((entry.get("case_id"), entry.get("effort")), 0.0)
-    return total
-
-
 def run(manifest_path: pathlib.Path, ledger_path: pathlib.Path, runner: TrialRunner,
-        cap_usd: float, reviewer_model: str, *, run_id: str, tenant_id: str,
-        execute: bool = False, config_id: str = "default",
-        approval_path: pathlib.Path | None = None,
-        clock: Callable[[], float] | None = None) -> dict[str, Any]:
-    """Preflight all arms; optionally run valid, under-cap, approved requests."""
-    if cap_usd < 0 or not reviewer_model:
-        raise RunnerError("a non-negative cap and reviewer model id are required")
+        reviewer_model: str, *, run_id: str, tenant_id: str,
+        execute: bool = False, config_id: str = "default") -> dict[str, Any]:
+    """Preflight all arms; optionally run the ready requests."""
+    if not reviewer_model:
+        raise RunnerError("a reviewer model id is required")
     if not isinstance(run_id, str) or not RUN_ID.fullmatch(run_id):
         raise RunnerError("run id must be 1-32 characters from [A-Za-z0-9_-]")
     if not isinstance(tenant_id, str) or not tenant_id:
@@ -414,21 +361,11 @@ def run(manifest_path: pathlib.Path, ledger_path: pathlib.Path, runner: TrialRun
     manifest = _manifest(pathlib.Path(manifest_path))
     cases = _case_map(manifest)
     manifest_hash = manifest["manifest_sha256"]
-    now = (clock or time.time)()
-    record = None
-    if execute:
-        if approval_path is None:
-            raise approval.ApprovalError("--execute requires an explicit approval record")
-        record = approval.load(approval_path, now=now)
-        # Identity/expiry mismatches abort before any request, including resume.
-        approval.check_binding(record, endpoint=runner.base_url, tenant_id=tenant_id,
-                               manifest_sha256=manifest_hash, run_id=run_id)
     runner.verify_identity(tenant_id)  # refuse a mismatched key before any review POST
     ledger_path = pathlib.Path(ledger_path)
     ledger = _load_ledger(ledger_path, manifest_hash, run_id, tenant_id)
-    cfg = _sha(_canonical({"reviewer_model": reviewer_model, "cap_usd": cap_usd, "config_id": config_id}))
-    estimate_rows = []
-    projection = 0.0
+    cfg = _sha(_canonical({"reviewer_model": reviewer_model, "config_id": config_id}))
+    preflight_rows = []
     for case_id in manifest["run_order"]:
         case = cases[case_id]
         for effort in EFFORTS:
@@ -437,40 +374,27 @@ def run(manifest_path: pathlib.Path, ledger_path: pathlib.Path, runner: TrialRun
             entry = ledger["entries"].setdefault(key, {"case_id": case_id, "effort": effort,
                 "request_identity": key, "attempts": [], "state": "new"})
             entry["preflight_config"] = cfg
-            # Changed budget/config invalidates only zero-call outcomes; started work is immutable.
+            # Changed config invalidates only zero-call outcomes; started work is immutable.
             if entry.get("preflight_status") is None or entry.get("preflight_config_seen") != cfg:
                 receipt = runner.post_review(req)
                 entry.setdefault("attempts", []).append({"kind": "dry_run", "at": time.time(), "receipt": receipt})
                 entry["preflight_status"] = receipt["status"]
                 entry["preflight_receipt"] = receipt
                 entry["preflight_config_seen"] = cfg
-                if receipt["status"] in {"unavailable", "skipped_budget"}:
+                if receipt["status"] == "unavailable":
                     entry["state"] = "preflight_blocked"
-            estimate = float(entry.get("preflight_receipt", {}).get("estimated_usd", 0) or 0)
-            retry_total = estimate * RETRY_EXPOSURE
-            projection += retry_total
-            estimate_rows.append({"case_id": case_id, "effort": effort, "estimated_usd": estimate,
-                                  "retry_inclusive_usd": retry_total, "status": entry.get("preflight_status")})
+            preflight_rows.append({"case_id": case_id, "effort": effort,
+                                   "status": entry.get("preflight_status")})
     _save_ledger(ledger_path, ledger)
-    blocked_efforts = sorted({row["effort"] for row in estimate_rows
-                              if row["status"] in {"unavailable", "skipped_budget"}})
-    retry_by_arm = {(row["case_id"], row["effort"]): row["retry_inclusive_usd"] for row in estimate_rows}
+    blocked_efforts = sorted({row["effort"] for row in preflight_rows
+                              if row["status"] == "unavailable"})
     summary = {"manifest_hash": manifest_hash, "run_id": run_id, "tenant_id": tenant_id,
-               "estimates": estimate_rows, "retry_exposure_per_review": RETRY_EXPOSURE,
-               "projected_usd": projection, "cap_usd": cap_usd, "refused_over_cap": projection > cap_usd,
-               "readiness": {"ready": projection <= cap_usd and not blocked_efforts,
-                             "refused_over_cap": projection > cap_usd,
-                             "blocked_efforts": blocked_efforts}}
-    if projection > cap_usd:
-        return summary
+               "preflight": preflight_rows,
+               "readiness": {"ready": not blocked_efforts, "blocked_efforts": blocked_efforts}}
     if not execute:
         return summary
-
-    approval.check_preflight(record, summary)
-    required = _prior_spend(ledger) + _unknown_reservations(ledger, retry_by_arm) + projection
-    summary["approval_required_usd"] = required
-    summary["authorized_max_usd"] = record["authorized_max_usd"]
-    approval.check_ceiling(record, required)
+    if not summary["readiness"]["ready"]:
+        raise RunnerError("preflight blocked efforts: " + ", ".join(blocked_efforts))
 
     # Reconcile existing server records first; duplicate receipts carry their own canonical body.
     records = runner.get_reviews(manifest_hash, run_id, tenant_id)["reviews"]
@@ -488,8 +412,8 @@ def run(manifest_path: pathlib.Path, ledger_path: pathlib.Path, runner: TrialRun
             if entry.get("state") in {"started", "started_unknown", "complete"}:
                 entry["state"] = "started_unknown" if entry.get("state") != "complete" else "complete_mismatch"
                 continue
-            if entry.get("preflight_status") in {"unavailable", "skipped_budget"}:
-                # These statuses are zero-provider-call outcomes; configuration changes can resume them.
+            if entry.get("preflight_status") in {"unavailable"}:
+                # Only an unavailable dry-run blocks an unchanged config; other outcomes retry.
                 if entry.get("preflight_config_seen") == cfg:
                     continue
             entry["state"] = "started"
@@ -505,9 +429,11 @@ def run(manifest_path: pathlib.Path, ledger_path: pathlib.Path, runner: TrialRun
                 continue
             entry.setdefault("attempts", []).append({"kind": "run", "at": time.time(), "receipt": receipt})
             entry["last_status"] = receipt["status"]
-            if receipt["status"] in {"unavailable", "skipped_budget"}:
+            if receipt["status"] == "unavailable":
                 entry["state"] = "preflight_blocked"
                 entry["preflight_config_seen"] = cfg
+            elif receipt["status"] == "skipped_busy":
+                entry["state"] = "retry_pending"
             elif receipt["status"] == "skipped_duplicate":
                 entry["duplicate_receipt"] = receipt
                 canonical = _duplicate_body(receipt)
