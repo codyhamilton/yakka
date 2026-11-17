@@ -61,3 +61,9 @@ The Phase 2 outcome is exercised through its own entry point by `test_three_case
 Artifact feedback: all three briefs and all three reports `delivered`, screen pass; no flagged checks.
 
 **Carried:** None.
+
+## Phase 3 — garcia-music manifest of at least 300 eligible cases
+
+Run: OpenCode `opencode run` — model `opencode-go/deepseek-v4.1-flash`; start 2026-11-18 04:39 AEST. Phase is `approach: open`; the invoker declares its approach as two candidate extractors compared, freezing at most 360 eligible with a 300 floor and no padding.
+
+Units: TBD by refine.
