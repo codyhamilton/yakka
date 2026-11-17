@@ -18,6 +18,20 @@ def git(repo, *args):
     return subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True).stdout.decode().strip()
 
 
+class RemoteURLRedaction(unittest.TestCase):
+    def test_https_token_is_not_stored(self):
+        raw = "https://x-access-token:ghp_exampleexampleexample@github.com/codyhamilton/garcia-music.git"
+        redacted = manifest._redact_remote_url(raw)
+        self.assertEqual(redacted, "https://github.com/codyhamilton/garcia-music.git")
+        self.assertNotIn("ghp_", redacted)
+        self.assertNotIn("x-access-token", redacted)
+        self.assertEqual(manifest._repository_identity(raw), manifest._repository_identity(redacted))
+
+    def test_scp_remote_is_unchanged(self):
+        raw = "git@github.com:codyhamilton/garcia-music.git"
+        self.assertEqual(manifest._redact_remote_url(raw), raw)
+
+
 class ManifestFixtures(unittest.TestCase):
     def setUp(self):
         tmp_root = ROOT / ".scratch"
@@ -76,6 +90,7 @@ class ManifestFixtures(unittest.TestCase):
         self.assertNotIn("Criteria amended at head", case["capture"]["diff"])
         self.assertNotIn("docs/plans/demo/DESIGN.md", case["capture"]["files"])
         self.assertIn("Criteria amended at head", git(self.repo, "show", f"{self.head}:docs/plans/demo/DESIGN.md"))
+        self.assertEqual(self.out.stat().st_mode & 0o777, 0o600)
         self.assertEqual(case["criteria"]["source"], "base_blob")
         self.assertEqual(case["criteria"]["content_hash"], git(self.repo, "rev-parse", f"{self.base}:docs/plans/demo/DESIGN.md"))
         self.assertNotEqual(case["criteria"]["content_hash"], git(self.repo, "rev-parse", f"{self.head}:docs/plans/demo/DESIGN.md"))

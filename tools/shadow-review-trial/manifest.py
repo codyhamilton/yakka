@@ -4,6 +4,7 @@ from __future__ import annotations
 import datetime
 import hashlib
 import json
+import os
 import pathlib
 import random
 import re
@@ -238,6 +239,22 @@ def load_pr_export(repo: pathlib.Path, path: pathlib.Path, candidate_strata: dic
     return {"sha256": _sha(raw), "by_head": by_head}
 
 
+def _redact_remote_url(url: str) -> str:
+    """Drop userinfo from an http(s) remote so a token in the URL is not stored.
+
+    SCP-style remotes (``git@host:owner/repo.git``) have no URL userinfo and
+    are returned unchanged. The stored value is only an audit of which remote
+    was fetched; ``_repository_identity`` is what the freeze compares.
+    """
+    if "://" not in url:
+        return url
+    scheme, rest = url.split("://", 1)
+    host, sep, path = rest.partition("/")
+    if "@" not in host:
+        return url
+    return scheme + "://" + host.split("@", 1)[1] + (sep + path if sep else "")
+
+
 def _repository_identity(url: str) -> str:
     value = url.strip().rstrip("/")
     if value.startswith("file://"):
@@ -259,8 +276,9 @@ def prepare_history(repo: pathlib.Path, remote: str = "origin",
     """Fetch and verify complete, non-shallow history from the configured remote."""
     run = run or _git
     try:
-        remote_url = str(run(repo, "remote", "get-url", remote)).strip()
-        identity = _repository_identity(remote_url)
+        raw_remote_url = str(run(repo, "remote", "get-url", remote)).strip()
+        identity = _repository_identity(raw_remote_url)
+        remote_url = _redact_remote_url(raw_remote_url)
         expected = _repository_identity(expected_repository)
         if identity != expected:
             raise HistoryPreparationError(
@@ -436,7 +454,10 @@ def create_manifest(repo: pathlib.Path, output: pathlib.Path, seed: int = 1, tar
                "comparators": comparators}
     frozen["manifest_sha256"] = _canonical_hash(frozen)
     output.parent.mkdir(parents=True, exist_ok=True)
-    with output.open("x", encoding="utf-8") as handle:
+    # The manifest holds private diffs and criteria. 0o600 stays owner-only
+    # under a typical umask (umask only clears bits).
+    fd = os.open(output, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as handle:
         handle.write(json.dumps(frozen, indent=2, sort_keys=True) + "\n")
     return frozen
 
