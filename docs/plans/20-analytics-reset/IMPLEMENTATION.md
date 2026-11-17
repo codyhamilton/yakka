@@ -45,6 +45,13 @@ The phase outcome is approach-open; this run uses the signed outcome and CONTRAC
 - Deviations / unfinished: the typed `population.relation`/`associations`/`resolved_n` layer and its invariant evidence were **not implemented**; responses keep the pre-existing population objects. Follow-up brief 6-05b closes it before 6-06.
 - Verification: focused cohort/session/artifact tests passed; store passed (6.979s); serve failed only the two pre-existing activity tests; `go build ./internal/...` and `git diff --check` clean.
 
+### `6-05b-cohort-population-relation.md`
+
+- Outcome: committed as `a0b4695` (`Report typed cohort population, relation and rejection associations`); added `CohortCount`, `RejectionAssociations` and `ContentHashCount`, a shared population/relation builder, session-unit populations on `/query`, `/distribution`, `/summary`, `/series`, `/explore`, entity-unit populations elsewhere, and target-side rejection associations with the identity and treatment.
+- Surfaces: `packages/yakka/internal/{serve,store}/` cohort population paths, new `analytics_population.go`, focused tests and `reports/6-05b-cohort-population-relation.md`.
+- Deviations / unfinished: non-session populations reuse the post-restriction count for `scope_n` and `cohort_n`; `/scores` and `/score-series` expose one content-hash population rather than one per check; no store-level unit test. 6-07 must check these against the invariants.
+- Verification: focused cohort population tests passed; store passed (6.934s); serve failed only the two pre-existing activity tests.
+
 ## Phase 6 (earlier run) — Plan and execution entities and the cohort predicate
 
 Refinement commit: `c85e5b9` (`docs: refine Phase 6 analytics work`). Four sequential units; plan/execution entity rows, cohort resolution, target-route application, then time cohorts/activity and schema publication. The signed contract in CONTRACTS.md 17.3 supplies the implementation boundaries. `artifact_feedback` on all four briefs returned delivered / screen pass (`jev-1.13.0`). Phase 5 carried items remain outside this phase: artifact file-to-time-bucket assignment and score-lens memory-growth evidence.
