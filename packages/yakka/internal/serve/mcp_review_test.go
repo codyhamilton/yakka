@@ -68,15 +68,30 @@ func TestReviewMCPRegistrationContract(t *testing.T) {
 }
 
 func TestReviewMCPRegistrationAvailability(t *testing.T) {
+	listed := func(s *Server) bool {
+		list := mcpDecode(t, mcpRequest(t, s.Handler(), "ka", `{"id":1,"method":"tools/list"}`, nil))["result"].(map[string]any)["tools"].([]any)
+		for _, raw := range list {
+			if m, _ := raw.(map[string]any); m["name"] == "review_change" {
+				return true
+			}
+		}
+		return false
+	}
 	token := New(Config{Addr: "0.0.0.0:8770", Data: t.TempDir(), Keys: []KeyPair{{"a", "ka"}}, ReviewToken: "fixture-only"}, Options{DisableWorker: true})
 	t.Cleanup(func() { _ = token.Close() })
 	if token.mcpTool("review_change") == nil {
 		t.Fatal("token in remote mode did not register review_change")
 	}
+	if !listed(token) {
+		t.Fatal("token in remote mode did not list review_change")
+	}
 	noToken := New(Config{Addr: "0.0.0.0:8770", Data: t.TempDir(), Keys: []KeyPair{{"a", "ka"}}}, Options{DisableWorker: true})
 	t.Cleanup(func() { _ = noToken.Close() })
 	if noToken.mcpTool("review_change") != nil {
 		t.Fatal("token-less server registered review_change")
+	}
+	if listed(noToken) {
+		t.Fatal("token-less server listed review_change")
 	}
 	local := New(Config{Addr: "127.0.0.1:8770", Data: t.TempDir(), ReviewToken: "fixture-only"}, Options{DisableWorker: true})
 	t.Cleanup(func() { _ = local.Close() })
