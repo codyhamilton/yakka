@@ -1,10 +1,16 @@
 # Plan 20 implementation
 
 Tool: opencode execute skill
-Run ID: feat/20-analytics-reset phase 8 (2026-11-18)
-Start time: 2026-11-18 07:50 Australia/Brisbane
+Run ID: feat/20-analytics-reset phase 9 (2026-11-18)
+Start time: 2026-11-18 09:28 Australia/Brisbane
 
-Phase 7 (below) closed at `5df6413` with the `Yakka-Phase: 20-analytics-reset:7` trailer. This run builds Phase 8 only.
+Phase 8 (below) closed at `35195d2` with the `Yakka-Phase: 20-analytics-reset:8` trailer, after `83899d0` merged origin/master into the branch. This run builds Phase 9 only.
+
+## Phase 9 — Workspace engine, Start and Pulse
+
+The phase outcome is approach-open (the panel engine, view spec codec and linking model are new). This run uses the signed outcome and CONTRACTS.md 17.3, 17.3.1, 17.5 and 17.7 as the fixed yardstick. No new grain, join, route, dependency, gesture or contract is authorized. Phase 9 has no Units list in DESIGN.md and is more than one worker's work, so `refine` is dispatched as its own context; its verdict decides the units.
+
+Refinement dispatched 2026-11-18 09:30 Australia/Brisbane; verdict recorded below when it lands.
 
 ## Phase 8 — Distribution and categorical chart kit
 
