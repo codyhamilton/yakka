@@ -2,8 +2,10 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"math"
 	"sort"
+	"strconv"
 	"time"
 )
 
@@ -73,37 +75,7 @@ func (t *Tenant) ScoreSeries(ctx context.Context, f AnalyticsFilter, kind, bucke
 	if _, err := tx.ExecContext(ctx, `CREATE TEMP TABLE IF NOT EXISTS score_series_population (bucket TEXT NOT NULL, content_hash TEXT NOT NULL, version_ts REAL NOT NULL, PRIMARY KEY(bucket,content_hash)) WITHOUT ROWID; DELETE FROM score_series_population`); err != nil {
 		return nil, err
 	}
-	rows, err := tx.QueryContext(ctx, `
-		SELECT content_hash, ts FROM facts
-		WHERE type='artifact_version' AND content_hash != '' AND kind=? AND `+w, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	ins, err := tx.PrepareContext(ctx, `INSERT INTO score_series_population(bucket,content_hash,version_ts) VALUES(?,?,?) ON CONFLICT(bucket,content_hash) DO UPDATE SET version_ts=max(version_ts,excluded.version_ts)`)
-	if err != nil {
-		rows.Close()
-		return nil, err
-	}
-	for rows.Next() {
-		var hash string
-		var ts float64
-		if err := rows.Scan(&hash, &ts); err != nil {
-			return nil, err
-		}
-		b := scoreSeriesBucketStart(ts, bucket, f.TZ)
-		if _, err := ins.ExecContext(ctx, b, hash, ts); err != nil {
-			ins.Close()
-			rows.Close()
-			return nil, err
-		}
-	}
-	if err := rows.Err(); err != nil {
-		ins.Close()
-		return nil, err
-	}
-	rows.Close()
-	if err := ins.Close(); err != nil {
+	if err := insertScoreSeriesPopulation(ctx, tx, f, kind, bucket, w, args); err != nil {
 		return nil, err
 	}
 	// SQL owns the hash join, latest-score selection and exact order statistics. SQLite may spill
@@ -148,6 +120,62 @@ func (t *Tenant) ScoreSeries(ctx context.Context, f AnalyticsFilter, kind, bucke
 		out = append(out, ScoreSeriesCheck{Name: c, Points: byCheck[c]})
 	}
 	return out, nil
+}
+
+// insertScoreSeriesPopulation fills the temp population without retaining scanned facts in Go.
+// UTC buckets are assigned in SQL. A non-UTC zone still uses the calendar helper, one row at a
+// time, because the bucket label carries that zone's offset.
+func insertScoreSeriesPopulation(ctx context.Context, tx *sql.Tx, f AnalyticsFilter, kind, bucket, w string, args []any) error {
+	if f.TZ != nil && f.TZ != time.UTC {
+		rows, err := tx.QueryContext(ctx, `
+			SELECT content_hash, ts FROM facts
+			WHERE type='artifact_version' AND content_hash != '' AND kind=? AND `+w, args...)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		ins, err := tx.PrepareContext(ctx, `INSERT INTO score_series_population(bucket,content_hash,version_ts) VALUES(?,?,?) ON CONFLICT(bucket,content_hash) DO UPDATE SET version_ts=max(version_ts,excluded.version_ts)`)
+		if err != nil {
+			return err
+		}
+		defer ins.Close()
+		for rows.Next() {
+			var hash string
+			var ts float64
+			if err := rows.Scan(&hash, &ts); err != nil {
+				return err
+			}
+			if _, err := ins.ExecContext(ctx, scoreSeriesBucketStart(ts, bucket, f.TZ), hash, ts); err != nil {
+				return err
+			}
+		}
+		return rows.Err()
+	}
+	expr := scoreSeriesBucketSQL(bucket, "ts")
+	_, err := tx.ExecContext(ctx, `
+		INSERT INTO score_series_population(bucket, content_hash, version_ts)
+		SELECT `+expr+`, content_hash, MAX(ts)
+		FROM facts
+		WHERE type='artifact_version' AND content_hash != '' AND kind=? AND `+w+`
+		GROUP BY 1, content_hash`, args...)
+	return err
+}
+
+func scoreSeriesBucketSQL(bucket, te string) string {
+	switch bucket {
+	case "day":
+		return "strftime('%Y-%m-%dT00:00:00', " + te + ", 'unixepoch') || 'Z'"
+	case "week":
+		return "date(" + te + ", 'unixepoch', 'weekday 0', '-6 days') || 'T00:00:00Z'"
+	case "month":
+		return "strftime('%Y-%m-01T00:00:00', " + te + ", 'unixepoch') || 'Z'"
+	case "year":
+		return "strftime('%Y-01-01T00:00:00', " + te + ", 'unixepoch') || 'Z'"
+	}
+	if n, ok := multiYearStep(bucket); ok {
+		return "printf('%04d-01-01T00:00:00Z',(CAST(strftime('%Y'," + te + ", 'unixepoch') AS INTEGER)/" + strconv.Itoa(n) + ")*" + strconv.Itoa(n) + ")"
+	}
+	return "''"
 }
 
 // ScoreSeriesObservations returns hash/check observations after canonicalizing each hash inside

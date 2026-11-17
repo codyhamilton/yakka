@@ -117,7 +117,7 @@ func (t *Tenant) Distribution(ctx context.Context, f AnalyticsFilter, p Distribu
 			cm AS (SELECT conversation_id,model FROM mc WHERE rn=1),
 			per AS (SELECT conversation_id,sum(CASE WHEN ` + pricedExpr + `=1 THEN ` + valueExpr + ` ELSE 0 END) value,
 				sum(1-` + pricedExpr + `) unpriced,sum(` + pricedExpr + `) priced FROM kept GROUP BY conversation_id)
-			INSERT INTO dist_samples SELECT ` + keyExpr + `,per.value,per.priced,per.unpriced FROM per LEFT JOIN cm USING(conversation_id) LEFT JOIN session_repo sr USING(conversation_id) LEFT JOIN session_harness sh USING(conversation_id) LEFT JOIN session_model sm USING(conversation_id)`
+			INSERT INTO dist_samples SELECT ` + keyExpr + `,per.value,per.priced,per.unpriced FROM per LEFT JOIN cm USING(conversation_id) LEFT JOIN session_repo sr USING(conversation_id) LEFT JOIN session_harness sh USING(conversation_id) LEFT JOIN session_model sm USING(conversation_id)` + sessionPredicateSQL(f2, "per", &args)
 	} else {
 		if p.Dim == "session_repo" {
 			query = cte + `, session_repo_counts AS (SELECT conversation_id,COUNT(DISTINCT repo_id) n,MIN(repo_id) repo FROM facts WHERE type IN ('artifact_version','commit') AND repo_id!='' GROUP BY conversation_id), session_repo AS (SELECT conversation_id,CASE WHEN n=1 THEN repo WHEN n>1 THEN '(multi)' ELSE '(none)' END repo FROM session_repo_counts) INSERT INTO dist_samples SELECT ` + keyExpr + `,` + valueExpr + `,` + pricedExpr + `,1-` + pricedExpr + ` FROM kept LEFT JOIN session_repo sr USING(conversation_id)`
