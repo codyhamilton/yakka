@@ -115,16 +115,20 @@ type message struct {
 type outputConfig struct {
 	Effort string `json:"effort"`
 }
+type messagesUsage struct {
+	InputTokens  int `json:"input_tokens"`
+	OutputTokens int `json:"output_tokens"`
+}
+
 type messagesResponse struct {
 	Model   string `json:"model"`
 	Content []struct {
 		Type string `json:"type"`
 		Text string `json:"text"`
 	} `json:"content"`
-	Usage struct {
-		InputTokens  int `json:"input_tokens"`
-		OutputTokens int `json:"output_tokens"`
-	} `json:"usage"`
+	// Usage is a pointer so a missing or null usage object stays unreported.
+	// A present object, even with zero tokens, is reported usage.
+	Usage *messagesUsage `json:"usage"`
 }
 
 // Review sends packet.Prompt as the sole user message, then validates the
@@ -174,7 +178,13 @@ func (r *Reviewer) Review(ctx context.Context, packet Packet, criteria []Criteri
 		return Result{}, &ProviderError{Status: ProviderInvalid}
 	}
 	invalid := func() error {
-		return &ProviderError{Status: ProviderInvalid, InputTokens: envelope.Usage.InputTokens, OutputTokens: envelope.Usage.OutputTokens, UsageReported: true}
+		pe := &ProviderError{Status: ProviderInvalid}
+		if envelope.Usage != nil {
+			pe.InputTokens = envelope.Usage.InputTokens
+			pe.OutputTokens = envelope.Usage.OutputTokens
+			pe.UsageReported = true
+		}
+		return pe
 	}
 	if len(envelope.Content) != 1 {
 		return Result{}, invalid()
@@ -193,7 +203,9 @@ func (r *Reviewer) Review(ctx context.Context, packet Packet, criteria []Criteri
 		return Result{}, invalid()
 	}
 	result.Model = envelope.Model
-	result.InputTokens = envelope.Usage.InputTokens
-	result.OutputTokens = envelope.Usage.OutputTokens
+	if envelope.Usage != nil {
+		result.InputTokens = envelope.Usage.InputTokens
+		result.OutputTokens = envelope.Usage.OutputTokens
+	}
 	return result, nil
 }
