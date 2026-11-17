@@ -109,19 +109,23 @@ func sessionPopulation(scopeN, cohortN, returnedN int, relation map[string]any) 
 // contentPopulation is the content_hash-unit population /scores and /score-series report,
 // including the session relation's target_sessions counts.
 func contentPopulation(ctx context.Context, r *http.Request, ts *tenantState, f store.AnalyticsFilter, kind string) (map[string]any, error) {
-	n, err := ts.t.ContentHashCount(ctx, f, kind)
+	scopeN, err := ts.t.ContentHashCount(ctx, withoutCohort(f), kind)
 	if err != nil {
 		return nil, err
 	}
-	scopeN, cohortN, err := cohortSessionCounts(ctx, ts.t, f)
+	cohortN, err := ts.t.ContentHashCount(ctx, f, kind)
 	if err != nil {
 		return nil, err
 	}
-	rel, err := cohortRelation(ctx, ts.t, f, false, scopeN, cohortN, true)
+	scopeSessions, cohortSessions, err := cohortSessionCounts(ctx, ts.t, f)
+	if err != nil {
+		return nil, err
+	}
+	rel, err := cohortRelation(ctx, ts.t, f, false, scopeSessions, cohortSessions, true)
 	if err != nil {
 		return nil, err
 	}
 	return map[string]any{"grain": "content", "unit": "content_hash",
-		"scope_n": n, "cohort_n": n, "eligible_n": n, "returned_n": 0,
+		"scope_n": scopeN, "cohort_n": cohortN, "eligible_n": cohortN, "returned_n": 0,
 		"missing_by_reason": map[string]int{}, "relation": rel}, nil
 }
