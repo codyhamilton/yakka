@@ -167,3 +167,8 @@ Run: OpenCode `opencode run` — model `opencode-go/deepseek-v4.1-flash`; start 
 - gate: provision the dedicated synthetic trial tenant and its separate `read_write` key, and record its immutable tenant id (operator/human act; the locally configured key is tenant `default`, not a dedicated trial tenant).
 - gate: after both hold, re-run Phase 5 — probe, then the frozen 360-case set at `high`/`xhigh`/`max`, the Phase 4 report and metric-only evidence under `docs/lab/RESEARCH/<date>-shadow-review-trial/`. Never pad and never deploy from the build.
 - Phase 5 report (when it runs): carry the leak check's `short_excerpts_skipped` and `foreign_plan_document_captures` beside `pass` (Phase 4: 1458 and 54 on the real manifest).
+
+## Amendment — optional YAKKA_REVIEW_MODEL (18 Nov 2026, 8:17 AM AEST)
+
+Cody asked that `review_change` not depend on `YAKKA_REVIEW_MODEL`, that the env stay optional, and that an unset model use the existing review default `review.LiveModel` (`claude-haiku-5-5`). Registration remains token + authenticated remote mode + 150-second MCP ceiling. The paid trial is not run in this amendment; after this plan is merged to master (the deploy path) only the non-spending `tools/list` probe is re-run. Phase 5's trial still waits on Cody's dedicated trial tenant id.
+

@@ -71,9 +71,10 @@ Server configuration is environment only:
 | `TYPESAFE_API_KEY` | scorer credential; server side only, never in any client config |
 | `CLAUDE_API_TOKEN` | review provider credential; set in remote mode and review is available to every authenticated tenant for any repo; server side only, sent only in the provider authentication header |
 
-`CLAUDE_API_TOKEN` is the only review setting. The model is the code constant `claude-haiku-5-5`;
-effort is chosen per call (`high`, `xhigh` or `max`, default `high`) and validated server-side; and
-Yakka applies no spend cap. Actual cost is still recorded per review.
+`CLAUDE_API_TOKEN` is the setting that enables review. The model defaults to `claude-haiku-5-5`;
+`YAKKA_REVIEW_MODEL` is an optional override and is not required for registration. Effort is chosen
+per call (`high`, `xhigh` or `max`, default `high`) and validated server-side; and Yakka applies no
+spend cap. Actual cost is still recorded per review.
 
 **Local mode** is loopback with no credential requirement, for one user on one machine:
 

@@ -70,8 +70,8 @@ Only the shim captures local content, in uncommitted or explicit range mode, usi
 policy values; it scans before egress and the server rescans. Machines need no provider key.
 The tool declares a 150-second timeout and no local actions; local capture is read-only.
 Registration depends on a non-empty `CLAUDE_API_TOKEN` in authenticated remote mode and a sufficient
-MCP timeout ceiling, without claiming deployment or live availability. The model is the code constant
-`claude-haiku-5-5` and any authenticated tenant's repo is reviewable; `skipped_busy` reports the
+MCP timeout ceiling, without claiming deployment or live availability. The model defaults to
+`claude-haiku-5-5` (optional `YAKKA_REVIEW_MODEL` override) and any authenticated tenant's repo is reviewable; `skipped_busy` reports the
 two-call per-tenant in-flight limit. Optional per-call `effort`, `tags` and `store` are validated
 server-side before spend or storage; per-call effort defaults to `high` and is never capped by a
 setting. A `store=true` duplicate returns the earlier review in full with

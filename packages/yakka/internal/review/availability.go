@@ -18,6 +18,17 @@ const LiveModel = "claude-haiku-5-5"
 type Availability struct {
 	Token string
 	Local bool
+	// Model is the optional YAKKA_REVIEW_MODEL override. Empty means LiveModel.
+	Model string
+}
+
+// EffectiveModel is the model a review call uses: Model if set, otherwise LiveModel
+// ("claude-haiku-5-5"), the existing review/Claude default and Plan 28 recommended model.
+func (c Availability) EffectiveModel() string {
+	if m := strings.TrimSpace(c.Model); m != "" {
+		return m
+	}
+	return LiveModel
 }
 
 type AvailabilityError struct{ Setting string }

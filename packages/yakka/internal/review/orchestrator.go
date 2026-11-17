@@ -239,6 +239,7 @@ func Run(ctx context.Context, tenant *store.Tenant, tenantID string, req Request
 	if err != nil {
 		return Receipt{}, err
 	}
+	model := cfg.Availability.EffectiveModel()
 	if req.DryRun {
 		if err := CheckAvailability(cfg.Availability, controls.effective); err != nil {
 			return Receipt{Status: "unavailable", Reason: safeReason(err)}, nil
@@ -311,7 +312,7 @@ func Run(ctx context.Context, tenant *store.Tenant, tenantID string, req Request
 		if err := tenant.WriteReviewInput(inputHash, inputBytes); err != nil {
 			return Receipt{}, errors.New("review input persistence failed")
 		}
-		key = executionKey(req, tenantID, repo, packet, resolved.Record, LiveModel, controls.effective, controls.profile, controls.tags)
+		key = executionKey(req, tenantID, repo, packet, resolved.Record, model, controls.effective, controls.profile, controls.tags)
 	}
 	id := makeID()
 	var release func()
@@ -329,7 +330,7 @@ func Run(ctx context.Context, tenant *store.Tenant, tenantID string, req Request
 			}
 			return cached, nil
 		} else if controls.legacyFallback {
-			legacyKey := PreUpgradeExecutionKey(req, tenantID, repo, packet, resolved.Record, LiveModel, controls.effective, controls.profile)
+			legacyKey := PreUpgradeExecutionKey(req, tenantID, repo, packet, resolved.Record, model, controls.effective, controls.profile)
 			if legacyKey != key {
 				legacyRow, legacyFound, legacyErr := tenant.ReviewByExecutionKey(ctx, repo, legacyKey)
 				if legacyErr != nil {
@@ -383,7 +384,7 @@ func Run(ctx context.Context, tenant *store.Tenant, tenantID string, req Request
 		if release != nil {
 			defer release()
 		}
-		reviewer := NewReviewer(cfg.Availability.Token, LiveModel, controls.effective, cfg.Endpoint)
+		reviewer := NewReviewer(cfg.Availability.Token, model, controls.effective, cfg.Endpoint)
 		reviewCtx, cancelReview := context.WithTimeout(ctx, reviewWallTime)
 		defer cancelReview()
 		for n := 1; n <= 2; n++ {
@@ -412,10 +413,10 @@ func Run(ctx context.Context, tenant *store.Tenant, tenantID string, req Request
 				a.Status = "ok"
 				a.CostKnown = true
 				inputSize := int64(res.InputTokens)
-				if tier, yes := store.PricingTier(LiveModel, inputSize, false); yes {
+				if tier, yes := store.PricingTier(model, inputSize, false); yes {
 					a.PricingTier = tier
 				}
-				a.CostUSD, _ = store.CostAtInputSize("claude", LiveModel, store.Tokens{In: int64(res.InputTokens), Out: int64(res.OutputTokens)}, inputSize, nil)
+				a.CostUSD, _ = store.CostAtInputSize("claude", model, store.Tokens{In: int64(res.InputTokens), Out: int64(res.OutputTokens)}, inputSize, nil)
 				attempts = append(attempts, a)
 				status = "ok"
 				if packet.Coverage.State != "complete" || res.Coverage != "complete" {
@@ -429,10 +430,10 @@ func Run(ctx context.Context, tenant *store.Tenant, tenantID string, req Request
 				a.InputTokens, a.OutputTokens = pe.InputTokens, pe.OutputTokens
 				a.CostKnown = true
 				inputSize := int64(pe.InputTokens)
-				if tier, yes := store.PricingTier(LiveModel, inputSize, false); yes {
+				if tier, yes := store.PricingTier(model, inputSize, false); yes {
 					a.PricingTier = tier
 				}
-				a.CostUSD, _ = store.CostAtInputSize("claude", LiveModel, store.Tokens{In: int64(pe.InputTokens), Out: int64(pe.OutputTokens)}, inputSize, nil)
+				a.CostUSD, _ = store.CostAtInputSize("claude", model, store.Tokens{In: int64(pe.InputTokens), Out: int64(pe.OutputTokens)}, inputSize, nil)
 			}
 			attempts = append(attempts, a)
 			status = a.Status
@@ -855,7 +856,7 @@ func persistRecord(ctx context.Context, t *store.Tenant, tenant string, r Reques
 	if r.Detail == "full" || !write {
 		out.Model = result.Model
 		if out.Model == "" {
-			out.Model = LiveModel
+			out.Model = cfg.Availability.EffectiveModel()
 		}
 		out.Effort = ctl.effective
 		out.Tags = ctl.tags
@@ -881,7 +882,7 @@ func persistRecord(ctx context.Context, t *store.Tenant, tenant string, r Reques
 		now = cfg.Now()
 	}
 	conv := "review:" + p.CaptureID[:min(12, len(p.CaptureID))]
-	model := LiveModel
+	model := cfg.Availability.EffectiveModel()
 	tags := ctl.tags
 	if tags == nil {
 		tags = []string{}
@@ -973,7 +974,7 @@ func persistReviewUsage(ctx context.Context, t *store.Tenant, status string, res
 	rec := map[string]any{
 		"type":              "review_usage",
 		"usage_id":          makeID(),
-		"configured_model":  LiveModel,
+		"configured_model":  cfg.Availability.EffectiveModel(),
 		"returned_model":    result.Model,
 		"configured_effort": ctl.configured,
 		"requested_effort":  ctl.requested,

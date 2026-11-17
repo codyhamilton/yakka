@@ -154,17 +154,24 @@ func TestReviewRESTUnavailableInLocalMode(t *testing.T) {
 
 func TestReviewEnvironmentConfigValidation(t *testing.T) {
 	env := func(m map[string]string) func(string) string { return func(k string) string { return m[k] } }
-	removed := map[string]string{
-		"CLAUDE_API_TOKEN":          "private-value",
-		"YAKKA_REVIEW_" + "MODEL":   "claude-haiku-5-5",
-		"YAKKA_REVIEW_" + "EFFORT":  "high",
-		"YAKKA_REVIEW_" + "USD_CAP": "zero",
-		"YAKKA_REVIEW_" + "REPOS":   "not-qualified",
+	unset, err := ConfigFromEnv(env(map[string]string{"CLAUDE_API_TOKEN": "private-value"}))
+	if err != nil || unset.ReviewToken != "private-value" || unset.ReviewModel != "" || unset.EffectiveReviewModel() != review.LiveModel {
+		t.Fatalf("unset model: config=%+v err=%v", unset, err)
 	}
-	for _, m := range []map[string]string{{"CLAUDE_API_TOKEN": "private-value"}, removed} {
-		c, err := ConfigFromEnv(env(m))
-		if err != nil || c.ReviewToken != "private-value" {
-			t.Fatalf("config=%+v err=%v", c, err)
-		}
+	// YAKKA_REVIEW_MODEL is optional; effort, cap and repo allowlist are still ignored and
+	// an invalid cap does not fail startup.
+	withOptional := map[string]string{
+		"CLAUDE_API_TOKEN":     "private-value",
+		"YAKKA_REVIEW_MODEL":   "optional-env-model",
+		"YAKKA_REVIEW_EFFORT":  "high",
+		"YAKKA_REVIEW_USD_CAP": "zero",
+		"YAKKA_REVIEW_REPOS":   "not-qualified",
+	}
+	c, err := ConfigFromEnv(env(withOptional))
+	if err != nil || c.ReviewToken != "private-value" {
+		t.Fatalf("optional model: config=%+v err=%v", c, err)
+	}
+	if c.ReviewModel != "optional-env-model" || c.EffectiveReviewModel() != "optional-env-model" {
+		t.Fatalf("optional model not applied: %+v", c)
 	}
 }

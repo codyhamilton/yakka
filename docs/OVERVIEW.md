@@ -65,8 +65,9 @@ call-and-record boundary; the tool declares 150 seconds and no local actions. Re
 `detail=full` includes validated findings, and a completed duplicate carries the original findings.
 The `read`-only `list_reviews` tool declares no local readers or actions. Registration requires a
 non-empty `CLAUDE_API_TOKEN` in authenticated remote mode and an MCP timeout ceiling of at least 150
-seconds; deployment and live availability require separate evidence. The model is the code constant
-`claude-haiku-5-5`, any authenticated tenant's repo is reviewable, and `skipped_busy` reports the
+seconds; it does not depend on `YAKKA_REVIEW_MODEL`. Deployment and live availability require
+separate evidence. The model defaults to `claude-haiku-5-5` (optional `YAKKA_REVIEW_MODEL` override),
+any authenticated tenant's repo is reviewable, and `skipped_busy` reports the
 two-call per-tenant in-flight limit. Per-call effort defaults to `high`, is validated server-side and
 is never capped by a setting.
 See [architecture](ARCHITECTURE.md#advisory-change-review) and

@@ -43,6 +43,17 @@ type Config struct {
 	// ignores it and allows loopback origins.
 	CORSOrigins []string
 	ReviewToken string
+	// ReviewModel is the optional YAKKA_REVIEW_MODEL override. Empty means
+	// review.LiveModel ("claude-haiku-5-5"). Registration does not depend on it.
+	ReviewModel string
+}
+
+// EffectiveReviewModel is the model reviews use: ReviewModel if set, otherwise review.LiveModel.
+func (c Config) EffectiveReviewModel() string {
+	if m := strings.TrimSpace(c.ReviewModel); m != "" {
+		return m
+	}
+	return review.LiveModel
 }
 
 // KeyPair maps one key to one tenant.
@@ -80,6 +91,7 @@ func ConfigFromEnv(getenv func(string) string) (Config, error) {
 	}
 	c := Config{Addr: getenv("YAKKA_SERVE_ADDR"), Data: getenv("YAKKA_SERVE_DATA")}
 	c.ReviewToken = strings.TrimSpace(getenv("CLAUDE_API_TOKEN"))
+	c.ReviewModel = strings.TrimSpace(getenv("YAKKA_REVIEW_MODEL"))
 	if c.Addr == "" {
 		c.Addr = "127.0.0.1:8770"
 	}
@@ -288,7 +300,8 @@ func New(cfg Config, opts Options) *Server {
 	s := &Server{cfg: cfg, opts: opts, registry: reg, mcpTools: mcpTools, mcpDiscovery: newMCPDiscoveryLimits(), grants: newDeviceGrants(), tenants: map[string]*tenantState{}, gates: map[string]*sync.RWMutex{}, stop: make(chan struct{}), screen: opts.ScreenStep}
 	// A review tool is advertised only when its declared 150-second contract
 	// fits this server's configured MCP call ceiling, a token is configured and
-	// the server is authenticated remote mode.
+	// the server is authenticated remote mode. Registration does not depend on
+	// YAKKA_REVIEW_MODEL; an unset model uses review.LiveModel.
 	if cfg.ReviewToken != "" && !cfg.Local() && mcpTools.maxCall >= 150 {
 		if err := s.RegisterReviewMCPTool(); err != nil {
 			panic("serve: review MCP tool: " + err.Error())
@@ -734,7 +747,7 @@ func (s *Server) auth(h tenantHandler) http.HandlerFunc {
 }
 
 func (s *Server) reviewAvailability() review.Availability {
-	return review.Availability{Token: s.cfg.ReviewToken, Local: s.cfg.Local()}
+	return review.Availability{Token: s.cfg.ReviewToken, Local: s.cfg.Local(), Model: s.cfg.ReviewModel}
 }
 
 func (s *Server) reviewsRoute(w http.ResponseWriter, r *http.Request) {

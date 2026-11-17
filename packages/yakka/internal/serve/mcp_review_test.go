@@ -100,6 +100,99 @@ func TestReviewMCPRegistrationAvailability(t *testing.T) {
 	}
 }
 
+func TestReviewChangeRegistrationUsesOptionalModel(t *testing.T) {
+	listed := func(s *Server) bool {
+		list := mcpDecode(t, mcpRequest(t, s.Handler(), "ka", `{"id":1,"method":"tools/list"}`, nil))["result"].(map[string]any)["tools"].([]any)
+		for _, raw := range list {
+			if m, _ := raw.(map[string]any); m["name"] == "review_change" {
+				return true
+			}
+		}
+		return false
+	}
+	env := func(m map[string]string) func(string) string { return func(k string) string { return m[k] } }
+
+	unset, err := ConfigFromEnv(env(map[string]string{"CLAUDE_API_TOKEN": "fixture-only", "YAKKA_SERVE_DATA": t.TempDir()}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if unset.ReviewModel != "" || unset.EffectiveReviewModel() != review.LiveModel {
+		t.Fatalf("env unset: %+v", unset)
+	}
+	sUnset := New(Config{Addr: "0.0.0.0:8770", Data: t.TempDir(), Keys: []KeyPair{{"a", "ka"}}, ReviewToken: unset.ReviewToken, ReviewModel: unset.ReviewModel}, Options{DisableWorker: true})
+	t.Cleanup(func() { _ = sUnset.Close() })
+	if sUnset.mcpTool("review_change") == nil || !listed(sUnset) {
+		t.Fatal("env unset: review_change should register with default model")
+	}
+	if sUnset.reviewAvailability().EffectiveModel() != review.LiveModel {
+		t.Fatalf("env unset effective model=%q", sUnset.reviewAvailability().EffectiveModel())
+	}
+
+	override := "optional-env-model"
+	set, err := ConfigFromEnv(env(map[string]string{"CLAUDE_API_TOKEN": "fixture-only", "YAKKA_REVIEW_MODEL": override, "YAKKA_SERVE_DATA": t.TempDir()}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if set.EffectiveReviewModel() != override {
+		t.Fatalf("env set effective model=%q", set.EffectiveReviewModel())
+	}
+	var gotModel string
+	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var payload map[string]any
+		if json.NewDecoder(r.Body).Decode(&payload) != nil {
+			t.Error("invalid provider request")
+		}
+		if m, _ := payload["model"].(string); m != "" {
+			gotModel = m
+		}
+		answer, _ := json.Marshal(map[string]any{"outcomes": []any{}, "findings": []any{}, "limitations": []any{}, "coverage": "complete"})
+		response, _ := json.Marshal(map[string]any{"model": override, "content": []any{map[string]any{"type": "text", "text": string(answer)}}, "usage": map[string]any{"input_tokens": 8, "output_tokens": 2}})
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(response)
+	}))
+	t.Cleanup(fake.Close)
+	sSet := New(Config{Addr: "0.0.0.0:8770", Data: t.TempDir(), Keys: []KeyPair{{"a", "ka"}}, ReviewToken: set.ReviewToken, ReviewModel: set.ReviewModel}, Options{DisableWorker: true, ReviewEndpoint: fake.URL, PollInterval: time.Hour})
+	t.Cleanup(func() { _ = sSet.Close() })
+	if sSet.mcpTool("review_change") == nil || !listed(sSet) {
+		t.Fatal("env set: review_change should still register")
+	}
+	if sSet.reviewAvailability().EffectiveModel() != override {
+		t.Fatalf("env set availability model=%q", sSet.reviewAvailability().EffectiveModel())
+	}
+	diff := "diff --git a/pkg/a.go b/pkg/a.go\nindex 1111111..2222222 100644\n--- a/pkg/a.go\n+++ b/pkg/a.go\n@@ -1 +1 @@\n-old code\n+new code\n"
+	hash := sha256.Sum256([]byte(diff))
+	head := strings.Repeat("b", 40)
+	baseSHA := strings.Repeat("a", 40)
+	capture := review.Capture{RepoID: "repo-a", Mode: "range", View: "combined", Base: baseSHA, Head: head, Diff: diff, DiffSHA256: hex.EncodeToString(hash[:]), Complete: true}
+	args := map[string]any{"mode": "range", "view": "combined", "base": baseSHA, "head": head, "kind": "adhoc", "build_models": []any{map[string]any{"id": "unknown"}}, "detail": "full", "_local": map[string]any{"change": capture}}
+	callBody, _ := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": map[string]any{"name": "review_change", "arguments": args}})
+	req := httptest.NewRequest(http.MethodPost, "/v1/mcp", strings.NewReader(string(callBody)))
+	req.Header.Set("Authorization", "Bearer ka")
+	rec := httptest.NewRecorder()
+	sSet.Handler().ServeHTTP(rec, req)
+	if rec.Code != 200 {
+		t.Fatalf("review call status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var rpc struct {
+		Result review.Receipt `json:"result"`
+	}
+	if json.Unmarshal(rec.Body.Bytes(), &rpc) != nil {
+		t.Fatalf("review result %s", rec.Body.String())
+	}
+	if gotModel != override {
+		t.Fatalf("provider model=%q want %q (body=%s)", gotModel, override, rec.Body.String())
+	}
+	if rpc.Result.Status == "unavailable" {
+		t.Fatalf("review unavailable: %s", rec.Body.String())
+	}
+
+	sNone := New(Config{Addr: "0.0.0.0:8770", Data: t.TempDir(), Keys: []KeyPair{{"a", "ka"}}}, Options{DisableWorker: true})
+	t.Cleanup(func() { _ = sNone.Close() })
+	if sNone.mcpTool("review_change") != nil || listed(sNone) {
+		t.Fatal("no Claude token: review_change must not be registered")
+	}
+}
+
 func TestReviewMCPMissingReaderIsCaptureUnsupportedWithoutRecord(t *testing.T) {
 	s, _ := newServer(t, true)
 	defer s.Close()

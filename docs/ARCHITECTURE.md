@@ -83,7 +83,7 @@ machines use their existing Yakka login and need no provider key. The tool is `r
 `readOnlyHint:false`: its effect is a server-side provider call and record. Its declaration allows 150 seconds and
 no local actions. Registration requires a non-empty `CLAUDE_API_TOKEN` in authenticated remote mode
 and a sufficient MCP timeout ceiling of at least 150 seconds; source integration does not establish
-deployed availability. The model is the code constant `claude-haiku-5-5`, any authenticated tenant's
+deployed availability. The model defaults to `claude-haiku-5-5` (optional `YAKKA_REVIEW_MODEL` override); any authenticated tenant's
 repo is reviewable, and `skipped_busy` reports the two-call per-tenant in-flight limit. Per-call
 `effort`, `tags` and `store` are validated on the server; effort defaults to `high` and is never
 capped by a setting. A completed `store=true` duplicate returns the earlier review in full, with

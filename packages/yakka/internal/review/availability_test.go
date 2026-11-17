@@ -39,6 +39,21 @@ func TestAvailabilityTokenOnly(t *testing.T) {
 	}
 }
 
+func TestEffectiveModelDefaultsAndOverride(t *testing.T) {
+	if got := (Availability{}).EffectiveModel(); got != LiveModel {
+		t.Fatalf("unset model = %q, want %q", got, LiveModel)
+	}
+	if LiveModel != "claude-haiku-5-5" {
+		t.Fatalf("LiveModel = %q, want claude-haiku-5-5", LiveModel)
+	}
+	if got := (Availability{Model: "  "}).EffectiveModel(); got != LiveModel {
+		t.Fatalf("whitespace model = %q, want default", got)
+	}
+	if got := (Availability{Model: " optional-model "}).EffectiveModel(); got != "optional-model" {
+		t.Fatalf("override = %q", got)
+	}
+}
+
 func readReservations(t *testing.T, path string) map[string]json.RawMessage {
 	t.Helper()
 	b, err := os.ReadFile(path)
