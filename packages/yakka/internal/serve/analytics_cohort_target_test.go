@@ -146,3 +146,86 @@ func TestAnalyticsArtifactCohortResolves(t *testing.T) {
 		t.Fatalf("artifact cohort rows=%v, want only the commit session's file", rows)
 	}
 }
+
+func timeCohortParam(fields, include, exclude, predicate string) string {
+	raw := `{"v":1,"grain":"time","scope":{"from":"2026-11-08T00:00:00Z","to":"2026-11-09T00:00:00Z","tz":"UTC","include":` + include + `,"exclude":` + exclude + `},"predicate":` + predicate + `,"source":{"fields":` + fields + `,"bucket":"day","bucket_step":1}}`
+	return "cohort=" + url.QueryEscape(raw)
+}
+
+func TestAnalyticsTimeCohortTargetSessions(t *testing.T) {
+	s, ts := queryTenant(t)
+	win := "from=2026-11-08T00:00:00Z&to=2026-11-09T00:00:00Z"
+	at := func(h int) float64 { return float64(time.Date(2026, 11, 8, h, 0, 0, 0, time.UTC).Unix()) }
+	qadd(t, ts, store.FactRow{Type: "commit", ConversationID: "c1", Harness: "h", RepoID: "r", Event: "commit", TS: at(3)}, nil)
+	qadd(t, ts, store.FactRow{Type: "commit", ConversationID: "c2", Harness: "h", RepoID: "r", Event: "commit", TS: at(4)}, nil)
+	cohort := timeCohortParam(`["commits","hook_events"]`, `[]`, `[]`, `{"range":{"measure":"commits","lo":1,"hi":100}}`)
+
+	m := aok(t, s, "/v1/analytics/entities?grain=time&field=commits&field=hook_events&bucket=day&"+win+"&"+cohort)
+	population := m["population"].(map[string]any)
+	if population["unit"] != "bucket" || population["grain"] != "time" {
+		t.Fatalf("time population=%v", population)
+	}
+	relation, ok := population["relation"].(map[string]any)
+	if !ok {
+		t.Fatalf("time population has no relation: %v", population)
+	}
+	target, ok := relation["target_sessions"].(map[string]any)
+	if !ok || target["unit"] != "session" || target["scope_n"] != float64(2) || target["cohort_n"] != float64(2) {
+		t.Fatalf("time target_sessions=%v", relation["target_sessions"])
+	}
+}
+
+func TestAnalyticsTimeCohortRefusesInapplicableFilter(t *testing.T) {
+	s, _ := queryTenant(t)
+	win := "from=2026-11-08T00:00:00Z&to=2026-11-09T00:00:00Z"
+	cohort := timeCohortParam(`["rejections","conversations"]`, `[{"lens":"tool","values":["Read"]}]`, `[]`, `{"range":{"measure":"rejections","lo":0,"hi":100}}`)
+
+	code, body := aget(t, s, "/v1/analytics/entities?grain=time&field=rejections&field=conversations&bucket=day&"+win+"&"+cohort)
+	if code != 400 || body["code"] != "unsupported_join" {
+		t.Fatalf("inapplicable time filter=%d %v want 400 unsupported_join", code, body)
+	}
+	message, _ := body["error"].(string)
+	if !strings.Contains(message, "tool") || !strings.Contains(message, "source field") {
+		t.Fatalf("refusal must name filter and source field: %v", body)
+	}
+}
+
+func TestAnalyticsActivityByTypeAndTargetSessions(t *testing.T) {
+	s, ts := queryTenant(t)
+	win := "from=2026-11-08T00:00:00Z&to=2026-11-09T00:00:00Z"
+	at := func(h int) float64 { return float64(time.Date(2026, 11, 8, h, 0, 0, 0, time.UTC).Unix()) }
+	qadd(t, ts, store.FactRow{Type: "commit", ConversationID: "c1", Harness: "h", RepoID: "r", Event: "commit", TS: at(3)}, nil)
+	qadd(t, ts, store.FactRow{Type: "artifact_version", ConversationID: "c1", Harness: "h", RepoID: "r", Path: "docs/plans/p/briefs/a.md", Event: "artifact", TS: at(4)}, nil)
+	qadd(t, ts, store.FactRow{Type: "hook_event", ConversationID: "c2", Harness: "h", Event: "PreToolUse", NormEvent: "tool_use", Tool: "Read", TS: at(2)}, nil)
+	cohort := "cohort=" + cohortParam(`{"range":{"measure":"commits","lo":1,"hi":1}}`)
+
+	m := aok(t, s, "/v1/analytics/activity?"+win+"&"+cohort)
+	population := m["population"].(map[string]any)
+	byType, ok := population["by_type"].(map[string]any)
+	if !ok {
+		t.Fatalf("activity population has no by_type: %v", population)
+	}
+	want := map[string]struct {
+		unit          string
+		scope, cohort float64
+	}{
+		"session_start":    {"session", 2, 1},
+		"artifact_version": {"version", 1, 1},
+		"execution":        {"execution", 1, 1},
+		"rejection":        {"rejection", 0, 0},
+	}
+	for name, w := range want {
+		entry, ok := byType[name].(map[string]any)
+		if !ok || entry["unit"] != w.unit || entry["scope_n"] != w.scope || entry["cohort_n"] != w.cohort {
+			t.Fatalf("by_type[%s]=%v want %+v", name, byType[name], w)
+		}
+	}
+	relation, ok := population["relation"].(map[string]any)
+	if !ok {
+		t.Fatalf("activity population has no relation: %v", population)
+	}
+	target, ok := relation["target_sessions"].(map[string]any)
+	if !ok || target["unit"] != "session" || target["scope_n"] != float64(2) || target["cohort_n"] != float64(1) {
+		t.Fatalf("activity target_sessions=%v", relation["target_sessions"])
+	}
+}

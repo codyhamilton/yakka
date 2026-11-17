@@ -71,7 +71,31 @@ func (s *Server) analyticsActivity(w http.ResponseWriter, r *http.Request, _ str
 	for _, x := range rows {
 		out = append(out, map[string]any{"event_time": rfc(x.EventTime), "type": x.Type, "identity": x.Identity, "conversation_id": x.ConversationID, "repo_id": x.RepoID, "path": x.Path, "harness": x.Harness, "kind": x.Kind, "plan": x.Plan, "stage": x.Stage})
 	}
-	result := map[string]any{"mode": "list", "rows": out, "population": map[string]any{"grain": "activity", "unit": "typed_observation", "scope_n": total, "cohort_n": total, "eligible_n": total, "returned_n": len(out), "missing_by_reason": map[string]int{}}}
+	scopeCounts, err := ts.t.ActivityTypeCounts(r.Context(), withoutCohort(f))
+	if err != nil {
+		readFailed(w)
+		return
+	}
+	cohortCounts, err := ts.t.ActivityTypeCounts(r.Context(), f)
+	if err != nil {
+		readFailed(w)
+		return
+	}
+	population := map[string]any{"grain": "activity", "unit": "typed_observation", "scope_n": total, "cohort_n": total, "eligible_n": total, "returned_n": len(out), "missing_by_reason": map[string]int{}, "by_type": activityByType(scopeCounts, cohortCounts)}
+	if f.CohortSQL != "" {
+		scopeN, cohortN, cerr := cohortSessionCounts(r.Context(), ts.t, f)
+		if cerr != nil {
+			readFailed(w)
+			return
+		}
+		rel, rerr := cohortRelation(r.Context(), ts.t, f, true, scopeN, cohortN, true)
+		if rerr != nil {
+			readFailed(w)
+			return
+		}
+		population["relation"] = rel
+	}
+	result := map[string]any{"mode": "list", "rows": out, "population": population}
 	if len(ignored) > 0 {
 		result["ignored_filters"] = ignored
 	}
@@ -80,4 +104,19 @@ func (s *Server) analyticsActivity(w http.ResponseWriter, r *http.Request, _ str
 		result["next"] = (cursor{Route: "activity", Filter: filter, From: f.From.UnixNano(), To: f.To.UnixNano(), TS: last.EventTime, Key: []string{last.Type, last.Identity}}).encode()
 	}
 	writeJSON(w, 200, result)
+}
+
+// activityByType reports one {unit, scope_n, cohort_n} per activity observation type. The
+// activity rows keep their own units; these counts are never equated with them.
+func activityByType(scope, cohort map[string]int) map[string]any {
+	out := map[string]any{}
+	for _, x := range []struct{ name, unit string }{
+		{"session_start", "session"},
+		{"artifact_version", "version"},
+		{"execution", "execution"},
+		{"rejection", "rejection"},
+	} {
+		out[x.name] = map[string]any{"unit": x.unit, "scope_n": scope[x.name], "cohort_n": cohort[x.name]}
+	}
+	return out
 }

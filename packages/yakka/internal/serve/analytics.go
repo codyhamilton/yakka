@@ -310,7 +310,11 @@ func (s *Server) parseFilter(w http.ResponseWriter, r *http.Request, ts *tenantS
 	if raw := q.Get("cohort"); raw != "" {
 		cohort, err := store.ParseCohortDefinition([]byte(raw))
 		if err != nil {
-			errCodeJSON(w, 400, "cohort_invalid", err.Error(), nil)
+			code := "cohort_invalid"
+			if errors.Is(err, store.ErrUnsupportedJoin) {
+				code = "unsupported_join"
+			}
+			errCodeJSON(w, 400, code, err.Error(), map[string]any{"reason": err.Error()})
 			return f, false
 		}
 		sql, args, rel, err := store.CohortSessionSubquery(cohort, s.cohortResolveOptions(ts))
@@ -325,6 +329,14 @@ func (s *Server) parseFilter(w http.ResponseWriter, r *http.Request, ts *tenantS
 		f.CohortSQL, f.CohortArgs = sql, args
 		f.CohortExclude = cohort.Definition.Op == "exclude"
 		f.CohortSourceGrain, f.CohortMapping, f.CohortOp = rel.SourceGrain, rel.Mapping, cohort.Definition.Op
+		if rel.SourceRejections {
+			assoc, aerr := ts.t.TimeCohortSourceAssociations(r.Context(), cohort)
+			if aerr != nil {
+				readFailed(w)
+				return f, false
+			}
+			f.CohortSourceAssociation = &assoc
+		}
 	}
 	if o.scoresKind && len(f.Kinds) != 1 {
 		errJSON(w, 400, "kind required")

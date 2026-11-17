@@ -12,7 +12,7 @@ import (
 
 func TestAnalyticsActivityMergesAndPagesEqualTimeRows(t *testing.T) {
 	s, ts := queryTenant(t)
-	at := float64(time.Now().UTC().Unix())
+	at := float64(time.Date(2026, 11, 8, 12, 0, 0, 0, time.UTC).Unix())
 	qadd(t, ts, store.FactRow{Type: "commit", ConversationID: "session-1", Harness: "h", Event: "commit", TS: at}, nil)
 	qadd(t, ts, store.FactRow{Type: "artifact_version", ConversationID: "session-1", Harness: "h", Event: "artifact", TS: at, RepoID: "r", Path: "docs/plans/p/briefs/a.md"}, nil)
 	path := "/v1/analytics/activity?from=2026-11-08T00:00:00Z&to=2026-11-09T00:00:00Z&limit=1"
@@ -41,11 +41,27 @@ func TestAnalyticsActivityMergesAndPagesEqualTimeRows(t *testing.T) {
 	if len(seen) != 3 {
 		t.Fatalf("paged observations=%v want session start, artifact version and brief execution", seen)
 	}
+	full := aok(t, s, "/v1/analytics/activity?from=2026-11-08T00:00:00Z&to=2026-11-09T00:00:00Z")
+	byType, ok := full["population"].(map[string]any)["by_type"].(map[string]any)
+	if !ok {
+		t.Fatalf("activity population has no by_type: %v", full["population"])
+	}
+	for name, unit := range map[string]string{"session_start": "session", "artifact_version": "version", "execution": "execution", "rejection": "rejection"} {
+		entry, ok := byType[name].(map[string]any)
+		if !ok || entry["unit"] != unit {
+			t.Fatalf("by_type[%s]=%v want unit %s", name, byType[name], unit)
+		}
+	}
+	if byType["session_start"].(map[string]any)["scope_n"] != float64(1) ||
+		byType["artifact_version"].(map[string]any)["cohort_n"] != float64(1) ||
+		byType["execution"].(map[string]any)["cohort_n"] != float64(1) {
+		t.Fatalf("activity by_type counts=%v", byType)
+	}
 }
 
 func TestAnalyticsActivityProbeCountsLateArrivalWithoutRows(t *testing.T) {
 	s, ts := queryTenant(t)
-	at := float64(time.Now().UTC().Unix())
+	at := float64(time.Date(2026, 11, 8, 12, 0, 0, 0, time.UTC).Unix())
 	qadd(t, ts, store.FactRow{Type: "commit", ConversationID: "before", Harness: "h", Event: "commit", TS: at}, nil)
 	probe := func(after string) map[string]any {
 		path := "/v1/analytics/activity?mode=probe&from=2026-11-08T00:00:00Z&to=2026-11-09T00:00:00Z"

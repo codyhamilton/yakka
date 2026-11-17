@@ -58,6 +58,32 @@ func (t *Tenant) ActivityPage(ctx context.Context, f AnalyticsFilter, afterTS *f
 	return out, more, total, nil
 }
 
+// ActivityTypeCounts counts each activity observation type in the filter's window and scope. With
+// a cohort restriction present the counts are post-restriction; callers pass a filter cleared of
+// the cohort for the pre-restriction scope. The four units are the 17.3.1 by_type keys.
+func (t *Tenant) ActivityTypeCounts(ctx context.Context, f AnalyticsFilter) (map[string]int, error) {
+	fw, fa := f.factWhere()
+	rw, ra := f.rejWhere()
+	counts := map[string]int{}
+	queries := []struct {
+		name, q string
+		args    []any
+	}{
+		{"session_start", `SELECT COUNT(*) FROM (SELECT conversation_id FROM facts WHERE ` + fw + ` GROUP BY conversation_id)`, fa},
+		{"artifact_version", `SELECT COUNT(*) FROM facts WHERE type='artifact_version' AND ` + fw, fa},
+		{"execution", `SELECT COUNT(DISTINCT repo_id||':'||conversation_id||':'||path) FROM facts WHERE type='artifact_version' AND kind='brief' AND ` + fw, fa},
+		{"rejection", `SELECT COUNT(*) FROM rejections WHERE ` + rw, ra},
+	}
+	for _, x := range queries {
+		var count int
+		if err := t.rdb.QueryRowContext(ctx, x.q, x.args...).Scan(&count); err != nil {
+			return nil, fmt.Errorf("activity type count %s: %w", x.name, err)
+		}
+		counts[x.name] = count
+	}
+	return counts, nil
+}
+
 // ActivityProbe counts new observations after a receive watermark and returns the latest watermark.
 func (t *Tenant) ActivityProbe(ctx context.Context, after int64, f AnalyticsFilter) (map[string]int, int64, error) {
 	fw, fa := f.factWhere()

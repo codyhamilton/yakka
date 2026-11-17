@@ -627,3 +627,71 @@ func TestAnalyticsCohortScopeExcludeDiffersFromTargetOpExclude(t *testing.T) {
 		t.Fatalf("empty source=%v want empty", got)
 	}
 }
+
+func timeCohortRaw(include, exclude, predicate, source string) string {
+	return `{"v":1,"grain":"time","scope":` + cohortScope(include, exclude) + `,"predicate":` + predicate + `,"source":` + source + `}`
+}
+
+func TestAnalyticsTimeCohortResolvesScopeAndBucketID(t *testing.T) {
+	tn, _ := fixture(t)
+	defer tn.Close()
+	source := `{"fields":["commits"],"bucket":"day","bucket_step":1}`
+	commits := `{"range":{"measure":"commits","lo":0,"hi":1000000}}`
+
+	got := resolveCohortSessions(t, tn, timeCohortRaw(`[{"lens":"harness","values":["cursor"]}]`, `[]`, commits, source), nil)
+	if !reflect.DeepEqual(got, []string{"c5"}) {
+		t.Fatalf("scope include harness=cursor resolved %v want [c5]", got)
+	}
+	got = resolveCohortSessions(t, tn, timeCohortRaw(`[]`, `[{"lens":"harness","values":["cursor"]}]`, commits, source), nil)
+	if !reflect.DeepEqual(got, []string{"c4"}) {
+		t.Fatalf("scope exclude harness=cursor resolved %v want [c4]", got)
+	}
+	bucket := `"{\"t\":\"2026-10-01T00:00:00Z\",\"tz\":\"UTC\"}"`
+	got = resolveCohortSessions(t, tn, timeCohortRaw(`[{"lens":"id","values":[`+bucket+`]}]`, `[]`, commits, source), nil)
+	if !reflect.DeepEqual(got, []string{"c5"}) {
+		t.Fatalf("scope id 2026-10-01 resolved %v want [c5]", got)
+	}
+	got = resolveCohortSessions(t, tn, timeCohortRaw(`[]`, `[]`, `{"in":{"lens":"id","values":[`+bucket+`]}}`, source), nil)
+	if !reflect.DeepEqual(got, []string{"c5"}) {
+		t.Fatalf("predicate id 2026-10-01 resolved %v want [c5]", got)
+	}
+}
+
+func TestAnalyticsTimeCohortRefusesInapplicableFilter(t *testing.T) {
+	tn, _ := fixture(t)
+	defer tn.Close()
+	raw := timeCohortRaw(`[{"lens":"tool","values":["Read"]}]`, `[]`, `{"range":{"measure":"rejections","lo":0,"hi":10}}`, `{"fields":["rejections"],"bucket":"day","bucket_step":1}`)
+	_, err := ParseCohortDefinition([]byte(raw))
+	if !errors.Is(err, ErrUnsupportedJoin) {
+		t.Fatalf("scope tool on rejections err=%v want unsupported_join", err)
+	}
+	if !strings.Contains(err.Error(), "tool") || !strings.Contains(err.Error(), "rejections") {
+		t.Fatalf("refusal must name filter and source field: %v", err)
+	}
+	raw = timeCohortRaw(`[]`, `[]`, `{"in":{"lens":"harness","values":["cursor"]}}`, `{"fields":["commits"],"bucket":"day","bucket_step":1}`)
+	_, err = ParseCohortDefinition([]byte(raw))
+	if !errors.Is(err, ErrUnsupportedJoin) {
+		t.Fatalf("time predicate lens harness err=%v want unsupported_join", err)
+	}
+}
+
+func TestAnalyticsTimeCohortSourceRejectionAssociations(t *testing.T) {
+	tn, _ := fixture(t)
+	defer tn.Close()
+	mustExec(t, tn, `INSERT INTO rejections (stage,fact_type,conversation_id,path,content_hash,pattern,reason,at) VALUES (?,?,?,?,?,?,?,?)`,
+		"screen", "artifact_version", "ghost", "p", "", "", "r", ad(10, 2, 3, 0).UnixNano())
+	mustExec(t, tn, `INSERT INTO rejections (stage,fact_type,conversation_id,path,content_hash,pattern,reason,at) VALUES (?,?,?,?,?,?,?,?)`,
+		"screen", "artifact_version", "", "p", "", "", "r", ad(10, 3, 3, 0).UnixNano())
+	raw := timeCohortRaw(`[]`, `[]`, `{"range":{"measure":"rejections","lo":0,"hi":100}}`, `{"fields":["rejections"],"bucket":"day","bucket_step":1}`)
+	c := mustParse(t, raw)
+	a, err := tn.TimeCohortSourceAssociations(context.Background(), c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a.Total != 6 || a.Associated != 4 || a.NoConversationID != 1 || a.OrphanConversationID != 1 {
+		t.Fatalf("source associations=%+v want total 6 associated 4 missing 1 orphan 1", a)
+	}
+	if got := resolveCohortSessions(t, tn, raw, nil); !reflect.DeepEqual(got, []string{"c1"}) {
+		t.Fatalf("source contributors=%v want [c1]", got)
+	}
+}

@@ -163,6 +163,115 @@ func CohortGrainFilters(grain string) []string {
 	return append([]string{}, cohortGrainFilters[grain]...)
 }
 
+// cohortTimeMeasureFilters lists the shared-filter dimensions each time measure applies, mirroring
+// the 17.3 matrix. A scope element naming a dimension absent here applies to no row of that
+// measure, so a time cohort carrying it is refused as unsupported_join.
+var cohortTimeMeasureFilters = map[string][]string{
+	"hook_events":        {"harness", "repo_id", "norm_event", "event", "tool", "conversation_id"},
+	"conversations":      {"harness", "repo_id", "model"},
+	"artifact_versions":  {"harness", "repo_id", "kind", "plan", "source", "conversation_id"},
+	"distinct_content":   {"harness", "repo_id", "kind", "plan", "source", "conversation_id"},
+	"commits":            {"harness", "repo_id", "conversation_id"},
+	"rejections":         {},
+	"model_calls":        {"harness", "repo_id", "model", "conversation_id"},
+	"unpriced_calls":     {"harness", "repo_id", "model", "conversation_id"},
+	"tokens_in":          {"harness", "repo_id", "model", "conversation_id"},
+	"tokens_out":         {"harness", "repo_id", "model", "conversation_id"},
+	"tokens_cache_read":  {"harness", "repo_id", "model", "conversation_id"},
+	"tokens_cache_write": {"harness", "repo_id", "model", "conversation_id"},
+	"tokens_reasoning":   {"harness", "repo_id", "model", "conversation_id"},
+	"cost_usd":           {"harness", "repo_id", "model", "conversation_id"},
+}
+
+// cohortTimeFilterApplies reports whether a time measure carries the named shared-filter
+// dimension. The bucket identity applies to every measure.
+func cohortTimeFilterApplies(measure, lens string) bool {
+	if lens == "id" {
+		return true
+	}
+	for _, name := range cohortTimeMeasureFilters[measure] {
+		if name == lens {
+			return true
+		}
+	}
+	return false
+}
+
+// cohortTimeScopeFilter turns the scope elements a measure applies into the shared AnalyticsFilter
+// dimensions, so facts, kept usage rows and rejections are restricted exactly as the time route
+// would restrict that measure. Scope elements that do not apply are ignored here; the parser has
+// already validated that at least one named source field applies them.
+func cohortTimeScopeFilter(scope CohortScope, measure string, from, to time.Time) AnalyticsFilter {
+	f := AnalyticsFilter{From: from, To: to}
+	for _, el := range scope.Include {
+		if !cohortTimeFilterApplies(measure, el.Lens) {
+			continue
+		}
+		cohortTimeSetDimension(&f, el.Lens, el.Values)
+	}
+	for _, el := range scope.Exclude {
+		if !cohortTimeFilterApplies(measure, el.Lens) {
+			continue
+		}
+		if f.Excludes == nil {
+			f.Excludes = map[string][]string{}
+		}
+		f.Excludes[el.Lens] = append(f.Excludes[el.Lens], el.Values...)
+	}
+	return f
+}
+
+func cohortTimeSetDimension(f *AnalyticsFilter, lens string, values []string) {
+	switch lens {
+	case "repo_id":
+		f.Repos = append(f.Repos, values...)
+	case "harness":
+		f.Harnesses = append(f.Harnesses, values...)
+	case "kind":
+		f.Kinds = append(f.Kinds, values...)
+	case "plan":
+		f.Plans = append(f.Plans, values...)
+	case "norm_event":
+		f.NormEvents = append(f.NormEvents, values...)
+	case "event":
+		f.Events = append(f.Events, values...)
+	case "tool":
+		f.Tools = append(f.Tools, values...)
+	case "model":
+		f.Models = append(f.Models, values...)
+	case "source":
+		f.Sources = append(f.Sources, values...)
+	case "conversation_id":
+		f.ConversationIDs = append(f.ConversationIDs, values...)
+	}
+}
+
+// cohortTimeScopeValues returns the merged values of one lens in a scope list.
+func cohortTimeScopeValues(elements []CohortScopeElement, lens string) []string {
+	var out []string
+	for _, el := range elements {
+		if el.Lens == lens {
+			out = append(out, el.Values...)
+		}
+	}
+	return out
+}
+
+// cohortTimeFactTypes maps a fact-backed time field to the fact types that contribute sessions.
+func cohortTimeFactTypes(field string) []string {
+	switch field {
+	case "hook_events":
+		return []string{"hook_event"}
+	case "conversations":
+		return []string{"artifact_version", "commit", "hook_event"}
+	case "artifact_versions", "distinct_content":
+		return []string{"artifact_version"}
+	case "commits":
+		return []string{"commit"}
+	}
+	return nil
+}
+
 // CohortScopeLensError reports a lens that /schema publishes for another grain but not for this
 // source grain. It is unsupported_join with reason not_defined_for_grain and a suggested try list.
 type CohortScopeLensError struct {
@@ -285,6 +394,21 @@ func ParseCohortDefinition(raw []byte) (ParsedCohort, error) {
 			seen[field] = true
 		}
 		sort.Strings(source.Fields)
+		for _, el := range append(append([]CohortScopeElement{}, d.Scope.Include...), d.Scope.Exclude...) {
+			if el.Lens == "id" {
+				continue
+			}
+			applies := false
+			for _, field := range source.Fields {
+				if cohortTimeFilterApplies(field, el.Lens) {
+					applies = true
+					break
+				}
+			}
+			if !applies {
+				return out, fmt.Errorf("%w: filter %q does not apply to source field %q", ErrUnsupportedJoin, el.Lens, source.Fields[0])
+			}
+		}
 		d.Source, _ = json.Marshal(source)
 	case "artifact", "content":
 		var source struct {
@@ -470,7 +594,13 @@ func parseCohortNode(grain string, raw json.RawMessage, depth int, leaves *int) 
 				Lens   string   `json:"lens"`
 				Values []string `json:"values"`
 			}
-			if err := strictObject(body, &v); err != nil || !cohortAllowsName(cohortLenses[grain], v.Lens) {
+			if err := strictObject(body, &v); err != nil {
+				return nil, fmt.Errorf("%w: unsupported lens", ErrCohortInvalid)
+			}
+			if !cohortAllowsName(cohortLenses[grain], v.Lens) {
+				if grain == "time" && cohortFilterMatchesAnyGrain(v.Lens) {
+					return nil, &CohortScopeLensError{Grain: grain, Lens: v.Lens, Reason: "not_defined_for_grain", Try: CohortGrainFilters(grain)}
+				}
 				return nil, fmt.Errorf("%w: unsupported lens", ErrCohortInvalid)
 			}
 			if len(v.Values) > 64 {
@@ -807,9 +937,6 @@ func CohortSessionSubquery(c ParsedCohort, options ...CohortResolveOptions) (str
 		return "", nil, r, fmt.Errorf("%w: invalid fixed source window", ErrCohortInvalid)
 	}
 	if d.Grain == "time" {
-		if len(d.Scope.Include) != 0 || len(d.Scope.Exclude) != 0 {
-			return "", nil, r, fmt.Errorf("%w: time source scope elements are resolved by the time-cohort unit", ErrUnsupportedJoin)
-		}
 		return timeCohortSessionSubquery(c, from, to, r)
 	}
 	src, err := cohortSourceFor(c, from, to, opts)
@@ -1181,6 +1308,10 @@ func cohortSourceCheck(d CohortDefinition) struct{ Kind, Check string } {
 	return struct{ Kind, Check string }{source.Kind, source.Check}
 }
 
+// cohortTimeColumns is the fixed measure column order every time bucket CTE projects, so the
+// UNION ALL stays aligned and sumColumns can total each measure.
+var cohortTimeColumns = []string{"hook_events", "conversations", "artifact_versions", "distinct_content", "commits", "rejections", "model_calls", "unpriced_calls", "tokens_in", "tokens_out", "tokens_cache_read", "tokens_cache_write", "tokens_reasoning", "cost_usd"}
+
 func timeCohortSessionSubquery(c ParsedCohort, from, to time.Time, rel CohortRelation) (string, []any, CohortRelation, error) {
 	var source struct {
 		Fields     []string `json:"fields"`
@@ -1190,94 +1321,216 @@ func timeCohortSessionSubquery(c ParsedCohort, from, to time.Time, rel CohortRel
 	if err := json.Unmarshal(c.Definition.Source, &source); err != nil {
 		return "", nil, rel, fmt.Errorf("%w: invalid time source", ErrCohortInvalid)
 	}
-	f := AnalyticsFilter{From: from, To: to}
-	loc, err := time.LoadLocation(c.Definition.Scope.TZ)
-	if err != nil {
+	if _, err := time.LoadLocation(c.Definition.Scope.TZ); err != nil {
 		return "", nil, rel, fmt.Errorf("%w: invalid time zone", ErrCohortInvalid)
 	}
-	f.TZ = loc
-	args := []any{seconds(from), seconds(to)}
-	// The source and membership use the frozen calendar bucket rule, including local DST
-	// boundaries. Each contributor is still selected by its existing fact/call/rejection identity.
 	if source.Bucket == "" {
 		return "", nil, rel, fmt.Errorf("%w: empty time bucket", ErrCohortInvalid)
 	}
-	columns := []string{"hook_events", "conversations", "artifact_versions", "distinct_content", "commits", "rejections", "model_calls", "unpriced_calls", "tokens_in", "tokens_out", "tokens_cache_read", "tokens_cache_write", "tokens_reasoning", "cost_usd"}
 	for _, m := range source.Fields {
-		if !containsString(columns, m) {
+		if !containsString(cohortTimeColumns, m) {
 			return "", nil, rel, fmt.Errorf("%w: time measure %q has no contributor mapping", ErrUnsupportedJoin, m)
 		}
 	}
-	// Resolve only bucket rows selected by the frozen positive predicate.
-	cond, predicateArgs, err := compileCohortNode("time", c.root)
+	prefix, args, err := buildTimeCohortPrefix(c, source.Fields, source.Bucket, source.BucketStep, from, to)
 	if err != nil {
 		return "", nil, rel, err
 	}
-	fieldPred := make([]string, 0, len(source.Fields))
-	factTypes := map[string]bool{}
-	includeUsage, includeRejections := false, false
-	for _, field := range source.Fields {
-		fieldPred = append(fieldPred, "\""+field+"\" > 0")
-		switch field {
-		case "hook_events":
-			factTypes["hook_event"] = true
-		case "conversations":
-			for _, typ := range []string{"hook_event", "artifact_version", "commit"} {
-				factTypes[typ] = true
-			}
-		case "artifact_versions", "distinct_content":
-			factTypes["artifact_version"] = true
-		case "commits":
-			factTypes["commit"] = true
-		case "rejections":
-			includeRejections = true
-		default:
-			includeUsage = true
-		}
+	bucketOf := func(expr string) string {
+		return cohortTimeBucketExpr(expr, source.Bucket, c.Definition.Scope.TZ, source.BucketStep)
 	}
-	zeroCols := make([]string, len(columns))
-	for i, col := range columns {
-		zeroCols[i] = "0 AS \"" + col + "\""
-	}
-	factExpr := "wf_cohort_bucket(ts,'" + source.Bucket + "','" + strings.ReplaceAll(c.Definition.Scope.TZ, "'", "''") + "'," + strconv.Itoa(source.BucketStep) + ")"
-	usageCTE, usageArgs := usageRowsWhere(f)
-	args = append(args, usageArgs...)
-	// Rejection timestamps are nanoseconds; the scalar accepts seconds, like the existing
-	// analytics measure. Rejection membership requires a recorded conversation with facts.
-	q := "WITH facts_b AS (SELECT " + factExpr + " bucket,COUNT(DISTINCT CASE WHEN type='hook_event' THEN row_hash END) hook_events,COUNT(DISTINCT conversation_id) conversations,COUNT(DISTINCT CASE WHEN type='artifact_version' THEN row_hash END) artifact_versions,COUNT(DISTINCT CASE WHEN type='artifact_version' THEN content_hash END) distinct_content,SUM(CASE WHEN type='commit' THEN 1 ELSE 0 END) commits," + strings.Join(zeroCols[5:], ",") + " FROM facts WHERE ts>=? AND ts<=? GROUP BY bucket), "
-	q += "usage_b AS (" + usageCTE + " SELECT wf_cohort_bucket(ts,'" + source.Bucket + "','" + strings.ReplaceAll(c.Definition.Scope.TZ, "'", "''") + "'," + strconv.Itoa(source.BucketStep) + ") bucket,0 hook_events,0 conversations,0 artifact_versions,0 distinct_content,0 commits,0 rejections,COUNT(*) model_calls,SUM(1-wf_usage_priced(harness,model,tok_in,tok_out,tok_cache_read,tok_cache_write,tok_reasoning,cost_reported)) unpriced_calls,SUM(tok_in) tokens_in,SUM(tok_out) tokens_out,SUM(tok_cache_read) tokens_cache_read,SUM(tok_cache_write) tokens_cache_write,SUM(tok_reasoning) tokens_reasoning,SUM(wf_usage_cost(harness,model,tok_in,tok_out,tok_cache_read,tok_cache_write,tok_reasoning,cost_reported)) cost_usd FROM kept GROUP BY bucket), "
-	q += "reject_b AS (SELECT wf_cohort_bucket(at/1e9,'" + source.Bucket + "','" + strings.ReplaceAll(c.Definition.Scope.TZ, "'", "''") + "'," + strconv.Itoa(source.BucketStep) + ") bucket,0 hook_events,0 conversations,0 artifact_versions,0 distinct_content,0 commits,COUNT(*) rejections," + strings.Join(zeroCols[6:], ",") + " FROM rejections WHERE at>=? AND at<=? GROUP BY bucket), "
-	q += "all_b AS (SELECT * FROM facts_b UNION ALL SELECT * FROM usage_b UNION ALL SELECT * FROM reject_b), buckets AS (SELECT bucket," + sumColumns(columns) + " FROM all_b GROUP BY bucket), selected AS (SELECT bucket FROM buckets WHERE (" + cond + ") AND (" + strings.Join(fieldPred, " OR ") + ")) "
+	// Each named field contributes sessions through its own measure identity, restricted by the
+	// scope dimensions that measure applies. Rejections contribute only associated sessions.
 	contributors := []string{}
-	if len(factTypes) != 0 {
-		types := make([]string, 0, len(factTypes))
-		for typ := range factTypes {
-			types = append(types, "'"+typ+"'")
+	for _, field := range source.Fields {
+		switch {
+		case field == "rejections":
+			rw, ra := cohortTimeScopeFilter(c.Definition.Scope, "rejections", from, to).rejWhere()
+			contributors = append(contributors, "SELECT r.conversation_id FROM rejections r JOIN facts existing ON existing.conversation_id=r.conversation_id JOIN selected s ON "+bucketOf("r.at/1e9")+"=s.bucket WHERE "+rw+" AND r.conversation_id<>''")
+			args = append(args, ra...)
+		case usageMeasures[field]:
+			uf := cohortTimeScopeFilter(c.Definition.Scope, field, from, to)
+			ucte, uargs := usageRowsWhere(uf)
+			contributors = append(contributors, "SELECT u.conversation_id FROM ("+ucte+" SELECT conversation_id,ts FROM kept) u JOIN selected s ON "+bucketOf("u.ts")+"=s.bucket")
+			args = append(args, uargs...)
+		default:
+			types := cohortTimeFactTypes(field)
+			if len(types) == 0 {
+				return "", nil, rel, fmt.Errorf("%w: time measure %q has no contributor mapping", ErrUnsupportedJoin, field)
+			}
+			where, fargs := cohortTimeScopeFilter(c.Definition.Scope, field, from, to).factWhere()
+			contributors = append(contributors, "SELECT f.conversation_id FROM facts f JOIN selected s ON "+bucketOf("f.ts")+"=s.bucket WHERE f.type IN ("+sqlStringList(types)+") AND "+where)
+			args = append(args, fargs...)
 		}
-		sort.Strings(types)
-		contributors = append(contributors, "SELECT f.conversation_id FROM facts f JOIN selected s ON wf_cohort_bucket(f.ts,'"+source.Bucket+"','"+strings.ReplaceAll(c.Definition.Scope.TZ, "'", "''")+"',"+strconv.Itoa(source.BucketStep)+")=s.bucket WHERE f.type IN ("+strings.Join(types, ",")+") AND f.ts>=? AND f.ts<=?")
 	}
-	if includeUsage {
-		contributors = append(contributors, "SELECT u.conversation_id FROM ("+usageCTE+" SELECT conversation_id,ts FROM kept) u JOIN selected s ON wf_cohort_bucket(u.ts,'"+source.Bucket+"','"+strings.ReplaceAll(c.Definition.Scope.TZ, "'", "''")+"',"+strconv.Itoa(source.BucketStep)+")=s.bucket WHERE u.ts>=? AND u.ts<=?")
+	if len(contributors) == 0 {
+		return "", nil, rel, fmt.Errorf("%w: time source has no fields", ErrCohortInvalid)
 	}
-	if includeRejections {
-		contributors = append(contributors, "SELECT r.conversation_id FROM rejections r JOIN facts existing ON existing.conversation_id=r.conversation_id JOIN selected s ON wf_cohort_bucket(r.at/1e9,'"+source.Bucket+"','"+strings.ReplaceAll(c.Definition.Scope.TZ, "'", "''")+"',"+strconv.Itoa(source.BucketStep)+")=s.bucket WHERE r.at>=? AND r.at<=? AND r.conversation_id<>''")
-	}
-	q += "SELECT DISTINCT conversation_id FROM (" + strings.Join(contributors, " UNION ") + ") WHERE conversation_id<>''"
-	args = append(args, from.UnixNano(), to.UnixNano())
-	args = append(args, predicateArgs...)
-	if len(factTypes) != 0 {
-		args = append(args, seconds(from), seconds(to))
-	}
-	if includeUsage {
-		args = append(args, usageArgs...)
-		args = append(args, seconds(from), seconds(to))
-	}
-	if includeRejections {
-		args = append(args, from.UnixNano(), to.UnixNano())
-	}
+	q := prefix + " SELECT DISTINCT conversation_id FROM (" + strings.Join(contributors, " UNION ") + ") WHERE conversation_id<>''"
 	rel.Mapping, rel.Unit = "time_bucket_to_contributing_session", "conversation_id"
+	rel.SourceRejections = containsString(source.Fields, "rejections")
 	return q, args, rel, nil
+}
+
+// buildTimeCohortPrefix renders the frozen bucket grid, applies the scope dimensions each measure
+// applies, and returns the shared "WITH ... selected AS (...)" prefix plus its arguments. Callers
+// append either the contributor SELECT or a source-side rejection-association count.
+func buildTimeCohortPrefix(c ParsedCohort, fields []string, bucket string, step int, from, to time.Time) (string, []any, error) {
+	scope := c.Definition.Scope
+	cond, predicateArgs, err := compileCohortNode("time", c.root, scope.TZ)
+	if err != nil {
+		return "", nil, err
+	}
+	bucketOf := func(expr string) string { return cohortTimeBucketExpr(expr, bucket, scope.TZ, step) }
+	ctes := []string{}
+	args := []any{}
+
+	addFact := func(name, typePred, measure string, exprs map[string]string) {
+		where, fargs := cohortTimeScopeFilter(scope, measure, from, to).factWhere()
+		if typePred != "" {
+			where += " AND " + typePred
+		}
+		ctes = append(ctes, name+" AS (SELECT "+bucketOf("ts")+" bucket,"+cohortTimeSelect(exprs)+" FROM facts WHERE "+where+" GROUP BY bucket)")
+		args = append(args, fargs...)
+	}
+	addFact("hook_b", "type='hook_event'", "hook_events", map[string]string{"hook_events": "COUNT(DISTINCT row_hash)"})
+	addFact("conv_b", "", "conversations", map[string]string{"conversations": "COUNT(DISTINCT conversation_id)"})
+	addFact("art_b", "type='artifact_version'", "artifact_versions", map[string]string{"artifact_versions": "COUNT(DISTINCT row_hash)", "distinct_content": "COUNT(DISTINCT content_hash)"})
+	addFact("commit_b", "type='commit'", "commits", map[string]string{"commits": "COUNT(*)"})
+
+	ucte, uargs := usageRowsWhere(cohortTimeScopeFilter(scope, "cost_usd", from, to))
+	usageExprs := map[string]string{
+		"model_calls":        "COUNT(*)",
+		"unpriced_calls":     "SUM(1-wf_usage_priced(harness,model,tok_in,tok_out,tok_cache_read,tok_cache_write,tok_reasoning,cost_reported))",
+		"tokens_in":          "SUM(tok_in)",
+		"tokens_out":         "SUM(tok_out)",
+		"tokens_cache_read":  "SUM(tok_cache_read)",
+		"tokens_cache_write": "SUM(tok_cache_write)",
+		"tokens_reasoning":   "SUM(tok_reasoning)",
+		"cost_usd":           "SUM(wf_usage_cost(harness,model,tok_in,tok_out,tok_cache_read,tok_cache_write,tok_reasoning,cost_reported))",
+	}
+	ctes = append(ctes, "usage_b AS ("+ucte+" SELECT "+bucketOf("ts")+" bucket,"+cohortTimeSelect(usageExprs)+" FROM kept GROUP BY bucket)")
+	args = append(args, uargs...)
+
+	rw, rargs := cohortTimeScopeFilter(scope, "rejections", from, to).rejWhere()
+	ctes = append(ctes, "reject_b AS (SELECT "+bucketOf("at/1e9")+" bucket,"+cohortTimeSelect(map[string]string{"rejections": "COUNT(*)"})+" FROM rejections WHERE "+rw+" GROUP BY bucket)")
+	args = append(args, rargs...)
+
+	with := "WITH " + strings.Join(ctes, ", ") + ", all_b AS (SELECT * FROM hook_b UNION ALL SELECT * FROM conv_b UNION ALL SELECT * FROM art_b UNION ALL SELECT * FROM commit_b UNION ALL SELECT * FROM usage_b UNION ALL SELECT * FROM reject_b), buckets AS (SELECT bucket," + sumColumns(cohortTimeColumns) + " FROM all_b GROUP BY bucket)"
+	fieldPred := make([]string, 0, len(fields))
+	for _, f := range fields {
+		fieldPred = append(fieldPred, "\""+f+"\" > 0")
+	}
+	selected := "selected AS (SELECT bucket FROM buckets WHERE (" + cond + ") AND (" + strings.Join(fieldPred, " OR ") + ")"
+	idArgs := []any{}
+	if values := cohortTimeScopeValues(scope.Include, "id"); len(values) > 0 {
+		keys := cohortTimeBucketKeys(values, scope.TZ)
+		if len(keys) == 0 {
+			selected += " AND 0"
+		} else {
+			selected += " AND bucket IN (" + strings.TrimSuffix(strings.Repeat("?,", len(keys)), ",") + ")"
+			for _, k := range keys {
+				idArgs = append(idArgs, k)
+			}
+		}
+	}
+	if values := cohortTimeScopeValues(scope.Exclude, "id"); len(values) > 0 {
+		keys := cohortTimeBucketKeys(values, scope.TZ)
+		if len(keys) > 0 {
+			selected += " AND bucket NOT IN (" + strings.TrimSuffix(strings.Repeat("?,", len(keys)), ",") + ")"
+			for _, k := range keys {
+				idArgs = append(idArgs, k)
+			}
+		}
+	}
+	selected += ")"
+	args = append(args, predicateArgs...)
+	args = append(args, idArgs...)
+	return with + ", " + selected, args, nil
+}
+
+func cohortTimeBucketExpr(expr, bucket, tz string, step int) string {
+	return "wf_cohort_bucket(" + expr + ",'" + bucket + "','" + strings.ReplaceAll(tz, "'", "''") + "'," + strconv.Itoa(step) + ")"
+}
+
+// cohortTimeSelect projects every measure column, computing only the names in exprs and zeroing
+// the rest so a UNION ALL across measure groups keeps one column order.
+func cohortTimeSelect(exprs map[string]string) string {
+	sel := make([]string, len(cohortTimeColumns))
+	for i, col := range cohortTimeColumns {
+		if expr, ok := exprs[col]; ok {
+			sel[i] = expr + " AS \"" + col + "\""
+		} else {
+			sel[i] = "0 AS \"" + col + "\""
+		}
+	}
+	return strings.Join(sel, ",")
+}
+
+// cohortTimeBucketKeys translates scope/predicate time ids ({"t","tz"}) into the bucket keys the
+// resolver groups on. An id from another zone cannot name a row of this grid and matches nothing.
+func cohortTimeBucketKeys(values []string, tz string) []string {
+	out := []string{}
+	for _, raw := range values {
+		var id struct {
+			T  string `json:"t"`
+			TZ string `json:"tz"`
+		}
+		if json.Unmarshal([]byte(raw), &id) != nil || id.T == "" || id.TZ != tz {
+			continue
+		}
+		out = append(out, id.T)
+	}
+	return out
+}
+
+func sqlStringList(values []string) string {
+	quoted := make([]string, len(values))
+	for i, v := range values {
+		quoted[i] = "'" + strings.ReplaceAll(v, "'", "''") + "'"
+	}
+	return strings.Join(quoted, ",")
+}
+
+// TimeCohortSourceAssociations classifies rejections in a time cohort's selected buckets within
+// the source scope. Only associated rejections could contribute sessions; missing and orphan rows
+// are counted rather than inner-joined away. It is empty unless source.fields include rejections.
+func (t *Tenant) TimeCohortSourceAssociations(ctx context.Context, c ParsedCohort) (RejectionAssociation, error) {
+	var a RejectionAssociation
+	if c.Definition.Grain != "time" || len(c.Definition.Source) == 0 {
+		return a, nil
+	}
+	var source struct {
+		Fields     []string `json:"fields"`
+		Bucket     string   `json:"bucket"`
+		BucketStep int      `json:"bucket_step"`
+	}
+	if err := json.Unmarshal(c.Definition.Source, &source); err != nil || !containsString(source.Fields, "rejections") {
+		return a, nil
+	}
+	from, err := time.Parse(time.RFC3339, c.Definition.Scope.From)
+	if err != nil {
+		return a, fmt.Errorf("%w: invalid fixed source window", ErrCohortInvalid)
+	}
+	to, err := time.Parse(time.RFC3339, c.Definition.Scope.To)
+	if err != nil {
+		return a, fmt.Errorf("%w: invalid fixed source window", ErrCohortInvalid)
+	}
+	prefix, args, err := buildTimeCohortPrefix(c, source.Fields, source.Bucket, source.BucketStep, from, to)
+	if err != nil {
+		return a, err
+	}
+	bucketOf := cohortTimeBucketExpr("r.at/1e9", source.Bucket, c.Definition.Scope.TZ, source.BucketStep)
+	q := prefix + ` SELECT COUNT(*),
+		COALESCE(SUM(CASE WHEN r.conversation_id<>'' AND EXISTS (
+			SELECT 1 FROM facts x WHERE x.conversation_id=r.conversation_id AND x.type<>'session_action') THEN 1 ELSE 0 END),0),
+		COALESCE(SUM(CASE WHEN r.conversation_id='' THEN 1 ELSE 0 END),0),
+		COALESCE(SUM(CASE WHEN r.conversation_id<>'' AND NOT EXISTS (
+			SELECT 1 FROM facts x WHERE x.conversation_id=r.conversation_id AND x.type<>'session_action') THEN 1 ELSE 0 END),0)
+		FROM rejections r JOIN selected s ON ` + bucketOf + `=s.bucket WHERE r.at>=? AND r.at<=?`
+	args = append(args, from.UnixNano(), to.UnixNano())
+	err = t.rdb.QueryRowContext(ctx, q, args...).Scan(&a.Total, &a.Associated, &a.NoConversationID, &a.OrphanConversationID)
+	return a, err
 }
 
 func containsString(xs []string, value string) bool {
@@ -1296,7 +1549,7 @@ func sumColumns(columns []string) string {
 	return strings.Join(xs, ",")
 }
 
-func compileCohortNode(grain string, n *cohortNode) (string, []any, error) {
+func compileCohortNode(grain string, n *cohortNode, tz string) (string, []any, error) {
 	if n == nil {
 		return "", nil, fmt.Errorf("%w: missing parsed predicate", ErrCohortInvalid)
 	}
@@ -1308,7 +1561,7 @@ func compileCohortNode(grain string, n *cohortNode) (string, []any, error) {
 		}
 		parts := []string{}
 		for _, child := range n.children {
-			sql, a, err := compileCohortNode(grain, child)
+			sql, a, err := compileCohortNode(grain, child, tz)
 			if err != nil {
 				return "", nil, err
 			}
@@ -1318,8 +1571,18 @@ func compileCohortNode(grain string, n *cohortNode) (string, []any, error) {
 		return strings.Join(parts, sep), args, nil
 	}
 	if n.kind == "not" {
-		sql, a, err := compileCohortNode(grain, n.children[0])
+		sql, a, err := compileCohortNode(grain, n.children[0], tz)
 		return "NOT (" + sql + ")", a, err
+	}
+	if n.kind == "in" && grain == "time" && n.lens == "id" {
+		keys := cohortTimeBucketKeys(n.values, tz)
+		if len(keys) == 0 {
+			return "0", nil, nil
+		}
+		for _, k := range keys {
+			args = append(args, k)
+		}
+		return "bucket IN (" + strings.TrimSuffix(strings.Repeat("?,", len(keys)), ",") + ")", args, nil
 	}
 	columns := map[string]map[string]string{
 		"time":      {"hook_events": "hook_events", "conversations": "conversations", "artifact_versions": "artifact_versions", "distinct_content": "distinct_content", "commits": "commits", "rejections": "rejections", "model_calls": "model_calls", "unpriced_calls": "unpriced_calls", "tokens_in": "tokens_in", "tokens_out": "tokens_out", "tokens_cache_read": "tokens_cache_read", "tokens_cache_write": "tokens_cache_write", "tokens_reasoning": "tokens_reasoning", "cost_usd": "cost_usd"},
@@ -1374,6 +1637,9 @@ type CohortRelation struct {
 	Distinct    bool   `json:"distinct"`
 	// ResolvedN reports that resolved_n is |C| before the target window, as 17.3.1 requires.
 	ResolvedN bool `json:"resolved_n_support"`
+	// SourceRejections reports that a time cohort's source.fields include rejections, so its
+	// relation also carries the source-side association counts.
+	SourceRejections bool `json:"-"`
 }
 
 // CohortCount returns |C|: the distinct sessions the positive source predicate resolves to,

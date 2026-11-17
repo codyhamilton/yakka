@@ -1245,8 +1245,36 @@ func (s *Server) analyticsTimeEntities(w http.ResponseWriter, r *http.Request, t
 		readFailed(w)
 		return
 	}
+	timePopulation := func(rowsN int) (map[string]any, bool) {
+		p := map[string]any{"grain": "time", "unit": "bucket", "scope_n": rowsN, "cohort_n": rowsN, "eligible_n": rowsN, "returned_n": rowsN, "missing_by_reason": map[string]int{}}
+		if f.CohortSQL == "" {
+			return p, true
+		}
+		scopeN, cohortN, cerr := cohortSessionCounts(r.Context(), ts.t, f)
+		if cerr != nil {
+			readFailed(w)
+			return nil, false
+		}
+		withAssociations := false
+		for _, field := range fields {
+			if field == "rejections" {
+				withAssociations = true
+			}
+		}
+		rel, rerr := cohortRelation(r.Context(), ts.t, f, withAssociations, scopeN, cohortN, true)
+		if rerr != nil {
+			readFailed(w)
+			return nil, false
+		}
+		p["relation"] = rel
+		return p, true
+	}
 	if empty {
-		writeJSON(w, 200, map[string]any{"grain": "time", "bucket": "none", "fields": fields, "rows": []any{}, "population": map[string]any{"grain": "time", "unit": "bucket", "scope_n": 0, "cohort_n": 0, "eligible_n": 0, "returned_n": 0, "missing_by_reason": map[string]int{}}, "window": window})
+		population, ok := timePopulation(0)
+		if !ok {
+			return
+		}
+		writeJSON(w, 200, map[string]any{"grain": "time", "bucket": "none", "fields": fields, "rows": []any{}, "population": population, "window": window})
 		return
 	}
 	bucket := q.Get("bucket")
@@ -1322,7 +1350,11 @@ func (s *Server) analyticsTimeEntities(w http.ResponseWriter, r *http.Request, t
 		}
 		rows = kept
 	}
-	out := map[string]any{"grain": "time", "bucket": bucket, "fields": fields, "rows": rows, "population": map[string]any{"grain": "time", "unit": "bucket", "scope_n": len(rows), "cohort_n": len(rows), "eligible_n": len(rows), "returned_n": len(rows), "missing_by_reason": map[string]int{}}, "window": window}
+	population, ok := timePopulation(len(rows))
+	if !ok {
+		return
+	}
+	out := map[string]any{"grain": "time", "bucket": bucket, "fields": fields, "rows": rows, "population": population, "window": window}
 	if len(ignored) > 0 {
 		names := make([]string, 0, len(ignored))
 		for name := range ignored {

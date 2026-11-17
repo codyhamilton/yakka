@@ -106,8 +106,11 @@ type AnalyticsFilter struct {
 	CohortSourceGrain string
 	CohortMapping     string
 	CohortOp          string
-	SessionRanges     []SessionRange
-	TZ                *time.Location // nil means UTC
+	// CohortSourceAssociation carries a time cohort's source-side rejection counts so the
+	// relation can report side:"source" without re-resolving at each handler.
+	CohortSourceAssociation *RejectionAssociation
+	SessionRanges           []SessionRange
+	TZ                      *time.Location // nil means UTC
 	// All is set for all=1 with no cursor. Handlers resolve From to retained coverage
 	// before choosing a bucket; the stored minimum is only the requested bound.
 	All bool

@@ -12,6 +12,7 @@ import (
 func withoutCohort(f store.AnalyticsFilter) store.AnalyticsFilter {
 	f.CohortSQL, f.CohortArgs, f.CohortExclude = "", nil, false
 	f.CohortSourceGrain, f.CohortMapping, f.CohortOp = "", "", ""
+	f.CohortSourceAssociation = nil
 	return f
 }
 
@@ -68,6 +69,21 @@ func cohortRelation(ctx context.Context, t *store.Tenant, f store.AnalyticsFilte
 			},
 			"treatment": treatment,
 		}}
+	}
+	if f.CohortSourceAssociation != nil {
+		a := *f.CohortSourceAssociation
+		rel["associations"] = append(rel["associations"].([]any), map[string]any{
+			"side":         "source",
+			"contributor":  "rejection",
+			"unit":         "rejection",
+			"total_n":      a.Total,
+			"associated_n": a.Associated,
+			"missing_by_reason": map[string]int{
+				"no_conversation_id":     a.NoConversationID,
+				"orphan_conversation_id": a.OrphanConversationID,
+			},
+			"treatment": "selected",
+		})
 	}
 	if targetSessions {
 		rel["target_sessions"] = map[string]any{"unit": "session", "scope_n": scopeN, "cohort_n": cohortN}
