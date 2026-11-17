@@ -238,6 +238,13 @@ None blocking. Whether the unit and PR tiers will be needed is answered by Phase
 - Surfaces: `tools/shadow-review-trial/{approval.py,cli.py,runner.py,report.py,test_approval.py,test_runner.py,test_phase7.py,test_report.py,test_report_export.py,README.md}`.
 - Approach: known
 - Depends on: Phase 1
+- Units:
+
+| Unit | Brief | Depends on | Runs alongside |
+|---|---|---|---|
+| 1 — Run path without spend gates | `briefs/phase2-01-run-path.md` | nothing | nothing (2 and 3 need it) |
+| 2 — Report actual cost only | `briefs/phase2-02-report-cost.md` | 1 | 3 |
+| 3 — Trial README without the spend gate | `briefs/phase2-03-readme.md` | 1 | 2 |
 
 ### Phase 3 — garcia-music manifest of at least 300 eligible cases
 
