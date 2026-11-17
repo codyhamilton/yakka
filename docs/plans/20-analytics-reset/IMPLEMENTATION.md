@@ -1,10 +1,14 @@
 # Plan 20 implementation
 
 Tool: opencode execute skill
-Run ID: feat/20-analytics-reset phase 7 (2026-11-18)
-Start time: 2026-11-18 05:53 Australia/Brisbane
+Run ID: feat/20-analytics-reset phase 8 (2026-11-18)
+Start time: 2026-11-18 07:50 Australia/Brisbane
 
-Phase 6 (below) closed at `d889d83` with the `Yakka-Phase: 20-analytics-reset:6` trailer; `d482046` is the later review touch-up commit. This run builds Phase 7 only.
+Phase 7 (below) closed at `5df6413` with the `Yakka-Phase: 20-analytics-reset:7` trailer. This run builds Phase 8 only.
+
+## Phase 8 — Distribution and categorical chart kit
+
+The phase outcome is approach-known (SVG with the shared tooltip, legend and registry). This run uses the signed outcome and CONTRACTS.md 17.5 and 17.7 as the fixed yardstick. No new grain, join, route, dependency, gesture or contract is authorized. Phase 8 has no Units list in DESIGN.md and is more than one worker's work, so `refine` is dispatched as its own context; its verdict decides the units.
 
 ## Phase 7 — Time-series chart kit
 
