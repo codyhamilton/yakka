@@ -444,6 +444,130 @@ class AlignmentReportTests(unittest.TestCase):
         self.assertEqual(fix["by_tier"]["unit"], {"matched": 0, "hunks": 0, "recall": None,
                                                   "null": {"matched": 0, "hunks": 0, "recall": None}})
 
+    def test_paired_deltas_on_common_cases_with_bootstrap(self):
+        manifest = phase3_manifest(3)
+        cases = {case["case_id"]: case for case in manifest["cases"]}
+        for index in range(3):
+            cases[f"case-{index}"]["outcomes"] = [
+                outcome_finding("src/a.py", 10, 20, None, f"finding {index}")]
+        manifest = refreeze(manifest)
+
+        def review_finding(index, matched):
+            return {"id": f"F{index}", "severity": "medium",
+                    "path": "src/a.py" if matched else "src/z.py",
+                    "line_start": 10 if matched else 100,
+                    "line_end": 20 if matched else 110,
+                    "title": f"finding {index}" if matched else "unrelated",
+                    "evidence": f"finding {index}" if matched else "unrelated detail"}
+
+        matched = {0: {"high": True, "xhigh": True, "max": True},
+                   1: {"high": True, "xhigh": False, "max": True},
+                   2: {"high": False, "xhigh": True, "max": True}}
+        rows, refs = [], []
+        for effort in report.EFFORTS:
+            for index in range(3):
+                rows.append(record(manifest, f"case-{index}", effort,
+                                   findings=[review_finding(index, matched[index][effort])]))
+                refs.append((f"case-{index}", effort, f"case-{index}-{effort}"))
+        deltas = report_for(manifest, rows, refs)["comparisons"]["paired_deltas"]
+
+        for metric in ("finding_recall", "fix_recall", "corroboration_rate", "severity_agreement_rate"):
+            self.assertEqual(set(deltas[metric]), {"high_vs_xhigh", "high_vs_max", "xhigh_vs_max"})
+        recall = deltas["finding_recall"]
+        self.assertEqual(recall["high_vs_xhigh"]["n"], 3)
+        self.assertAlmostEqual(recall["high_vs_xhigh"]["delta"], 0.0)
+        self.assertLessEqual(recall["high_vs_xhigh"]["low"], recall["high_vs_xhigh"]["delta"])
+        self.assertGreaterEqual(recall["high_vs_xhigh"]["high"], recall["high_vs_xhigh"]["delta"])
+        self.assertEqual(recall["high_vs_max"]["n"], 3)
+        self.assertAlmostEqual(recall["high_vs_max"]["delta"], -1 / 3)
+        self.assertAlmostEqual(recall["xhigh_vs_max"]["delta"], -1 / 3)
+        self.assertEqual(deltas["corroboration_rate"], recall)
+
+        for metric in ("fix_recall", "severity_agreement_rate"):
+            for pair in ("high_vs_xhigh", "high_vs_max", "xhigh_vs_max"):
+                self.assertEqual(deltas[metric][pair],
+                                 {"delta": None, "low": None, "high": None, "n": 0})
+
+        repeat = report_for(manifest, rows, refs)["comparisons"]["paired_deltas"]
+        self.assertEqual(deltas, repeat)
+
+    def test_cost_latency_per_review_and_effort(self):
+        manifest = make_manifest(3)
+        rows = [record(manifest, "case-0", "high", cost=0.1, latency=10),
+                record(manifest, "case-1", "high", cost=0.2, latency=20)]
+        unknown = record(manifest, "case-2", "high", latency=30)
+        unknown["attempts"] = [{"status": "ok", "latency_ms": 30, "cost_usd": None,
+                                "cost_known": False, "input_tokens": 100, "output_tokens": 20}]
+        rows.append(unknown)
+        refs = [(f"case-{index}", "high", f"case-{index}-high") for index in range(3)]
+        result = report_for(manifest, rows, refs)
+        cost_latency = result["cost_latency"]
+
+        self.assertEqual(cost_latency["cost_basis"], result["usage"]["cost_basis"])
+        for effort in report.EFFORTS:
+            for key in ("cost_usd", "known_cost_usd", "unknown_cost_entries"):
+                self.assertEqual(cost_latency["by_effort"][effort][key], result["arms"][effort][key])
+            self.assertEqual(cost_latency["by_effort"][effort]["reviews"], result["arms"][effort]["completed"])
+            self.assertEqual(cost_latency["by_effort"][effort]["latency_ms"], result["arms"][effort]["latency_ms"])
+        high = cost_latency["by_effort"]["high"]
+        self.assertIsNone(high["cost_usd"])
+        self.assertEqual(high["known_cost_usd"], 0.3)
+        self.assertEqual(high["unknown_cost_entries"], 1)
+        self.assertEqual(high["reviews"], 3)
+        self.assertEqual(high["latency_ms"], {"count": 3, "min": 10, "p50": 20, "p90": 30, "max": 30})
+
+        per_review = cost_latency["per_review"]
+        self.assertEqual(sorted(per_review), ["case-0", "case-1", "case-2"])
+        self.assertEqual(per_review["case-0"]["high"]["cost_usd"], 0.1)
+        self.assertEqual(per_review["case-0"]["high"]["known_cost_usd"],
+                         result["arms"]["high"]["per_case"]["case-0"]["known_cost_usd"])
+        self.assertEqual(per_review["case-0"]["high"]["latency_ms"],
+                         result["arms"]["high"]["per_case"]["case-0"]["latency_ms"])
+        self.assertIsNone(per_review["case-2"]["high"]["cost_usd"])
+        self.assertEqual(per_review["case-2"]["high"]["known_cost_usd"], 0.0)
+        self.assertEqual(per_review["case-2"]["high"]["unknown_cost_attempts"], 1)
+        self.assertEqual(per_review["case-2"]["high"]["latency_ms"],
+                         {"count": 1, "min": 30, "p50": 30, "p90": 30, "max": 30})
+
+    def test_reproducibility_and_reconciliation(self):
+        manifest = phase3_manifest(2)
+        rows = [record(manifest, f"case-{index}", effort)
+                for effort in report.EFFORTS for index in range(2)]
+        refs = [(f"case-{index}", effort, f"case-{index}-{effort}")
+                for effort in report.EFFORTS for index in range(2)]
+        export, ledger = make_export(manifest, rows), make_ledger(manifest, refs)
+        one = report.build_report(manifest, export, ledger, {}, adjudication())
+        two = report.build_report(manifest, export, ledger, {}, adjudication())
+        self.assertEqual(one, two)
+        self.assertEqual(one["reproducibility"]["report_sha256"], two["reproducibility"]["report_sha256"])
+        self.assertEqual(one["reproducibility"]["manifest_sha256"], manifest["manifest_sha256"])
+        self.assertEqual(one["reproducibility"]["seed"], 23)
+        self.assertRegex(one["reproducibility"]["ledger_sha256"], r"^[0-9a-f]{64}$")
+        self.assertRegex(one["reproducibility"]["export_sha256"], r"^[0-9a-f]{64}$")
+        self.assertRegex(one["reproducibility"]["report_sha256"], r"^[0-9a-f]{64}$")
+
+        reconciliation = one["reconciliation"]
+        self.assertEqual(reconciliation["canonical_records"], 6)
+        self.assertEqual(reconciliation["completed_records"], 6)
+        self.assertEqual(reconciliation["completed_without_canonical_id"], 0)
+        self.assertEqual(reconciliation["completed_without_cost"], 0)
+        self.assertEqual(reconciliation["unknown_cost_entries"], 0)
+        self.assertEqual(reconciliation["missing_from_export"], 0)
+        self.assertEqual(reconciliation["cost_basis"], one["usage"]["cost_basis"])
+
+        unpriced = record(manifest, "case-0", "high")
+        unpriced["attempts"] = [{"status": "ok"}]
+        with self.assertRaisesRegex(ValueError, "cost"):
+            report.build_report(manifest, make_export(manifest, [unpriced]),
+                                make_ledger(manifest, [("case-0", "high", "case-0-high")]), {}, adjudication())
+
+        unkeyed = {"schema_version": 1, "manifest_hash": manifest["manifest_sha256"],
+                   "run_id": RUN, "tenant_id": TENANT,
+                   "entries": {"entry-0": {"case_id": "case-0", "effort": "high", "state": "complete"}}}
+        with self.assertRaisesRegex(ValueError, "canonical review id"):
+            report.build_report(manifest, make_export(manifest, [record(manifest, "case-0", "high")]),
+                                unkeyed, {}, adjudication())
+
 
 if __name__ == "__main__":
     unittest.main()

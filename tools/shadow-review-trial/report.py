@@ -36,6 +36,10 @@ REVIEWER_MODEL = "claude-haiku-5-5"
 UNKNOWN_STATES = ("started", "started_unknown")
 NO_PROVIDER_CALL_STATUSES = ("unavailable", "skipped_busy", "skipped_budget")
 USAGE_FIELDS = ("cost_usd", "cost_known", "input_tokens", "output_tokens", "latency_ms")
+PAIRED_METRICS = ("finding_recall", "fix_recall", "corroboration_rate", "severity_agreement_rate")
+PAIRED_EFFORT_PAIRS = (("high_vs_xhigh", "high", "xhigh"),
+                       ("high_vs_max", "high", "max"),
+                       ("xhigh_vs_max", "xhigh", "max"))
 
 
 def _canonical_hash(value: Any) -> str:
@@ -663,6 +667,68 @@ def _rate(numerator: int, denominator: int) -> float | None:
     return numerator / denominator if denominator else None
 
 
+def _metric_seed(seed: int, metric: str) -> int:
+    """Bootstrap seed: low 64 bits of sha256("<manifest seed>:<metric>").
+
+    Mixing the metric name keeps each metric's resample draws a pure,
+    reproducible function of the frozen manifest seed, with no module state.
+    """
+    return int(hashlib.sha256(f"{seed}:{metric}".encode("utf-8")).hexdigest()[:16], 16)
+
+
+def _case_metric_contributions(analysis: dict[str, Any], case: dict[str, Any], case_id: str, effort: str,
+                               adjudications: dict[tuple[str, str, str, str], dict[str, Any]]) -> dict[str, float | None]:
+    """One case's contribution to each paired metric, None where undefined.
+
+    These are the same ratios phase4-05 aggregates per effort, recomputed per
+    case so paired differences are defined. A censored case contributes no fix
+    recall; a case with no recorded findings, later-fix hunks, review findings
+    or severity pairs has no denominator and therefore no value.
+    """
+    findings = analysis["reviews"]
+    corroborated = 0
+    for finding in findings:
+        if finding.get("id") in analysis["matched_finding_ids"]:
+            corroborated += 1
+            continue
+        decision = adjudications.get(("review", case_id, effort, finding.get("id", "")))
+        if decision is not None and decision.get("category") == "valid":
+            corroborated += 1
+    pairs = analysis["severity_pairs"]
+    agree = sum(first == second for first, second in pairs)
+    censored = case.get("censored") is True
+    return {
+        "finding_recall": _rate(len(analysis["matched_recorded"]), len(analysis["recorded"])),
+        "fix_recall": None if censored else _rate(len(analysis["matched_fixes"]), len(analysis["fixes"])),
+        "corroboration_rate": _rate(corroborated, len(findings)),
+        "severity_agreement_rate": _rate(agree, len(pairs)),
+    }
+
+
+def _paired_deltas(seed: int, paired_cases: list[str],
+                   contributions: dict[tuple[str, str], dict[str, float | None]]) -> dict[str, Any]:
+    """Seeded paired deltas on cases completed at every effort, per metric and effort pair."""
+    rows: dict[str, Any] = {}
+    for metric in PAIRED_METRICS:
+        by_pair: dict[str, Any] = {}
+        for label, first, second in PAIRED_EFFORT_PAIRS:
+            differences: list[float] = []
+            for case_id in paired_cases:
+                left = contributions.get((case_id, first), {}).get(metric)
+                right = contributions.get((case_id, second), {}).get(metric)
+                if left is None or right is None:
+                    continue
+                differences.append(left - right)
+            if differences:
+                interval = matching.bootstrap_interval(differences, _metric_seed(seed, metric))
+                by_pair[label] = {"delta": interval["mean"], "low": interval["low"],
+                                  "high": interval["high"], "n": interval["n"]}
+            else:
+                by_pair[label] = {"delta": None, "low": None, "high": None, "n": 0}
+        rows[metric] = by_pair
+    return rows
+
+
 def _analyse_record(record: dict[str, Any], case: dict[str, Any], effort: str, case_id: str,
                     adjudications: dict[tuple[str, str, str, str], dict[str, Any]]) -> dict[str, Any]:
     """One completed record's matches, counts and severity pairs (no I/O, no mutation)."""
@@ -766,11 +832,15 @@ def _comparisons_and_validation(manifest: dict[str, Any], cases: dict[str, dict[
     uncertain_band = 0
     uncensored_cases: set[str] = set()
     censored_cases: set[str] = set()
+    contributions: dict[tuple[str, str], dict[str, float | None]] = {}
+    completed_by_effort: dict[str, set[str]] = {effort: set() for effort in EFFORTS}
 
     for case_id, effort, record in completed_records:
         case = cases[case_id]
         tier = _case_tier(case)
+        completed_by_effort[effort].add(case_id)
         analysis = _analyse_record(record, case, effort, case_id, adj)
+        contributions[(case_id, effort)] = _case_metric_contributions(analysis, case, case_id, effort, adj)
         for group in (findings_by_effort[effort], findings_by_tier[tier]):
             group["recorded"] += len(analysis["recorded"])
             group["matched"] += len(analysis["matched_recorded"])
@@ -839,6 +909,8 @@ def _comparisons_and_validation(manifest: dict[str, Any], cases: dict[str, dict[
         "verdict_agreement": {"by_effort": verdict_rows},
         "severity_agreement": {"by_effort": severity_rows},
     }
+    paired_cases = sorted(set.intersection(*(completed_by_effort[effort] for effort in EFFORTS)))
+    comparisons["paired_deltas"] = _paired_deltas(seed, paired_cases, contributions)
     label_pairs = [(row["category"], row["second_label"]) for row in adjudications["findings"]
                    if row.get("second_label") is not None]
     validation = {
@@ -973,6 +1045,18 @@ def build_report(manifest: dict[str, Any], export: dict[str, Any], ledger: dict[
     for identity in adj:
         if identity[0] == "review" and identity not in valid_review_finding_ids:
             raise ValueError(f"adjudication does not match a completed review finding: {identity[1]}/{identity[3]}")
+
+    completed_without_canonical_id = sum(
+        1 for entry in ledger["entries"].values()
+        if isinstance(entry, dict) and entry.get("state") == "complete"
+        and not entry.get("canonical_review_id") and not entry.get("duplicate_receipt"))
+    if completed_without_canonical_id:
+        raise ValueError("a completed ledger row has no canonical review id")
+    completed_without_cost = sum(
+        1 for _, _, record in completed_records
+        if not any("cost_usd" in attempt or "cost_known" in attempt for attempt in _attempts(record)))
+    if completed_without_cost:
+        raise ValueError("a completed review row carries neither a cost nor an unknown-cost flag")
 
     case_by_tag = {_case_tag(case_id): case_id for case_id in cases}
     attempted_by_arm = Counter()
@@ -1199,13 +1283,40 @@ def build_report(manifest: dict[str, Any], export: dict[str, Any], ledger: dict[
                         "input_token_fields": missing_input_fields, "output_token_fields": missing_output_fields,
                         "latency_fields": missing_latency_fields}
         cost_basis = "canonical_record_attempts"
+    cost_latency_per_review: dict[str, dict[str, Any]] = {}
+    for effort in EFFORTS:
+        for case_id, row in arm_reports[effort]["per_case"].items():
+            cost_latency_per_review.setdefault(case_id, {})[effort] = {
+                "cost_usd": row["cost_usd"], "known_cost_usd": row["known_cost_usd"],
+                "unknown_cost_attempts": row["unknown_cost_attempts"], "latency_ms": row["latency_ms"]}
+    cost_latency = {
+        "cost_basis": cost_basis,
+        "by_effort": {effort: {"cost_usd": arm_reports[effort]["cost_usd"],
+                               "known_cost_usd": arm_reports[effort]["known_cost_usd"],
+                               "unknown_cost_entries": arm_reports[effort]["unknown_cost_entries"],
+                               "reviews": arm_reports[effort]["completed"],
+                               "latency_ms": arm_reports[effort]["latency_ms"]} for effort in EFFORTS},
+        "per_review": {case_id: {effort: rows[effort] for effort in EFFORTS if effort in rows}
+                       for case_id, rows in sorted(cost_latency_per_review.items())},
+    }
+    reconciliation = {
+        "canonical_records": len(canonical_refs),
+        "completed_records": len(completed_records),
+        "completed_without_canonical_id": completed_without_canonical_id,
+        "completed_without_cost": completed_without_cost,
+        "unknown_cost_entries": unknown_cost_entries,
+        "missing_from_export": 0,
+        "cost_basis": cost_basis,
+    }
+    reproducibility = {"manifest_sha256": manifest_hash, "seed": int(manifest.get("seed", 0)),
+                       "ledger_sha256": _canonical_hash(ledger), "export_sha256": _canonical_hash(export)}
     comparisons, validation = _comparisons_and_validation(
         manifest, cases, completed_records, adjudications, adj, run_id)
     statuses = {status: status_counts.get(status, 0) for status in STATUSES}
     statuses.update({k: v for k, v in sorted(status_counts.items()) if k not in statuses})
     pages = [{key: page[key] for key in ("cursor_in", "cursor_out", "complete", "row_count", "row_ids_sha256")}
              for page in export["pages"]]
-    return {"schema_version": 1, "manifest_sha256": manifest_hash,
+    report = {"schema_version": 1, "manifest_sha256": manifest_hash,
             "denominators": {"attempted_records": len(rows), "eligible_cases": len(cases),
                              "canonical_records": len(canonical_refs),
                              "completed_valid_records": len(completed_records), "historical_findings": len(historical_rows),
@@ -1227,6 +1338,8 @@ def build_report(manifest: dict[str, Any], export: dict[str, Any], ledger: dict[
             "outcomes": {"by_build_model": dict(sorted(model_strata.items())), "by_reviewer_model": dict(sorted(reviewer_strata.items())),
                          "by_effective_effort": dict(sorted(effort_strata.items())), **arm_outcomes},
             "comparisons": comparisons, "validation": validation,
+            "cost_latency": cost_latency, "reconciliation": reconciliation,
+            "reproducibility": reproducibility,
             "historical_findings": {"by_category": {k: category_counts.get(k, 0) for k in (*HISTORICAL, "unadjudicated")}, "items": historical_rows},
             "new_findings": {"by_category": {k: new_counts.get(k, 0) for k in NEW}, "items": finding_rows,
                              "low_sample_rate": adjudications["low_sample_rate"], "sampling_seed": manifest.get("seed", 0)},
@@ -1235,6 +1348,8 @@ def build_report(manifest: dict[str, Any], export: dict[str, Any], ledger: dict[
                       "output_tokens": usage_output, "latency_ms": usage_latency,
                       "missing_data": missing_data,
                       "unknown_cost_entries": unknown_cost_entries}}
+    report["reproducibility"]["report_sha256"] = _canonical_hash(report)
+    return report
 
 
 def _distribution(values: list[int]) -> dict[str, int | float | None]:
