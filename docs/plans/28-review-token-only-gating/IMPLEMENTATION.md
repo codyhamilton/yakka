@@ -38,3 +38,5 @@ The Phase 1 outcome is exercised through its own entry points: MCP `tools/list` 
 Run: OpenCode `opencode run` — model `opencode-go/deepseek-v4.1-flash`; start 2026-11-18 04:16 AEST. Refined as 3 units (`7288e46`): wave 1 unit 1; wave 2 units 2 and 3.
 
 Units: `phase2-01-run-path`, `phase2-02-report-cost`, `phase2-03-readme`.
+
+- **phase2-01-run-path** — closed `60a8837`. `approval.py`/`test_approval.py` deleted; `runner.run` takes no cap/record; preflight rows are `{case_id, effort, status}` with only `unavailable` blocking; `skipped_busy` run receipts go `retry_pending` and legacy `skipped_budget` retries; CLI loses the cap and record options; fixture rehearsal records actual cost. `python3 -m unittest test_runner.py test_phase7.py` 29 OK, `test_manifest.py` 12 OK, full discover 54 OK; required grep empty. Deviation: no red-first output captured. Report: `reports/phase2-01-run-path.md`.
