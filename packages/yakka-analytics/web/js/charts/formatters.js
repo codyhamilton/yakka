@@ -96,6 +96,7 @@ export const formatTimeBasis = formatBasis;
 export function formatValue(value, options = {}) {
   const { kind = 'number', ...rest } = options;
   if (kind === 'money') return formatMoney(value, rest);
+  if (kind === 'text') return isMissing(value) ? NULL_TEXT : String(value);
   if (isMissing(value)) return kind === 'money' ? 'unpriced' : NULL_TEXT;
   if (kind === 'percent') return formatPercent(value, rest);
   if (kind === 'share') return formatShare(value, rest.whole, rest);

@@ -431,6 +431,61 @@ html[data-theme='dark'],
   cursor: crosshair;
 }
 
+/* Categorical SVG charts: shared plot, axis, label and mark chrome. */
+.yk-svg-plot {
+  display: block;
+  max-width: 100%;
+}
+
+.yk-cat-grid,
+.yk-cat-axis {
+  stroke: var(--yk-chart-grid);
+  stroke-width: 1;
+}
+
+.yk-cat-axis {
+  stroke: var(--yk-chart-border);
+}
+
+.yk-cat-label {
+  fill: var(--yk-chart-muted);
+  font-size: 0.72rem;
+}
+
+.yk-cat-tick,
+.yk-cat-value {
+  fill: var(--yk-chart-text);
+  font-size: 0.72rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.yk-mark {
+  cursor: pointer;
+}
+
+.yk-mark:focus-visible {
+  outline: 2px solid var(--yk-chart-focus);
+  outline-offset: 2px;
+}
+
+.yk-mark[data-highlight='true'] .yk-mark-shape {
+  stroke: var(--yk-chart-focus);
+  stroke-width: 2.5;
+}
+
+.yk-mark[data-selected='true'] .yk-mark-shape {
+  stroke: var(--yk-chart-text);
+  stroke-width: 2;
+}
+
+.yk-mark[data-excluded='true'] {
+  opacity: 0.5;
+}
+
+.yk-mark[data-dimmed='true'] {
+  opacity: 0.35;
+}
+
 @media (max-width: 900px) {
   .yk-chart-grid,
   .yk-foundations .yk-panels {
