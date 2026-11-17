@@ -374,3 +374,256 @@ func TestAnalyticsCohortCompilesScopePredicate(t *testing.T) {
 		t.Fatalf("unmapped lens err=%v want not_defined_for_grain", err)
 	}
 }
+
+func cohortMatrixFixture(t *testing.T) *Tenant {
+	t.Helper()
+	tn, _ := fixture(t)
+	rows := []FactRow{
+		ufact(901, "cursor", "model-a", "c1", `{"n":901}`, ad(9, 29, 12, 0), 1, 2, 0, 0, 0, nil),
+		ufact(902, "cursor", "model-a", "c1", `{"n":902}`, ad(9, 29, 13, 0), 1, 2, 0, 0, 0, nil),
+		ufact(903, "cursor", "model-a", "c1", `{"n":903}`, ad(9, 30, 1, 0), 1, 2, 0, 0, 0, nil),
+		ufact(904, "cursor", "model-b", "c1", `{"n":904}`, ad(9, 30, 2, 0), 1, 2, 0, 0, 0, nil),
+	}
+	if _, err := tn.Append(context.Background(), rows); err != nil {
+		t.Fatal(err)
+	}
+	return tn
+}
+
+func cohortCatalogue() CohortResolveOptions {
+	return CohortResolveOptions{Checks: map[string][]string{
+		"design": {"d.x", "d.y"}, "brief": {"b.x"}, "report": {"b.x"},
+	}}
+}
+
+func resolveCohortSessions(t *testing.T, tn *Tenant, raw string, opts *CohortResolveOptions) []string {
+	t.Helper()
+	c, err := ParseCohortDefinition([]byte(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var tail []CohortResolveOptions
+	if opts != nil {
+		tail = append(tail, *opts)
+	}
+	q, args, rel, err := CohortSessionSubquery(c, tail...)
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if !rel.ResolvedN || rel.SourceGrain != c.Definition.Grain {
+		t.Fatalf("relation=%+v", rel)
+	}
+	rows, err := tn.rdb.QueryContext(context.Background(), q, args...)
+	if err != nil {
+		t.Fatalf("resolver SQL: %v\n%s", err, q)
+	}
+	defer rows.Close()
+	got := []string{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		got = append(got, id)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	sort.Strings(got)
+	return got
+}
+
+func cohortRaw(grain, scope, predicate string) string {
+	return `{"v":1,"grain":"` + grain + `","scope":` + scope + `,"predicate":` + predicate + `}`
+}
+
+func cohortScope(include, exclude string) string {
+	return `{"from":"2026-09-28T00:00:00Z","to":"2026-10-05T12:00:00Z","tz":"UTC","include":` + include + `,"exclude":` + exclude + `}`
+}
+
+func cohortSmoke(t *testing.T, tn *Tenant, opts CohortResolveOptions, grain, source string, measures, lenses []string) {
+	t.Helper()
+	extra := ""
+	if source != "" {
+		extra = `,"source":` + source
+	}
+	for _, name := range measures {
+		raw := `{"v":1,"grain":"` + grain + `","scope":` + cohortScope(`[]`, `[]`) + `,"predicate":{"range":{"measure":` + fmt.Sprintf("%q", name) + `,"lo":0,"hi":1e18}}` + extra + `}`
+		if _, _, _, err := CohortSessionSubquery(mustParse(t, raw), opts); err != nil {
+			t.Fatalf("%s measure %s: %v", grain, name, err)
+		}
+	}
+	for _, name := range lenses {
+		raw := `{"v":1,"grain":"` + grain + `","scope":` + cohortScope(`[]`, `[]`) + `,"predicate":{"in":{"lens":` + fmt.Sprintf("%q", name) + `,"values":["x"]}}` + extra + `}`
+		if _, _, _, err := CohortSessionSubquery(mustParse(t, raw), opts); err != nil {
+			t.Fatalf("%s lens %s: %v", grain, name, err)
+		}
+	}
+	if extra == "" {
+		raw := `{"v":1,"grain":"` + grain + `","scope":` + cohortScope(`[]`, `[]`) + `,"predicate":{"is_null":{"measure":` + fmt.Sprintf("%q", measures[0]) + `}}}`
+		if _, _, _, err := CohortSessionSubquery(mustParse(t, raw), opts); err != nil {
+			t.Fatalf("%s is_null %s: %v", grain, measures[0], err)
+		}
+	}
+}
+
+func TestAnalyticsCohortMatrixSessionResolvesEveryEntry(t *testing.T) {
+	tn := cohortMatrixFixture(t)
+	defer tn.Close()
+	opts := cohortCatalogue()
+	for _, measure := range []string{"cost_usd", "unpriced_calls", "model_calls", "tokens_in", "tokens_out", "tokens_cache_read", "tokens_cache_write", "tokens_reasoning", "hook_events", "commits", "artifact_versions", "distinct_content", "duration_s", "first_ts", "last_ts"} {
+		raw := cohortRaw("session", cohortScope(`[]`, `[]`), fmt.Sprintf(`{"range":{"measure":%q,"lo":0,"hi":1e18}}`, measure))
+		if _, err := ParseCohortDefinition([]byte(raw)); err != nil {
+			t.Fatalf("%s parse: %v", measure, err)
+		}
+	}
+	for _, lens := range []string{"harness", "session_model", "session_repo", "id"} {
+		raw := cohortRaw("session", cohortScope(`[]`, `[]`), fmt.Sprintf(`{"in":{"lens":%q,"values":["c1"]}}`, lens))
+		_ = resolveCohortSessions(t, tn, raw, &opts)
+	}
+	if got := resolveCohortSessions(t, tn, cohortRaw("session", cohortScope(`[]`, `[]`), `{"in":{"lens":"session_model","values":["(mixed)"]}}`), &opts); !reflect.DeepEqual(got, []string{"c1"}) {
+		t.Fatalf("mixed-model sessions=%v want [c1]", got)
+	}
+	if got := resolveCohortSessions(t, tn, cohortRaw("session", cohortScope(`[]`, `[]`), `{"in":{"lens":"harness","values":["codex"]}}`), &opts); !reflect.DeepEqual(got, []string{"c4"}) {
+		t.Fatalf("lifetime harness sessions=%v want [c4]", got)
+	}
+	if got := resolveCohortSessions(t, tn, cohortRaw("session", cohortScope(`[]`, `[]`), `{"range":{"measure":"model_calls","lo":1,"hi":10}}`), &opts); !reflect.DeepEqual(got, []string{"c1"}) {
+		t.Fatalf("model-call sessions=%v want [c1]", got)
+	}
+}
+
+func TestAnalyticsCohortMatrixArtifactResolvesScoreBandWriterAndScope(t *testing.T) {
+	tn := cohortMatrixFixture(t)
+	defer tn.Close()
+	opts := cohortCatalogue()
+	cohortSmoke(t, tn, opts, "artifact", `{"check":"d.x"}`,
+		[]string{"versions", "distinct_writing_sessions", "first_ts", "last_ts", "content_bytes", "score:d.x", "writing_session_cost_usd", "writing_session_model_calls", "writing_session_tokens_in", "writing_session_tokens_out", "writing_session_tokens_cache_read", "writing_session_tokens_cache_write", "writing_session_tokens_reasoning", "writing_session_hook_events"},
+		[]string{"kind", "plan", "repo_id", "harness", "session_model", "source", "screen_verdict", "scorer", "band:d.x", "id"})
+	if got := resolveCohortSessions(t, tn, cohortRaw("artifact", cohortScope(`[]`, `[]`), `{"range":{"measure":"score:d.x","lo":0.7,"hi":1}}`), &opts); !reflect.DeepEqual(got, []string{"c1"}) {
+		t.Fatalf("score:d.x=%v want [c1]", got)
+	}
+	if got := resolveCohortSessions(t, tn, cohortRaw("artifact", cohortScope(`[]`, `[]`), `{"in":{"lens":"band:d.x","values":["high"]}}`), &opts); !reflect.DeepEqual(got, []string{"c1"}) {
+		t.Fatalf("band:d.x=%v want [c1]", got)
+	}
+	scorerRaw := `{"v":1,"grain":"artifact","scope":` + cohortScope(`[]`, `[]`) + `,"predicate":{"in":{"lens":"scorer","values":["s"]}},"source":{"check":"d.x"}}`
+	if got := resolveCohortSessions(t, tn, scorerRaw, &opts); !reflect.DeepEqual(got, []string{"c1"}) {
+		t.Fatalf("scorer/check=%v want [c1]", got)
+	}
+	if got := resolveCohortSessions(t, tn, cohortRaw("artifact", cohortScope(`[]`, `[]`), `{"range":{"measure":"writing_session_model_calls","lo":1,"hi":100}}`), &opts); !reflect.DeepEqual(got, []string{"c1"}) {
+		t.Fatalf("writing-session measure=%v want [c1]", got)
+	}
+	design := resolveCohortSessions(t, tn, cohortRaw("artifact", cohortScope(`[{"lens":"kind","values":["design"]}]`, `[]`), `{"range":{"measure":"versions","lo":0,"hi":100}}`), &opts)
+	brief := resolveCohortSessions(t, tn, cohortRaw("artifact", cohortScope(`[]`, `[{"lens":"kind","values":["design"]}]`), `{"range":{"measure":"versions","lo":0,"hi":100}}`), &opts)
+	if !reflect.DeepEqual(design, []string{"c1"}) || !reflect.DeepEqual(brief, []string{"c1", "c2", "c3", "c4"}) {
+		t.Fatalf("scope include design=%v exclude design=%v", design, brief)
+	}
+	idScope := cohortScope(`[{"lens":"id","values":["{\"path\":\"docs/plans/p1/DESIGN.md\",\"repo_id\":\"repoA\"}"]}]`, `[]`)
+	if got := resolveCohortSessions(t, tn, cohortRaw("artifact", idScope, `{"range":{"measure":"versions","lo":0,"hi":100}}`), &opts); !reflect.DeepEqual(got, []string{"c1"}) {
+		t.Fatalf("artifact id=%v want [c1]", got)
+	}
+}
+
+func TestAnalyticsCohortMatrixContentResolvesRepresentative(t *testing.T) {
+	tn := cohortMatrixFixture(t)
+	defer tn.Close()
+	opts := cohortCatalogue()
+	cohortSmoke(t, tn, opts, "content", `{"kind":"design","check":"d.x"}`,
+		[]string{"score"}, []string{"harness", "session_model", "repo_id", "plan", "scorer", "screen_verdict", "band", "id"})
+	raw := `{"v":1,"grain":"content","scope":` + cohortScope(`[]`, `[]`) + `,"predicate":{"range":{"measure":"score","lo":0.7,"hi":1}},"source":{"kind":"design","check":"d.x"}}`
+	if got := resolveCohortSessions(t, tn, raw, &opts); !reflect.DeepEqual(got, []string{"c1"}) {
+		t.Fatalf("content score=%v want [c1]", got)
+	}
+	band := `{"v":1,"grain":"content","scope":` + cohortScope(`[]`, `[]`) + `,"predicate":{"in":{"lens":"band","values":["high"]}},"source":{"kind":"design","check":"d.x"}}`
+	if got := resolveCohortSessions(t, tn, band, &opts); !reflect.DeepEqual(got, []string{"c1"}) {
+		t.Fatalf("content band=%v want [c1]", got)
+	}
+	missing := `{"v":1,"grain":"content","scope":` + cohortScope(`[]`, `[]`) + `,"predicate":{"range":{"measure":"score","lo":0,"hi":1}},"source":{"kind":"design"}}`
+	if _, err := ParseCohortDefinition([]byte(missing)); !errors.Is(err, ErrCohortInvalid) {
+		t.Fatalf("missing content check err=%v", err)
+	}
+	unknown := &CohortResolveOptions{Checks: map[string][]string{"design": {"d.x"}}}
+	unknownRaw := `{"v":1,"grain":"content","scope":` + cohortScope(`[]`, `[]`) + `,"predicate":{"range":{"measure":"score","lo":0,"hi":1}},"source":{"kind":"design","check":"not_a_check"}}`
+	if _, _, _, err := CohortSessionSubquery(mustParse(t, unknownRaw), *unknown); !errors.Is(err, ErrCohortInvalid) {
+		t.Fatalf("unknown check err=%v", err)
+	}
+}
+
+func mustParse(t *testing.T, raw string) ParsedCohort {
+	t.Helper()
+	c, err := ParseCohortDefinition([]byte(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return c
+}
+
+func TestAnalyticsCohortMatrixExecutionResolvesScoresAndShape(t *testing.T) {
+	tn := cohortMatrixFixture(t)
+	defer tn.Close()
+	opts := cohortCatalogue()
+	cohortSmoke(t, tn, opts, "execution", "",
+		[]string{"session_cost_usd", "brief_score:b.x", "report_score:b.x", "ts"},
+		[]string{"shape", "plan", "repo_id", "harness", "session_model", "id"})
+	if got := resolveCohortSessions(t, tn, cohortRaw("execution", cohortScope(`[]`, `[]`), `{"range":{"measure":"brief_score:b.x","lo":0,"hi":0.5}}`), &opts); !reflect.DeepEqual(got, []string{"c1", "c3"}) {
+		t.Fatalf("brief_score=%v want [c1 c3]", got)
+	}
+	if got := resolveCohortSessions(t, tn, cohortRaw("execution", cohortScope(`[]`, `[]`), `{"in":{"lens":"shape","values":["complete"]}}`), &opts); !reflect.DeepEqual(got, []string{"c1"}) {
+		t.Fatalf("shape complete=%v want [c1]", got)
+	}
+	if got := resolveCohortSessions(t, tn, cohortRaw("execution", cohortScope(`[]`, `[]`), `{"in":{"lens":"shape","values":["started"]}}`), &opts); !reflect.DeepEqual(got, []string{"c3"}) {
+		t.Fatalf("shape started=%v want [c3]", got)
+	}
+	id := `{"v":1,"grain":"execution","scope":` + cohortScope(`[{"lens":"id","values":["{\"brief_path\":\"docs/plans/p1/briefs/b1.md\",\"conversation_id\":\"c1\",\"repo_id\":\"repoA\"}"]}]`, `[]`) + `,"predicate":{"range":{"measure":"ts","lo":0,"hi":1e18}}}`
+	if got := resolveCohortSessions(t, tn, id, &opts); !reflect.DeepEqual(got, []string{"c1"}) {
+		t.Fatalf("execution id=%v want [c1]", got)
+	}
+}
+
+func TestAnalyticsCohortMatrixPlanResolvesDerivedMeasuesAndLenses(t *testing.T) {
+	tn := cohortMatrixFixture(t)
+	defer tn.Close()
+	opts := cohortCatalogue()
+	cohortSmoke(t, tn, opts, "plan", "",
+		[]string{"artifacts", "artifacts:design", "versions", "sessions", "shared_sessions", "associated_cost_usd", "unpriced_calls", "executions_complete", "executions_unreported", "executions_started", "complete_share", "design_score:d.x", "span_days", "first_ts", "last_ts"},
+		[]string{"repo_id", "harness", "session_model", "id"})
+	for _, tc := range []struct {
+		predicate string
+		want      []string
+	}{
+		{`{"range":{"measure":"design_score:d.x","lo":0.7,"hi":1}}`, []string{"c1", "c2"}},
+		{`{"range":{"measure":"artifacts:design","lo":1,"hi":1}}`, []string{"c1", "c2"}},
+		{`{"range":{"measure":"complete_share","lo":0.5,"hi":0.5}}`, []string{"c1", "c4"}},
+		{`{"range":{"measure":"span_days","lo":0,"hi":100}}`, []string{"c1", "c2", "c3", "c4"}},
+		{`{"range":{"measure":"executions_complete","lo":1,"hi":10}}`, []string{"c1", "c4"}},
+	} {
+		if got := resolveCohortSessions(t, tn, cohortRaw("plan", cohortScope(`[]`, `[]`), tc.predicate), &opts); !reflect.DeepEqual(got, tc.want) {
+			t.Fatalf("plan %s=%v want %v", tc.predicate, got, tc.want)
+		}
+	}
+	id := `{"v":1,"grain":"plan","scope":` + cohortScope(`[{"lens":"id","values":["{\"plan\":\"p1\",\"repo_id\":\"repoA\"}"]}]`, `[]`) + `,"predicate":{"range":{"measure":"artifacts","lo":0,"hi":100}}}`
+	if got := resolveCohortSessions(t, tn, id, &opts); !reflect.DeepEqual(got, []string{"c1", "c2"}) {
+		t.Fatalf("plan id=%v want [c1 c2]", got)
+	}
+	if got := resolveCohortSessions(t, tn, cohortRaw("plan", cohortScope(`[{"lens":"harness","values":["codex"]}]`, `[]`), `{"range":{"measure":"artifacts","lo":0,"hi":100}}`), &opts); !reflect.DeepEqual(got, []string{"c1", "c4"}) {
+		t.Fatalf("plan harness=%v want [c1 c4]", got)
+	}
+}
+
+func TestAnalyticsCohortScopeExcludeDiffersFromTargetOpExclude(t *testing.T) {
+	tn := cohortMatrixFixture(t)
+	defer tn.Close()
+	opts := cohortCatalogue()
+	predicate := `{"range":{"measure":"commits","lo":0,"hi":100}}`
+	all := resolveCohortSessions(t, tn, cohortRaw("session", cohortScope(`[]`, `[]`), predicate), &opts)
+	scopeExcluded := resolveCohortSessions(t, tn, cohortRaw("session", cohortScope(`[]`, `[{"lens":"harness","values":["codex"]}]`), predicate), &opts)
+	if reflect.DeepEqual(all, scopeExcluded) || len(scopeExcluded) == 0 || len(all) <= len(scopeExcluded) {
+		t.Fatalf("scope exclude did not narrow: all=%v excluded=%v", all, scopeExcluded)
+	}
+	opExcluded := resolveCohortSessions(t, tn, `{"v":1,"grain":"session","scope":`+cohortScope(`[]`, `[]`)+`,"predicate":`+predicate+`,"op":"exclude"}`, &opts)
+	if !reflect.DeepEqual(all, opExcluded) {
+		t.Fatalf("op=exclude changed positive source resolution: all=%v op=%v", all, opExcluded)
+	}
+	if got := resolveCohortSessions(t, tn, cohortRaw("session", cohortScope(`[]`, `[]`), `{"range":{"measure":"commits","lo":1000,"hi":2000}}`), &opts); len(got) != 0 {
+		t.Fatalf("empty source=%v want empty", got)
+	}
+}
