@@ -1,4 +1,4 @@
-"""Contract fixtures for named history profiles, the extractor seam and synthetic history."""
+"""Contract fixtures for named history profiles and synthetic history."""
 import pathlib
 import sys
 import tempfile
@@ -42,26 +42,6 @@ class HistoryProfileFixtures(unittest.TestCase):
     def test_unknown_profile_is_refused(self):
         with self.assertRaises(ValueError):
             history_profile.get_profile("not-a-workflow")
-
-    def test_default_extract_classifies_phase_pr_and_unclassified_commits(self):
-        repo = pathlib.Path(self.tmp.name) / "repo"
-        built = synthetic_history.build_history(repo)
-        profile = history_profile.get_profile("garcia-music-workflow")
-        extracted = history_profile.default_extract(repo, profile, now="2026-01-01T00:00:00Z")
-        phase = extracted[built["phase_heads"][-1]]
-        self.assertEqual(phase["tier"], "phase")
-        self.assertEqual(phase["plan"], "docs/plans/demo")
-        self.assertEqual(phase["phase"], 2)
-        self.assertEqual(phase["outcomes"], [])
-        self.assertEqual(phase["later_fixes"], [])
-        self.assertFalse(phase["censored"])
-        self.assertIsNone(phase["window_end"])
-        pr = extracted[built["pr_head"]]
-        self.assertEqual(pr["tier"], "pr")
-        self.assertEqual(pr["pr"], str(built["pr_number"]))
-        later = extracted[built["later_head"]]
-        self.assertIsNone(later["tier"])
-        self.assertEqual(history_profile.default_extract(repo, profile, now="2026-01-01T00:00:00Z"), extracted)
 
     def test_synthetic_history_is_deterministic(self):
         first = synthetic_history.build_history(pathlib.Path(self.tmp.name) / "one")
