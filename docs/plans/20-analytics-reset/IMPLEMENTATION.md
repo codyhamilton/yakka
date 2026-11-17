@@ -1,10 +1,23 @@
 # Plan 20 implementation
 
-Tool: Codex execute skill
-Run ID: feat/20-analytics-reset phase 6 execution
-Start time: 2026-11-08 09:12 Australia/Brisbane (2026-11-07 23:12 UTC)
+Tool: opencode execute skill
+Run ID: feat/20-analytics-reset phase 6 rebuild (2026-11-18)
+Start time: 2026-11-18 03:30 Australia/Brisbane (2026-11-17 17:30 UTC)
 
-## Phase 6 — Plan and execution entities and the cohort predicate
+## Phase 6 — Plan and execution entities and the cohort predicate (rebuild against CONTRACTS.md 17.3.1)
+
+The earlier Phase 6 units and briefs on this branch predate the 2026-11-18 amendment (PR #249, `cf87bf4`): their `[]string` scope lists, partial resolver, route set and missing association counts contradict 17.3.1 and are not carried forward. The plan/execution entity units 6-01 to 6-01d landed by the earlier run stay on the branch and are re-verified. Refinement commit `3317aa8` replaces 6-02 to 6-04b with 6-02 to 6-07. `artifact_feedback` on all six rebuilt briefs returned delivered / screen pass (`jev-1.13.0`).
+
+Merge fallout fixed before the phase: master's Plan 23 `store.ArtifactVersion` collided with Phase 5's artifact history row name, so the tree did not build. Commit `58bcca5` renames only the Phase 5 row to `ArtifactHistoryVersion`.
+
+The phase outcome is approach-open; this run uses the signed outcome and CONTRACTS.md 17.3.1 as the fixed yardstick. No new grain, join, route, dependency, gesture or contract is authorized.
+
+### Baseline before the rebuild
+
+- `GOMEMLIMIT=8GiB GOMAXPROCS=3 go build ./internal/...` → after `58bcca5`, passes.
+- `GOMEMLIMIT=8GiB GOMAXPROCS=3 go test -p=3 ./internal/store ./internal/serve -count=1` → store passes; serve fails `TestAnalyticsActivityMergesAndPagesEqualTimeRows` and `TestAnalyticsActivityProbeCountsLateArrivalWithoutRows`, both because the test uses `time.Now()` against a fixed 2026-11-08 window. Owned by 6-06.
+
+## Phase 6 (earlier run) — Plan and execution entities and the cohort predicate
 
 Refinement commit: `c85e5b9` (`docs: refine Phase 6 analytics work`). Four sequential units; plan/execution entity rows, cohort resolution, target-route application, then time cohorts/activity and schema publication. The signed contract in CONTRACTS.md 17.3 supplies the implementation boundaries. `artifact_feedback` on all four briefs returned delivered / screen pass (`jev-1.13.0`). Phase 5 carried items remain outside this phase: artifact file-to-time-bucket assignment and score-lens memory-growth evidence.
 
