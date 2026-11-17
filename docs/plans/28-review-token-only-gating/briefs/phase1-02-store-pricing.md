@@ -33,7 +33,8 @@ Settled decisions:
 ## Changes
 
 - Add `TestLiveReviewModelIsPriced` to `pricing_test.go`: it fails unless `PricedModel("claude-haiku-5-5")` is true. Comment that this mirrors `review.LiveModel` and exists because review no longer checks pricing at runtime.
-- Remove `ReservationCost` from `pricing.go` and `TestHaiku55ConservativeReservations` from `pricing_test.go`.
+- Remove `ReservationCost` from `pricing.go`.
+- Replace `TestHaiku55ConservativeReservations` with `TestPricingTiersAndTableIdentity`: keep its `PricingTableID` non-empty check and its `PricingTier("claude-haiku-5-5", size, uncertain)` table (`up_to_100k`, `over_100k`), and delete only the reservation-cost assertions.
 - Before deleting, run `grep -rn 'ReservationCost' --include='*.go' .`; expected after unit 1: only `pricing.go` and `pricing_test.go`. If any non-test caller remains, stop and report `blocked` naming the file — unit 1 has not landed.
 - Do not change pricing values, tier boundaries, `pricing_table.json`, or any other store function.
 
@@ -48,7 +49,7 @@ Identify or write the failing test first; report its output before and after.
 
 - `grep -rn 'ReservationCost' --include='*.go' .` → no matches.
 - `cd packages/yakka && go test ./internal/store -count=1` → all pass.
-- `cd packages/yakka && go test ./internal/store -run 'TestLiveReviewModelIsPriced' -count=1 -v` → passes.
+- `cd packages/yakka && go test ./internal/store -run 'TestLiveReviewModelIsPriced|TestPricingTiersAndTableIdentity' -count=1 -v` → both pass.
 - `cd packages/yakka && go vet ./internal/store` → no output.
 
 ## Report back
