@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Scatter and ECDF gallery</title>
+    <link rel="stylesheet" href="/css/charts.css">
+    <script type="module" src="/gallery/scatter.js"></script>
+  </head>
+  <body>
+    <main class="yk-foundations">
+      <h1>Numeric scatter and ECDF</h1>
+
+      <section aria-labelledby="scatter-heading">
+        <h2 id="scatter-heading">5,000 points with colour, shape, size and sampled marks</h2>
+        <div id="scatter-host" class="yk-chart-grid"></div>
+      </section>
+
+      <section aria-labelledby="sample-heading">
+        <h2 id="sample-heading">Sampled points labelled separately</h2>
+        <div id="sample-host" class="yk-chart-grid"></div>
+      </section>
+
+      <section aria-labelledby="ecdf-heading">
+        <h2 id="ecdf-heading">ECDF step lines by cohort</h2>
+        <div id="ecdf-host" class="yk-chart-grid"></div>
+      </section>
+
+      <output id="scatter-state" aria-live="polite">No scatter event yet</output>
+    </main>
+  </body>
+</html>

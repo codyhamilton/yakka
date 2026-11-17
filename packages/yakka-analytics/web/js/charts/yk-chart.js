@@ -19,6 +19,9 @@ import {
 import { createThresholdPlugin, renderThresholdTable, thresholdModel } from './thresholds.js';
 import { createGestureEngine, createHighlightPlugin } from './gestures.js';
 import { createHistory, decodeBrush } from './history.js';
+import { scatterModel } from './scatter.js';
+import { createCanvasScatter } from './canvas-scatter.js';
+import { ecdfModel } from './ecdf.js';
 import {
   addSelection, decodeSelection, emptySelection, isExcluded, isSelected,
   normaliseSelection, removeSelection, selectedKeys, selectionIsEmpty, selectionPredicate,
@@ -45,6 +48,10 @@ if (hostStyles) {
     .yk-table tbody tr[data-selected='true'] { background: color-mix(in srgb, var(--yk-chart-focus) 12%, transparent); }
     .yk-table tbody tr[data-excluded='true'] { opacity: 0.6; text-decoration: line-through; }
     .yk-table tbody tr[data-highlighted='true'] { outline: 1px dashed var(--yk-chart-focus); outline-offset: -1px; }
+    .yk-scatter-stack { position: relative; width: 100%; height: 240px; }
+    .yk-scatter-canvas { position: absolute; inset: 0; width: 100%; height: 100%; touch-action: none; cursor: crosshair; }
+    .yk-scatter-overlay { z-index: 1; }
+    .yk-scatter-overlay:focus-visible { outline: 2px solid var(--yk-chart-focus); outline-offset: 2px; }
   `);
 }
 
@@ -84,6 +91,8 @@ export class YkChart extends HTMLElement {
   #inspectedSeries = 0;
   #highlight = null;
   #selectMode = false;
+  #scatter = null;
+  #selectionRegion = null;
   #legendState = { hidden: [], active: null, isolated: null };
   #highlightHandler = null;
   #baseWindow = null;
@@ -131,6 +140,8 @@ export class YkChart extends HTMLElement {
     this.#observer = null;
     this.#engine?.destroy();
     this.#engine = null;
+    this.#scatter?.destroy();
+    this.#scatter = null;
     this.#u?.destroy();
     this.#u = null;
     this.#stopTheme?.();
@@ -151,6 +162,7 @@ export class YkChart extends HTMLElement {
   }
 
   inspect() {
+    if (this.#scatter) return this.#inspectScatter();
     const spec = this.#spec || {};
     const u = this.#u;
     const transform = this.#transform;
@@ -251,6 +263,9 @@ export class YkChart extends HTMLElement {
     this.dataset.idle = 'false';
     this.#engine?.destroy();
     this.#engine = null;
+    this.#scatter?.destroy();
+    this.#scatter = null;
+    this.#selectionRegion = null;
     this.#u?.destroy();
     this.#u = null;
     this.#transform = null;
@@ -267,7 +282,16 @@ export class YkChart extends HTMLElement {
       return;
     }
 
-    const transform = transformSeriesData({ spec, data: this.#data });
+    const kind = spec.chart === 'scatter' || spec.type === 'scatter'
+      ? 'scatter'
+      : spec.chart === 'ecdf' || spec.type === 'ecdf' ? 'ecdf' : 'series';
+    if (kind === 'scatter') {
+      this.#buildScatter(spec, chartId);
+      return;
+    }
+    const transform = kind === 'ecdf'
+      ? ecdfModel({ spec, data: this.#data })
+      : transformSeriesData({ spec, data: this.#data });
     this.#transform = transform;
     this.#thresholds = thresholdModel(spec);
     const effectiveSpec = transform.spec;
@@ -288,6 +312,7 @@ export class YkChart extends HTMLElement {
     const group = scaleGroupKey(styledSpec);
     const zeroBased = transform.type === 'columns';
     const scales = buildScales(styledSpec, { zeroBased });
+    if (transform.type === 'ecdf') scales.y.range = () => [0, 1];
     const plotRows = transform.rows.map(row => row.values);
     const xs = transform.rows.map(row => row.x);
     const data = [xs, ...seriesStyles.map(item => plotRows.map(values => values[item.key] ?? null))];
@@ -312,6 +337,11 @@ export class YkChart extends HTMLElement {
           base.fill = item.colour;
           base.width = 0;
           base.paths = uPlot.paths.bars({ size: [0.72, Infinity, 1] });
+          base.points = { show: false };
+        }
+        if (transform.type === 'ecdf') {
+          base.width = 2;
+          base.paths = uPlot.paths.stepped({ align: 1 });
           base.points = { show: false };
         }
         return base;
@@ -398,6 +428,229 @@ export class YkChart extends HTMLElement {
     this.#composeTable(root, styledSpec, transform);
     if (this.#history) this.#applyUrlState(this.#history.state);
     this.#applyState('ready');
+  }
+
+  #buildScatter(spec, chartId) {
+    const model = scatterModel({ spec, data: this.#data });
+    const groups = [...new Set(model.points.map(point => point.group).filter(value => value != null))].sort();
+    registry.register(groups);
+    const styleFor = point => {
+      const style = registry.style(point.group || point.key);
+      const colour = readToken(this, style.cssVar) || style.light;
+      return { ...style, colour };
+    };
+
+    const root = this.#shell(chartId, 'ready');
+    const frame = root.querySelector('.yk-chart-frame');
+    const tooltip = createTooltip(this.shadowRoot.ownerDocument || document);
+    this.shadowRoot.querySelector(':scope > .yk-tooltip')?.remove();
+    this.shadowRoot.append(tooltip.element);
+    this._tooltip = tooltip;
+    this._tooltipSpec = {
+      ...model.spec,
+      series: [
+        { key: 'y', label: model.spec.y.label, unit: model.spec.y.unit || '', kind: model.spec.y.kind || 'number' },
+        ...(model.spec.values || []).map(item => ({ ...item }))
+      ]
+    };
+
+    const tokens = {
+      surface: readToken(this, '--yk-chart-surface'),
+      text: readToken(this, '--yk-chart-text'),
+      muted: readToken(this, '--yk-chart-muted'),
+      grid: readToken(this, '--yk-chart-grid'),
+      border: readToken(this, '--yk-chart-border'),
+      focus: readToken(this, '--yk-chart-focus')
+    };
+
+    this.#scatter = createCanvasScatter({
+      doc: this.shadowRoot.ownerDocument,
+      frame,
+      spec: model.spec,
+      points: model.points,
+      tokens,
+      styleFor,
+      onHover: (point, index, position) => {
+        this.#inspectedKey = point.key;
+        this.#inspectedIndex = index;
+        this.#setHighlight(point.key);
+        this.#showScatterTooltip(point, position);
+      },
+      onLeave: () => tooltip.hide(),
+      onInspect: (point, index) => this.#inspectScatterPoint(point, index),
+      onSelection: detail => this.#onScatterSelection(detail)
+    });
+
+    this.#composeScatterLegend(root, groups);
+    this.#composeScatterTable(root, model);
+    if (this.#history) this.#applyUrlState(this.#history.state);
+    this.#applyState('ready');
+  }
+
+  #composeScatterLegend(root, groups) {
+    if (groups.length < 2) return;
+    const doc = this.shadowRoot.ownerDocument;
+    const host = doc.createElement('div');
+    host.className = 'yk-chart-legend';
+    const legend = createLegend(doc, {
+      series: groups.map(key => ({ key, label: key, ...registry.style(key) })),
+      state: { hidden: [...this.#hidden] },
+      onIntent: detail => {
+        this.#legendState = detail.state;
+        if (detail.type === 'focus') {
+          this.#focusLegend(detail.key);
+          return;
+        }
+        if (detail.type === 'isolate') this.#applyHidden(new Set(groups.filter(key => key !== detail.key)));
+        else this.#applyHidden(new Set(detail.state.hidden || []));
+        legend.update({ hidden: [...this.#hidden], isolated: detail.key });
+        this.#history?.hide([...this.#hidden]);
+        this.#emit('legend', { type: detail.type, key: detail.key, hidden: [...this.#hidden] });
+      }
+    });
+    host.append(legend.element);
+    root.append(host);
+    this._legend = legend;
+  }
+
+  #composeScatterTable(root, model) {
+    const doc = this.shadowRoot.ownerDocument;
+    const details = doc.createElement('details');
+    details.className = 'yk-chart-table';
+    details.open = true;
+    const summary = doc.createElement('summary');
+    summary.textContent = 'Table';
+    const extra = (model.spec.values || []).map(item => ({ ...item, key: String(item.key) }));
+    const tableSpec = {
+      title: model.spec.title,
+      x: model.spec.x,
+      series: [{ key: 'y', label: model.spec.y.label, unit: model.spec.y.unit || '', kind: model.spec.y.kind || 'number' }, ...extra]
+    };
+    const table = createTable(doc, {
+      spec: tableSpec,
+      data: model.points,
+      onSelect: detail => this.#onSelectionIntent(detail),
+      onInspect: detail => this.#inspectScatterKey(detail.key)
+    });
+    details.append(summary, table.element);
+    root.append(details);
+    this._table = table;
+  }
+
+  #inspectScatter() {
+    const info = this.#scatter.inspect();
+    const spec = this.#spec || {};
+    return {
+      chart: this.dataset.chart || null,
+      state: this.dataset.state || null,
+      mode: 'absolute',
+      type: 'scatter',
+      stacked: false,
+      bucket: spec.bucket ?? null,
+      window: { from: info.xScale.min, to: info.xScale.max },
+      selection: this.#scatterPredicate(),
+      selectionKeys: selectedKeys(this.#selection),
+      region: this.#selectionRegion,
+      brush: null,
+      inspectedKey: this.#inspectedKey,
+      inspectedIndex: this.#inspectedIndex,
+      inspectedSeries: 0,
+      highlight: this.#highlight,
+      selectMode: this.#selectMode,
+      urlState: this.#history ? this.#history.state : null,
+      series: info.groups.map(key => ({ key, label: key, visible: !this.#hidden.has(key) })),
+      plot: info.plot,
+      xScale: info.xScale,
+      yScale: info.yScale,
+      yScales: ['y'],
+      dualAxis: false,
+      xToPx: info.xToPx,
+      yToPx: info.yToPx,
+      xToData: info.xToData,
+      yToData: info.yToData,
+      cursor: info.cursor,
+      marks: info.marks,
+      sampledMarkCount: info.sampledMarkCount,
+      thresholds: []
+    };
+  }
+
+  #scatterPredicate() {
+    const base = selectionPredicate(this.#selection);
+    if (!base) return null;
+    return { ...base, where: this.#selectionRegion };
+  }
+
+  #showScatterTooltip(point, position) {
+    const tooltip = this._tooltip;
+    if (!tooltip || !position) return;
+    const model = tooltipModel({
+      spec: this._tooltipSpec,
+      datum: {
+        key: point.key,
+        label: point.key,
+        values: point.values,
+        sample: this.#spec?.sample,
+        hidden: [...this.#hidden]
+      },
+      key: point.key
+    });
+    tooltip.show(model, { x: position.x, y: position.y });
+  }
+
+  #inspectScatterPoint(point, index) {
+    if (!point) return;
+    this.#inspectedKey = point.key;
+    this.#inspectedIndex = index;
+    this.#setHighlight(point.key);
+    const rect = this.#scatter?.inspect().plot;
+    if (rect) this.#showScatterTooltip(point, { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 });
+    this.#emit('inspect', {
+      key: point.key,
+      index,
+      x: point.x,
+      y: point.y,
+      values: point.values,
+      source: 'pointer',
+      open: true
+    });
+  }
+
+  #inspectScatterKey(key) {
+    const layout = this.#scatter?.inspect();
+    const index = layout?.marks.findIndex(mark => mark.key === key) ?? -1;
+    if (index >= 0) this.#inspectScatterPoint(layout.marks[index], index);
+  }
+
+  #onScatterSelection({ keys = [], data = null, additive = false, exclude = false } = {}) {
+    let next = this.#selection;
+    if (exclude) {
+      for (const key of keys) {
+        next = removeSelection(next, key);
+        if (!isExcluded(next, key)) next = toggleSelection(next, key, { exclude: true });
+      }
+    } else if (!additive) {
+      next = emptySelection();
+      for (const key of keys) next = addSelection(next, key);
+      this.#selectionRegion = data;
+    } else {
+      for (const key of keys) next = addSelection(next, key);
+      this.#selectionRegion = data;
+    }
+    this.#selection = normaliseSelection(next);
+    this.#scatter?.setSelection(this.#selection);
+    this.#history?.commitSelection(selectionIsEmpty(this.#selection) ? null : this.#selection);
+    this.#syncSelectionUI();
+    this.#emit('select', {
+      key: null,
+      selected: null,
+      additive: Boolean(additive),
+      exclude: Boolean(exclude),
+      source: 'scatter-rectangle',
+      selection: this.#scatterPredicate(),
+      keys: selectedKeys(this.#selection),
+      region: this.#selectionRegion
+    });
   }
 
   #shell(chartId, state) {
@@ -505,6 +758,7 @@ export class YkChart extends HTMLElement {
 
   #applyHidden(hidden) {
     this.#hidden = new Set(hidden);
+    this.#scatter?.setHidden([...this.#hidden]);
     for (const [index, item] of (this._tooltipSpec?.series || []).entries()) {
       this.#u?.setSeries(index + 1, { show: !this.#hidden.has(item.key) });
     }
@@ -603,9 +857,14 @@ export class YkChart extends HTMLElement {
       else delete row.dataset.highlighted;
     }
     this.#u?.redraw(false);
+    this.#scatter?.setHighlight(key);
     if (propagate && key) {
       this.#emit('yk-highlight', { key, chart: this.#chartId() });
     }
+  }
+
+  #syncScatterSelection() {
+    this.#scatter?.setSelection(this.#selection);
   }
 
   #onSelectionIntent(detail = {}) {
@@ -615,8 +874,10 @@ export class YkChart extends HTMLElement {
     else if (detail.selected === false) next = removeSelection(this.#selection, detail.key);
     else next = toggleSelection(this.#selection, detail.key, { exclude: Boolean(detail.exclude) });
     this.#selection = normaliseSelection(next);
+    this.#selectionRegion = null;
     this.#history?.commitSelection(selectionIsEmpty(this.#selection) ? null : this.#selection);
     this.#syncSelectionUI();
+    this.#syncScatterSelection();
     this.#emit('select', {
       key: detail.key ?? null,
       selected: detail.selected ?? null,
@@ -717,9 +978,11 @@ export class YkChart extends HTMLElement {
 
   #applyUrlState(state) {
     if (!state) return;
-    this.#brush = decodeBrush(state.sel);
+    this.#brush = this.#scatter ? null : decodeBrush(state.sel);
     this.#selection = decodeSelection(state.pick);
+    this.#selectionRegion = null;
     this.#hidden = new Set(state.hide || []);
+    this.#scatter?.setHidden([...this.#hidden]);
     for (const [index, item] of (this._tooltipSpec?.series || []).entries()) {
       this.#u?.setSeries(index + 1, { show: !this.#hidden.has(item.key) });
     }
@@ -727,6 +990,7 @@ export class YkChart extends HTMLElement {
     if (state.from && state.to) this.#setWindow({ from: Number(state.from), to: Number(state.to) });
     else this.#resetWindow();
     this.#syncSelectionUI();
+    this.#syncScatterSelection();
     this.#u?.redraw(false);
   }
 }
