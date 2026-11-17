@@ -155,7 +155,7 @@ def main(argv=None):
                                      remote=args.remote, expected_repository=args.expected_repository,
                                      profile=args.history_profile)
             print(json.dumps({"manifest": str(args.output.resolve()), "manifest_sha256": frozen["manifest_sha256"],
-                              "candidates": len(frozen["candidates"]), "eligible": len(frozen["cases"]),
+                              "candidates": len(frozen["candidates"]), "frozen": len(frozen["cases"]),
                               "target": frozen["target"], "floor": frozen["floor"], "tiers": frozen["tiers"],
                               "exclusions": frozen["exclusions"],
                               "shortfall_against_floor": frozen["shortfall_against_floor"]}, sort_keys=True))
