@@ -1,8 +1,14 @@
 # Plan 20 implementation
 
 Tool: opencode execute skill
-Run ID: feat/20-analytics-reset phase 6 rebuild (2026-11-18)
-Start time: 2026-11-18 03:30 Australia/Brisbane (2026-11-17 17:30 UTC)
+Run ID: feat/20-analytics-reset phase 7 (2026-11-18)
+Start time: 2026-11-18 05:53 Australia/Brisbane
+
+Phase 6 (below) closed at `d889d83` with the `Yakka-Phase: 20-analytics-reset:6` trailer; `d482046` is the later review touch-up commit. This run builds Phase 7 only.
+
+## Phase 7 — Time-series chart kit
+
+The phase outcome is approach-open (composing uPlot's hooks into the gesture table; 2-D scatter hit-testing). This run uses the signed outcome and CONTRACTS.md 17.5 and 17.7 as the fixed yardstick. No new grain, join, route, dependency, gesture or contract is authorized. Refinement decides the units.
 
 ## Phase 6 — Plan and execution entities and the cohort predicate (rebuild against CONTRACTS.md 17.3.1)
 
