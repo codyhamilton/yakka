@@ -75,7 +75,7 @@ func (s *Server) analyticsSchema(w http.ResponseWriter, r *http.Request, _ strin
 			"scope_elements": 64, "scope_values": 64, "value_bytes": map[string]int{"default": 256, "id": 1024},
 			"time_range": map[string]string{"min": minAnalyticsTime.Format(time.RFC3339Nano), "max": maxAnalyticsTime.Format(time.RFC3339Nano)}},
 		"grains": grains, "lenses": lenses, "coverage": coverage,
-		"features": map[string]bool{"bucket_auto": true, "entities_session": true, "entities_time": true, "entities_artifact": true, "entities_plan": true, "entities_execution": true, "exclude": true, "scores_by_lens": true, "artifact_content": true, "analytics_activity": true},
+		"features": map[string]bool{"bucket_auto": true, "entities_session": true, "entities_time": true, "entities_artifact": true, "entities_plan": true, "entities_execution": true, "exclude": true, "scores_by_lens": true, "artifact_content": true, "analytics_activity": true, "cohort": true},
 	})
 }
 

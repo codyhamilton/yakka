@@ -268,6 +268,14 @@ func (s *Server) analyticsPlanEntities(w http.ResponseWriter, r *http.Request, t
 		readFailed(w)
 		return
 	}
+	planScopeN := n
+	if f.CohortSQL != "" {
+		planScopeN, err = ts.t.PlanEntityCount(r.Context(), withoutCohort(f))
+		if err != nil {
+			readFailed(w)
+			return
+		}
+	}
 	rows := make([]map[string]any, 0, len(page))
 	for _, x := range page {
 		execN := x.ExecutionsComplete + x.ExecutionsUnreported + x.ExecutionsStarted
@@ -332,7 +340,7 @@ func (s *Server) analyticsPlanEntities(w http.ResponseWriter, r *http.Request, t
 			return
 		}
 	}
-	out := map[string]any{"grain": "plan", "rows": rows, "sort": sortSpec, "population": map[string]any{"grain": "plan", "unit": "repo_id,plan", "scope_n": n, "cohort_n": n, "eligible_n": n, "returned_n": len(rows), "missing_by_reason": map[string]int{}, "relation": planRel}}
+	out := map[string]any{"grain": "plan", "rows": rows, "sort": sortSpec, "population": map[string]any{"grain": "plan", "unit": "repo_id,plan", "scope_n": planScopeN, "cohort_n": n, "eligible_n": n, "returned_n": len(rows), "missing_by_reason": map[string]int{}, "relation": planRel}}
 	if more && len(page) > 0 {
 		last := page[len(page)-1]
 		ts := planMeasure(last, p[0])
@@ -482,6 +490,15 @@ func (s *Server) analyticsExecutionEntities(w http.ResponseWriter, r *http.Reque
 		rows = append(rows, map[string]any{"id": map[string]any{"repo_id": x.RepoID, "conversation_id": x.ConversationID, "brief_path": x.BriefPath}, "m": m, "l": map[string]any{"shape": x.Shape, "plan": x.Plan, "repo_id": x.RepoID, "harness": x.Harness, "session_model": prov[x.ConversationID].Model}, "flags": flags})
 	}
 	n := counts["complete"] + counts["unreported"] + counts["started"]
+	execScopeN := n
+	if f.CohortSQL != "" {
+		_, baseCounts, _, baseErr := ts.t.ExecutionsPage(r.Context(), withoutCohort(f), nil, nil, 1)
+		if baseErr != nil {
+			readFailed(w)
+			return
+		}
+		execScopeN = baseCounts["complete"] + baseCounts["unreported"] + baseCounts["started"]
+	}
 	var execRel map[string]any
 	if f.CohortSQL != "" {
 		scopeN, cohortN, err := cohortSessionCounts(r.Context(), ts.t, f)
@@ -495,7 +512,7 @@ func (s *Server) analyticsExecutionEntities(w http.ResponseWriter, r *http.Reque
 			return
 		}
 	}
-	out := map[string]any{"grain": "execution", "rows": rows, "population": map[string]any{"grain": "execution", "unit": "repo_id,conversation_id,brief_path", "scope_n": n, "cohort_n": n, "eligible_n": n, "returned_n": len(rows), "missing_by_reason": map[string]int{}, "relation": execRel}}
+	out := map[string]any{"grain": "execution", "rows": rows, "population": map[string]any{"grain": "execution", "unit": "repo_id,conversation_id,brief_path", "scope_n": execScopeN, "cohort_n": n, "eligible_n": n, "returned_n": len(rows), "missing_by_reason": map[string]int{}, "relation": execRel}}
 	if more && len(page) > 0 {
 		last := page[len(page)-1]
 		out["next"] = (cursor{Route: "entities:execution", Filter: canonFilter(q), From: f.From.UnixNano(), To: f.To.UnixNano(), TS: last.TS, Key: []string{last.ConversationID, last.BriefPath, last.RepoID}, FactWatermark: snapshot.FactWatermark, FactRowID: snapshot.FactRowID, Revision: snapshot.Revision}).encode()
@@ -749,6 +766,14 @@ func sessionLensPage(ctx context.Context, t *store.Tenant, f store.AnalyticsFilt
 	return filtered, more, prov, count, nil
 }
 
+// sessionLensCount is the pre-cohort population count for a lens-filtered session read. The SQL
+// ConversationCount ignores the route's lifetime lens filters, so a cohort target's scope_n must
+// scan the lens population with the restriction removed.
+func sessionLensCount(ctx context.Context, t *store.Tenant, f store.AnalyticsFilter, lens sessionLensFilter) (int, error) {
+	_, _, _, count, err := sessionLensPage(ctx, t, f, "last_ts", true, nil, 1, lens)
+	return count, err
+}
+
 func (s *Server) analyticsSessionEntities(w http.ResponseWriter, r *http.Request, ts *tenantState) {
 	q := r.URL.Query()
 	mode := q.Get("mode")
@@ -863,7 +888,12 @@ func (s *Server) analyticsSessionEntities(w http.ResponseWriter, r *http.Request
 	scopeN, cohortN := count, count
 	var rel map[string]any
 	if f.CohortSQL != "" {
-		scopeN, cohortN, err = cohortSessionCounts(r.Context(), ts.t, f)
+		if lens.active() {
+			cohortN = count
+			scopeN, err = sessionLensCount(r.Context(), ts.t, withoutCohort(f), lens)
+		} else {
+			scopeN, cohortN, err = cohortSessionCounts(r.Context(), ts.t, f)
+		}
 		if err != nil {
 			readFailed(w)
 			return

@@ -129,32 +129,39 @@ func artifactPopulation(ctx context.Context, t *store.Tenant, f store.AnalyticsF
 				row.measures["writing_session_cost_usd"] = nil
 				row.flags["null_reasons"] = map[string]string{"writing_session_cost_usd": "all_unpriced"}
 			}
-			n, available, err := t.ArtifactContentBytes(x.Hash)
-			if err != nil {
-				return nil, err
-			}
-			if available {
-				row.measures["content_bytes"] = n
-			} else {
+			row.lenses["screen_verdict"] = "unknown"
+			if x.Hash == "" {
+				// A legacy fact may carry no content hash; identity and measures still stand,
+				// but there is no blob, score or screen to read.
 				row.measures["content_bytes"] = nil
 				row.flags["content_unavailable"] = true
-			}
-			scores, err := t.ArtifactVersionScores(ctx, x.Hash)
-			if err != nil {
-				return nil, err
-			}
-			for check, v := range scores {
-				row.measures["score:"+check] = v["score"]
-				row.measures["score_scorer:"+check] = v["scorer"]
-				row.lenses["band:"+check] = artifactScoreBand(v, baselines[kind][check][v["scorer"].(string)])
-			}
-			screen, err := t.ArtifactScreen(ctx, x.Hash)
-			if err != nil {
-				return nil, err
-			}
-			row.lenses["screen_verdict"] = "unknown"
-			if screen != nil {
-				row.lenses["screen_verdict"] = screen.Verdict
+			} else {
+				n, available, err := t.ArtifactContentBytes(x.Hash)
+				if err != nil {
+					return nil, err
+				}
+				if available {
+					row.measures["content_bytes"] = n
+				} else {
+					row.measures["content_bytes"] = nil
+					row.flags["content_unavailable"] = true
+				}
+				scores, err := t.ArtifactVersionScores(ctx, x.Hash)
+				if err != nil {
+					return nil, err
+				}
+				for check, v := range scores {
+					row.measures["score:"+check] = v["score"]
+					row.measures["score_scorer:"+check] = v["scorer"]
+					row.lenses["band:"+check] = artifactScoreBand(v, baselines[kind][check][v["scorer"].(string)])
+				}
+				screen, err := t.ArtifactScreen(ctx, x.Hash)
+				if err != nil {
+					return nil, err
+				}
+				if screen != nil {
+					row.lenses["screen_verdict"] = screen.Verdict
+				}
 			}
 			out = append(out, row)
 		}
@@ -409,38 +416,51 @@ func (s *Server) analyticsArtifactEntities(w http.ResponseWriter, r *http.Reques
 		errJSON(w, 400, "artifact bucket grouping is not available")
 		return
 	}
-	rows, err := artifactPopulation(r.Context(), ts.t, f)
+	load := func(filter store.AnalyticsFilter) ([]artifactPopulationRow, error) {
+		loaded, loadErr := artifactPopulation(r.Context(), ts.t, filter)
+		if loadErr != nil {
+			return nil, loadErr
+		}
+		for i := range loaded {
+			if selectedCheck != "" {
+				scorer, scored := loaded[i].measures["score_scorer:"+selectedCheck]
+				loaded[i].lenses["scorer"] = scorer
+				if !scored {
+					loaded[i].lenses["scorer"] = "unscored"
+					loaded[i].lenses["band:"+selectedCheck] = "unscored"
+				}
+			}
+		}
+		selected := loaded[:0]
+		for _, x := range loaded {
+			keep := q.Get("scorer") == "" || x.lenses["scorer"] == q.Get("scorer")
+			for _, v := range ranges {
+				n, valid := artifactNumber(x, v.Measure)
+				if !valid || v.Lo != nil && n < *v.Lo || v.Hi != nil && n > *v.Hi {
+					keep = false
+					break
+				}
+			}
+			if keep && (predicate == nil || predicate(x)) {
+				selected = append(selected, x)
+			}
+		}
+		return selected, nil
+	}
+	rows, err := load(f)
 	if err != nil {
 		readFailed(w)
 		return
 	}
-
-	for i := range rows {
-		if selectedCheck != "" {
-			scorer, scored := rows[i].measures["score_scorer:"+selectedCheck]
-			rows[i].lenses["scorer"] = scorer
-			if !scored {
-				rows[i].lenses["scorer"] = "unscored"
-				rows[i].lenses["band:"+selectedCheck] = "unscored"
-			}
-		}
-	}
 	scope := len(rows)
-	selected := rows[:0]
-	for _, x := range rows {
-		keep := q.Get("scorer") == "" || x.lenses["scorer"] == q.Get("scorer")
-		for _, v := range ranges {
-			n, valid := artifactNumber(x, v.Measure)
-			if !valid || v.Lo != nil && n < *v.Lo || v.Hi != nil && n > *v.Hi {
-				keep = false
-				break
-			}
+	if f.CohortSQL != "" {
+		baseRows, baseErr := load(withoutCohort(f))
+		if baseErr != nil {
+			readFailed(w)
+			return
 		}
-		if keep && (predicate == nil || predicate(x)) {
-			selected = append(selected, x)
-		}
+		scope = len(baseRows)
 	}
-	rows = selected
 	if len(fields) == 0 && mode == "list" {
 		seen := map[string]bool{}
 		for _, x := range rows {

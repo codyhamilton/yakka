@@ -273,10 +273,13 @@ func TestArtifactSchemaBandsAndWriterMeasures(t *testing.T) {
 	if features["entities_artifact"] != true || features["artifact_content"] != true {
 		t.Errorf("artifact features=%v", features)
 	}
-	for _, name := range []string{"cohort", "activity", "actions", "reviews"} {
+	for _, name := range []string{"activity", "actions", "reviews"} {
 		if _, ok := features[name]; ok {
 			t.Errorf("unserved feature %s", name)
 		}
+	}
+	if features["cohort"] != true {
+		t.Errorf("cohort feature not advertised after the proof: %v", features)
 	}
 	grain := schema["grains"].(map[string]any)["artifact"].(map[string]any)
 	if grain["bucket_grouping"] != false {

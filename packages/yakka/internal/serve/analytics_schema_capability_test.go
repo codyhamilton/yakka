@@ -62,8 +62,8 @@ func TestAnalyticsSchemaPublishesFiltersPredicatesAndContent(t *testing.T) {
 		t.Errorf("value_bytes budget = %v", budgets["value_bytes"])
 	}
 	features := m["features"].(map[string]any)
-	if _, ok := features["cohort"]; ok {
-		t.Errorf("cohort advertised before proof: %v", features)
+	if features["cohort"] != true {
+		t.Errorf("cohort not advertised after proof: %v", features)
 	}
 }
 

@@ -92,10 +92,13 @@ func TestAnalyticsSchema(t *testing.T) {
 	if features["artifact_content"] != true {
 		t.Errorf("artifact content capability not advertised: %v", features)
 	}
-	for _, name := range []string{"activity", "cohort", "actions", "reviews"} {
+	for _, name := range []string{"activity", "actions", "reviews"} {
 		if _, ok := features[name]; ok {
 			t.Errorf("later phase feature advertised: %s", name)
 		}
+	}
+	if features["cohort"] != true {
+		t.Errorf("cohort feature not advertised after its proof: %v", features)
 	}
 	if _, ok := m["grains"].(map[string]any)["session"]; !ok {
 		t.Error("session grain missing")

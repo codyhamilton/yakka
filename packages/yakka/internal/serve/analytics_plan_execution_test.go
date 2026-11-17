@@ -108,8 +108,8 @@ func TestAnalyticsPlanExecutionSchemaMatchesImplementedMeasuresAndOrders(t *test
 			t.Errorf("plan schema lacks sort %q: %v", want, planSort)
 		}
 	}
-	if _, ok := features["cohort"]; ok {
-		t.Fatalf("design-only cohort feature advertised: %v", features)
+	if features["cohort"] != true {
+		t.Fatalf("cohort feature not advertised after the proof: %v", features)
 	}
 }
 
