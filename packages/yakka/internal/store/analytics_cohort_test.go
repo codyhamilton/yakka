@@ -238,3 +238,139 @@ func TestAnalyticsTimeCohortRejectsUnassociatedRejectionContributors(t *testing.
 		t.Fatalf("rejection contributors=%v, want only existing conversation c1", got)
 	}
 }
+
+func cohortScopeRaw(grain, include, exclude, predicate string) []byte {
+	return []byte(`{"v":1,"grain":"` + grain + `","scope":{"from":"2025-01-01T00:00:00Z","to":"2025-01-31T00:00:00Z","tz":"UTC","include":` + include + `,"exclude":` + exclude + `},"predicate":` + predicate + `}`)
+}
+
+func TestAnalyticsCohortScopeElementsValidate(t *testing.T) {
+	sessionPred := `{"range":{"measure":"commits","lo":0,"hi":1}}`
+	if _, err := ParseCohortDefinition(cohortScopeRaw("session", `[]`, `[]`, sessionPred)); err != nil {
+		t.Fatalf("empty lists must be accepted: %v", err)
+	}
+	for _, tc := range []struct {
+		name     string
+		include  string
+		exclude  string
+		wantJoin bool
+	}{
+		{"null include", `null`, `[]`, false},
+		{"missing include", ``, `[]`, false},
+		{"null element", `[null]`, `[]`, false},
+		{"bare string element", `["harness:x"]`, `[]`, false},
+		{"missing values", `[{"lens":"harness"}]`, `[]`, false},
+		{"empty values", `[{"lens":"harness","values":[]}]`, `[]`, false},
+		{"unknown lens", `[{"lens":"not_a_lens","values":["x"]}]`, `[]`, false},
+		{"published outside grain", `[{"lens":"screen_verdict","values":["pass"]}]`, `[]`, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			raw := cohortScopeRaw("session", tc.include, tc.exclude, sessionPred)
+			if tc.name == "missing include" {
+				raw = []byte(`{"v":1,"grain":"session","scope":{"from":"2025-01-01T00:00:00Z","to":"2025-01-31T00:00:00Z","tz":"UTC","exclude":[]},"predicate":` + sessionPred + `}`)
+			}
+			_, err := ParseCohortDefinition(raw)
+			if tc.wantJoin {
+				if !errors.Is(err, ErrUnsupportedJoin) {
+					t.Fatalf("err=%v want unsupported_join", err)
+				}
+				var lensErr *CohortScopeLensError
+				if !errors.As(err, &lensErr) || lensErr.Reason != "not_defined_for_grain" || len(lensErr.Try) == 0 {
+					t.Fatalf("err=%v want not_defined_for_grain with try", err)
+				}
+				return
+			}
+			if !errors.Is(err, ErrCohortInvalid) {
+				t.Fatalf("err=%v want cohort_invalid", err)
+			}
+		})
+	}
+	artifactPred := `{"range":{"measure":"versions","lo":0,"hi":1}}`
+	if _, err := ParseCohortDefinition(cohortScopeRaw("artifact", `[{"lens":"band:review","values":["high"]}]`, `[]`, artifactPred)); err != nil {
+		t.Fatalf("dynamic band lens must be accepted: %v", err)
+	}
+}
+
+func TestAnalyticsCohortScopeCanonicalisesElements(t *testing.T) {
+	pred := `{"range":{"measure":"commits","lo":0,"hi":1}}`
+	a, err := ParseCohortDefinition(cohortScopeRaw("session",
+		`[{"lens":"harness","values":["b","a","a"]},{"lens":"harness","values":["c","b"]},{"lens":"session_model","values":["z","y"]}]`,
+		`[{"lens":"session_repo","values":["r1","r0"]}]`, pred))
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := ParseCohortDefinition(cohortScopeRaw("session",
+		`[{"lens":"session_model","values":["y","z"]},{"lens":"harness","values":["a","b","c"]}]`,
+		`[{"lens":"session_repo","values":["r0","r1"]}]`, pred))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a.Key != b.Key {
+		t.Fatalf("canonical keys differ: %s != %s", a.Key, b.Key)
+	}
+	wantInclude := []CohortScopeElement{{Lens: "harness", Values: []string{"a", "b", "c"}}, {Lens: "session_model", Values: []string{"y", "z"}}}
+	wantExclude := []CohortScopeElement{{Lens: "session_repo", Values: []string{"r0", "r1"}}}
+	if !reflect.DeepEqual(a.Definition.Scope.Include, wantInclude) || !reflect.DeepEqual(a.Definition.Scope.Exclude, wantExclude) {
+		t.Fatalf("canonical scope=%+v / %+v", a.Definition.Scope.Include, a.Definition.Scope.Exclude)
+	}
+}
+
+func TestAnalyticsCohortScopeBudgets(t *testing.T) {
+	artifactPred := `{"range":{"measure":"versions","lo":0,"hi":1}}`
+	sessionPred := `{"range":{"measure":"commits","lo":0,"hi":1}}`
+	elems := make([]string, 65)
+	for i := range elems {
+		elems[i] = fmt.Sprintf(`{"lens":"band:c%d","values":["v"]}`, i)
+	}
+	_, err := ParseCohortDefinition(cohortScopeRaw("artifact", "["+strings.Join(elems, ",")+"]", "[]", artifactPred))
+	if !errors.Is(err, ErrCohortInvalid) || !strings.Contains(err.Error(), "scope_elements") {
+		t.Fatalf("scope_elements err=%v", err)
+	}
+	vals := make([]string, 65)
+	for i := range vals {
+		vals[i] = fmt.Sprintf(`"v%d"`, i)
+	}
+	_, err = ParseCohortDefinition(cohortScopeRaw("artifact", `[{"lens":"band:c","values":[`+strings.Join(vals, ",")+`]}]`, "[]", artifactPred))
+	if !errors.Is(err, ErrCohortInvalid) || !strings.Contains(err.Error(), "scope_values") {
+		t.Fatalf("scope_values err=%v", err)
+	}
+	_, err = ParseCohortDefinition(cohortScopeRaw("session", `[{"lens":"harness","values":["`+strings.Repeat("x", 257)+`"]}]`, "[]", sessionPred))
+	if !errors.Is(err, ErrCohortInvalid) || !strings.Contains(err.Error(), "value_bytes") {
+		t.Fatalf("value_bytes err=%v", err)
+	}
+	if _, err := ParseCohortDefinition(cohortScopeRaw("artifact", `[{"lens":"id","values":["`+strings.Repeat("x", 1024)+`"]}]`, "[]", artifactPred)); err != nil {
+		t.Fatalf("composite id of 1024 bytes must be accepted: %v", err)
+	}
+	_, err = ParseCohortDefinition(cohortScopeRaw("artifact", `[{"lens":"id","values":["`+strings.Repeat("x", 1025)+`"]}]`, "[]", artifactPred))
+	if !errors.Is(err, ErrCohortInvalid) || !strings.Contains(err.Error(), "value_bytes") {
+		t.Fatalf("composite id value_bytes err=%v", err)
+	}
+}
+
+func TestAnalyticsCohortCompilesScopePredicate(t *testing.T) {
+	scope := CohortScope{
+		Include: []CohortScopeElement{{Lens: "harness", Values: []string{"a", "b"}}, {Lens: "session_model", Values: []string{"m"}}},
+		Exclude: []CohortScopeElement{{Lens: "session_repo", Values: []string{"r"}}},
+	}
+	cols := map[string]SQLExpression{"harness": "source.harness", "session_model": "source.session_model", "session_repo": "source.session_repo"}
+	sql, args, err := CompileCohortScope(scope, cols)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(sql, "source.harness IN (?,?)") || !strings.Contains(sql, "source.session_model IN (?)") || !strings.Contains(sql, "source.session_repo NOT IN (?)") {
+		t.Fatalf("scope SQL=%s", sql)
+	}
+	if !reflect.DeepEqual(args, []any{"a", "b", "m", "r"}) {
+		t.Fatalf("args=%v", args)
+	}
+	if sql, args, err := CompileCohortScope(CohortScope{}, cols); err != nil || sql != "1" || args != nil {
+		t.Fatalf("empty scope sql=%q args=%v err=%v", sql, args, err)
+	}
+	_, _, err = CompileCohortScope(scope, map[string]SQLExpression{"harness": "h"})
+	if !errors.Is(err, ErrUnsupportedJoin) {
+		t.Fatalf("unmapped lens err=%v want unsupported_join", err)
+	}
+	var lensErr *CohortScopeLensError
+	if !errors.As(err, &lensErr) || lensErr.Reason != "not_defined_for_grain" {
+		t.Fatalf("unmapped lens err=%v want not_defined_for_grain", err)
+	}
+}

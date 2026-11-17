@@ -26,13 +26,24 @@ type CohortDefinition struct {
 	Source    json.RawMessage `json:"source,omitempty"`
 }
 
-type CohortScope struct {
-	From    string   `json:"from"`
-	To      string   `json:"to"`
-	TZ      string   `json:"tz"`
-	Include []string `json:"include"`
-	Exclude []string `json:"exclude"`
+// CohortScopeElement is one signed scope element: the values of one lens to include in, or
+// exclude from, the source population. A structured element (not a "lens:value" string) is
+// required because lens names may contain a colon, as band:<check> does.
+type CohortScopeElement struct {
+	Lens   string   `json:"lens"`
+	Values []string `json:"values"`
 }
+
+type CohortScope struct {
+	From    string               `json:"from"`
+	To      string               `json:"to"`
+	TZ      string               `json:"tz"`
+	Include []CohortScopeElement `json:"include"`
+	Exclude []CohortScopeElement `json:"exclude"`
+}
+
+// SQLExpression is a SQL column or expression a resolver binds a scope lens to.
+type SQLExpression string
 
 // ParsedCohort holds the normalized definition and its stable identity. Canonical is safe to
 // place in a query parameter after URL encoding; Key changes when scope, predicate or operation
@@ -72,6 +83,65 @@ var cohortLenses = map[string]map[string]bool{
 	"content":   {"kind": true, "plan": true, "repo_id": true, "harness": true, "session_model": true, "source": true, "screen_verdict": true, "scorer": true},
 	"execution": {"shape": true, "plan": true, "repo_id": true, "harness": true, "session_model": true},
 	"plan":      {"repo_id": true, "harness": true, "session_model": true},
+}
+
+// cohortGrainFilters is the single table of names each source grain accepts as a frozen source
+// scope lens (CONTRACTS.md 17.3.1). The schema unit publishes this table; the cohort parser
+// validates scope elements against it. "band:<check>" is a dynamic prefix validated against the
+// catalogue by the resolver unit, not here.
+var cohortGrainFilters = map[string][]string{
+	"session":   {"harness", "session_model", "session_repo", "id"},
+	"artifact":  {"kind", "plan", "repo_id", "harness", "session_model", "source", "screen_verdict", "scorer", "band:<check>", "id"},
+	"content":   {"harness", "session_model", "repo_id", "plan", "scorer", "screen_verdict", "band", "id"},
+	"execution": {"shape", "plan", "repo_id", "harness", "session_model", "id"},
+	"plan":      {"repo_id", "harness", "session_model", "id"},
+	// The shared-filter dimensions the time measures apply, plus id. session_repo and
+	// session_model stay absent until the time route parses them (17.3.1).
+	"time": {"repo_id", "harness", "kind", "plan", "norm_event", "event", "tool", "model", "source", "conversation_id", "stage", "id"},
+}
+
+// CohortGrainFilters returns a copy of the scope-filter names a grain accepts, in table order.
+func CohortGrainFilters(grain string) []string {
+	return append([]string{}, cohortGrainFilters[grain]...)
+}
+
+// CohortScopeLensError reports a lens that /schema publishes for another grain but not for this
+// source grain. It is unsupported_join with reason not_defined_for_grain and a suggested try list.
+type CohortScopeLensError struct {
+	Grain  string
+	Lens   string
+	Reason string
+	Try    []string
+}
+
+func (e *CohortScopeLensError) Error() string {
+	return fmt.Sprintf("%s: lens %q is %s for grain %q; try %s", ErrUnsupportedJoin, e.Lens, e.Reason, e.Grain, strings.Join(e.Try, ", "))
+}
+
+func (e *CohortScopeLensError) Unwrap() error { return ErrUnsupportedJoin }
+
+func cohortFilterMatches(names []string, lens string) bool {
+	for _, name := range names {
+		if name == lens {
+			return true
+		}
+		if strings.HasSuffix(name, ":<check>") {
+			prefix := strings.TrimSuffix(name, "<check>")
+			if strings.HasPrefix(lens, prefix) && len(lens) > len(prefix) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func cohortFilterMatchesAnyGrain(lens string) bool {
+	for _, names := range cohortGrainFilters {
+		if cohortFilterMatches(names, lens) {
+			return true
+		}
+	}
+	return false
 }
 
 // ParseCohortDefinition enforces the public 64-leaf, 64-value, depth-8 predicate limits. It
@@ -124,25 +194,15 @@ func ParseCohortDefinition(raw []byte) (ParsedCohort, error) {
 	if _, err := time.LoadLocation(d.Scope.TZ); err != nil {
 		return out, fmt.Errorf("%w: invalid scope tz", ErrCohortInvalid)
 	}
-	if d.Scope.Include == nil {
-		d.Scope.Include = []string{}
+	include, err := parseCohortScopeList(d.Grain, rawField(rawField(raw, "scope"), "include"))
+	if err != nil {
+		return out, err
 	}
-	if d.Scope.Exclude == nil {
-		d.Scope.Exclude = []string{}
+	exclude, err := parseCohortScopeList(d.Grain, rawField(rawField(raw, "scope"), "exclude"))
+	if err != nil {
+		return out, err
 	}
-	for _, list := range [][]string{d.Scope.Include, d.Scope.Exclude} {
-		if len(list) > 64 {
-			return out, fmt.Errorf("%w: scope list exceeds 64 values", ErrCohortInvalid)
-		}
-		for _, v := range list {
-			if v == "" || len(v) > 256 {
-				return out, fmt.Errorf("%w: invalid scope value", ErrCohortInvalid)
-			}
-		}
-		sort.Strings(list)
-	}
-	d.Scope.Include = uniqStrings(d.Scope.Include)
-	d.Scope.Exclude = uniqStrings(d.Scope.Exclude)
+	d.Scope.Include, d.Scope.Exclude = include, exclude
 	if len(d.Source) != 0 && d.Grain != "time" {
 		return out, fmt.Errorf("%w: source metadata is only valid for time", ErrCohortInvalid)
 	}
@@ -372,6 +432,144 @@ func uniqStrings(in []string) []string {
 	return out
 }
 
+func uniqSortedStrings(in []string) []string {
+	if len(in) == 0 {
+		return []string{}
+	}
+	sort.Strings(in)
+	return uniqStrings(in)
+}
+
+// parseCohortScopeList strict-decodes one include/exclude array, validates each element's lens
+// and budgets, then canonicalises: same-lens elements merge, values deduplicate and sort, and
+// elements sort by lens. Budgets are counted on that merged form.
+func parseCohortScopeList(grain string, raw json.RawMessage) ([]CohortScopeElement, error) {
+	var raws []json.RawMessage
+	if err := json.Unmarshal(raw, &raws); err != nil {
+		return nil, fmt.Errorf("%w: scope include/exclude must be arrays of objects", ErrCohortInvalid)
+	}
+	merged := []CohortScopeElement{}
+	byLens := map[string]int{}
+	for _, elemRaw := range raws {
+		if isJSONNull(elemRaw) {
+			return nil, fmt.Errorf("%w: scope element must be an object, not null", ErrCohortInvalid)
+		}
+		var el CohortScopeElement
+		if err := strictObject(elemRaw, &el); err != nil {
+			return nil, fmt.Errorf("%w: scope element must be an object with lens and values", ErrCohortInvalid)
+		}
+		if err := requireJSONKeys(elemRaw, "lens", "values"); err != nil {
+			return nil, fmt.Errorf("%w: scope element requires lens and values", ErrCohortInvalid)
+		}
+		if isJSONNull(rawField(elemRaw, "values")) {
+			return nil, fmt.Errorf("%w: scope element values must be an array", ErrCohortInvalid)
+		}
+		if el.Lens == "" {
+			return nil, fmt.Errorf("%w: scope element lens is required", ErrCohortInvalid)
+		}
+		if err := validateCohortScopeLens(grain, el.Lens); err != nil {
+			return nil, err
+		}
+		if len(el.Values) == 0 {
+			return nil, fmt.Errorf("%w: scope element values must not be empty", ErrCohortInvalid)
+		}
+		limit := cohortScopeValueLimit(grain, el.Lens)
+		for _, v := range el.Values {
+			if v == "" {
+				return nil, fmt.Errorf("%w: scope value must not be empty", ErrCohortInvalid)
+			}
+			if len(v) > limit {
+				return nil, fmt.Errorf("%w: value_bytes exceeds %d bytes for lens %q", ErrCohortInvalid, limit, el.Lens)
+			}
+		}
+		sort.Strings(el.Values)
+		el.Values = uniqStrings(el.Values)
+		if idx, ok := byLens[el.Lens]; ok {
+			merged[idx].Values = uniqSortedStrings(append(merged[idx].Values, el.Values...))
+		} else {
+			byLens[el.Lens] = len(merged)
+			merged = append(merged, el)
+		}
+	}
+	if len(merged) > 64 {
+		return nil, fmt.Errorf("%w: scope_elements exceeds 64 elements", ErrCohortInvalid)
+	}
+	for _, el := range merged {
+		if len(el.Values) > 64 {
+			return nil, fmt.Errorf("%w: scope_values exceeds 64 values for lens %q", ErrCohortInvalid, el.Lens)
+		}
+	}
+	sort.Slice(merged, func(i, j int) bool { return merged[i].Lens < merged[j].Lens })
+	return merged, nil
+}
+
+func validateCohortScopeLens(grain, lens string) error {
+	if cohortFilterMatches(cohortGrainFilters[grain], lens) {
+		return nil
+	}
+	if cohortFilterMatchesAnyGrain(lens) {
+		return &CohortScopeLensError{Grain: grain, Lens: lens, Reason: "not_defined_for_grain", Try: CohortGrainFilters(grain)}
+	}
+	return fmt.Errorf("%w: unknown scope lens %q", ErrCohortInvalid, lens)
+}
+
+func cohortScopeValueLimit(grain, lens string) int {
+	if lens == "id" {
+		switch grain {
+		case "artifact", "plan", "execution", "time":
+			return 1024
+		}
+	}
+	return 256
+}
+
+// CompileCohortScope renders the canonical include/exclude scope as a WHERE fragment and args
+// over the supplied source expressions. Within one lens values are OR; across lenses they are
+// AND; excludes are AND NOT IN applied after includes. An unmapped lens is unsupported_join with
+// reason not_defined_for_grain and the mapped names as try, never silently ignored.
+func CompileCohortScope(scope CohortScope, columns map[string]SQLExpression) (string, []any, error) {
+	if len(scope.Include) == 0 && len(scope.Exclude) == 0 {
+		return "1", nil, nil
+	}
+	parts := []string{}
+	args := []any{}
+	clause := func(el CohortScopeElement, negate bool) error {
+		expr, ok := columns[el.Lens]
+		if !ok || expr == "" {
+			try := make([]string, 0, len(columns))
+			for name := range columns {
+				try = append(try, name)
+			}
+			sort.Strings(try)
+			return &CohortScopeLensError{Lens: el.Lens, Reason: "not_defined_for_grain", Try: try}
+		}
+		if len(el.Values) == 0 {
+			return fmt.Errorf("%w: scope element values must not be empty", ErrCohortInvalid)
+		}
+		placeholders := strings.TrimSuffix(strings.Repeat("?,", len(el.Values)), ",")
+		op := " IN ("
+		if negate {
+			op = " NOT IN ("
+		}
+		parts = append(parts, "("+string(expr)+op+placeholders+"))")
+		for _, v := range el.Values {
+			args = append(args, v)
+		}
+		return nil
+	}
+	for _, el := range scope.Include {
+		if err := clause(el, false); err != nil {
+			return "", nil, err
+		}
+	}
+	for _, el := range scope.Exclude {
+		if err := clause(el, true); err != nil {
+			return "", nil, err
+		}
+	}
+	return strings.Join(parts, " AND "), args, nil
+}
+
 // CohortSessionSubquery returns a parameterized positive source mapping. The result stays inside
 // SQLite so a large source population is never copied into an unbounded Go identity slice.
 // Source exclusion is deliberately left to the target query after this positive set is resolved.
@@ -379,7 +577,7 @@ func CohortSessionSubquery(c ParsedCohort) (string, []any, CohortRelation, error
 	d := c.Definition
 	r := CohortRelation{SourceGrain: d.Grain, TargetGrain: "session", Distinct: true}
 	if len(d.Scope.Include) != 0 || len(d.Scope.Exclude) != 0 {
-		return "", nil, r, fmt.Errorf("%w: scope include/exclude element syntax is unspecified", ErrCohortInvalid)
+		return "", nil, r, fmt.Errorf("%w: scope include/exclude is not yet bound by this resolver", ErrCohortInvalid)
 	}
 	from, e1 := time.Parse(time.RFC3339, d.Scope.From)
 	to, e2 := time.Parse(time.RFC3339, d.Scope.To)
