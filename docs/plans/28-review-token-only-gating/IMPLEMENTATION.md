@@ -40,3 +40,24 @@ Run: OpenCode `opencode run` — model `opencode-go/deepseek-v4.1-flash`; start 
 Units: `phase2-01-run-path`, `phase2-02-report-cost`, `phase2-03-readme`.
 
 - **phase2-01-run-path** — closed `60a8837`. `approval.py`/`test_approval.py` deleted; `runner.run` takes no cap/record; preflight rows are `{case_id, effort, status}` with only `unavailable` blocking; `skipped_busy` run receipts go `retry_pending` and legacy `skipped_budget` retries; CLI loses the cap and record options; fixture rehearsal records actual cost. `python3 -m unittest test_runner.py test_phase7.py` 29 OK, `test_manifest.py` 12 OK, full discover 54 OK; required grep empty. Deviation: no red-first output captured. Report: `reports/phase2-01-run-path.md`.
+
+- **phase2-02-report-cost** — closed `aadac76`. `report.build_report` takes five arguments; `skipped_busy` added to `STATUSES`; cap/projection/reservation/exposure fields deleted; `cost_known`/null-cost validation and unknown-cost counting added at receipt, export-attempt, arm, per-case and run level; per-case gains `known_cost_usd` and `unknown_cost_attempts`. `python3 -m unittest test_report.py test_report_export.py` 17 OK; full discover 58 OK; required grep empty. Deviation: `_validate_export` also accepts null cost with the flag (needed for a null per-case total). Report: `reports/phase2-02-report-cost.md`.
+- **phase2-03-readme** — closed `819ef2e` (done with concerns: its brief's "deployed-server readiness" label collided with the check that forbids the word `readiness`; used DESIGN's "deployed-server target"). README has no spend-approval gate, no removed variable and no allowlist setup; dry-run, execute, report, smoke and layout sections describe actual cost and the transient `skipped_busy`. `run --help`/`report --help` and loopback `smoke` pass; forbidden-string greps empty. Report: `reports/phase2-03-readme.md`.
+
+**Verification** (runner, after all three units):
+
+```
+$ python3 -m unittest discover -s tools/shadow-review-trial -p 'test_*.py'   # Ran 58 tests, OK
+$ python3 -m unittest tools/shadow-review-trial/test_phase7.py -v            # Ran 3 tests, OK
+$ grep -rIE 'YAKKA_REVIEW_|refused_over_cap|cap_usd|cap-usd|estimated_usd|approval' \
+    tools/shadow-review-trial --exclude-dir=__pycache__                      # no matches (exit 1)
+$ ls tools/shadow-review-trial                                               # approval.py and test_approval.py absent
+$ python3 tools/shadow-review-trial/cli.py run --help                        # no --cap-usd, no approval option
+$ python3 tools/shadow-review-trial/cli.py report --help                     # no --cap-usd
+```
+
+The Phase 2 outcome is exercised through its own entry point by `test_three_case_three_effort_manifest_run_saved_records_and_report`, which drives `cli.main` against a loopback fixture server: `run --dry-run` posts 9 dry-runs and makes 0 model calls with `readiness.ready` true and no estimate fields; `--execute` with a wrong tenant and with an `unavailable` dry-run each exits with 0 model calls; the full `--execute` makes 9 model calls and completes 3 cases at each of `high`/`xhigh`/`max` with no approval file and no cap; the ledger's 9 run receipts and attempt rows each carry `cost_usd` 0.01; the report shows `usage.cost_usd` and `known_cost_usd` 0.09 and 0.03 per arm and 0.01 per case. `test_report.py`/`test_report_export.py` accept `skipped_busy` and legacy `skipped_budget` and treat null cost with `cost_known:false` as unknown, never estimated.
+
+Artifact feedback: all three briefs and all three reports `delivered`, screen pass; no flagged checks.
+
+**Carried:** None.
