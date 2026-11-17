@@ -38,6 +38,13 @@ The phase outcome is approach-open; this run uses the signed outcome and CONTRAC
 - Deviations / unfinished: session scatter and aggregate still apply fact-level filters (list only is lens-derived); `stage` is published for the time grain but not accepted as an include filter; filtered session paging scans in-window rows in 500-row chunks; artifact `cohort=` still rejects. 6-05 must close the scatter/aggregate lens filters, the `stage` publication/acceptance mismatch and artifact cohorts.
 - Verification: focused schema/entity/time tests passed 8/8; store passed (6.913s); serve failed only the two pre-existing activity tests; `go build ./internal/...` and `git diff --check` clean.
 
+### `6-05-cohort-target-population.md`
+
+- Outcome: committed as `70387d0` (`Accept resolved cohorts on target routes`); wired `s.opts.Checks` and the tenant blob dir into resolution, applied session lens filters to scatter/aggregate, accepted artifact cohorts, added `refuseCohort` to the six refusing routes, and stopped publishing the unaccepted time `stage` filter (legacy `exclude=stage:` unchanged).
+- Surfaces: `packages/yakka/internal/serve/` analytics handlers and shared filter code, `packages/yakka/internal/store/analytics_cohort.go`, focused route tests and `reports/6-05-cohort-target-population.md`.
+- Deviations / unfinished: the typed `population.relation`/`associations`/`resolved_n` layer and its invariant evidence were **not implemented**; responses keep the pre-existing population objects. Follow-up brief 6-05b closes it before 6-06.
+- Verification: focused cohort/session/artifact tests passed; store passed (6.979s); serve failed only the two pre-existing activity tests; `go build ./internal/...` and `git diff --check` clean.
+
 ## Phase 6 (earlier run) — Plan and execution entities and the cohort predicate
 
 Refinement commit: `c85e5b9` (`docs: refine Phase 6 analytics work`). Four sequential units; plan/execution entity rows, cohort resolution, target-route application, then time cohorts/activity and schema publication. The signed contract in CONTRACTS.md 17.3 supplies the implementation boundaries. `artifact_feedback` on all four briefs returned delivered / screen pass (`jev-1.13.0`). Phase 5 carried items remain outside this phase: artifact file-to-time-bucket assignment and score-lens memory-growth evidence.

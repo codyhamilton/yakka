@@ -603,6 +603,7 @@ Refinement verdict: **Proceed**, three sequential units. The fixture ledger and 
 | 6-03 Full cohort resolver matrix | [briefs/6-03-cohort-resolver-matrix.md](briefs/6-03-cohort-resolver-matrix.md) | 6-02; Phases 1–5 | Nothing; establishes the bounded resolver over every matrix entry. |
 | 6-04 Capability schema publication and filter alignment | [briefs/6-04-schema-capability-publication.md](briefs/6-04-schema-capability-publication.md) | 6-03; Phases 1–5 | Nothing; publishes `filters`/`predicate`/`content` and aligns session/artifact/time filters. |
 | 6-05 Cohort target routes, population and associations | [briefs/6-05-cohort-target-population.md](briefs/6-05-cohort-target-population.md) | 6-04; Phases 1–5 | Nothing; applies the cohort to the eleven accepting routes and reports typed population. |
+| 6-05b Typed population, relation and association reporting | [briefs/6-05b-cohort-population-relation.md](briefs/6-05b-cohort-population-relation.md) | 6-05; Phases 1–5 | Nothing; closes the population/relation/association layer 6-05 left incomplete. |
 | 6-06 Time cohorts and the activity feed | [briefs/6-06-time-cohorts-and-activity.md](briefs/6-06-time-cohorts-and-activity.md) | 6-05; Phases 1–5 | Nothing; closes time-source membership, associations and the merged feed/probe. |
 | 6-07 Schema-driven cohort proof | [briefs/6-07-cohort-proof-enumeration.md](briefs/6-07-cohort-proof-enumeration.md) | 6-06; Phases 1–5 | Nothing; proves offer-implies-resolve and the invariants, then advertises `features.cohort`. |
 
