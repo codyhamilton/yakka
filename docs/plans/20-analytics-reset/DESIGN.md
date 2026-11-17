@@ -665,6 +665,29 @@ Refinement verdict: **Proceed**, five units. 8-01 establishes the shared SVG ele
 - Approach: open (the panel engine, view spec codec and the linking model are new).
 - Depends on: Phases 1, 2, 3, 4, 5, 6, 7 and 8.
 
+**Units**
+
+| Unit | Brief | Depends on | May run alongside |
+|---|---|---|---|
+| Workspace engine, view spec and Start | [9-01-workspace-engine](briefs/9-01-workspace-engine.md) | Phases 1–8 | Nothing; establishes the registry, view-spec codec, panel frame and states, scope bar, coverage strip, chooser, saved boards, Follow, route table, stub API and harness the other units consume. |
+| Chips, selection tray, inspector and capability inspector | [9-02-tray-inspector](briefs/9-02-tray-inspector.md) | 9-01 | 9-05; owns new modules under `web/js/core/`, `web/css/workspace.css` and its specs. |
+| Pulse preset, river, feed, brush and movers | [9-03-pulse](briefs/9-03-pulse.md) | 9-01, 9-02 | 9-04 and 9-05; owns the Phase 9 pulse panel modules, preset registration, CSS and specs. |
+| Ledger explorer | [9-04-ledger](briefs/9-04-ledger.md) | 9-01, 9-02 | 9-03 and 9-05; owns `web/js/explorers/ledger*`, the ledger panel module, CSS and specs. |
+| Ops explorer | [9-05-ops](briefs/9-05-ops.md) | 9-01 | 9-02, 9-03 and 9-04; owns `web/js/ops*`, the ops panel module, CSS and specs. |
+| Workspace acceptance and phase proof | [9-06-workspace-acceptance](briefs/9-06-workspace-acceptance.md) | 9-01 to 9-05 | Nothing; owns the phase acceptance proof, the deep-link/Back and old-server matrix and the final browser suite. |
+
+**Carried from Phase 8**
+
+- The browser-evidence gate (playwright-core under `NODE_PATH` and the Chromium 1243 cache, with a named skip reason) touches Phase 9 and is absorbed into every Phase 9 browser spec's done evidence, not into a unit.
+- The 8-02 box legend's tooltip/legend series seam touches no Phase 9 panel (Pulse charts are strips, bars with sparklines, activity, calendar and coverage; no box legend); it belongs to Phase 10's distribution panels.
+- The shared `[data-shape]` swatch selectors concern any new SVG element that sets `data-shape` on mark groups. Phase 9 adds no chart element and composes the existing kit, so it does not touch Phase 9; it belongs to the later phase that adds such an element.
+- The shared base data setter/view accessor and table-arrow conventions do touch Phase 9 consumers: 9-03 and 9-04 must pass arrays, use the existing elements' public surface and must not edit the chart base, using the same conventions as 8-03/8-04.
+- Heatmap cells and calendar days sharing entity keys touches Phase 9's Pulse `calendar` only as inherited element behaviour; no Phase 9 unit may change `yk-matrix`, and the known key behaviour is named in 9-03 rather than fixed here.
+- The unrendered diverging ramp touches no Phase 9 panel by contract (Pulse `movers` shows change with the committed status/neutral styles, not a ramp); it belongs to Phase 10's delta and compare panels.
+- Bars legend focus emitting `filter` with a null value touches Phase 9: 9-02 maps legend-focus series keys to contract lens names before emitting a board chip, and 9-03 proves it on the Pulse panels. It is absorbed there.
+
+Refinement verdict: **Proceed**, six units. 9-01 runs first and establishes the engine, codec, states, route table, stub API and harness; 9-02 and 9-05 may then run in parallel on disjoint paths; 9-03 and 9-04 follow 9-02 and may run in parallel with each other and with 9-05; 9-06 closes the phase outcome over all five. Phase 8 carried items are placed above: the browser gate is absorbed into done evidence, the bars legend-focus mapping into 9-02/9-03, and the remaining four belong to later phases or are constraints, not scope. All evidence uses the committed fixture manifest through a first-party test-only stub API and deterministic fixtures; no live server, production data, credential, deployment or migration is required. Browser evidence needs `playwright-core` under `NODE_PATH=/home/codyh/workspace/yakka/packages/yakka-analytics/node_modules` and the Chromium 1243 cache, both outside this worktree; a spec that cannot reach them skips with a named reason and records a gate. No additional orchestrator decision is required.
+
 ### Phase 10 — Trends, Compare, Quality, Cost and Tools
 
 - Outcome: From each of Trends, Compare, Quality, Cost and Tools, changing a supported measure/lens/chart regroups the preset's panels with stable surviving styles. Every panel assigned to P10 in the preset matrix is delivered. Long-history auto resolution and zoom preserve dates; finite period/cohort comparisons show both populations and coverage. Quality separates check/scorer/hash versus file observations, displays scorer-specific baselines/bands and opens the correct artifact inspector (reader delivery is P12). Model/repo/harness cost and tool investigations preserve unpriced/unattributed/mixed groups, numeric eligibility and named unsupported joins. All modes, linked actions and table values match the fixture.
