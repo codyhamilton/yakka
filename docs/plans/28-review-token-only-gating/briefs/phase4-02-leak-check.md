@@ -4,8 +4,8 @@ Consumer: a build worker adding the Plan 28 Phase 4 request leak check, dispatch
 Owned paths: `tools/shadow-review-trial/leak_check.py`, `tools/shadow-review-trial/test_leak_check.py`; report `docs/plans/28-review-token-only-gating/reports/phase4-02-leak-check.md`. Touch nothing else.
 Do not edit `report.py`, `cli.py`, `runner.py`, `manifest.py`, `README.md` or their tests — other Phase 4 units own them.
 Commits: commit to `feat/28-review-token-only-gating` when done evidence passes, with a plain-summary title; include the report. Never push.
-Depends on: nothing.
-Runs alongside: `phase4-01-matching`, `phase4-03-evidence-check`, `phase4-04-manifest-population` (disjoint paths).
+Depends on: `phase4-01-matching` (imports `matching.normalise_text`; do not duplicate it).
+Runs alongside: `phase4-03-evidence-check`, `phase4-04-manifest-population` (disjoint paths).
 Budget: 6 files to read, about 300 lines to add including tests, 60 tool turns. Past the budget, stop: write a handoff under this brief's name in `IMPLEMENTATION.md` (done, not done, what you learned), commit if this brief commits, and report `over budget`.
 
 ## Required reading, in order
@@ -66,7 +66,7 @@ Use field names exactly; `report.py` and `cli.py` consume them in later units. R
 Identify or write the failing tests first; report their output before and after.
 
 - `cd /home/codyh/workspace/yakka-build/28 && python3 -m unittest tools/shadow-review-trial/test_leak_check.py` → all pass.
-- `python3 -m unittest discover -s tools/shadow-review-trial -p 'test_*.py'` → all passes (91 + this unit's tests; the full suite only if `phase4-01-matching` has landed, otherwise state which import it needs).
+- `python3 -m unittest discover -s tools/shadow-review-trial -p 'test_*.py'` → all pass (91 + units 01, 03, 04 and this unit's tests; `phase4-01-matching` is a dependency and has landed).
 - Tests build a small synthetic manifest shaped like `create_manifest` output (tier/stratum, plan, base/head, capture with a small diff, criteria `base_blob`, outcomes with excerpts) inside a temp dir under the repo, never `/tmp`, and assert:
   - a clean manifest with no plan text and no outcome excerpt in the diff passes with zero hits;
   - injecting the case plan's `REVIEW.md` path or `IMPLEMENTATION.md` into the diff fails via `own_plan_document_hits`;

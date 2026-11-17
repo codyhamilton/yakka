@@ -274,15 +274,15 @@ None blocking. Whether the unit and PR tiers will be needed is answered by Phase
 
 | Unit | Brief | Depends on | Runs alongside |
 |---|---|---|---|
-| 1 — Deterministic matcher, null, kappa and bootstrap | `briefs/phase4-01-matching.md` | nothing | 2, 3, 4 |
-| 2 — Request-level leak check | `briefs/phase4-02-leak-check.md` | nothing | 1, 3, 4 |
+| 1 — Deterministic matcher, null, kappa and bootstrap | `briefs/phase4-01-matching.md` | nothing | 3, 4 |
+| 2 — Request-level leak check | `briefs/phase4-02-leak-check.md` | 1 | 3, 4 |
 | 3 — Metric-only evidence check | `briefs/phase4-03-evidence-check.md` | nothing | 1, 2, 4 |
 | 4 — Manifest ingestion and population | `briefs/phase4-04-manifest-population.md` | nothing | 1, 2, 3 |
 | 5 — Comparisons (a)–(e) and matching/adjudication controls | `briefs/phase4-05-comparisons.md` | 1, 2, 4 | nothing (owns `report.py`) |
 | 6 — Paired deltas, cost/latency, reproducibility and reconciliation | `briefs/phase4-06-deltas-cost-validation.md` | 1, 4, 5 | nothing (owns `report.py`) |
 | 7 — Report output surface, CLI and README | `briefs/phase4-07-output-surface.md` | 3, 4, 5, 6 | nothing |
 
-Wave 1: 1, 2, 3, 4. Wave 2: 5. Wave 3: 6. Wave 4: 7.
+Wave 1: 1, 3, 4. Wave 2: 2. Wave 3: 5. Wave 4: 6. Wave 5: 7.
 
 Carried placement: the foreign-plan capture item (54 real captures) is resolved by unit 2's scoped request check — the case's own plan documents and every recorded outcome excerpt fail; other plans' `docs/plans/` files are counted as `foreign_plan_document_captures`, surfaced in unit 5's validation section and documented in unit 7's README. The `tiers`/`base_blob`/`outcomes`/`later_fixes`/`target`/`floor` ingestion is unit 4. The cosmetic `eligible` label on `cli.py manifest` is unit 7. `history_extract_b.py` stays committed as comparison provenance; whether to drop it is a close-out decision, not Phase 4 work.
 

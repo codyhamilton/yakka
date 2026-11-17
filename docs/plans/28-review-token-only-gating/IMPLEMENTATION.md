@@ -101,7 +101,7 @@ Artifact feedback: all six briefs and all six reports `delivered`, screen pass; 
 
 ## Phase 4 — Comparison and validation report
 
-Run: OpenCode `opencode run` — model `opencode-go/deepseek-v4.1-flash`; start 2026-11-18 06:47 AEST. Refined as 7 units: wave 1 units 1–4 (disjoint paths); wave 2 unit 5; wave 3 unit 6; wave 4 unit 7.
+Run: OpenCode `opencode run` — model `opencode-go/deepseek-v4.1-flash`; start 2026-11-18 06:47 AEST. Refined as 7 units: wave 1 units 1, 3 and 4 (disjoint paths); wave 2 unit 2 (needs the matcher from unit 1); wave 3 unit 5; wave 4 unit 6; wave 5 unit 7.
 
 Units: `phase4-01-matching`, `phase4-02-leak-check`, `phase4-03-evidence-check`, `phase4-04-manifest-population`, `phase4-05-comparisons`, `phase4-06-deltas-cost-validation`, `phase4-07-output-surface`.
 
