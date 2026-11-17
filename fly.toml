@@ -3,6 +3,8 @@
 # The analytics site is Cloudflare Pages at https://yakka.build and https://www.yakka.build.
 # GitHub's callback stays https://yakka.build/oauth/callback (the Pages page, not this origin).
 # Set GITHUB_OAUTH_CLIENT_ID and GITHUB_OAUTH_CLIENT_SECRET with `fly secrets set` (never in this file).
+# CLAUDE_API_TOKEN is also set with `fly secrets set` (never in this file) and is the only review
+# setting; with a non-loopback authenticated server it alone enables review.
 
 app = "yakka"
 primary_region = "iad"

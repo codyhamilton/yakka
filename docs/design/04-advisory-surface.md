@@ -43,9 +43,11 @@ or delete queue entries. The separate `change` reader below scans and transmits 
 | `review_change(mode, build_models, …)` | a server-owned single-call review receipt, with validated findings when `detail=full` | advisory comparison beside existing reviews; never a workflow decision input |
 | `list_reviews(filters…)` | a tenant's stored reviews as a complete, cursor-paged listing with the same filters as `GET /v1/reviews` | whether earlier reviews exist and what they found, without spending on a new call |
 
-The review tool is exposed only when server review model configuration and the MCP timeout ceiling
-permit registration, and only to `read_write` callers. `list_reviews` is a `read` tool with no local
-readers or actions. Maintainer operations (defining checks, rescoring, rating) are CLI or REST
+The review tool is exposed only when `CLAUDE_API_TOKEN` is non-empty in authenticated remote mode and
+the MCP timeout ceiling of at least 150 seconds permits registration, and only to `read_write`
+callers. The model is fixed in code (`claude-haiku-5-5`), any authenticated tenant's repo is
+reviewable, and `skipped_busy` reports the two-call per-tenant in-flight limit. `list_reviews` is a
+`read` tool with no local readers or actions. Maintainer operations (defining checks, rescoring, rating) are CLI or REST
 only.
 
 Only the human owner may reset or delete a tenant. Agents must not perform or attempt this on a user's behalf.
@@ -63,12 +65,12 @@ are implemented. The same amendment's owner-only tenant reset/delete is also imp
 cookie-session/profile-UI-only and adds no MCP tool or key path.
 
 The server owns the tool definition, prompt and exclusion policy, stored brief or plan/phase criteria
-resolution, provider call, validation, spend limits and tenant-local review record. It uses the same
+resolution, provider call, validation, actual-cost recording and tenant-local review record. It uses the same
 orchestrator as authenticated `POST /v1/reviews`; records are read through `GET /v1/reviews` or the
 read-only `list_reviews` tool. Optional `effort` (default `high`; `high`, `xhigh` or `max` only),
 `tags` (at most 16 exact strings) and `store` (default `true`; `false`
-skips all dedupe, cache and record writes) are validated before any spend or storage, and
-`YAKKA_REVIEW_EFFORT` is a high-only server default that never caps a valid per-call override.
+skips all dedupe, cache and record writes) are validated before any spend or storage; per-call
+effort defaults to `high`, is validated server-side and is never capped by a setting.
 `read_write` scope and `readOnlyHint:false` disclose this spend-and-record boundary. Local collection
 is read-only: the declaration has a 150-second timeout and no local actions. The shim alone captures
 uncommitted changes or an explicit Git range using the server-declared `change` reader, scans before

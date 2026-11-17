@@ -69,11 +69,11 @@ Server configuration is environment only:
 | `YAKKA_SERVE_CORS_ORIGINS` | comma-separated exact origins allowed to call bearer-authenticated reads from a browser; unset or empty means no CORS headers; ignored in local mode, which allows loopback origins ([design 7](07-analytics-site.md#browser-access)) |
 | `GITHUB_OAUTH_CLIENT_ID`, `GITHUB_OAUTH_CLIENT_SECRET`, `YAKKA_PUBLIC_URL` | set together for remote collector mode (non-loopback bind); ignored on loopback ([design 5](05-distribution.md#local-bootstrap)) |
 | `TYPESAFE_API_KEY` | scorer credential; server side only, never in any client config |
-| `CLAUDE_API_TOKEN` | optional review provider credential; server side only, sent only in the provider authentication header |
-| `YAKKA_REVIEW_MODEL` | exact live review model id; availability requires `claude-haiku-5-5` |
-| `YAKKA_REVIEW_EFFORT` | high-only server default and validation setting for review effort; unset means `high`, and any configured value other than `high` disables calls. It never caps a valid per-call `high`, `xhigh` or `max` override. |
-| `YAKKA_REVIEW_USD_CAP` | positive server-wide rolling 24-hour USD spend cap; unset disables calls |
-| `YAKKA_REVIEW_REPOS` | comma-separated `<tenant>/<repo_id>` allowlist; unset enables no repositories |
+| `CLAUDE_API_TOKEN` | review provider credential; set in remote mode and review is available to every authenticated tenant for any repo; server side only, sent only in the provider authentication header |
+
+`CLAUDE_API_TOKEN` is the only review setting. The model is the code constant `claude-haiku-5-5`;
+effort is chosen per call (`high`, `xhigh` or `max`, default `high`) and validated server-side; and
+Yakka applies no spend cap. Actual cost is still recorded per review.
 
 **Local mode** is loopback with no credential requirement, for one user on one machine:
 
@@ -189,10 +189,10 @@ compaction refuses while serve runs, so SQLite never has two writers.
 Per-tenant files mean writes for different tenants never share a lock. Deleting the directory
 removes tenant-local storage, but is not a complete tenant deletion on its own: `registry.json`
 lives alongside tenant directories and retains tokens, owner/name entries and user-global sessions;
-review reservations/claims also live outside the tenant directory. Raw directory deletion therefore
-leaves orphaned registry entries, and a still-valid token can lazily recreate the directory. The
-owner lifecycle routes below are the complete-cleanup path: they coordinate tenant storage with the
-registry, global claims/reservations and the cleanup journal.
+review claims also live outside the tenant directory. Raw directory deletion therefore leaves
+orphaned registry entries, and a still-valid token can lazily recreate the directory. The owner
+lifecycle routes below are the complete-cleanup path: they coordinate tenant storage with the
+registry, global claims and the cleanup journal.
 
 The [Plan 23 follow-up amendment](../plans/23-llm-review-shadow.md) landed owner
 self-serve reset and delete with complete tenant/global cleanup. Its per-call effort/tags/store
@@ -208,7 +208,7 @@ MCP tool, CLI command or admin alias exists.
 | Endpoint | Description / success |
 | --- | --- |
 | `POST /v1/tenants/<tenant-id>/reset` | Only the human owner may reset or delete a tenant. Agents must not perform or attempt this on a user's behalf. `204` wipes all assets and revokes all keys/grants, retaining tenant id/name/owner/trustworthy marker and a fresh store generation for explicit re-selection and rekeying. |
-| `DELETE /v1/tenants/<tenant-id>` | Only the human owner may reset or delete a tenant. Agents must not perform or attempt this on a user's behalf. `204` removes the entire tenant: storage, reviews, usage, tokens, tenant-bound sessions if any, owner/name/marker, grants, attributed claims/reservations and cleanup journal. |
+| `DELETE /v1/tenants/<tenant-id>` | Only the human owner may reset or delete a tenant. Agents must not perform or attempt this on a user's behalf. `204` removes the entire tenant: storage, reviews, usage, tokens, tenant-bound sessions if any, owner/name/marker, grants, attributed claims and cleanup journal. |
 
 Both require a valid owner `workflow_session` cookie, JSON body
 `{"confirm_tenant_id":"<exact path id>"}`, exact `Origin` equal to the public API origin,

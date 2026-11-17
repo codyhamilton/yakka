@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased — Review availability needs only the provider token
+
+- Review is available whenever `CLAUDE_API_TOKEN` is set in authenticated remote mode, to every authenticated tenant and for any repo; the model is the code constant `claude-haiku-5-5` and effort is the per-call `high`/`xhigh`/`max` control, defaulting to `high`.
+- Removed the four review configuration settings and the Yakka-side spend cap and reservation ledger. Actual cost is still recorded per review from provider usage; a failed attempt with no reported usage records `cost_usd: null` with `cost_known: false`. `skipped_busy` is the new per-tenant in-flight-limit status, and `skipped_budget` remains readable when ingesting older rows.
+- `review_change` registers when the provider token is non-empty, the server is not local, and the MCP call ceiling is at least 150 seconds; `tools/list` for a `read_write` caller is the non-spending availability signal.
+
 ## Unreleased — Claude flavour of the cloud installer
 
 - `scripts/cloud-install.sh --target claude` does the same full user-level install for Claude Code cloud environments: client and `yakka` on PATH, MCP merged into `~/.claude.json` (server `yakka`, no `env` block), hooks merged into `~/.claude/settings.json` with absolute `spool.sh` paths, and skills under `~/.claude/skills/<name>/`. Default `--target cursor` is unchanged. The key is read from `YAKKA_KEY` at runtime and is never printed or written into config. Set `YAKKA_ENDPOINT=https://api.yakka.build` as well so drain is not left with a partial override.

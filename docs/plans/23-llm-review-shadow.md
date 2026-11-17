@@ -2,6 +2,8 @@
 
 Plan 23 added an advisory, single-call Claude review path and a fixture-backed historical trial instrument. Its three-phase follow-up completed review controls and paged reads, synthetic-tenant isolation and disposal, and a full-clone trial workflow with an explicit spend gate. The implementation outcomes are proved with tests and fakes; the paid historical trial and deployed smoke remain operator work.
 
+> **Amended by Plan 28.** [`28-review-token-only-gating`](28-review-token-only-gating/DESIGN.md) supersedes the four review settings, the USD cap and the trial spend-approval gate: review availability is now token-only. This record's historical outcomes below are unchanged; this pointer marks where they are superseded.
+
 ## Intent
 
 User request, verbatim:
@@ -120,6 +122,8 @@ Added tenant-attributed claims and spend, owner-only reset/delete, cleanup journ
 
 ### Follow-up Phase 3 — Real-server trial workflow has complete evidence and an explicit spend gate
 
+*Superseded in part by [Plan 28](28-review-token-only-gating/DESIGN.md): the spend-approval gate is dropped and availability is token-only; the historical outcome below stands.*
+
 Added full-history fetch/unshallow and repository/object/count verification before manifest freeze; dedicated tenant and scope checks; full-body duplicate reconciliation; complete cursor-paged exports; exact-run canonical cost including failed billed attempts; and Cody approval binding before provider-reaching execution. Fake tests cover missing, expired, mismatched and over-ceiling approval, zero-call refusal and the composed manifest/run/adjudication/report workflow. The trial fixture suite passed 58 tests under the 8 GiB cap. No live server, paid call or provider credential was used.
 
 ## Deviations
@@ -136,8 +140,12 @@ Recorded verification used an 8 GiB cap and at most three Go workers where appli
 
 ## Residual Risks
 
+*Superseded in part by [Plan 28](28-review-token-only-gating/DESIGN.md): the four review settings, the USD cap and the separate spend approval no longer apply; availability is token-only.*
+
 No live historical population or paid trial is evidenced; the target of 50 distinct completed valid cases at each of high, xhigh and max remains unverified. The deployed server, server-held provider credential and a separate written spend approval are prerequisites before any paid run. Manual browser verification of reset/delete and tenant re-selection remains outstanding. Historical canonical rows without `review_id` return `cache_unavailable` without provider replay pending Cody's confirmation. Review cursors are checksummed, not MAC-protected, so same-tenant cursor tampering remains possible. The `Reservations.PurgeTenant` rollback restores memory on persistence failure but lacks an injected-save-failure test.
 
 ## Follow-ups
+
+*Superseded in part by [Plan 28](28-review-token-only-gating/DESIGN.md): the settings, cap and spend-approval follow-ups are replaced by token-only availability; the remaining items stand.*
 
 Resolve original findings #211–#217 before relying on their affected edge cases. Complete the historical clone/population proof, deployed-server readiness, server credential check, explicit spend approval and human lifecycle UI walkthrough before operator use. Consider a standalone high-water value only if audit consumers require it; current exports preserve the opaque cursor chain. Address #225 with a deterministic save-failure test for reservation purge.
