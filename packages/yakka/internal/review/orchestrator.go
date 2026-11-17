@@ -24,8 +24,6 @@ import (
 
 const (
 	MaxReviewBody         = 3 << 20
-	maxReviewInputTokens  = int64(400_000)
-	maxReviewOutputTokens = int64(8_000)
 	reviewWallTime        = 120 * time.Second
 	defaultAttemptTimeout = 60 * time.Second
 )
@@ -156,7 +154,8 @@ type Attempt struct {
 	InputTokens  int     `json:"input_tokens,omitempty"`
 	OutputTokens int     `json:"output_tokens,omitempty"`
 	LatencyMS    int64   `json:"latency_ms"`
-	CostUSD      float64 `json:"cost_usd"`
+	CostUSD      float64 `json:"cost_usd,omitempty"`
+	CostKnown    bool    `json:"cost_known"`
 	PricingTier  string  `json:"pricing_tier,omitempty"`
 }
 
@@ -168,7 +167,6 @@ type Receipt struct {
 	FindingCounts    map[string]int  `json:"finding_counts,omitempty"`
 	Coverage         Coverage        `json:"coverage,omitempty"`
 	CostUSD          float64         `json:"cost_usd,omitempty"`
-	EstimatedUSD     float64         `json:"estimated_usd,omitempty"`
 	Manifest         []ManifestEntry `json:"manifest,omitempty"`
 	Ignored          []string        `json:"ignored,omitempty"`
 	Result           *Result         `json:"result,omitempty"`
@@ -237,9 +235,14 @@ func Run(ctx context.Context, tenant *store.Tenant, tenantID string, req Request
 	if req.Detail != "" && req.Detail != "full" {
 		return Receipt{}, errors.New("detail must be full")
 	}
-	controls, err := resolveCallControls(req, cfg.Availability.Effort)
+	controls, err := resolveCallControls(req)
 	if err != nil {
 		return Receipt{}, err
+	}
+	if req.DryRun {
+		if err := CheckAvailability(cfg.Availability, controls.effective); err != nil {
+			return Receipt{Status: "unavailable", Reason: safeReason(err)}, nil
+		}
 	}
 
 	phaseText := ""
@@ -293,24 +296,12 @@ func Run(ctx context.Context, tenant *store.Tenant, tenantID string, req Request
 		return persistRefusal(ctx, tenant, tenantID, req, repo, "refused_criteria", ce.Code, resolved.Record, packet, "", cfg, controls)
 	}
 	if req.DryRun {
-		est, ok := store.ReservationCost(cfg.Availability.Model, maxReviewInputTokens, maxReviewOutputTokens, true)
-		if err := CheckAvailability(cfg.Availability, tenantID, repo, controls.effective); err != nil {
-			return Receipt{Status: "unavailable", Reason: safeReason(err), CaptureID: packet.CaptureID, Coverage: packet.Coverage, Manifest: packet.Manifest}, nil
-		}
-		if !ok || est < 0 {
-			return Receipt{Status: "unavailable", Reason: "priced model required", CaptureID: packet.CaptureID, Coverage: packet.Coverage, Manifest: packet.Manifest}, nil
-		}
-		return Receipt{Status: "dry_run", CaptureID: packet.CaptureID, Coverage: packet.Coverage, Manifest: packet.Manifest, EstimatedUSD: est}, nil
+		return Receipt{Status: "dry_run", CaptureID: packet.CaptureID, Coverage: packet.Coverage, Manifest: packet.Manifest}, nil
 	}
 
 	status, reason := "", ""
-	if err := CheckAvailability(cfg.Availability, tenantID, repo, controls.effective); err != nil {
+	if err := CheckAvailability(cfg.Availability, controls.effective); err != nil {
 		status, reason = "unavailable", safeReason(err)
-	}
-	if status == "" {
-		if id, ok := store.ReservationCost(cfg.Availability.Model, maxReviewInputTokens, maxReviewOutputTokens, true); !ok || id < 0 {
-			status, reason = "unavailable", "priced model required"
-		}
 	}
 	inputHash := ""
 	key := ""
@@ -320,7 +311,7 @@ func Run(ctx context.Context, tenant *store.Tenant, tenantID string, req Request
 		if err := tenant.WriteReviewInput(inputHash, inputBytes); err != nil {
 			return Receipt{}, errors.New("review input persistence failed")
 		}
-		key = executionKey(req, tenantID, repo, packet, resolved.Record, cfg.Availability.Model, controls.effective, controls.profile, controls.tags)
+		key = executionKey(req, tenantID, repo, packet, resolved.Record, LiveModel, controls.effective, controls.profile, controls.tags)
 	}
 	id := makeID()
 	var release func()
@@ -338,7 +329,7 @@ func Run(ctx context.Context, tenant *store.Tenant, tenantID string, req Request
 			}
 			return cached, nil
 		} else if controls.legacyFallback {
-			legacyKey := PreUpgradeExecutionKey(req, tenantID, repo, packet, resolved.Record, cfg.Availability.Model, controls.effective, controls.profile)
+			legacyKey := PreUpgradeExecutionKey(req, tenantID, repo, packet, resolved.Record, LiveModel, controls.effective, controls.profile)
 			if legacyKey != key {
 				legacyRow, legacyFound, legacyErr := tenant.ReviewByExecutionKey(ctx, repo, legacyKey)
 				if legacyErr != nil {
@@ -356,38 +347,31 @@ func Run(ctx context.Context, tenant *store.Tenant, tenantID string, req Request
 			}
 		}
 	}
-	spendKey := key
-	if !controls.store {
-		spendKey = id
-	}
 	if status == "" {
 		if cfg.Reservations == nil {
-			cfg.Reservations = NewReservations(cfg.Availability.USDCap, 2)
+			cfg.Reservations = NewReservations(2)
 		}
-		reservation, ok := store.ReservationCost(cfg.Availability.Model, maxReviewInputTokens, maxReviewOutputTokens, true)
-		if !ok {
-			status, reason = "unavailable", "priced model required"
-		} else if controls.store {
-			if err := cfg.Reservations.begin(key, id, tenantID, reservation); err != nil {
+		if controls.store {
+			if err := cfg.Reservations.begin(key, id, tenantID); err != nil {
 				if first, dup := duplicateReview(err); dup {
 					originalID := first
 					if stateID, state := cfg.Reservations.claimState(key); state == claimActive && stateID != "" {
 						return Receipt{Status: "in_progress", Reason: originalID, Cached: boolPtr(false), OriginalReviewID: originalID}, nil
 					}
 					return Receipt{Status: "outcome_unknown", Reason: originalID, Cached: boolPtr(false), OriginalReviewID: originalID}, nil
-				} else if errors.Is(err, ErrReservationState) {
-					status, reason = "unavailable", "review reservation state unavailable"
+				} else if errors.Is(err, ErrClaimState) {
+					status, reason = "unavailable", "review claim state unavailable"
 				} else {
-					status, reason = "skipped_budget", "spend cap or in-flight limit"
+					status, reason = "skipped_busy", "tenant in-flight limit"
 				}
 			} else {
 				release = func() { cfg.Reservations.finishClaim(key, tenantID) }
 			}
-		} else if err := cfg.Reservations.beginEphemeral(spendKey, tenantID, reservation); err != nil {
-			if errors.Is(err, ErrReservationState) {
-				status, reason = "unavailable", "review reservation state unavailable"
+		} else if err := cfg.Reservations.beginEphemeral(id, tenantID); err != nil {
+			if errors.Is(err, ErrClaimState) {
+				status, reason = "unavailable", "review claim state unavailable"
 			} else {
-				status, reason = "skipped_budget", "spend cap or in-flight limit"
+				status, reason = "skipped_busy", "tenant in-flight limit"
 			}
 		} else {
 			release = func() { cfg.Reservations.finish(tenantID) }
@@ -399,18 +383,12 @@ func Run(ctx context.Context, tenant *store.Tenant, tenantID string, req Request
 		if release != nil {
 			defer release()
 		}
-		reviewer := NewReviewer(cfg.Availability.Token, cfg.Availability.Model, controls.effective, cfg.Endpoint)
+		reviewer := NewReviewer(cfg.Availability.Token, LiveModel, controls.effective, cfg.Endpoint)
 		reviewCtx, cancelReview := context.WithTimeout(ctx, reviewWallTime)
 		defer cancelReview()
 		for n := 1; n <= 2; n++ {
-			if n > 1 {
-				if reviewCtx.Err() != nil {
-					break
-				}
-				if !cfg.Reservations.reserveRetry(spendKey, tenantID, n, reservationAmount(cfg.Availability.Model)) {
-					reason = "retry reservation exceeds spend cap"
-					break
-				}
+			if n > 1 && reviewCtx.Err() != nil {
+				break
 			}
 			at := time.Now()
 			if cfg.Now != nil {
@@ -432,12 +410,12 @@ func Run(ctx context.Context, tenant *store.Tenant, tenantID string, req Request
 				}
 				a.InputTokens, a.OutputTokens = res.InputTokens, res.OutputTokens
 				a.Status = "ok"
+				a.CostKnown = true
 				inputSize := int64(res.InputTokens)
-				if tier, yes := store.PricingTier(cfg.Availability.Model, inputSize, false); yes {
+				if tier, yes := store.PricingTier(LiveModel, inputSize, false); yes {
 					a.PricingTier = tier
 				}
-				a.CostUSD, _ = store.CostAtInputSize("claude", cfg.Availability.Model, store.Tokens{In: int64(res.InputTokens), Out: int64(res.OutputTokens)}, inputSize, nil)
-				cfg.Reservations.settle(spendKey, n, a.CostUSD)
+				a.CostUSD, _ = store.CostAtInputSize("claude", LiveModel, store.Tokens{In: int64(res.InputTokens), Out: int64(res.OutputTokens)}, inputSize, nil)
 				attempts = append(attempts, a)
 				status = "ok"
 				if packet.Coverage.State != "complete" || res.Coverage != "complete" {
@@ -446,9 +424,15 @@ func Run(ctx context.Context, tenant *store.Tenant, tenantID string, req Request
 				break
 			}
 			a.Status = errorStatus(err)
-			a.CostUSD = reservationAmount(cfg.Availability.Model)
-			if tier, ok := store.PricingTier(cfg.Availability.Model, maxReviewInputTokens, true); ok {
-				a.PricingTier = tier
+			var pe *ProviderError
+			if errors.As(err, &pe) && pe.UsageReported {
+				a.InputTokens, a.OutputTokens = pe.InputTokens, pe.OutputTokens
+				a.CostKnown = true
+				inputSize := int64(pe.InputTokens)
+				if tier, yes := store.PricingTier(LiveModel, inputSize, false); yes {
+					a.PricingTier = tier
+				}
+				a.CostUSD, _ = store.CostAtInputSize("claude", LiveModel, store.Tokens{In: int64(pe.InputTokens), Out: int64(pe.OutputTokens)}, inputSize, nil)
 			}
 			attempts = append(attempts, a)
 			status = a.Status
@@ -620,7 +604,7 @@ type callControls struct {
 	legacyFallback bool
 }
 
-func resolveCallControls(r Request, availabilityEffort string) (callControls, error) {
+func resolveCallControls(r Request) (callControls, error) {
 	submitted := r.Tags
 	if len(submitted) > maxReviewTags {
 		return callControls{}, errors.New("tags must contain at most 16 entries")
@@ -664,10 +648,7 @@ func resolveCallControls(r Request, availabilityEffort string) (callControls, er
 	if !validEffort(requested) {
 		return callControls{}, errors.New("effort must be high, xhigh or max")
 	}
-	configured := availabilityEffort
-	if configured == "" {
-		configured = "high"
-	}
+	configured := "high"
 	store := r.Store == nil || *r.Store
 	return callControls{configured: configured, requested: requested, effective: requested, profile: profile, tags: canonical, store: store, legacy: legacy, legacyFallback: legacyFallback}, nil
 }
@@ -699,10 +680,6 @@ func errorStatus(err error) string {
 		return "unavailable"
 	}
 	return "api_error"
-}
-func reservationAmount(model string) float64 {
-	n, _ := store.ReservationCost(model, maxReviewInputTokens, maxReviewOutputTokens, true)
-	return n
 }
 func packetInput(p Packet) []byte {
 	s := string(p.Prompt)
@@ -878,7 +855,7 @@ func persistRecord(ctx context.Context, t *store.Tenant, tenant string, r Reques
 	if r.Detail == "full" || !write {
 		out.Model = result.Model
 		if out.Model == "" {
-			out.Model = cfg.Availability.Model
+			out.Model = LiveModel
 		}
 		out.Effort = ctl.effective
 		out.Tags = ctl.tags
@@ -904,7 +881,7 @@ func persistRecord(ctx context.Context, t *store.Tenant, tenant string, r Reques
 		now = cfg.Now()
 	}
 	conv := "review:" + p.CaptureID[:min(12, len(p.CaptureID))]
-	model := cfg.Availability.Model
+	model := LiveModel
 	tags := ctl.tags
 	if tags == nil {
 		tags = []string{}
@@ -933,13 +910,26 @@ func persistRecord(ctx context.Context, t *store.Tenant, tenant string, r Reques
 	}
 	if len(attempts) > 0 {
 		var cost float64
+		var in, out int
+		known := false
 		for _, a := range attempts {
-			cost += a.CostUSD
+			in += a.InputTokens
+			out += a.OutputTokens
+			if a.CostKnown {
+				known = true
+				cost += a.CostUSD
+			}
 		}
-		rec["cost_usd"] = cost
 		rec["pricing_table_id"] = store.PricingTableID()
-		rec["input_tokens"] = result.InputTokens
-		rec["output_tokens"] = result.OutputTokens
+		rec["input_tokens"] = in
+		rec["output_tokens"] = out
+		if known {
+			rec["cost_usd"] = cost
+			rec["cost_known"] = true
+		} else {
+			rec["cost_usd"] = nil
+			rec["cost_known"] = false
+		}
 	}
 	if reason != "" {
 		rec["reason"] = reason
@@ -958,16 +948,19 @@ func persistRecord(ctx context.Context, t *store.Tenant, tenant string, r Reques
 
 // persistReviewUsage writes one content-free review_usage fact for a store=false call that
 // reached the provider. It carries no repository, plan, session, capture, prompt, criteria,
-// finding, error-body or content-derived hash field. charge is the settled actual cost on
-// success and the conservative reservation for an error or unknown outcome.
+// finding, error-body or content-derived hash field. Cost is the sum of known attempt costs;
+// with no known attempt it is null and cost_known is false.
 func persistReviewUsage(ctx context.Context, t *store.Tenant, status string, result Result, attempts []Attempt, cfg RunConfig, ctl callControls) error {
 	var charge float64
+	var in, out int
+	known := false
 	for _, a := range attempts {
-		charge += a.CostUSD
-	}
-	outcome := "conservative"
-	if status == "ok" || status == "ok_partial" {
-		outcome = "settled"
+		in += a.InputTokens
+		out += a.OutputTokens
+		if a.CostKnown {
+			known = true
+			charge += a.CostUSD
+		}
 	}
 	tags := ctl.tags
 	if tags == nil {
@@ -978,24 +971,28 @@ func persistReviewUsage(ctx context.Context, t *store.Tenant, status string, res
 		now = cfg.Now()
 	}
 	rec := map[string]any{
-		"type":                "review_usage",
-		"usage_id":            makeID(),
-		"configured_model":    cfg.Availability.Model,
-		"returned_model":      result.Model,
-		"configured_effort":   ctl.configured,
-		"requested_effort":    ctl.requested,
-		"effective_effort":    ctl.effective,
-		"input_tokens":        result.InputTokens,
-		"output_tokens":       result.OutputTokens,
-		"cost_usd":            charge,
-		"pricing_table_id":    store.PricingTableID(),
-		"ts":                  float64(now.Unix()),
-		"tags":                tags,
-		"store":               false,
-		"status":              status,
-		"attempts":            attempts,
-		"reservation_outcome": outcome,
-		"reservation_usd":     charge,
+		"type":              "review_usage",
+		"usage_id":          makeID(),
+		"configured_model":  LiveModel,
+		"returned_model":    result.Model,
+		"configured_effort": ctl.configured,
+		"requested_effort":  ctl.requested,
+		"effective_effort":  ctl.effective,
+		"input_tokens":      in,
+		"output_tokens":     out,
+		"pricing_table_id":  store.PricingTableID(),
+		"ts":                float64(now.Unix()),
+		"tags":              tags,
+		"store":             false,
+		"status":            status,
+		"attempts":          attempts,
+	}
+	if known {
+		rec["cost_usd"] = charge
+		rec["cost_known"] = true
+	} else {
+		rec["cost_usd"] = nil
+		rec["cost_known"] = false
 	}
 	b, _ := json.Marshal(rec)
 	facts, err := ingest.IngestReviewUsage(ctx, t, []json.RawMessage{json.RawMessage(b)})

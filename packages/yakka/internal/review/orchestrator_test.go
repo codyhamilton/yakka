@@ -47,7 +47,7 @@ func rangeCapture(diff string, complete bool) Capture {
 	return c
 }
 func availableConfig(endpoint string) RunConfig {
-	return RunConfig{Availability: Availability{Token: "credential-sentinel", Model: LiveModel, Effort: "high", USDCap: 5, Repositories: map[string]bool{"tenant/repo-sentinel": true}}, Reservations: NewReservations(5, 2), Endpoint: endpoint}
+	return RunConfig{Availability: Availability{Token: "credential-sentinel"}, Reservations: NewReservations(2), Endpoint: endpoint}
 }
 func providerReply(outcomes any, findings any, limitations any, coverage string) string {
 	b, _ := json.Marshal(map[string]any{"outcomes": outcomes, "findings": findings, "limitations": limitations, "coverage": coverage})
@@ -232,7 +232,7 @@ func executionKeyForTest(t *testing.T, tenant *store.Tenant, req Request, cfg Ru
 	if repo == "" {
 		repo = req.RepoID
 	}
-	controls, err := resolveCallControls(req, cfg.Availability.Effort)
+	controls, err := resolveCallControls(req)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -244,7 +244,7 @@ func executionKeyForTest(t *testing.T, tenant *store.Tenant, req Request, cfg Ru
 	if err != nil {
 		t.Fatal(err)
 	}
-	return executionKey(req, "tenant", repo, packet, resolved.Record, cfg.Availability.Model, controls.effective, controls.profile, controls.tags)
+	return executionKey(req, "tenant", repo, packet, resolved.Record, LiveModel, controls.effective, controls.profile, controls.tags)
 }
 
 func TestDuplicateClaimsReportActiveAndDurableWithoutReplay(t *testing.T) {
@@ -293,14 +293,14 @@ func TestDuplicateClaimsReportActiveAndDurableWithoutReplay(t *testing.T) {
 		cfg := availableConfig(srv.URL)
 		key := executionKeyForTest(t, tenant, req, cfg)
 		path := filepath.Join(t.TempDir(), "reservations.json")
-		before, err := NewPersistentReservations(5, 2, path)
+		before, err := NewPersistentReservations(2, path)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := before.begin(key, "original-id", "tenant", reservationAmount(LiveModel)); err != nil {
+		if err := before.begin(key, "original-id", "tenant"); err != nil {
 			t.Fatal(err)
 		}
-		after, err := NewPersistentReservations(5, 2, path)
+		after, err := NewPersistentReservations(2, path)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -398,7 +398,7 @@ func TestLegacyAdapterFindsOldKeyAndAdditionalTagBypassesFallback(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	legacyKey := PreUpgradeExecutionKey(req, "tenant", "repo-sentinel", packet, resolved.Record, cfg.Availability.Model, "high", "historical_trial")
+	legacyKey := PreUpgradeExecutionKey(req, "tenant", "repo-sentinel", packet, resolved.Record, LiveModel, "high", "historical_trial")
 	old := reviewCacheFixture("old-legacy-review", legacyKey, 100)
 	delete(old, "review_id") // Pre-upgrade canonical records lost the reserved top-level id.
 	delete(old, "tags")
@@ -448,12 +448,20 @@ func TestRunStatusFixturesAndPreflightResume(t *testing.T) {
 	t.Run("invalid output", func(t *testing.T) {
 		tenant := reviewTenant(t)
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-			io.WriteString(w, `{"model":"x","content":[{"type":"text","text":"not json"}],"usage":{"input_tokens":1,"output_tokens":1}}`)
+			io.WriteString(w, `{"model":"x","content":[{"type":"text","text":"not json"}],"usage":{"input_tokens":1000,"output_tokens":500}}`)
 		}))
 		defer srv.Close()
 		out, err := Run(context.Background(), tenant, "tenant", reviewRequest(true), availableConfig(srv.URL))
 		if err != nil || out.Status != "invalid_output" {
 			t.Fatalf("%+v %v", out, err)
+		}
+		rec := readReviewRecord(t, tenant)
+		if cost, _ := rec["cost_usd"].(float64); cost <= 0 || rec["cost_known"] != true {
+			t.Fatalf("invalid output cost=%v known=%v", rec["cost_usd"], rec["cost_known"])
+		}
+		attempts := recordAttempts(t, tenant)
+		if len(attempts) != 1 || attempts[0]["cost_known"] != true || attempts[0]["input_tokens"] != float64(1000) || attempts[0]["output_tokens"] != float64(500) {
+			t.Fatalf("invalid output attempts=%v", attempts)
 		}
 	})
 	t.Run("api error", func(t *testing.T) {
@@ -490,29 +498,16 @@ func TestRunStatusFixturesAndPreflightResume(t *testing.T) {
 			t.Fatalf("unavailable=%+v err=%v", out, err)
 		}
 	})
-	t.Run("unavailable settings make zero calls", func(t *testing.T) {
+	t.Run("local mode makes zero calls", func(t *testing.T) {
 		var calls atomic.Int32
 		srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { calls.Add(1) }))
 		defer srv.Close()
-		for _, tc := range []struct {
-			name   string
-			mutate func(*Availability)
-		}{
-			{"local", func(a *Availability) { a.Local = true }},
-			{"model", func(a *Availability) { a.Model = "claude-sonnet-5-5" }},
-			{"effort", func(a *Availability) { a.Effort = "xhigh" }},
-			{"cap", func(a *Availability) { a.USDCap = 0 }},
-			{"repository", func(a *Availability) { a.Repositories = map[string]bool{} }},
-		} {
-			t.Run(tc.name, func(t *testing.T) {
-				tenant := reviewTenant(t)
-				cfg := availableConfig(srv.URL)
-				tc.mutate(&cfg.Availability)
-				out, err := Run(context.Background(), tenant, "tenant", reviewRequest(true), cfg)
-				if err != nil || out.Status != "unavailable" || calls.Load() != 0 {
-					t.Fatalf("%+v err=%v calls=%d", out, err, calls.Load())
-				}
-			})
+		tenant := reviewTenant(t)
+		cfg := availableConfig(srv.URL)
+		cfg.Availability.Local = true
+		out, err := Run(context.Background(), tenant, "tenant", reviewRequest(true), cfg)
+		if err != nil || out.Status != "unavailable" || out.Reason != "authenticated remote mode required" || calls.Load() != 0 {
+			t.Fatalf("%+v err=%v calls=%d", out, err, calls.Load())
 		}
 	})
 	t.Run("criteria refusal code", func(t *testing.T) {
@@ -580,42 +575,6 @@ func TestRunStatusFixturesAndPreflightResume(t *testing.T) {
 		out, err := Run(context.Background(), tenant, "tenant", req, availableConfig(srv.URL))
 		if err != nil || out.Status != "ok" || calls.Load() != 1 {
 			t.Fatalf("legacy=%+v %v calls=%d", out, err, calls.Load())
-		}
-	})
-	t.Run("budget then available", func(t *testing.T) {
-		tenant := reviewTenant(t)
-		var calls atomic.Int32
-		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-			calls.Add(1)
-			io.WriteString(w, providerReply([]any{}, []any{}, []any{}, "complete"))
-		}))
-		defer srv.Close()
-		req := reviewRequest(true)
-		cfg := availableConfig(srv.URL)
-		cfg.Reservations = NewReservations(.001, 2)
-		out, err := Run(context.Background(), tenant, "tenant", req, cfg)
-		if err != nil || out.Status != "skipped_budget" || calls.Load() != 0 {
-			t.Fatalf("budget=%+v %v calls=%d", out, err, calls.Load())
-		}
-		cfg.Reservations = NewReservations(5, 2)
-		out, err = Run(context.Background(), tenant, "tenant", req, cfg)
-		if err != nil || out.Status != "ok" || calls.Load() != 1 {
-			t.Fatalf("available=%+v %v calls=%d", out, err, calls.Load())
-		}
-	})
-	t.Run("timeout remains reserved", func(t *testing.T) {
-		tenant := reviewTenant(t)
-		srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { time.Sleep(60 * time.Millisecond) }))
-		defer srv.Close()
-		cfg := availableConfig(srv.URL)
-		cfg.AttemptTimeout = 5 * time.Millisecond
-		cfg.Reservations = NewReservations(.25, 2)
-		out, err := Run(context.Background(), tenant, "tenant", reviewRequest(true), cfg)
-		if err != nil || out.Status != "timeout" || len(outFindings(out)) != 0 || len(readAttempts(t, tenant)) != 1 {
-			t.Fatalf("timeout=%+v %v", out, err)
-		}
-		if err := cfg.Reservations.begin("after-timeout", "later", "tenant", .04); !errors.Is(err, ErrBudget) {
-			t.Fatalf("timeout reservation released: %v", err)
 		}
 	})
 }
@@ -719,49 +678,45 @@ func TestPRReviewUsesEveryRepoScopedPhaseOutcome(t *testing.T) {
 }
 
 func TestReservationClaimsAreAtomic(t *testing.T) {
-	r := NewReservations(.06, 2)
+	r := NewReservations(1)
 	var allowed atomic.Int32
 	var wg sync.WaitGroup
 	for i := 0; i < 2; i++ {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			if r.begin(fmt.Sprintf("k%d", i), fmt.Sprintf("id%d", i), "tenant", .055) == nil {
+			if r.begin(fmt.Sprintf("k%d", i), fmt.Sprintf("id%d", i), "tenant") == nil {
 				allowed.Add(1)
 			}
 		}(i)
 	}
 	wg.Wait()
 	if allowed.Load() != 1 {
-		t.Fatalf("reserved %d calls over cap", allowed.Load())
+		t.Fatalf("admitted %d concurrent calls over the limit", allowed.Load())
 	}
-	limited := NewReservations(5, 1)
-	if err := limited.begin("first", "one", "tenant", .01); err != nil {
-		t.Fatal(err)
-	}
-	if err := limited.begin("second", "two", "tenant", .01); !errors.Is(err, ErrBudget) {
-		t.Fatalf("in-flight limit did not reject second call: %v", err)
+	if err := r.begin("third", "three", "tenant"); !errors.Is(err, ErrBusy) {
+		t.Fatalf("in-flight limit did not reject third call: %v", err)
 	}
 }
 
-func TestPersistentReservationKeepsUnknownClaimAndSpend(t *testing.T) {
+func TestPersistentReservationKeepsClaim(t *testing.T) {
 	path := t.TempDir() + "/reservations.json"
-	a, err := NewPersistentReservations(.06, 2, path)
+	a, err := NewPersistentReservations(2, path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = a.begin("tenant-key", "review-id", "tenant", .055); err != nil {
+	if err = a.begin("tenant-key", "review-id", "tenant"); err != nil {
 		t.Fatal(err)
 	}
-	b, err := NewPersistentReservations(.06, 2, path)
+	b, err := NewPersistentReservations(2, path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, dup := duplicateReview(b.begin("tenant-key", "second-id", "tenant", .001)); !dup {
+	if _, dup := duplicateReview(b.begin("tenant-key", "second-id", "tenant")); !dup {
 		t.Fatal("started claim did not survive reload")
 	}
-	if err := b.begin("other-key", "third-id", "tenant", .01); !errors.Is(err, ErrBudget) {
-		t.Fatalf("rolling spend not restored: %v", err)
+	if err := b.begin("other-key", "third-id", "tenant"); err != nil {
+		t.Fatalf("durable claim consumed an in-flight slot: %v", err)
 	}
 }
 
@@ -788,6 +743,17 @@ func readReviewRecord(t *testing.T, tenant *store.Tenant) map[string]any {
 		t.Fatal(err)
 	}
 	return rec
+}
+
+func recordAttempts(t *testing.T, tenant *store.Tenant) []map[string]any {
+	t.Helper()
+	rec := readReviewRecord(t, tenant)
+	raw, _ := json.Marshal(rec["attempts"])
+	var attempts []map[string]any
+	if err := json.Unmarshal(raw, &attempts); err != nil {
+		t.Fatalf("attempts=%v err=%v", rec["attempts"], err)
+	}
+	return attempts
 }
 
 func recordTags(t *testing.T, rec map[string]any) []string {
@@ -1125,7 +1091,7 @@ func usageRecord(t *testing.T, tenant *store.Tenant) map[string]any {
 
 func assertContentFreeUsage(t *testing.T, rec map[string]any) {
 	t.Helper()
-	for _, k := range []string{"usage_id", "configured_model", "returned_model", "configured_effort", "requested_effort", "effective_effort", "input_tokens", "output_tokens", "cost_usd", "pricing_table_id", "ts", "tags", "store", "status", "attempts", "reservation_outcome", "reservation_usd"} {
+	for _, k := range []string{"usage_id", "configured_model", "returned_model", "configured_effort", "requested_effort", "effective_effort", "input_tokens", "output_tokens", "cost_usd", "cost_known", "pricing_table_id", "ts", "tags", "store", "status", "attempts"} {
 		if _, ok := rec[k]; !ok {
 			t.Fatalf("usage fact missing %s: %v", k, rec)
 		}
@@ -1182,8 +1148,8 @@ func TestStoreFalseWritesContentFreeUsageFact(t *testing.T) {
 	}
 	rec := usageRecord(t, tenant)
 	assertContentFreeUsage(t, rec)
-	if rec["status"] != "ok" || rec["reservation_outcome"] != "settled" {
-		t.Fatalf("usage status=%v outcome=%v", rec["status"], rec["reservation_outcome"])
+	if rec["status"] != "ok" || rec["cost_known"] != true {
+		t.Fatalf("usage status=%v cost_known=%v", rec["status"], rec["cost_known"])
 	}
 	if got := recordTags(t, rec); strings.Join(got, ",") != "alpha,beta" {
 		t.Fatalf("usage tags=%v", got)
@@ -1236,11 +1202,8 @@ func TestStoreFalseUsageForProviderErrorAndTimeout(t *testing.T) {
 		}
 		rec := usageRecord(t, tenant)
 		assertContentFreeUsage(t, rec)
-		if rec["status"] != "api_error" || rec["reservation_outcome"] != "conservative" {
-			t.Fatalf("usage status=%v outcome=%v", rec["status"], rec["reservation_outcome"])
-		}
-		if charge, _ := rec["reservation_usd"].(float64); charge <= 0 {
-			t.Fatalf("conservative charge=%v", rec["reservation_usd"])
+		if rec["status"] != "api_error" || rec["cost_known"] != false || rec["cost_usd"] != nil {
+			t.Fatalf("usage status=%v cost_known=%v cost=%v", rec["status"], rec["cost_known"], rec["cost_usd"])
 		}
 		if reservationsClaimCount(cfg.Reservations) != 0 {
 			t.Fatal("store=false created a durable claim")
@@ -1258,7 +1221,6 @@ func TestStoreFalseUsageForProviderErrorAndTimeout(t *testing.T) {
 		defer srv.Close()
 		cfg := availableConfig(srv.URL)
 		cfg.AttemptTimeout = 5 * time.Millisecond
-		cfg.Reservations = NewReservations(.25, 2)
 		off := false
 		req := reviewRequest(true)
 		req.Store = &off
@@ -1268,11 +1230,8 @@ func TestStoreFalseUsageForProviderErrorAndTimeout(t *testing.T) {
 		}
 		rec := usageRecord(t, tenant)
 		assertContentFreeUsage(t, rec)
-		if rec["status"] != "timeout" || rec["reservation_outcome"] != "conservative" {
-			t.Fatalf("usage status=%v outcome=%v", rec["status"], rec["reservation_outcome"])
-		}
-		if err := cfg.Reservations.begin("after-timeout", "later", "tenant", .04); !errors.Is(err, ErrBudget) {
-			t.Fatalf("timeout reservation released: %v", err)
+		if rec["status"] != "timeout" || rec["cost_known"] != false || rec["cost_usd"] != nil {
+			t.Fatalf("usage status=%v cost_known=%v cost=%v", rec["status"], rec["cost_known"], rec["cost_usd"])
 		}
 		if reservationsClaimCount(cfg.Reservations) != 0 {
 			t.Fatal("store=false created a durable claim")
@@ -1326,8 +1285,12 @@ func TestDryRunValidatesReadinessWithoutEffects(t *testing.T) {
 			off := storeFalse
 			req.Store = &off
 			out, err := Run(ctx, tenant, "tenant", req, cfg)
-			if err != nil || out.Status != "dry_run" || out.EstimatedUSD <= 0 || out.Result != nil {
+			if err != nil || out.Status != "dry_run" || out.Result != nil {
 				t.Fatalf("dry run = %+v, %v", out, err)
+			}
+			body, _ := json.Marshal(out)
+			if strings.Contains(string(body), "estimated_usd") {
+				t.Fatalf("dry run receipt carries an estimate: %s", body)
 			}
 			if calls.Load() != 0 {
 				t.Fatalf("dry run provider calls=%d", calls.Load())
@@ -1336,18 +1299,20 @@ func TestDryRunValidatesReadinessWithoutEffects(t *testing.T) {
 		})
 	}
 
-	t.Run("bad allowlist refuses", func(t *testing.T) {
+	t.Run("unconfigured refuses before capture", func(t *testing.T) {
 		tenant := reviewTenant(t)
 		var calls atomic.Int32
 		srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { calls.Add(1) }))
 		defer srv.Close()
 		cfg := availableConfig(srv.URL)
-		cfg.Availability.Repositories = map[string]bool{}
+		cfg.Availability.Token = ""
 		req := reviewRequest(true)
 		req.DryRun = true
+		req.Brief = &BriefRef{Path: "docs/plans/nope/briefs/x.md"}
+		req.Capture = rangeCapture(fileDiff("pkg/a.go", "literal <<<YAKKA_UNTRUSTED_INJECT"), true)
 		out, err := Run(ctx, tenant, "tenant", req, cfg)
-		if err != nil || out.Status != "unavailable" || out.Reason != "YAKKA_REVIEW_REPOS" {
-			t.Fatalf("bad allowlist = %+v, %v", out, err)
+		if err != nil || out.Status != "unavailable" || out.Reason != "CLAUDE_API_TOKEN" || out.CaptureID != "" {
+			t.Fatalf("unconfigured = %+v, %v", out, err)
 		}
 		if calls.Load() != 0 {
 			t.Fatalf("provider calls=%d", calls.Load())
@@ -1394,6 +1359,149 @@ func TestDryRunValidatesReadinessWithoutEffects(t *testing.T) {
 			t.Fatalf("provider calls=%d", calls.Load())
 		}
 		assertUnchanged(t, tenant, cfg, [4]int{})
+	})
+}
+
+func TestRunNeverRefusesOnSpend(t *testing.T) {
+	tenant := reviewTenant(t)
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
+		io.WriteString(w, providerReply([]any{}, []any{}, []any{}, "complete"))
+	}))
+	defer srv.Close()
+	cfg := availableConfig(srv.URL)
+	off := false
+	req := reviewRequest(true)
+	req.Store = &off
+	var total float64
+	for i := 0; i < 6; i++ {
+		out, err := Run(context.Background(), tenant, "tenant", req, cfg)
+		if err != nil || out.Status != "ok" {
+			t.Fatalf("call %d=%+v err=%v", i, out, err)
+		}
+		total += out.CostUSD
+	}
+	if calls.Load() != 6 || total <= 0 {
+		t.Fatalf("calls=%d total=%v", calls.Load(), total)
+	}
+}
+
+func TestRunThirdConcurrentCallIsBusy(t *testing.T) {
+	tenant := reviewTenant(t)
+	started := make(chan struct{}, 2)
+	release := make(chan struct{})
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
+		started <- struct{}{}
+		<-release
+		io.WriteString(w, providerReply([]any{}, []any{}, []any{}, "complete"))
+	}))
+	defer srv.Close()
+	cfg := availableConfig(srv.URL)
+	off := false
+	req := reviewRequest(true)
+	req.Store = &off
+	type outcome struct {
+		receipt Receipt
+		err     error
+	}
+	results := make(chan outcome, 2)
+	for i := 0; i < 2; i++ {
+		go func() {
+			r, err := Run(context.Background(), tenant, "tenant", req, cfg)
+			results <- outcome{r, err}
+		}()
+	}
+	for i := 0; i < 2; i++ {
+		select {
+		case <-started:
+		case <-time.After(5 * time.Second):
+			t.Fatal("provider calls did not start")
+		}
+	}
+	busy, err := Run(context.Background(), tenant, "tenant", req, cfg)
+	if err != nil || busy.Status != "skipped_busy" || busy.Reason != "tenant in-flight limit" || calls.Load() != 2 {
+		t.Fatalf("busy=%+v err=%v calls=%d", busy, err, calls.Load())
+	}
+	close(release)
+	for i := 0; i < 2; i++ {
+		got := <-results
+		if got.err != nil || got.receipt.Status != "ok" {
+			t.Fatalf("concurrent result=%+v err=%v", got.receipt, got.err)
+		}
+	}
+}
+
+func TestRunRecordsOnlyActualCost(t *testing.T) {
+	t.Run("api error is unknown", func(t *testing.T) {
+		tenant := reviewTenant(t)
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusTooManyRequests)
+		}))
+		defer srv.Close()
+		out, err := Run(context.Background(), tenant, "tenant", reviewRequest(true), availableConfig(srv.URL))
+		if err != nil || out.Status != "api_error" {
+			t.Fatalf("%+v %v", out, err)
+		}
+		rec := readReviewRecord(t, tenant)
+		if rec["cost_usd"] != nil || rec["cost_known"] != false {
+			t.Fatalf("cost=%v known=%v", rec["cost_usd"], rec["cost_known"])
+		}
+		for _, a := range recordAttempts(t, tenant) {
+			if a["cost_known"] != false {
+				t.Fatalf("attempt=%v", a)
+			}
+			if _, ok := a["cost_usd"]; ok {
+				t.Fatalf("unknown attempt carries cost: %v", a)
+			}
+		}
+	})
+	t.Run("timeout is unknown", func(t *testing.T) {
+		tenant := reviewTenant(t)
+		srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+			time.Sleep(60 * time.Millisecond)
+		}))
+		defer srv.Close()
+		cfg := availableConfig(srv.URL)
+		cfg.AttemptTimeout = 5 * time.Millisecond
+		out, err := Run(context.Background(), tenant, "tenant", reviewRequest(true), cfg)
+		if err != nil || out.Status != "timeout" {
+			t.Fatalf("%+v %v", out, err)
+		}
+		rec := readReviewRecord(t, tenant)
+		if rec["cost_usd"] != nil || rec["cost_known"] != false {
+			t.Fatalf("cost=%v known=%v", rec["cost_usd"], rec["cost_known"])
+		}
+	})
+	t.Run("retry then success costs the success", func(t *testing.T) {
+		tenant := reviewTenant(t)
+		var calls atomic.Int32
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			if calls.Add(1) == 1 {
+				w.WriteHeader(http.StatusInternalServerError)
+				return
+			}
+			io.WriteString(w, providerReply([]any{}, []any{}, []any{}, "complete"))
+		}))
+		defer srv.Close()
+		out, err := Run(context.Background(), tenant, "tenant", reviewRequest(true), availableConfig(srv.URL))
+		if err != nil || out.Status != "ok" || calls.Load() != 2 {
+			t.Fatalf("%+v %v calls=%d", out, err, calls.Load())
+		}
+		rec := readReviewRecord(t, tenant)
+		cost, _ := rec["cost_usd"].(float64)
+		if cost <= 0 || rec["cost_known"] != true {
+			t.Fatalf("cost=%v known=%v", rec["cost_usd"], rec["cost_known"])
+		}
+		attempts := recordAttempts(t, tenant)
+		if len(attempts) != 2 || attempts[0]["cost_known"] != false || attempts[1]["cost_known"] != true {
+			t.Fatalf("attempts=%v", attempts)
+		}
+		if success, _ := attempts[1]["cost_usd"].(float64); success != cost {
+			t.Fatalf("total=%v want success cost=%v", cost, success)
+		}
 	})
 }
 

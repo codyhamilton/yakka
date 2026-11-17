@@ -11,156 +11,181 @@ import (
 	"time"
 )
 
-type persistedReservations struct {
-	Version int                    `json:"version"`
-	Spent   []spendEntry           `json:"spent"`
-	Claims  map[string]claimRecord `json:"claims"`
-	Claimed map[string]string      `json:"claimed"`
+func TestAvailabilityTokenOnly(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		c      Availability
+		effort string
+		want   string
+	}{
+		{"local", Availability{Token: "token", Local: true}, "high", "authenticated remote mode required"},
+		{"local without token", Availability{Local: true}, "high", "authenticated remote mode required"},
+		{"empty token", Availability{}, "high", "CLAUDE_API_TOKEN"},
+		{"bad effort", Availability{Token: "token"}, "min", "effort must be high, xhigh or max"},
+		{"empty effort", Availability{Token: "token"}, "", "effort must be high, xhigh or max"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := CheckAvailability(tc.c, tc.effort)
+			var a *AvailabilityError
+			if !errors.As(err, &a) || a.Setting != tc.want {
+				t.Fatalf("err=%v want %q", err, tc.want)
+			}
+		})
+	}
+	for _, eff := range []string{"high", "xhigh", "max"} {
+		if err := CheckAvailability(Availability{Token: "token"}, eff); err != nil {
+			t.Fatalf("effort %q refused: %v", eff, err)
+		}
+	}
 }
 
-func readReservations(t *testing.T, path string) persistedReservations {
+func readReservations(t *testing.T, path string) map[string]json.RawMessage {
 	t.Helper()
 	b, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var doc persistedReservations
+	var doc map[string]json.RawMessage
 	if err := json.Unmarshal(b, &doc); err != nil {
 		t.Fatal(err)
 	}
 	return doc
 }
 
-func reservationTotal(r *Reservations) float64 {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	var total float64
-	for _, e := range r.spent {
-		total += e.Amount
-	}
-	return total
-}
-
-func TestReservationPersistsTenantAndVersion(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "reservations.json")
-	r, err := NewPersistentReservations(5, 2, path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := r.begin("claim-key", "claim-id", "tenant-a", 0.25); err != nil {
-		t.Fatal(err)
-	}
-	if err := r.beginEphemeral("ephemeral-key", "tenant-a", 0.125); err != nil {
-		t.Fatal(err)
-	}
-	doc := readReservations(t, path)
-	if doc.Version != reservationsVersion {
-		t.Fatalf("document version=%d want %d", doc.Version, reservationsVersion)
-	}
-	if len(doc.Spent) != 2 {
-		t.Fatalf("spent entries=%d want 2", len(doc.Spent))
-	}
-	for _, e := range doc.Spent {
-		if e.Tenant != "tenant-a" || e.Version != reservationsVersion {
-			t.Fatalf("spend entry not attributed/versioned: %+v", e)
+func reservationClaims(t *testing.T, doc map[string]json.RawMessage) map[string]claimRecord {
+	t.Helper()
+	var claims map[string]claimRecord
+	if raw, ok := doc["claims"]; ok {
+		if err := json.Unmarshal(raw, &claims); err != nil {
+			t.Fatal(err)
 		}
 	}
-	claim, ok := doc.Claims["claim-key"]
-	if !ok || claim.ID != "claim-id" || claim.Tenant != "tenant-a" || claim.Version != reservationsVersion {
-		t.Fatalf("claim=%+v ok=%v", claim, ok)
-	}
-
-	reloaded, err := NewPersistentReservations(5, 2, path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if id, state := reloaded.claimState("claim-key"); id != "claim-id" || state != claimDurable {
-		t.Fatalf("reloaded claim=%q state=%v", id, state)
-	}
-	if !reloaded.TenantResidue("tenant-a") {
-		t.Fatal("reloaded reservations lost tenant attribution")
-	}
-	for _, e := range reloaded.spent {
-		if e.Tenant != "tenant-a" || e.Version != reservationsVersion {
-			t.Fatalf("reloaded spend entry not attributed/versioned: %+v", e)
-		}
-	}
+	return claims
 }
 
-func TestReservationLegacyVersionOneStaysUnattributed(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "reservations.json")
+func TestReservationLoadsLegacyAndVersionTwoClaims(t *testing.T) {
 	at := time.Now().UTC().Format(time.RFC3339Nano)
-	legacy := `{"spent":[{"at":"` + at + `","amount":0.5,"key":"legacy-key","attempt":1}],"claimed":{"legacy-key":"legacy-id"}}`
-	if err := os.WriteFile(path, []byte(legacy), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	r, err := NewPersistentReservations(5, 2, path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if id, state := r.claimState("legacy-key"); id != "legacy-id" || state != claimDurable {
-		t.Fatalf("legacy claim=%q state=%v", id, state)
-	}
-	beginErr := r.begin("legacy-key", "new-id", "tenant-a", 0.01)
-	first, dup := duplicateReview(beginErr)
-	if !dup || first != "legacy-id" {
-		t.Fatalf("legacy duplicate=%q dup=%v err=%v", first, dup, beginErr)
-	}
-	if r.TenantResidue("tenant-a") {
-		t.Fatal("legacy record was assigned to a tenant")
-	}
-	if err := r.PurgeTenant("tenant-a"); err != nil {
-		t.Fatal(err)
-	}
-	if err := r.PurgeTenant(""); err != nil {
-		t.Fatal(err)
-	}
-	doc := readReservations(t, path)
-	if _, ok := doc.Claims["legacy-key"]; !ok {
-		if _, legacy := doc.Claimed["legacy-key"]; !legacy {
-			t.Fatal("purge removed a legacy claim")
-		}
-	}
-	if len(doc.Spent) != 1 || doc.Spent[0].Key != "legacy-key" || doc.Spent[0].Tenant != "" {
-		t.Fatalf("purge retargeted or removed legacy spend: %+v", doc.Spent)
-	}
-	reloaded, err := NewPersistentReservations(5, 2, path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, dup := duplicateReview(reloaded.begin("legacy-key", "another-id", "tenant-b", 0.01)); !dup {
-		t.Fatal("legacy duplicate key did not survive purge/reload")
+	for _, tc := range []struct {
+		name, body, key, id string
+	}{
+		{"v1", `{"spent":[{"at":"` + at + `","amount":0.5,"key":"legacy-key","attempt":1}],"claimed":{"legacy-key":"legacy-id"}}`, "legacy-key", "legacy-id"},
+		{"v2", `{"version":2,"spent":[{"at":"` + at + `","amount":0.25,"key":"claim-key","attempt":1,"tenant":"tenant-a","version":2}],"claims":{"claim-key":{"id":"claim-id","tenant":"tenant-a","version":2}}}`, "claim-key", "claim-id"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "reservations.json")
+			if err := os.WriteFile(path, []byte(tc.body), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			r, err := NewPersistentReservations(2, path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if id, state := r.claimState(tc.key); id != tc.id || state != claimDurable {
+				t.Fatalf("loaded claim=%q state=%v want %q", id, state, tc.id)
+			}
+			if err := r.begin("fresh-key", "fresh-id", "tenant-a"); err != nil {
+				t.Fatal(err)
+			}
+			doc := readReservations(t, path)
+			if _, ok := doc["spent"]; ok {
+				t.Fatal("save kept spend entries")
+			}
+			claims := reservationClaims(t, doc)
+			if claims[tc.key].ID != tc.id || claims["fresh-key"].ID != "fresh-id" || claims["fresh-key"].Tenant != "tenant-a" {
+				t.Fatalf("saved claims=%+v", claims)
+			}
+			reloaded, err := NewPersistentReservations(2, path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if id, state := reloaded.claimState(tc.key); id != tc.id || state != claimDurable {
+				t.Fatalf("reloaded claim=%q state=%v", id, state)
+			}
+			if !reloaded.TenantResidue("tenant-a") {
+				t.Fatal("tenant attribution lost")
+			}
+		})
 	}
 }
 
-func TestReservationPurgeTenantTransfersAnonymously(t *testing.T) {
+func TestReservationUnreadableOrCorruptFileStartsEmpty(t *testing.T) {
+	t.Run("corrupt", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "reservations.json")
+		if err := os.WriteFile(path, []byte("{not json"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		r, err := NewPersistentReservations(2, path)
+		if err != nil {
+			t.Fatalf("corrupt file disabled review: %v", err)
+		}
+		if len(r.claimed) != 0 {
+			t.Fatalf("corrupt file produced claims: %+v", r.claimed)
+		}
+		if err := r.begin("key", "id", "tenant"); err != nil {
+			t.Fatalf("start after corrupt file: %v", err)
+		}
+		if _, ok := readReservations(t, path)["spent"]; ok {
+			t.Fatal("rewritten file kept spend entries")
+		}
+	})
+	t.Run("unreadable", func(t *testing.T) {
+		r, err := NewPersistentReservations(2, t.TempDir())
+		if err != nil {
+			t.Fatalf("unreadable path disabled review: %v", err)
+		}
+		if len(r.claimed) != 0 {
+			t.Fatalf("unreadable path produced claims: %+v", r.claimed)
+		}
+	})
+}
+
+func TestReservationBusyLimitAndDuplicate(t *testing.T) {
+	r := NewReservations(2)
+	if err := r.begin("a1", "1", "tenant"); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.begin("a2", "2", "tenant"); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.begin("a3", "3", "tenant"); !errors.Is(err, ErrBusy) {
+		t.Fatalf("third durable call err=%v want ErrBusy", err)
+	}
+	if err := r.beginEphemeral("e3", "tenant"); !errors.Is(err, ErrBusy) {
+		t.Fatalf("third ephemeral call err=%v want ErrBusy", err)
+	}
+	if err := r.begin("a1", "duplicate", "tenant"); !errors.Is(err, ErrDuplicateClaim) {
+		t.Fatalf("duplicate err=%v want ErrDuplicateClaim", err)
+	}
+	if id, dup := duplicateReview(r.begin("a1", "duplicate", "tenant")); !dup || id != "1" {
+		t.Fatalf("duplicate claim=%q dup=%v", id, dup)
+	}
+	if err := r.begin("b1", "4", "other"); err != nil {
+		t.Fatalf("other tenant blocked: %v", err)
+	}
+	r.finishClaim("a1", "tenant")
+	r.finishClaim("a2", "tenant")
+	if err := r.beginEphemeral("e3", "tenant"); err != nil {
+		t.Fatalf("slot not released: %v", err)
+	}
+}
+
+func TestReservationPurgeIsClaimsOnlyAndIdempotent(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "reservations.json")
-	r, err := NewPersistentReservations(5, 2, path)
+	r, err := NewPersistentReservations(2, path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := r.begin("a-key", "a-id", "a", 0.25); err != nil {
+	if err := r.begin("a-key", "a-id", "a"); err != nil {
 		t.Fatal(err)
 	}
-	if err := r.begin("b-key", "b-id", "b", 0.5); err != nil {
-		t.Fatal(err)
-	}
-	if err := r.beginEphemeral("a-ephemeral", "a", 0.125); err != nil {
+	if err := r.begin("b-key", "b-id", "b"); err != nil {
 		t.Fatal(err)
 	}
 	r.finishClaim("a-key", "a")
-	r.finish("a")
 	r.finishClaim("b-key", "b")
-	var transfers []spendEntry
-	for _, e := range r.spent {
-		if e.Tenant == "a" {
-			transfers = append(transfers, e)
-		}
+	if !r.TenantResidue("a") || !r.TenantResidue("b") {
+		t.Fatal("claims not counted as residue")
 	}
-	if len(transfers) != 2 {
-		t.Fatalf("tenant A spend entries=%d want 2", len(transfers))
-	}
-	before := reservationTotal(r)
 	if err := r.PurgeTenant("a"); err != nil {
 		t.Fatal(err)
 	}
@@ -176,108 +201,50 @@ func TestReservationPurgeTenantTransfersAnonymously(t *testing.T) {
 	if id, state := r.claimState("b-key"); id != "b-id" || state != claimDurable {
 		t.Fatalf("tenant B claim changed: %q %v", id, state)
 	}
-	if got := reservationTotal(r); got != before {
-		t.Fatalf("provider-wide total changed: got %v want %v", got, before)
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
 	}
-	assertAnonymousTransfers(t, r, transfers)
-
-	reloaded, err := NewPersistentReservations(5, 2, path)
+	if err := r.PurgeTenant("a"); err != nil {
+		t.Fatal(err)
+	}
+	after, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(before, after) {
+		t.Fatal("second purge rewrote reservations")
+	}
+	reloaded, err := NewPersistentReservations(2, path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if reloaded.TenantResidue("a") || !reloaded.TenantResidue("b") {
 		t.Fatal("reloaded tenant attribution wrong")
 	}
-	if got := reservationTotal(reloaded); got != before {
-		t.Fatalf("reloaded provider-wide total changed: got %v want %v", got, before)
-	}
-	assertAnonymousTransfers(t, reloaded, transfers)
-	doc := readReservations(t, path)
-	for _, e := range doc.Spent {
-		if e.Tenant == "" && e.Key == "" && e.Amount > 0 {
-			raw, err := json.Marshal(e)
-			if err != nil {
-				t.Fatal(err)
-			}
-			var fields map[string]any
-			if err := json.Unmarshal(raw, &fields); err != nil {
-				t.Fatal(err)
-			}
-			if len(fields) != 2 {
-				t.Fatalf("anonymous entry carries extra identity: %s", raw)
-			}
-		}
+	if id, state := reloaded.claimState("b-key"); id != "b-id" || state != claimDurable {
+		t.Fatalf("reloaded tenant B claim=%q state=%v", id, state)
 	}
 }
 
-func assertAnonymousTransfers(t *testing.T, r *Reservations, transfers []spendEntry) {
-	t.Helper()
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	for _, want := range transfers {
-		found := false
-		for _, e := range r.spent {
-			if e.Tenant == "" && e.Key == "" && e.At.Equal(want.At) && e.Amount == want.Amount {
-				found = true
-				break
-			}
-		}
-		if !found {
-			t.Fatalf("no anonymous transfer for %v", want)
-		}
-	}
-}
-
-func TestReservationPurgeIsIdempotent(t *testing.T) {
+func TestReservationPurgeLeavesLegacyClaims(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "reservations.json")
-	r, err := NewPersistentReservations(5, 2, path)
+	legacy := `{"claimed":{"legacy-key":"legacy-id"}}`
+	if err := os.WriteFile(path, []byte(legacy), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	r, err := NewPersistentReservations(2, path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := r.begin("a-key", "a-id", "a", 0.25); err != nil {
+	if err := r.PurgeTenant("tenant-a"); err != nil {
 		t.Fatal(err)
 	}
-	if err := r.begin("b-key", "b-id", "b", 0.5); err != nil {
-		t.Fatal(err)
+	if id, state := r.claimState("legacy-key"); id != "legacy-id" || state != claimDurable {
+		t.Fatalf("legacy claim purged: %q %v", id, state)
 	}
-	if err := r.PurgeTenant("a"); err != nil {
-		t.Fatal(err)
-	}
-	beforeTotal := reservationTotal(r)
-	beforeBytes, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := r.PurgeTenant("a"); err != nil {
-		t.Fatal(err)
-	}
-	afterBytes, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !bytes.Equal(beforeBytes, afterBytes) {
-		t.Fatal("second purge rewrote reservations")
-	}
-	if got := reservationTotal(r); got != beforeTotal {
-		t.Fatalf("second purge changed total: got %v want %v", got, beforeTotal)
-	}
-
-	reloaded, err := NewPersistentReservations(5, 2, path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := reloaded.PurgeTenant("a"); err != nil {
-		t.Fatal(err)
-	}
-	reloadedBytes, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !bytes.Equal(beforeBytes, reloadedBytes) {
-		t.Fatal("purge after reload rewrote reservations")
-	}
-	if got := reservationTotal(reloaded); got != beforeTotal {
-		t.Fatalf("purge after reload changed total: got %v want %v", got, beforeTotal)
+	if r.TenantResidue("tenant-a") {
+		t.Fatal("legacy claim attributed to a tenant")
 	}
 }
 
@@ -310,8 +277,8 @@ func TestReservationWaitTenantQuiescence(t *testing.T) {
 	}
 
 	t.Run("active claim", func(t *testing.T) {
-		r := NewReservations(5, 2)
-		if err := r.begin("key", "id", "tenant-a", 0.01); err != nil {
+		r := NewReservations(2)
+		if err := r.begin("key", "id", "tenant-a"); err != nil {
 			t.Fatal(err)
 		}
 		done, cancel := wait(t, r, "tenant-a")
@@ -322,8 +289,8 @@ func TestReservationWaitTenantQuiescence(t *testing.T) {
 	})
 
 	t.Run("ephemeral", func(t *testing.T) {
-		r := NewReservations(5, 2)
-		if err := r.beginEphemeral("eph", "tenant-a", 0.01); err != nil {
+		r := NewReservations(2)
+		if err := r.beginEphemeral("eph", "tenant-a"); err != nil {
 			t.Fatal(err)
 		}
 		done, cancel := wait(t, r, "tenant-a")
@@ -334,8 +301,8 @@ func TestReservationWaitTenantQuiescence(t *testing.T) {
 	})
 
 	t.Run("cancelled context", func(t *testing.T) {
-		r := NewReservations(5, 2)
-		if err := r.begin("key", "id", "tenant-a", 0.01); err != nil {
+		r := NewReservations(2)
+		if err := r.begin("key", "id", "tenant-a"); err != nil {
 			t.Fatal(err)
 		}
 		done, cancel := wait(t, r, "tenant-a")
@@ -352,7 +319,7 @@ func TestReservationWaitTenantQuiescence(t *testing.T) {
 	})
 
 	t.Run("idle tenant returns immediately", func(t *testing.T) {
-		r := NewReservations(5, 2)
+		r := NewReservations(2)
 		if err := r.WaitTenant(context.Background(), "tenant-a"); err != nil {
 			t.Fatalf("idle WaitTenant=%v", err)
 		}

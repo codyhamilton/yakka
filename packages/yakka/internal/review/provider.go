@@ -37,10 +37,15 @@ const (
 	ProviderInvalid  ProviderStatus = "invalid_output"
 )
 
-// ProviderError never includes the request, credential, or provider response body.
+// ProviderError never includes the request, credential, or provider response
+// body. UsageReported marks a parsed 200 envelope whose content or validation
+// failed after the provider reported token usage.
 type ProviderError struct {
-	Status     ProviderStatus
-	HTTPStatus int
+	Status        ProviderStatus
+	HTTPStatus    int
+	InputTokens   int
+	OutputTokens  int
+	UsageReported bool
 }
 
 func (e *ProviderError) Error() string {
@@ -165,8 +170,14 @@ func (r *Reviewer) Review(ctx context.Context, packet Packet, criteria []Criteri
 		return Result{}, &ProviderError{Status: ProviderAPIError}
 	}
 	var envelope messagesResponse
-	if err := json.Unmarshal(raw, &envelope); err != nil || len(envelope.Content) == 0 {
+	if err := json.Unmarshal(raw, &envelope); err != nil {
 		return Result{}, &ProviderError{Status: ProviderInvalid}
+	}
+	invalid := func() error {
+		return &ProviderError{Status: ProviderInvalid, InputTokens: envelope.Usage.InputTokens, OutputTokens: envelope.Usage.OutputTokens, UsageReported: true}
+	}
+	if len(envelope.Content) != 1 {
+		return Result{}, invalid()
 	}
 	var texts []string
 	for _, block := range envelope.Content {
@@ -175,11 +186,11 @@ func (r *Reviewer) Review(ctx context.Context, packet Packet, criteria []Criteri
 		}
 	}
 	if len(texts) != 1 {
-		return Result{}, &ProviderError{Status: ProviderInvalid}
+		return Result{}, invalid()
 	}
 	result, err := ValidateReply([]byte(texts[0]), packet, criteria)
 	if err != nil {
-		return Result{}, &ProviderError{Status: ProviderInvalid}
+		return Result{}, invalid()
 	}
 	result.Model = envelope.Model
 	result.InputTokens = envelope.Usage.InputTokens
