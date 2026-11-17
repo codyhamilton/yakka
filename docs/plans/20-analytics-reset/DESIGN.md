@@ -639,6 +639,25 @@ Refinement verdict: **Proceed**, five sequential units. Units 7-01 to 7-05 all c
 - Approach: known (SVG with the shared tooltip, legend and registry).
 - Depends on: Phase 7.
 
+#### Units
+
+| Unit | Brief | Depends on | Runs alongside |
+|---|---|---|---|
+| 8-01 Bars and the shared SVG element foundation | [briefs/8-01-bars-svg-foundation.md](briefs/8-01-bars-svg-foundation.md) | Phase 7 | Nothing; establishes the shared categorical element, CSS and test seams the other units compose. |
+| 8-02 Ranges and distributions | [briefs/8-02-ranges.md](briefs/8-02-ranges.md) | 8-01 | 8-03 and 8-04; owns a disjoint element, gallery page, fixture and spec. |
+| 8-03 Matrix heatmap and calendar | [briefs/8-03-matrix.md](briefs/8-03-matrix.md) | 8-01 | 8-02 and 8-04; owns a disjoint element, gallery page, fixture and spec. |
+| 8-04 Timeline and gantt lanes | [briefs/8-04-lanes.md](briefs/8-04-lanes.md) | 8-01 | 8-02 and 8-03; owns a disjoint element, gallery page, fixture and spec. |
+| 8-05 Treemap and gallery acceptance | [briefs/8-05-treemap-acceptance.md](briefs/8-05-treemap-acceptance.md) | 8-01, 8-02, 8-03, 8-04 | Nothing; owns the gallery index and the phase proof. |
+
+**Carried from Phase 7**
+
+- The browser-evidence gate (playwright-core under `NODE_PATH` and the Chromium 1243 cache, with a named skip reason) applies to every Phase 8 browser spec; it is absorbed into their done evidence, not into a unit.
+- The `f` gesture's reconciliation with the Phase 9 tray/inspector belongs to Phase 9; it does not touch Phase 8's SVG elements and is not absorbed.
+- Scatter additive rectangles keeping include keys as the authoritative predicate belongs to Phase 11's tray; it is not absorbed.
+- Legend focus mapping series keys to contract lens names belongs to the Phase 9 and Phase 10 board chips; it is not absorbed.
+
+Refinement verdict: **Proceed**, five units. 8-01 establishes the shared SVG element contract and `<yk-bars>`; 8-02, 8-03 and 8-04 then run in parallel on disjoint elements, gallery pages and specs; 8-05 adds `<yk-treemap>` and the gallery index and proves the phase outcome across all five. The only Phase 7 helper seam is `formatters.js` gaining a `text` kind so a categorical axis formats in the shared table; no existing behaviour changes. Browser evidence needs `playwright-core` under `NODE_PATH=/home/codyh/workspace/yakka/packages/yakka-analytics/node_modules` and the Chromium 1243 cache, both outside this worktree; a spec that cannot reach them skips with a named reason and records a gate. No additional orchestrator decision is required.
+
 ### Phase 9 — Workspace engine, Start and Pulse
 
 - Outcome: Start question paths open their configured destinations or state the missing capability. Pulse renders its complete preset against the fixture; feed/brush/zoom/Follow probe and acknowledgment behave as contracted, including late arrivals. All-history scope and ordinary long finite windows survive deep links/Back. Shared state, chips, tray and typed populations stay visible, with unsupported joins/ignored filters named. The panel chooser is schema-driven, saved boards reopen from their URL, the capability inspector explains provenance, `/ledger` cursor-pages beyond 20,000, and `/ops` shows only authorised status. Loading/abort/empty/error/unsupported and old-server cases are exercised. Later preset destinations are named until delivered; P13 verifies all links.
