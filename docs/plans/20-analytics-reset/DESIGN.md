@@ -618,6 +618,20 @@ Refinement verdict: **Proceed**, eleven sequential units against the amended CON
 - Approach: open (composing uPlot's hooks into the gesture table; 2-D scatter hit-testing).
 - Depends on: Phase 1.
 
+#### Units
+
+| Unit | Brief | Depends on | Runs alongside |
+|---|---|---|---|
+| 7-01 Chart foundations, colour and accessibility | [briefs/7-01-chart-foundations.md](briefs/7-01-chart-foundations.md) | Phase 1 | Nothing; establishes the shared harness, registry, formatters, tooltip, legend, badges and table the later units compose. |
+| 7-02 Time-series uPlot element | [briefs/7-02-time-series-element.md](briefs/7-02-time-series-element.md) | 7-01 | Nothing; composes the foundations into `<yk-chart>`. |
+| 7-03 Gesture and settled-state engine | [briefs/7-03-gestures-settled-state.md](briefs/7-03-gestures-settled-state.md) | 7-02 | Nothing; edits the same `<yk-chart>` composition. |
+| 7-04 Numeric scatter, ECDF and hit-test reference | [briefs/7-04-scatter-ecdf.md](briefs/7-04-scatter-ecdf.md) | 7-03 | Nothing; shares the `<yk-chart>` dispatch and gesture engine. |
+| 7-05 Gallery and browser acceptance | [briefs/7-05-gallery-acceptance.md](briefs/7-05-gallery-acceptance.md) | 7-04 | Nothing; proves the phase outcome over every unit. |
+
+Phase 6 carried items were reviewed. The two gates (the external Pages automation accepting `./web`; real-ledger p95 evidence needing `YAKKA_BENCH_DIR`) belong to Phases 13 and 3. The content-grain listing, the single content-hash population on `/scores` and `/score-series`, the legacy `exclude=band:<check>` limit and the representative family enumeration concern server contracts consumed by Phases 10 to 12. None touches Phase 7's chart kit, none is absorbed, and none blocks these units.
+
+Refinement verdict: **Proceed**, five sequential units. Units 7-01 to 7-05 all compose the same `<yk-chart>` element, its gallery and its accumulating test harness, so no unit may run in parallel; 7-01 establishes the shared contract, 7-02 the element, 7-03 the gestures, 7-04 scatter/ECDF, and 7-05 the acceptance proof. The approach-open choices (uPlot hook composition and 2-D hit-testing, including the declared first-party canvas fallback) stay inside 7-02 to 7-04 and add no dependency. Browser evidence needs `playwright-core` under `NODE_PATH=/home/codyh/workspace/yakka/packages/yakka-analytics/node_modules` and the Chromium 1243 cache, both outside this worktree; a spec that cannot reach them skips with a named reason and records a gate. No further orchestrator decision is required.
+
 ### Phase 8 — Distribution and categorical chart kit
 
 - Outcome: The same gallery proves ranked/stacked/100-percent/lollipop/slope bars, ranges/histograms/strips, heatmap/calendar, lanes and treemap support applicable inspect/selection/legend and accessible-table behavior. Values match fixture data; entity colours/styles remain stable across chart engines and filters. Unknown/mixed/multi/unscored/other styles stay distinct and both themes pass the palette check. Keyboard and touch reach every action without hover dependence.
