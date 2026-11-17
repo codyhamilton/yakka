@@ -18,7 +18,7 @@ its own design. Skill behaviour stays in each `SKILL.md`; the skill-level seams 
         │ ingest
  Remote service         ingest API · ledger · scorer client · review orchestrator (replaceable backends)
         │ reads
- Agent advisory tools   MCP reads + advisory review (server spend and record)
+ Agent advisory tools   MCP reads + advisory review (server-side provider call and record)
  Maintainer skills      .claude/skills/ — jev-variants · held-out set · white paper (not part of the pipeline)
 ```
 
@@ -65,14 +65,16 @@ TypeSafe's choice and is not part of any contract here.
 | Remote → scorer | scrubbed artifact text | remote → Jev |
 
 `review_change` shares its server-owned orchestrator with `POST /v1/reviews`. The server owns the
-definition, prompt/policy, criteria resolution, provider call, validation, spend limits and records.
+definition, prompt/policy, criteria resolution, provider call, validation, actual-cost recording and records.
 Only the shim captures local content, in uncommitted or explicit range mode, using declared typed
 policy values; it scans before egress and the server rescans. Machines need no provider key.
 The tool declares a 150-second timeout and no local actions; local capture is read-only.
-Registration depends on review model configuration and a sufficient MCP timeout ceiling, without
-claiming deployment or live availability. Optional per-call `effort`, `tags` and `store` are
-validated server-side before spend or storage, and `YAKKA_REVIEW_EFFORT` is a high-only default that
-never caps a valid override. A `store=true` duplicate returns the earlier review in full with
+Registration depends on a non-empty `CLAUDE_API_TOKEN` in authenticated remote mode and a sufficient
+MCP timeout ceiling, without claiming deployment or live availability. The model defaults to
+`claude-haiku-5-5` (optional `YAKKA_REVIEW_MODEL` override) and any authenticated tenant's repo is reviewable; `skipped_busy` reports the
+two-call per-tenant in-flight limit. Optional per-call `effort`, `tags` and `store` are validated
+server-side before spend or storage; per-call effort defaults to `high` and is never capped by a
+setting. A `store=true` duplicate returns the earlier review in full with
 `cached`, `original_review_id` and `original_status`; `store=false` calls are never deduplicated and
 can spend independently, so `review_change` does not promise unconditional idempotency. The separate
 read-only `list_reviews` tool serves the same tenant-bound cursor pages as `GET /v1/reviews`.
@@ -99,7 +101,7 @@ are maintainer operations and move to the REST API or CLI.
 | 1 | [Event model and ingest contract](01-event-model-and-ingest.md) | join keys, artifact identity, derived execution view, execution report, envelope types |
 | 2 | [Edge capture](02-edge-capture.md) | spool, drain daemon, client config, MCP shim plumbing, per-harness install and trust |
 | 3 | [Remote service](03-remote-service.md) | runtime (Go `yakka` binary), API versioning, auth and tenancy, precheck, storage, screening and scoring, local drain hosting |
-| 4 | [Agent advisory surface](04-advisory-surface.md) | MCP reads, advisory review's server spend-and-record boundary, hook feedback, behaviour when the remote is unreachable |
+| 4 | [Agent advisory surface](04-advisory-surface.md) | MCP reads, advisory review's server-side provider call-and-record boundary, hook feedback, behaviour when the remote is unreachable |
 | 5 | [Distribution](05-distribution.md) | plugin layout, per-harness packaging, the pinned Codex copy |
 | 6 | Lab and analysis | held-out set, white paper, check-to-cost revisit |
 | 7 | [Analytics site](07-analytics-site.md) | person-facing `/v1/analytics` reads, browser CORS, the static analytics workspace, local and Pages hosting; [Plan20](../plans/20-analytics-reset/DESIGN.md) records its implementation phases |

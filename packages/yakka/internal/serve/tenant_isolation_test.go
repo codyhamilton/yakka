@@ -67,8 +67,6 @@ func newIsolationFixture(t *testing.T) *isolationFixture {
 		GitHubOAuthClientID:     "cid",
 		GitHubOAuthClientSecret: "csec",
 		ReviewToken:             "fixture-only",
-		ReviewModel:             "claude-haiku-5-5",
-		ReviewUSDCap:            2,
 	}, Options{DisableWorker: true, GitHubHTTPBase: gh.URL, ReviewEndpoint: fake.URL, PollInterval: time.Hour})
 	t.Cleanup(func() { _ = s.Close() })
 	h := s.Handler()
@@ -78,8 +76,6 @@ func newIsolationFixture(t *testing.T) *isolationFixture {
 	synthTenant := remoteCreateTenant(t, h, origin, sess, "shadow-trial")
 	_, realKey := remoteIssueToken(t, h, origin, sess, realTenant, TokenScopeReadWrite, "1d")
 	_, synthKey := remoteIssueToken(t, h, origin, sess, synthTenant, TokenScopeReadWrite, "1d")
-	// The YAKKA_REVIEW_REPOS-equivalent allowlist selects both tenants explicitly.
-	s.cfg.ReviewRepositories = map[string]bool{realTenant + "/repo-a": true, synthTenant + "/repo-a": true}
 	return &isolationFixture{t: t, s: s, h: h, origin: origin, sess: sess,
 		realTenant: realTenant, synthTenant: synthTenant, realKey: realKey, synthKey: synthKey}
 }
@@ -287,15 +283,6 @@ func TestSyntheticTenantIsolationUnpersistedActivity(t *testing.T) {
 		t.Fatalf("real-work spend leaked: %v err=%v", spend, err)
 	}
 
-	total, attributed := reservationSpent(t, f.s)
-	if total <= 0 {
-		t.Fatalf("provider-wide exposure not recorded: %v", total)
-	}
-	for _, tenant := range attributed {
-		if tenant == f.realTenant {
-			t.Fatalf("synthetic spend attributed to real work: %v", attributed)
-		}
-	}
 	if body := f.get("/v1/reviews?repo_id=repo-a&detail=full", f.realKey); strings.Contains(body, usage[0].UsageID) {
 		t.Fatalf("real-work response exposed synthetic identity: %s", body)
 	}

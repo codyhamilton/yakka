@@ -16,23 +16,34 @@ User request, verbatim:
 >
 > Land as its own PR into master, marked ready for review.
 
+## Owner amendment (18 Nov 2026, 8:17 AM AEST)
+
+Cody, after the Phase 5 probe found `review_change` unregistered on the deployed server (master still required `YAKKA_REVIEW_MODEL` at registration):
+
+- Change the design and the code so `review_change` does **not** depend on `YAKKA_REVIEW_MODEL`.
+- Setting the model by env stays **optional**. When it is unset, use a sensible default: `review.LiveModel` (`claude-haiku-5-5`), which is the model the existing review/Claude path already defaults to and the model this design recommended as a code constant.
+- The tool must register whenever the Claude API token is present (existing contract: also authenticated remote mode and an MCP call ceiling of at least 150 seconds). Local mode is unchanged: the tool is not registered and calls return `authenticated remote mode required`.
+- Deploying happens by merging this plan to master. The paid trial stays blocked until Cody provisions the dedicated trial tenant and sends its id; do not run the paid trial in this amendment.
+
+This supersedes the earlier "the model is a code constant / `YAKKA_REVIEW_MODEL` is not read" contract. `YAKKA_REVIEW_EFFORT`, `YAKKA_REVIEW_USD_CAP` and `YAKKA_REVIEW_REPOS` stay unread.
+
 ## Problem
 
 Server-side review is gated by five settings. Four cannot usefully vary: the model must equal `claude-haiku-5-5`, the effort setting must be unset or `high`, the repo allowlist must name each reviewed repo, and the USD cap must be a positive number. Production holds `CLAUDE_API_TOKEN` but none of the four, so review reports `unavailable` there. The Yakka-side spend gate (rolling 24-hour reservation ledger) duplicates the limit the Anthropic account already enforces. The same gate shapes the trial tooling: `tools/shadow-review-trial` requires a spend-approval record and a `--cap-usd`, and its manifest builder reads only the yakka repo's layout, so the trial Plan 23 promised (50 cases per effort) has never run and one eligible case existed in the shallow history it saw.
 
 ## Solution Shape
 
-After this change a deployed remote-mode server with `CLAUDE_API_TOKEN` set offers review to every authenticated tenant, for any repo, with the model fixed in code and effort chosen per call (default `high`). Yakka still records the actual cost of every review attempt but never refuses or limits on spend. The trial tooling loses its spend approval and cap gates, learns to build a manifest from codyhamilton/garcia-music's workflow history (at least 300 eligible cases, each a real phase-scale diff with its recorded review outcomes and later fixes), and produces a defined comparison-and-validation report. The trial then runs once against the real server.
+After this change a deployed remote-mode server with `CLAUDE_API_TOKEN` set offers review to every authenticated tenant, for any repo, with the model defaulting to `review.LiveModel` (`claude-haiku-5-5`) and optionally overridden by `YAKKA_REVIEW_MODEL`, and with effort chosen per call (default `high`). Yakka still records the actual cost of every review attempt but never refuses or limits on spend. The trial tooling loses its spend approval and cap gates, learns to build a manifest from codyhamilton/garcia-music's workflow history (at least 300 eligible cases, each a real phase-scale diff with its recorded review outcomes and later fixes), and produces a defined comparison-and-validation report. The trial then runs once against the real server.
 
 ### Domain: Review availability and call contract (server)
 
 - Owns: whether review runs, the model, the effort default and validation, tool registration, and the receipt/status vocabulary.
 - Contract:
-  - **Availability** is exactly: authenticated remote mode (not `Config.Local()`) and a non-empty `CLAUDE_API_TOKEN`. `CheckAvailability` returns `authenticated remote mode required`, then `CLAUDE_API_TOKEN`, then the effort error for a bad per-call effort; it has no configuration-dependent refusal, and the runtime priced-model and reservation-state refusals are deleted (a store test asserts the constant is priced). The only other refusals are per-request or operational, not configuration: capture, disclosure and criteria refusals, the tenant in-flight limit, and `review claim state unavailable` when a durable claim cannot be written to disk. An unreadable `review-reservations.json` starts with empty claims instead of disabling review. No other environment variable influences review. In dry-run the availability check runs before capture and criteria resolution, so an unconfigured server answers `unavailable` whatever the capture; dry-run receipts carry no `estimated_usd`. `YAKKA_REVIEW_MODEL`, `YAKKA_REVIEW_EFFORT`, `YAKKA_REVIEW_USD_CAP` and `YAKKA_REVIEW_REPOS` are not read: a set value is ignored and an invalid `YAKKA_REVIEW_USD_CAP` no longer fails startup.
-  - **Model** is `review.LiveModel` (`claude-haiku-5-5`), the only source. A store test, not a runtime check, asserts it is in the pricing table.
+  - **Availability** is exactly: authenticated remote mode (not `Config.Local()`) and a non-empty `CLAUDE_API_TOKEN`. `CheckAvailability` returns `authenticated remote mode required`, then `CLAUDE_API_TOKEN`, then the effort error for a bad per-call effort; it has no configuration-dependent refusal, and the runtime priced-model and reservation-state refusals are deleted (a store test asserts the constant is priced). The only other refusals are per-request or operational, not configuration: capture, disclosure and criteria refusals, the tenant in-flight limit, and `review claim state unavailable` when a durable claim cannot be written to disk. An unreadable `review-reservations.json` starts with empty claims instead of disabling review. In dry-run the availability check runs before capture and criteria resolution, so an unconfigured server answers `unavailable` whatever the capture; dry-run receipts carry no `estimated_usd`. `YAKKA_REVIEW_EFFORT`, `YAKKA_REVIEW_USD_CAP` and `YAKKA_REVIEW_REPOS` are not read: a set value is ignored and an invalid `YAKKA_REVIEW_USD_CAP` no longer fails startup. `YAKKA_REVIEW_MODEL` is optional (see Model).
+  - **Model** defaults to `review.LiveModel` (`claude-haiku-5-5`), the existing review/Claude default. `YAKKA_REVIEW_MODEL`, if set to a non-empty trimmed value, overrides that default; if unset or blank, the default is used. Registration does not depend on the env being set. A store test, not a runtime check, asserts the default is in the pricing table. An override that is not in the pricing table still runs; cost may be recorded as unknown.
   - **Effort** is the optional per-call `effort` (`high`, `xhigh`, `max`), default `high`, through the same REST and MCP paths as today; invalid values are refused before any effect. The `ReviewEffort` config disappears; the record and usage field `configured_effort` stays for compatibility and always carries the default constant `high`.
   - **Repo scope**: any `repo` on an authenticated tenant is reviewable; tenant isolation is unchanged.
-  - **MCP registration**: `review_change` is registered when `CLAUDE_API_TOKEN` is non-empty, the server is not local, and the MCP call ceiling is at least 150 seconds. `list_reviews` is unchanged. `tools/list` for a read_write caller is the non-spending observable availability signal; a dry-run review POST is the REST one.
+  - **MCP registration**: `review_change` is registered when `CLAUDE_API_TOKEN` is non-empty, the server is not local, and the MCP call ceiling is at least 150 seconds. It does not depend on `YAKKA_REVIEW_MODEL`. `list_reviews` is unchanged. `tools/list` for a read_write caller is the non-spending observable availability signal; a dry-run review POST is the REST one.
   - **No spend gating**: the rolling-spend ledger, `YAKKA_REVIEW_USD_CAP`, worst-case reservation estimates, `reserveRetry` and the retry-over-cap refusal are removed. The `skipped_budget` status is never emitted again but remains valid when reading or ingesting historical rows.
   - **Kept, because it is not spend**: durable duplicate claims and cached-duplicate returns; the per-tenant in-flight limit (two), now reported as `skipped_busy` with reason `tenant in-flight limit`; tenant-attributed claims and in-flight tracking used by synthetic-tenant reset/delete. Tenant residue becomes claims-only and the spend-anonymising branch of `PurgeTenant` is deleted.
   - **Actual cost** per attempt and per review is recorded as today from provider usage and the embedded pricing table (`cost_usd`, tokens, tier, `pricing_table_id`), including failed attempts that report usage. A failed attempt with no reported usage records `cost_usd: null` with `cost_known: false` (ingest accepts null only with that flag; sums ignore it; the trial report counts it as an unknown entry), never a worst-case estimate; `reservation_outcome` and `reservation_usd` are no longer written and remain accepted when ingesting older rows.
@@ -66,7 +77,7 @@ After this change a deployed remote-mode server with `CLAUDE_API_TOKEN` set offe
 ### Domain: Stable and operator documentation
 
 - Owns: the statements about availability, configuration and gates in `docs/design/{01-event-model-and-ingest,03-remote-service,04-advisory-surface,08-server-mcp-contract,system-architecture}.md`, `docs/ARCHITECTURE.md`, `docs/OVERVIEW.md`, `fly.toml`'s header comment, `tools/shadow-review-trial/README.md` and `tools/README.md`, and the Plan 23 record.
-- Contract: each states token-only availability, the code-constant model, per-call effort and no Yakka spend limit (the "spend limits" phrase in the server-ownership sentences of `04`, `08`, `system-architecture`, `ARCHITECTURE` and `OVERVIEW` is removed, and `01`'s `review_usage` row drops `reservation_outcome`/`reservation_usd` from what new rows carry); the agent skills' "spend and record" wording stays true and is unchanged; `docs/design/03-remote-service.md` lists `CLAUDE_API_TOKEN` as the sole review setting and `fly.toml` gains a header comment (it has none today) that it is a `fly secrets` value and the only review setting; `CHANGELOG.md` records the removal, `skipped_busy` and the registration condition; Plan 23's record gains a short pointer to this plan beside the sections it supersedes without rewriting history. After this plan no file outside `docs/plans/` mentions any of the four variable names, and `docs/plans/` mentions them only in records of what was decided then.
+- Contract: each states token-only availability, the default model `claude-haiku-5-5` with optional `YAKKA_REVIEW_MODEL` override, per-call effort and no Yakka spend limit (the "spend limits" phrase in the server-ownership sentences of `04`, `08`, `system-architecture`, `ARCHITECTURE` and `OVERVIEW` is removed, and `01`'s `review_usage` row drops `reservation_outcome`/`reservation_usd` from what new rows carry); the agent skills' "spend and record" wording stays true and is unchanged; `docs/design/03-remote-service.md` lists `CLAUDE_API_TOKEN` as the setting that enables review and documents optional `YAKKA_REVIEW_MODEL`; `fly.toml` comments that the token is a `fly secrets` value that enables review and that the model env is optional; `CHANGELOG.md` records the removal of the required-model gate, `skipped_busy` and the registration condition; Plan 23's record gains a short pointer to this plan beside the sections it supersedes without rewriting history. After this plan, `YAKKA_REVIEW_EFFORT`, `YAKKA_REVIEW_USD_CAP` and `YAKKA_REVIEW_REPOS` are mentioned outside `docs/plans/` only if needed to say they are unread; `YAKKA_REVIEW_MODEL` may appear as the optional override.
 - Non-goals: rewriting historical plan records.
 
 ## Architectural Implications
@@ -80,7 +91,7 @@ After this change a deployed remote-mode server with `CLAUDE_API_TOKEN` set offe
 
 ## Decisions
 
-None beyond the owner decisions in Intent; the remaining questions are ledgered below.
+None beyond the owner decisions in Intent and the 18 Nov 8:17 AM AEST amendment (optional `YAKKA_REVIEW_MODEL`, default `review.LiveModel` = `claude-haiku-5-5`, registration does not depend on the model env); the remaining questions are ledgered below.
 
 ## Assumption Ledger
 
@@ -222,6 +233,17 @@ None blocking. Whether the unit and PR tiers will be needed is answered by Phase
 - Surfaces: `packages/yakka/internal/serve/{serve.go,mcp_review.go,reviews_test.go,tenant_isolation_test.go,mcp_review_test.go}`; `packages/yakka/internal/review/{availability.go,orchestrator.go,availability_test.go,orchestrator_test.go}`; `packages/yakka/internal/store/{pricing.go,pricing_test.go,review_usage.go}`; `packages/yakka/internal/ingest/{ingest.go,ingest_test.go}` (status vocabulary, nullable cost); `packages/yakka/internal/serve/lifecycle_*_test.go` (residue and purge); `CHANGELOG.md`; `docs/design/{01,03,04,08}*.md`, `docs/design/system-architecture.md`, `docs/ARCHITECTURE.md`, `docs/OVERVIEW.md`, `fly.toml`, `tools/README.md`, `docs/plans/23-llm-review-shadow.md` (pointer).
 - Approach: known
 - Depends on: nothing
+- Units:
+
+| Unit | Brief | Depends on | Runs alongside |
+|---|---|---|---|
+| 1 — Token-only availability, durable claims and orchestration | `briefs/phase1-01-review-core.md` | nothing | 3, 5 |
+| 2 — Priced live model test and reservation-cost removal | `briefs/phase1-02-store-pricing.md` | 1 | 4 |
+| 3 — Ingest status vocabulary and nullable cost | `briefs/phase1-03-ingest-vocabulary.md` | nothing | 1, 5 |
+| 4 — Server wiring and claims-only lifecycle residue | `briefs/phase1-04-serve-wiring.md` | 1 | 2 |
+| 5 — Stable docs, changelog and Plan 23 pointer | `briefs/phase1-05-stable-docs.md` | nothing | 1, 3 |
+
+- Amendment (18 Nov 8:17 AM AEST): the Phase 1 outcome's "four removed variables are ignored" and "grep finds no `YAKKA_REVIEW_MODEL`" clauses are superseded for the model env only. `review_change` must register in authenticated remote mode whenever `CLAUDE_API_TOKEN` is set, whether or not `YAKKA_REVIEW_MODEL` is set; unset uses `review.LiveModel` (`claude-haiku-5-5`); a set value is the model used for the call. The other three variables stay unread.
 
 ### Phase 2 — Trial tooling without spend gates
 
@@ -229,13 +251,31 @@ None blocking. Whether the unit and PR tiers will be needed is answered by Phase
 - Surfaces: `tools/shadow-review-trial/{approval.py,cli.py,runner.py,report.py,test_approval.py,test_runner.py,test_phase7.py,test_report.py,test_report_export.py,README.md}`.
 - Approach: known
 - Depends on: Phase 1
+- Units:
+
+| Unit | Brief | Depends on | Runs alongside |
+|---|---|---|---|
+| 1 — Run path without spend gates | `briefs/phase2-01-run-path.md` | nothing | nothing (2 and 3 need it) |
+| 2 — Report actual cost only | `briefs/phase2-02-report-cost.md` | 1 | 3 |
+| 3 — Trial README without the spend gate | `briefs/phase2-03-readme.md` | 1 | 2 |
 
 ### Phase 3 — garcia-music manifest of at least 300 eligible cases
 
 - Outcome: `cli.py manifest --repo <full clone of codyhamilton/garcia-music> --expected-repository codyhamilton/garcia-music --history-profile garcia-music-workflow --seed <n> --output <local path>` verifies a non-shallow, object-complete clone and writes a frozen, hashed manifest whose `cases` number at least 300 (at most 360; below 300 the phase is not closed), every case carrying `tier`, `base_sha`, `head_sha`, a non-empty capture, criteria from `DESIGN.md` at `base_sha`, at least one cited recorded review outcome, a `later_fixes` list (possibly empty) with `censored` set where the window is open, and no commit in two cases; it records per-tier eligible counts and an exclusion count for every ineligible candidate reason; a fixture suite built from synthetic repos covers each tier, censoring, base-criteria leak avoidance, and a shortfall under 300 reported rather than padded; running against the real clone reports the actual counts. Nothing from the clone is committed.
-- Surfaces: `tools/shadow-review-trial/{manifest.py,cli.py,test_manifest.py}`, a new history-profile module and fixtures in the same folder, the capture import path (Plan 27 location), `.gitignore` for the local trial data directory.
+- Surfaces: `tools/shadow-review-trial/{manifest.py,cli.py,test_manifest.py,test_phase7.py}` (the last for the fixture update the new eligibility requires), a new history-profile module, extractor and fixture modules in the same folder, the capture import path (Plan 27 location), `.gitignore` for the local trial data directory.
 - Approach: open — extracting findings, verdicts, phase boundaries and later fixes from garcia-music's heterogeneous markdown and commit conventions has no settled method. Yardsticks are the real count and a hand-checked sample of 30 cases whose outcome citations and fix attributions must all resolve to the cited blobs/commits. Bound: two candidate extractors are built and compared; if neither reaches 300 after the tier fallback the phase stops and reports.
+- Declared approach (invoker, recorded at refinement): build and compare two candidate extractors; freeze at most 360 eligible cases with a floor of 300; never pad. If neither candidate reaches 300 after the phase → unit → PR tier fallback, the phase stops and reports the per-tier counts and blockers; it does not invent or pad cases.
 - Depends on: nothing (sequenced after Phase 2 only because both edit `cli.py`; it is independent of Phase 1)
+- Units:
+
+| Unit | Brief | Depends on | Runs alongside |
+|---|---|---|---|
+| 1 — Manifest contract, history profile and candidate accounting | `briefs/phase3-01-manifest-contract.md` | nothing | nothing |
+| 2 — Candidate extractor A (trailer- and commit-driven) | `briefs/phase3-02-extractor-a.md` | 1 | 3 |
+| 3 — Candidate extractor B (document- and report-driven) | `briefs/phase3-03-extractor-b.md` | 1 | 2 |
+| 4 — Compare candidates, integrate and gate eligibility | `briefs/phase3-04-compare-integrate.md` | 1, 2, 3 | nothing |
+| 5 — Real-clone freeze at the 300 floor | `briefs/phase3-05-real-freeze.md` | 4 | nothing |
+| 6 — Independent manifest verification and 30-case hand-check | `briefs/phase3-06-verify-manifest.md` | 5 | nothing |
 
 ### Phase 4 — Comparison and validation report
 
@@ -243,13 +283,28 @@ None blocking. Whether the unit and PR tiers will be needed is answered by Phase
 - Surfaces: `tools/shadow-review-trial/{report.py,cli.py,test_report.py,test_report_export.py}`, new matcher and evidence-check modules with tests, README report section.
 - Approach: known
 - Depends on: Phases 2 and 3
+- Units:
+
+| Unit | Brief | Depends on | Runs alongside |
+|---|---|---|---|
+| 1 — Deterministic matcher, null, kappa and bootstrap | `briefs/phase4-01-matching.md` | nothing | 3, 4 |
+| 2 — Request-level leak check | `briefs/phase4-02-leak-check.md` | 1 | 3, 4 |
+| 3 — Metric-only evidence check | `briefs/phase4-03-evidence-check.md` | nothing | 1, 2, 4 |
+| 4 — Manifest ingestion and population | `briefs/phase4-04-manifest-population.md` | nothing | 1, 2, 3 |
+| 5 — Comparisons (a)–(e) and matching/adjudication controls | `briefs/phase4-05-comparisons.md` | 1, 2, 4 | nothing (owns `report.py`) |
+| 6 — Paired deltas, cost/latency, reproducibility and reconciliation | `briefs/phase4-06-deltas-cost-validation.md` | 1, 4, 5 | nothing (owns `report.py`) |
+| 7 — Report output surface, CLI and README | `briefs/phase4-07-output-surface.md` | 3, 4, 5, 6 | nothing |
+
+Wave 1: 1, 3, 4. Wave 2: 2. Wave 3: 5. Wave 4: 6. Wave 5: 7.
+
+Carried placement: the foreign-plan capture item (54 real captures) is resolved by unit 2's scoped request check — the case's own plan documents and every recorded outcome excerpt fail; other plans' `docs/plans/` files are counted as `foreign_plan_document_captures`, surfaced in unit 5's validation section and documented in unit 7's README. The `tiers`/`base_blob`/`outcomes`/`later_fixes`/`target`/`floor` ingestion is unit 4. The cosmetic `eligible` label on `cli.py manifest` is unit 7. `history_extract_b.py` stays committed as comparison provenance; whether to drop it is a close-out decision, not Phase 4 work.
 
 ### Phase 5 — Real-server trial on garcia-music history
 
 - Outcome: against the deployed Yakka server, `tools/list` for the trial tenant's key includes `review_change` and a dry-run review POST is not `unavailable` (the probe; if it fails the phase stops and reports the blocker); the real manifest from Phase 3 runs to completion at all three efforts on the dedicated tenant, and the Phase 4 report states, per effort, the completed valid case count against the 300 floor with every shortfall and failure reason; its aggregate JSON and summary are committed under `docs/lab/RESEARCH/<date>-shadow-review-trial/` with run identity, hashes, population, all comparison metrics with nulls, validation results and actual cost, and contain no garcia-music diff, finding text, path list or credential; the manifest, ledger and export remain local and gitignored.
 - Surfaces: `docs/lab/RESEARCH/<date>-shadow-review-trial/` (new), `docs/lab/RESEARCH/INDEX.md`, local-only trial data.
 - Approach: known
-- Depends on: Phases 1–4, and Phase 1 deployed to the Yakka server. This design PR carries only the design; each phase is built afterwards by `execute`, and Phase 5's evidence lands with a recorded deploy, not in this PR.
+- Depends on: Phases 1–4, and Phase 1 (including the optional-model amendment) deployed to the Yakka server by merging this plan's PR to master. Phase 5's paid trial then waits on Cody provisioning the dedicated trial tenant and sending its id; the non-spending `tools/list` probe can run after the merge-deploy without that tenant. Do not run the paid trial until the tenant id is provided.
 
 ## Provenance Notes
 

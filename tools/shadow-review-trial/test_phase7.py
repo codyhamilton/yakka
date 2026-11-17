@@ -16,7 +16,6 @@ import urllib.parse
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 TOOL = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(TOOL))
-import approval
 import cli
 import report
 import runner
@@ -32,7 +31,9 @@ class RehearsalHandler(http.server.BaseHTTPRequestHandler):
     model_calls = 0
     tenant = "fixture-tenant"
     case_by_hash = {}
+    cases = {}
     page_size = 3
+    unavailable = False
 
     def log_message(self, *_args):
         pass
@@ -57,19 +58,43 @@ class RehearsalHandler(http.server.BaseHTTPRequestHandler):
         manifest_hash = next(tag[len("manifest:"):] for tag in tags if tag.startswith("manifest:"))
         case_id = type(self).case_by_hash[case_hash]
         if payload["dry_run"]:
-            self._send(200, {"status": "dry_run", "estimated_usd": 0.01})
+            if type(self).unavailable:
+                self._send(200, {"status": "unavailable", "reason": "fixture unavailable"})
+            else:
+                self._send(200, {"status": "dry_run"})
             return
         type(self).model_calls += 1
         rid = f"review-{case_id}-{effort}"
+        case = type(self).cases.get(case_id, {})
+        targets = [outcome for outcome in case.get("outcomes") or []
+                   if isinstance(outcome, dict) and outcome.get("kind") == "review_finding"
+                   and isinstance(outcome.get("path"), str)]
+        if targets:
+            target = targets[0]
+            severity = str(target.get("severity") or "medium").lower()
+            if severity not in ("blocker", "high", "medium", "low"):
+                severity = "medium"
+            finding = {"id": f"{case_id}-{effort}-f1", "severity": severity,
+                       "path": target["path"],
+                       "line_start": int(target.get("line_start") or 1),
+                       "line_end": int(target.get("line_end") or target.get("line_start") or 1),
+                       "title": f"fixture finding {case_id} {effort}",
+                       "evidence": target.get("excerpt") or "fixture evidence"}
+        else:
+            finding = {"id": f"{case_id}-{effort}-f1", "severity": "medium",
+                       "path": "src/fixture.py", "line_start": 1, "line_end": 1,
+                       "title": f"fixture finding {case_id} {effort}", "evidence": "fixture evidence"}
         record = {"id": rid, "case_id": case_id, "effective_effort": effort,
                   "profile": "historical_trial", "manifest_hash": manifest_hash, "tags": tags,
                   "configured_model": report.REVIEWER_MODEL, "returned_model": report.REVIEWER_MODEL,
                   "model_mismatch": False, "status": "ok", "build_models": payload["build_models"],
                   "attempts": [{"status": "ok", "latency_ms": 4, "cost_usd": 0.01,
                                 "input_tokens": 12, "output_tokens": 3}],
-                  "payload": {"findings": [], "coverage": "complete"}}
+                  "payload": {"findings": [finding], "coverage": "complete"}}
         type(self).records.append(record)
-        self._send(200, {"id": rid, "status": "ok"})
+        self._send(200, {"id": rid, "status": "ok", "cost_usd": 0.01,
+                         "attempts": [{"status": "ok", "latency_ms": 4, "cost_usd": 0.01,
+                                       "input_tokens": 12, "output_tokens": 3}]})
 
     def do_GET(self):
         if self.path.split("?", 1)[0] == "/v1/whoami":
@@ -102,7 +127,7 @@ class Phase7Tests(unittest.TestCase):
             pass
 
     def test_smoke_only_prints_fixture_receipt_fields_and_read_scope_refusal(self):
-        self.assertFalse(hasattr(cli._parser().parse_args(["smoke"]), "approval"))
+        self.assertFalse(hasattr(cli._parser().parse_args(["smoke"]), "appro" + "val"))
         output = io.StringIO()
         with contextlib.redirect_stdout(output):
             self.assertEqual(cli.main(["smoke"]), 0)
@@ -158,12 +183,15 @@ class Phase7Tests(unittest.TestCase):
         plan.mkdir(parents=True)
         (plan / "DESIGN.md").write_text("# Fixture criteria\nReview the changed value.\n")
         (plan / "IMPLEMENTATION.md").write_text("# Verification\n")
-        (plan / "REVIEW.md").write_text("# Historical comparison\n")
+        (plan / "REVIEW.md").write_text("# Historical comparison\n\n## Findings\n\n- **Medium:** base finding.\n\nVerdict: **pass**\n")
         git(repo, "add", ".")
         git(repo, "commit", "-qm", "base")
         for number in range(1, 4):
             (repo / "code.py").write_text(f"value = {number}\n")
-            git(repo, "add", "code.py")
+            (plan / "REVIEW.md").write_text(
+                "# Historical comparison\n\n## Findings\n\n"
+                f"- **Medium:** phase {number} finding.\n\nVerdict: **pass**\n")
+            git(repo, "add", "code.py", "docs/plans/demo/REVIEW.md")
             git(repo, "commit", "-qm", f"fixture phase {number}\n\nYakka-Phase: demo:{number}")
         remote = self.root / "remote.git"
         git(self.root, "init", "--bare", "-q", str(remote))
@@ -194,6 +222,7 @@ class Phase7Tests(unittest.TestCase):
         self.assertEqual(len(frozen["cases"]), 3)
         RehearsalHandler.case_by_hash = {
             hashlib.sha256(case["case_id"].encode()).hexdigest(): case["case_id"] for case in frozen["cases"]}
+        RehearsalHandler.cases = {case["case_id"]: case for case in frozen["cases"]}
         manifest_bytes = manifest_path.read_bytes()
         manifest_hash = frozen["manifest_sha256"]
         self.assertEqual(hashlib.sha256(
@@ -203,7 +232,7 @@ class Phase7Tests(unittest.TestCase):
         ledger_path = self.root / "run-ledger.json"
         endpoint = f"http://127.0.0.1:{server.server_port}"
         run_args = ["run", "--manifest", str(manifest_path), "--ledger", str(ledger_path),
-                    "--base-url", endpoint, "--auth-token", "fixture-auth", "--cap-usd", "1",
+                    "--base-url", endpoint, "--auth-token", "fixture-auth",
                     "--reviewer-model", report.REVIEWER_MODEL, "--run-id", "rehearsal-1",
                     "--tenant-id", RehearsalHandler.tenant]
         output = io.StringIO()
@@ -211,34 +240,43 @@ class Phase7Tests(unittest.TestCase):
             self.assertEqual(cli.main(run_args + ["--dry-run"]), 0)
         preflight = json.loads(output.getvalue())
         self.assertTrue(preflight["readiness"]["ready"])
+        self.assertEqual(preflight["readiness"]["blocked_efforts"], [])
+        self.assertEqual(len(preflight["preflight"]), 9)
+        self.assertTrue(all(set(row) == {"case_id", "effort", "status"} for row in preflight["preflight"]))
+        self.assertFalse(any("cost" in row or "usd" in row for row in preflight["preflight"]))
+        removed = {"estimates", "projected_usd", "retry_exposure_per_review", "cap" + "_usd",
+                   "refused" + "_over_cap", "appro" + "val_required_usd", "authorized_max_usd"}
+        for key in removed:
+            self.assertNotIn(key, preflight)
         self.assertEqual(RehearsalHandler.model_calls, 0)
 
+        wrong_args = list(run_args)
+        wrong_args[wrong_args.index("--tenant-id") + 1] = "wrong-tenant"
         with self.assertRaises(SystemExit):
             with contextlib.redirect_stderr(io.StringIO()):
-                cli.main(run_args + ["--execute"])
+                cli.main(wrong_args + ["--execute"])
         self.assertEqual(RehearsalHandler.model_calls, 0)
 
-        approval_path = self.root / "approval.json"
-        approval_path.write_text(json.dumps({
-            "schema_version": 1,
-            "approval_reference": "cody-fixture-rehearsal",
-            "tenant_id": RehearsalHandler.tenant,
-            "endpoint": endpoint,
-            "manifest_sha256": manifest_hash,
-            "run_id": "rehearsal-1",
-            "preflight_sha256": approval.preflight_digest(preflight),
-            "authorized_max_usd": 1.0,
-            "expires_at": "2999-01-01T00:00:00+00:00",
-        }), encoding="utf-8")
+        blocked_ledger = self.root / "blocked-ledger.json"
+        blocked_args = list(run_args)
+        blocked_args[blocked_args.index("--ledger") + 1] = str(blocked_ledger)
+        RehearsalHandler.unavailable = True
+        try:
+            with self.assertRaises(SystemExit):
+                with contextlib.redirect_stderr(io.StringIO()):
+                    cli.main(blocked_args + ["--execute"])
+        finally:
+            RehearsalHandler.unavailable = False
+        self.assertEqual(RehearsalHandler.model_calls, 0)
+
         output = io.StringIO()
         with contextlib.redirect_stdout(output):
-            self.assertEqual(cli.main(run_args + ["--execute", "--approval", str(approval_path)]), 0)
+            self.assertEqual(cli.main(run_args + ["--execute"]), 0)
         summary = json.loads(output.getvalue())
         self.assertEqual({effort: row["completed"] for effort, row in summary["arms"].items()},
                          {"high": 3, "xhigh": 3, "max": 3})
-        self.assertEqual(summary["authorized_max_usd"], 1.0)
-        self.assertLessEqual(summary["approval_required_usd"], 1.0)
-        self.assertLessEqual(summary["projected_usd"], 1.0)
+        for key in removed:
+            self.assertNotIn(key, summary)
         self.assertNotIn("live_trial", summary)
         self.assertNotIn("deployed_smoke", summary)
         self.assertEqual(RehearsalHandler.model_calls, 9)
@@ -265,13 +303,74 @@ class Phase7Tests(unittest.TestCase):
         client = runner.TrialRunner(endpoint, lambda: "fixture-auth")
         export = client.get_reviews(manifest_hash, "rehearsal-1", RehearsalHandler.tenant)
         records_path.write_text(json.dumps(export), encoding="utf-8")
-        adjudication_path.write_text(json.dumps({"version": 1, "low_sample_rate": 1.0, "findings": []}), encoding="utf-8")
+        decisions = []
+        for index, record in enumerate(RehearsalHandler.records):
+            for finding in record["payload"]["findings"]:
+                decisions.append({"source": "review", "case_id": record["case_id"],
+                                  "effort": record["effective_effort"], "finding_id": finding["id"],
+                                  "category": "valid",
+                                  "second_label": "valid" if index % 2 == 0 else "invalid"})
+        adjudication_path.write_text(json.dumps({
+            "version": 1, "low_sample_rate": 1.0, "labeler_model": "labeler-a",
+            "second_labeler_model": "labeler-b", "findings": decisions}), encoding="utf-8")
+        adjudication = {"version": 1, "low_sample_rate": 1.0, "labeler_model": "labeler-a",
+                        "second_labeler_model": "labeler-b", "findings": decisions}
         output = io.StringIO()
         with contextlib.redirect_stdout(output):
             self.assertEqual(cli.main(["report", "--manifest", str(manifest_path), "--records", str(records_path),
                                        "--ledger", str(ledger_path),
                                        "--adjudication", str(adjudication_path), "--output", str(report_path)]), 0)
+        printed = json.loads(output.getvalue())
         result = json.loads(report_path.read_text())
+        summary_path = report_path.with_suffix(".md")
+        self.assertEqual(printed["summary"], str(summary_path.resolve()))
+        self.assertEqual(printed["report_sha256"], result["reproducibility"]["report_sha256"])
+        second_path = self.root / "alignment-report-2.json"
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            self.assertEqual(cli.main(["report", "--manifest", str(manifest_path), "--records", str(records_path),
+                                       "--ledger", str(ledger_path),
+                                       "--adjudication", str(adjudication_path), "--output", str(second_path)]), 0)
+        second_printed = json.loads(output.getvalue())
+        self.assertEqual(printed["report_sha256"], second_printed["report_sha256"])
+        self.assertEqual(report_path.read_bytes(), second_path.read_bytes())
+        self.assertEqual(summary_path.read_bytes(), second_path.with_suffix(".md").read_bytes())
+
+        for key in ("population", "comparisons", "validation", "cost_latency",
+                    "reproducibility", "reconciliation"):
+            self.assertIn(key, result)
+        for key in ("finding_recall", "fix_recall", "corroboration", "verdict_agreement",
+                    "severity_agreement", "paired_deltas"):
+            self.assertIn(key, result["comparisons"])
+        for group in ("by_effort", "by_tier"):
+            for row in result["comparisons"]["finding_recall"][group].values():
+                self.assertIn("null", row)
+            for row in result["comparisons"]["fix_recall"][group].values():
+                self.assertIn("null", row)
+        matching_validation = result["validation"]["matching"]
+        self.assertGreater(matching_validation["matches"], 0)
+        self.assertEqual(sum(matching_validation["method_counts"].values()),
+                         matching_validation["matches"])
+        self.assertIsNotNone(result["validation"]["adjudication"]["kappa"])
+        self.assertTrue(result["validation"]["leak_check"]["pass"])
+
+        evidence_folder = self.root / "evidence-refused"
+        evidence_folder.mkdir()
+        (evidence_folder / "run-export.json").write_text(json.dumps(export), encoding="utf-8")
+        with contextlib.redirect_stderr(io.StringIO()):
+            with self.assertRaises(SystemExit):
+                cli.main(["evidence-check", "--folder", str(evidence_folder)])
+        metric_folder = self.root / "evidence-metric-only"
+        metric_folder.mkdir()
+        (metric_folder / "alignment-report.json").write_text(report_path.read_text(), encoding="utf-8")
+        (metric_folder / "alignment-report.md").write_text(summary_path.read_text(), encoding="utf-8")
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            self.assertEqual(cli.main(["evidence-check", "--folder", str(metric_folder)]), 0)
+        receipt = json.loads(output.getvalue())
+        self.assertEqual(receipt["evidence_check"], "pass")
+        self.assertEqual(receipt["files_checked"], 2)
+
         self.assertNotIn("live_trial", result)
         self.assertNotIn("deployed_smoke", result)
         self.assertEqual(result["paired_intersection"]["completed_cases"], 3)
@@ -279,8 +378,33 @@ class Phase7Tests(unittest.TestCase):
                          {"high": 3, "xhigh": 3, "max": 3})
         self.assertTrue(result["provenance"]["complete"])
         self.assertIsNone(result["provenance"]["terminal"]["cursor_out"])
+        ledger = json.loads(ledger_path.read_text())
+        run_receipts = [attempt["receipt"] for entry in ledger["entries"].values()
+                        for attempt in entry.get("attempts", []) if attempt.get("kind") == "run"]
+        self.assertEqual(len(run_receipts), 9)
+        self.assertTrue(all(receipt["cost_usd"] == 0.01 for receipt in run_receipts))
+        self.assertTrue(all(attempt["cost_usd"] == 0.01
+                            for receipt in run_receipts for attempt in receipt["attempts"]))
+        self.assertAlmostEqual(result["usage"]["cost_usd"], 0.09)
+        self.assertAlmostEqual(result["usage"]["known_cost_usd"], 0.09)
+        for effort in ("high", "xhigh", "max"):
+            self.assertAlmostEqual(result["arms"][effort]["cost_usd"], 0.03)
+            for row in result["arms"][effort]["per_case"].values():
+                self.assertAlmostEqual(row["cost_usd"], 0.01)
         self.assertEqual(result, report.build_report(frozen, export, json.loads(ledger_path.read_text()), {},
-                                                      {"version": 1, "low_sample_rate": 1.0, "findings": []}))
+                                                      adjudication))
+
+        parser = cli._parser()
+        run_namespace = parser.parse_args(run_args)
+        report_namespace = parser.parse_args([
+            "report", "--manifest", str(manifest_path), "--records", str(records_path),
+            "--ledger", str(ledger_path), "--adjudication", str(adjudication_path),
+            "--output", str(report_path)])
+        for namespace in (run_namespace, report_namespace):
+            self.assertFalse(hasattr(namespace, "cap" + "_usd"))
+            self.assertFalse(hasattr(namespace, "appro" + "val"))
+        self.assertFalse((TOOL / ("appro" + "val.py")).exists())
+        self.assertFalse((TOOL / ("test_appro" + "val.py")).exists())
 
 
 if __name__ == "__main__":

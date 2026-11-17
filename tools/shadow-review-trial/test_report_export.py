@@ -164,12 +164,12 @@ class ReportExportTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "run_id"):
             report.build_report(manifest, export, wrong_ledger_run, {}, adjudication())
 
-    def test_failed_billed_receipt_contributes_but_dry_run_estimate_does_not(self):
+    def test_failed_billed_receipt_contributes_but_dry_run_does_not(self):
         manifest = make_manifest(3)
         export = make_export(manifest, [record(manifest, "case-0", "high", cost=0.1)])
         ledger = ledger_with(manifest, {
             "run-ok": entry("case-0", "high", "complete", canonical="case-0-high",
-                            dry_runs=[{"status": "dry_run", "estimated_usd": 9.0}],
+                            dry_runs=[{"status": "dry_run"}],
                             receipts=[{"status": "ok", "cost_usd": 0.11,
                                        "attempts": [{"number": 1, "status": "ok", "cost_usd": 0.11,
                                                      "input_tokens": 100, "output_tokens": 20,
@@ -179,7 +179,7 @@ class ReportExportTests(unittest.TestCase):
                                            "attempts": [{"number": 1, "status": "timeout", "cost_usd": 0.03},
                                                         {"number": 2, "status": "timeout", "cost_usd": 0.04}]}]),
             "run-dry-only": entry("case-2", "high", "preflight_blocked",
-                                  dry_runs=[{"status": "dry_run", "estimated_usd": 5.0}]),
+                                  dry_runs=[{"status": "dry_run"}]),
         })
         result = report.build_report(manifest, export, ledger, {}, adjudication())
         self.assertEqual(result["usage"]["cost_basis"], "ledger_run_receipts")
@@ -216,19 +216,84 @@ class ReportExportTests(unittest.TestCase):
             "known": entry("case-0", "high", "complete", canonical="case-0-high",
                            receipts=[{"status": "ok", "cost_usd": 0.12,
                                       "attempts": [{"number": 1, "status": "ok", "cost_usd": 0.12}]}]),
-            "unknown": entry("case-1", "high", "started_unknown", transport_error=True,
-                             preflight={"status": "dry_run", "estimated_usd": 0.05}),
+            "unknown": entry("case-1", "high", "started_unknown", transport_error=True),
         })
-        result = report.build_report(manifest, export, ledger, {}, adjudication(), 1.0)
+        result = report.build_report(manifest, export, ledger, {}, adjudication())
         usage = result["usage"]
         self.assertIsNone(usage["cost_usd"])
         self.assertEqual(usage["known_cost_usd"], 0.12)
         self.assertEqual(usage["unknown_cost_entries"], 1)
-        self.assertEqual(usage["cap_comparison"], "unknown")
-        self.assertAlmostEqual(usage["unknown_reservation_usd"], 0.10)
         self.assertIsNone(result["arms"]["high"]["cost_usd"])
         self.assertEqual(result["arms"]["high"]["known_cost_usd"], 0.12)
         self.assertEqual(result["arms"]["high"]["unknown_cost_entries"], 1)
+
+    def test_null_cost_with_unknown_flag_is_counted_not_summed(self):
+        manifest = make_manifest(2)
+        row = record(manifest, "case-0", "high")
+        row["attempts"] = [{"status": "ok", "cost_usd": 0.12, "input_tokens": 100,
+                            "output_tokens": 20, "latency_ms": 10},
+                           {"status": "timeout", "cost_usd": None, "cost_known": False}]
+        export = make_export(manifest, [row])
+        ledger = ledger_with(manifest, {
+            "known": entry("case-0", "high", "complete", canonical="case-0-high",
+                           receipts=[{"status": "ok", "cost_usd": 0.12,
+                                      "attempts": [{"number": 1, "status": "ok", "cost_usd": 0.12}]}]),
+            "unknown": entry("case-1", "high", "finished_incomplete",
+                             receipts=[{"status": "timeout",
+                                        "attempts": [{"status": "timeout", "cost_usd": None, "cost_known": False}]}]),
+        })
+        result = report.build_report(manifest, export, ledger, {}, adjudication())
+        usage = result["usage"]
+        self.assertIsNone(usage["cost_usd"])
+        self.assertEqual(usage["known_cost_usd"], 0.12)
+        self.assertEqual(usage["unknown_cost_entries"], 1)
+        self.assertIsNone(result["arms"]["high"]["cost_usd"])
+        self.assertEqual(result["arms"]["high"]["known_cost_usd"], 0.12)
+        self.assertEqual(result["arms"]["high"]["unknown_cost_entries"], 1)
+        per_case = result["arms"]["high"]["per_case"]["case-0"]
+        self.assertIsNone(per_case["cost_usd"])
+        self.assertEqual(per_case["known_cost_usd"], 0.12)
+        self.assertEqual(per_case["unknown_cost_attempts"], 1)
+
+    def test_cost_known_true_without_amount_is_a_known_zero(self):
+        manifest = make_manifest(1)
+        export = make_export(manifest, [record(manifest, "case-0", "high")])
+        ledger = ledger_with(manifest, {
+            "e": entry("case-0", "high", "complete", canonical="case-0-high",
+                       receipts=[{"status": "ok",
+                                  "attempts": [{"number": 1, "status": "ok", "cost_known": True}]}]),
+        })
+        result = report.build_report(manifest, export, ledger, {}, adjudication())
+        self.assertEqual(result["usage"]["cost_usd"], 0.0)
+        self.assertEqual(result["usage"]["known_cost_usd"], 0.0)
+        self.assertEqual(result["usage"]["unknown_cost_entries"], 0)
+        self.assertEqual(result["usage"]["missing_data"]["cost_fields"], 0)
+
+    def test_no_provider_call_statuses_cost_zero_and_are_not_unknown(self):
+        manifest = make_manifest(3)
+        rows = [record(manifest, "case-0", "high", status="skipped_busy", rid="busy"),
+                record(manifest, "case-1", "high", status="skipped_budget", rid="legacy"),
+                record(manifest, "case-2", "high", status="unavailable", rid="down")]
+        for row in rows:
+            row["attempts"] = [{"status": row["status"]}]
+        export = make_export(manifest, rows)
+        ledger = ledger_with(manifest, {
+            "busy": entry("case-0", "high", "retry_pending", canonical="busy",
+                          receipts=[{"status": "skipped_busy"}]),
+            "legacy": entry("case-1", "high", "retry_pending", canonical="legacy",
+                            receipts=[{"status": "skipped_budget"}]),
+            "down": entry("case-2", "high", "finished_incomplete", canonical="down",
+                          receipts=[{"status": "unavailable"}]),
+        })
+        result = report.build_report(manifest, export, ledger, {}, adjudication())
+        usage = result["usage"]
+        self.assertEqual(usage["cost_usd"], 0.0)
+        self.assertEqual(usage["known_cost_usd"], 0.0)
+        self.assertEqual(usage["unknown_cost_entries"], 0)
+        self.assertEqual(usage["missing_data"]["cost_fields"], 0)
+        self.assertEqual(result["records_by_status"]["skipped_busy"], 1)
+        self.assertEqual(result["records_by_status"]["skipped_budget"], 1)
+        self.assertEqual(result["records_by_status"]["unavailable"], 1)
 
     def test_malformed_receipt_usage_is_refused(self):
         manifest = make_manifest(1)
@@ -242,6 +307,14 @@ class ReportExportTests(unittest.TestCase):
             ledger["entries"]["e"]["attempts"][0]["receipt"]["attempts"][0]["cost_usd"] = value
             with self.assertRaisesRegex(ValueError, "finite non-negative"):
                 report.build_report(manifest, export, ledger, {}, adjudication())
+        ledger = ledger_with(manifest, {"e": copy.deepcopy(base)})
+        ledger["entries"]["e"]["attempts"][0]["receipt"]["attempts"][0]["cost_usd"] = None
+        with self.assertRaisesRegex(ValueError, "cost_known"):
+            report.build_report(manifest, export, ledger, {}, adjudication())
+        ledger = ledger_with(manifest, {"e": copy.deepcopy(base)})
+        ledger["entries"]["e"]["attempts"][0]["receipt"]["attempts"][0]["cost_known"] = "false"
+        with self.assertRaisesRegex(ValueError, "bool"):
+            report.build_report(manifest, export, ledger, {}, adjudication())
         ledger = ledger_with(manifest, {"e": copy.deepcopy(base)})
         ledger["entries"]["e"]["attempts"][0]["receipt"]["attempts"][0]["input_tokens"] = -1
         with self.assertRaisesRegex(ValueError, "non-negative integer"):

@@ -121,21 +121,18 @@ func TestHaiku55PublishedInputTiers(t *testing.T) {
 	}
 }
 
-func TestHaiku55ConservativeReservations(t *testing.T) {
-	// Uncertain size chooses the upper tier even below the boundary; a retry
-	// reserves the same worst-case amount as another independent attempt.
-	one, ok := ReservationCost("claude-haiku-5-5", 99_999, 2_000, true)
-	if !ok || !near(one, 0.0549995) {
-		t.Fatalf("reservation: %.9f %v", one, ok)
+// TestLiveReviewModelIsPriced mirrors review.LiveModel ("claude-haiku-5-5").
+// It lives here because store cannot import review and review no longer checks
+// pricing at runtime, so this test is the only guard that the live model stays
+// in the embedded pricing table.
+func TestLiveReviewModelIsPriced(t *testing.T) {
+	if !PricedModel("claude-haiku-5-5") {
+		t.Fatal("live review model claude-haiku-5-5 is missing from the pricing table")
 	}
-	retry, ok := ReservationCost("claude-haiku-5-5", 99_999, 2_000, true)
-	if !ok || !near(retry, one) {
-		t.Fatalf("retry reservation: %.9f %v", retry, ok)
-	}
-	known, _ := ReservationCost("claude-haiku-5-5", 99_999, 2_000, false)
-	if !near(known, 0.0109999) {
-		t.Fatalf("known low-tier reservation: %.9f", known)
-	}
+}
+
+func TestPricingTiersAndTableIdentity(t *testing.T) {
+	// Uncertain size chooses the upper tier even below the boundary.
 	if PricingTableID() == "" {
 		t.Fatal("pricing table identity is empty")
 	}

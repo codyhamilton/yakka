@@ -37,10 +37,15 @@ const (
 	ProviderInvalid  ProviderStatus = "invalid_output"
 )
 
-// ProviderError never includes the request, credential, or provider response body.
+// ProviderError never includes the request, credential, or provider response
+// body. UsageReported marks a parsed 200 envelope whose content or validation
+// failed after the provider reported token usage.
 type ProviderError struct {
-	Status     ProviderStatus
-	HTTPStatus int
+	Status        ProviderStatus
+	HTTPStatus    int
+	InputTokens   int
+	OutputTokens  int
+	UsageReported bool
 }
 
 func (e *ProviderError) Error() string {
@@ -110,16 +115,20 @@ type message struct {
 type outputConfig struct {
 	Effort string `json:"effort"`
 }
+type messagesUsage struct {
+	InputTokens  int `json:"input_tokens"`
+	OutputTokens int `json:"output_tokens"`
+}
+
 type messagesResponse struct {
 	Model   string `json:"model"`
 	Content []struct {
 		Type string `json:"type"`
 		Text string `json:"text"`
 	} `json:"content"`
-	Usage struct {
-		InputTokens  int `json:"input_tokens"`
-		OutputTokens int `json:"output_tokens"`
-	} `json:"usage"`
+	// Usage is a pointer so a missing or null usage object stays unreported.
+	// A present object, even with zero tokens, is reported usage.
+	Usage *messagesUsage `json:"usage"`
 }
 
 // Review sends packet.Prompt as the sole user message, then validates the
@@ -165,8 +174,20 @@ func (r *Reviewer) Review(ctx context.Context, packet Packet, criteria []Criteri
 		return Result{}, &ProviderError{Status: ProviderAPIError}
 	}
 	var envelope messagesResponse
-	if err := json.Unmarshal(raw, &envelope); err != nil || len(envelope.Content) == 0 {
+	if err := json.Unmarshal(raw, &envelope); err != nil {
 		return Result{}, &ProviderError{Status: ProviderInvalid}
+	}
+	invalid := func() error {
+		pe := &ProviderError{Status: ProviderInvalid}
+		if envelope.Usage != nil {
+			pe.InputTokens = envelope.Usage.InputTokens
+			pe.OutputTokens = envelope.Usage.OutputTokens
+			pe.UsageReported = true
+		}
+		return pe
+	}
+	if len(envelope.Content) != 1 {
+		return Result{}, invalid()
 	}
 	var texts []string
 	for _, block := range envelope.Content {
@@ -175,14 +196,16 @@ func (r *Reviewer) Review(ctx context.Context, packet Packet, criteria []Criteri
 		}
 	}
 	if len(texts) != 1 {
-		return Result{}, &ProviderError{Status: ProviderInvalid}
+		return Result{}, invalid()
 	}
 	result, err := ValidateReply([]byte(texts[0]), packet, criteria)
 	if err != nil {
-		return Result{}, &ProviderError{Status: ProviderInvalid}
+		return Result{}, invalid()
 	}
 	result.Model = envelope.Model
-	result.InputTokens = envelope.Usage.InputTokens
-	result.OutputTokens = envelope.Usage.OutputTokens
+	if envelope.Usage != nil {
+		result.InputTokens = envelope.Usage.InputTokens
+		result.OutputTokens = envelope.Usage.OutputTokens
+	}
 	return result, nil
 }

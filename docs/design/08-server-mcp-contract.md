@@ -203,21 +203,21 @@ per-tool rate limits, and registering tool handlers from outside the Go binary.
   holds the states. `bases:["cwd"]` is today's behaviour; whether a harness exposes `project_dir` is
   open question 4.
 - `review_change` is server-owned, `read_write`, `readOnlyHint:false`, with `timeout_s:150` and has no local actions.
-  Registration requires review model configuration and a server call ceiling of at
-  least 150 seconds. Required arguments are `mode` (`uncommitted` or `range`) and `build_models`;
+  Registration requires a non-empty `CLAUDE_API_TOKEN` in authenticated remote mode and a server call
+  ceiling of at least 150 seconds. Required arguments are `mode` (`uncommitted` or `range`) and `build_models`;
   a range uses `base` and `head`. Optional `kind`, `plan`, `phase`, `pr` and `brief` supply review
   identity and stored criteria references; `detail:full` includes validated findings. Optional
   `effort` (default `high`; `high`, `xhigh` or `max` only), `tags` (at most 16 exact strings) and
   `store` (default `true`; `false` skips all dedupe, cache, input and review-record writes and
-  returns the full review) are validated before any spend or storage, and a valid per-call effort is
-  never capped by the server's high-only default. The declaration
+  returns the full review) are validated before any spend or storage; per-call effort defaults to
+  `high`, is validated server-side and is never capped by a setting. The declaration
   orders optional `project_dir`, `cwd`, `git` of `project_dir`, then `change`. All are optional at
   the registry gate so the handler can translate a missing/unsupported capture to
   `capture_unsupported`; an actual capture is mandatory to review. No `session_hint` is declared.
   `change` is content-bearing/bulk with a 2 MiB serialized budget, typed server policy constants,
   and argument-fed capture settings. The shim overwrites agent-supplied `_local` and alone performs
   local capture. The server owns criteria resolution, prompt policy, provider credential/call,
-  validation, spend and tenant-local records, sharing the `POST /v1/reviews` orchestrator. Machines
+  validation, actual-cost recording and tenant-local records, sharing the `POST /v1/reviews` orchestrator. Machines
   need no provider key. Fresh receipts never return captured diff content, and a completed duplicate
   returns the original review's full fresh-shape content with `cached`, `original_review_id` and
   `original_status`; `store=false` is never deduplicated.

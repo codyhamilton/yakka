@@ -74,37 +74,31 @@ func seedTenantReservations(t *testing.T, s *Server, amounts map[string]float64)
 	if err := os.WriteFile(path, []byte(doc), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	res, err := review.NewPersistentReservations(100, 2, path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	s.reviewReservations = res
+	s.reviewReservations = review.NewPersistentReservations(2, path)
 }
 
-func reservationSpent(t *testing.T, s *Server) (float64, []string) {
+// reservationClaims reports how many saved claims each tenant owns and whether
+// the saved document still carries a spend array.
+func reservationClaims(t *testing.T, s *Server) (map[string]int, bool) {
 	t.Helper()
 	b, err := os.ReadFile(filepath.Join(s.cfg.Data, "review-reservations.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	var doc struct {
-		Spent []struct {
-			Amount float64 `json:"amount"`
-			Tenant string  `json:"tenant"`
-		} `json:"spent"`
+		Claims map[string]struct {
+			Tenant string `json:"tenant"`
+		} `json:"claims"`
+		Spent json.RawMessage `json:"spent"`
 	}
 	if err := json.Unmarshal(b, &doc); err != nil {
 		t.Fatal(err)
 	}
-	total := 0.0
-	var tenants []string
-	for _, e := range doc.Spent {
-		total += e.Amount
-		if e.Tenant != "" {
-			tenants = append(tenants, e.Tenant)
-		}
+	counts := map[string]int{}
+	for _, claim := range doc.Claims {
+		counts[claim.Tenant]++
 	}
-	return total, tenants
+	return counts, len(doc.Spent) > 0
 }
 
 func lifecycleRecord(t *testing.T, s *Server, tenant string) TenantLifecycleRecord {
@@ -177,7 +171,6 @@ func TestResetTenantErasesAssetsAndKeepsIdentity(t *testing.T) {
 	approveGrant(t, s, "dev-a", a)
 
 	before := lifecycleRecord(t, s, a)
-	beforeTotal, _ := reservationSpent(t, s)
 	bDigest := digestTree(t, filepath.Join(dir, b))
 
 	if err := s.ResetTenant(context.Background(), 301, a); err != nil {
@@ -201,16 +194,14 @@ func TestResetTenantErasesAssetsAndKeepsIdentity(t *testing.T) {
 		t.Fatal("device grant survived reset")
 	}
 	if s.reviewReservations.TenantResidue(a) || !s.reviewReservations.TenantResidue(b) {
-		t.Fatal("claim/spend attribution after reset is wrong")
+		t.Fatal("claim attribution after reset is wrong")
 	}
-	afterTotal, attributed := reservationSpent(t, s)
-	for _, tenant := range attributed {
-		if tenant == a {
-			t.Fatalf("tenant-attributed spend survived reset: %v", attributed)
-		}
+	claims, hasSpent := reservationClaims(t, s)
+	if claims[a] != 0 || claims[b] == 0 {
+		t.Fatalf("saved claims after reset=%v", claims)
 	}
-	if afterTotal != beforeTotal {
-		t.Fatalf("provider-wide total changed: %v -> %v", beforeTotal, afterTotal)
+	if hasSpent {
+		t.Fatal("saved reservations still carry spend after reset")
 	}
 	if code, _ := do(t, h, "GET", "/v1/whoami", aTok, ""); code != 401 {
 		t.Fatalf("old token still authorizes after reset: %d", code)

@@ -57,15 +57,19 @@ commits, trailers, exit codes or plan-folder files, or trigger fixes. Absent, un
 calls leave existing decisions unchanged.
 
 The Go server owns the definition, prompt/policy, criteria resolution, provider call, validation,
-spend limits and tenant-local records, through the same orchestrator as `POST /v1/reviews`. The
+actual-cost recording and tenant-local records, through the same orchestrator as `POST /v1/reviews`. The
 Python shim alone captures a bounded diff and omission manifest, scans before egress and forwards
 declared local context; the server rescans. Machines use their existing Yakka login and need no
-provider key. `read_write` scope and `readOnlyHint:false` disclose the server spend-and-record
-boundary; the tool declares 150 seconds and no local actions. Receipts omit captured diff content;
+provider key. `read_write` scope and `readOnlyHint:false` disclose the server-side provider
+call-and-record boundary; the tool declares 150 seconds and no local actions. Receipts omit captured diff content;
 `detail=full` includes validated findings, and a completed duplicate carries the original findings.
-The `read`-only `list_reviews` tool declares no local readers or actions. Registration depends on
-server review model configuration and a sufficient MCP timeout ceiling; deployment and live
-availability require separate evidence.
+The `read`-only `list_reviews` tool declares no local readers or actions. Registration requires a
+non-empty `CLAUDE_API_TOKEN` in authenticated remote mode and an MCP timeout ceiling of at least 150
+seconds; it does not depend on `YAKKA_REVIEW_MODEL`. Deployment and live availability require
+separate evidence. The model defaults to `claude-haiku-5-5` (optional `YAKKA_REVIEW_MODEL` override),
+any authenticated tenant's repo is reviewable, and `skipped_busy` reports the
+two-call per-tenant in-flight limit. Per-call effort defaults to `high`, is validated server-side and
+is never capped by a setting.
 See [architecture](ARCHITECTURE.md#advisory-change-review) and
 [the advisory surface](design/04-advisory-surface.md#review_change).
 

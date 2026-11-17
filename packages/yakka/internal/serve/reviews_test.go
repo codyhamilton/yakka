@@ -40,7 +40,7 @@ func TestReviewRESTRoutesAuthTenantAndReceipt(t *testing.T) {
 	}))
 	defer fake.Close()
 	dir := t.TempDir()
-	s := New(Config{Data: dir, Keys: []KeyPair{{Tenant: "a", Key: "ka"}, {Tenant: "b", Key: "kb"}}, ReviewToken: "credential-sentinel", ReviewModel: "claude-haiku-5-5", ReviewEffort: "high", ReviewUSDCap: 2, ReviewRepositories: map[string]bool{"a/repo-a": true, "b/repo-b": true}}, Options{DisableWorker: true, ReviewEndpoint: fake.URL, PollInterval: time.Hour})
+	s := New(Config{Data: dir, Keys: []KeyPair{{Tenant: "a", Key: "ka"}, {Tenant: "b", Key: "kb"}}, ReviewToken: "credential-sentinel"}, Options{DisableWorker: true, ReviewEndpoint: fake.URL, PollInterval: time.Hour})
 	defer s.Close()
 	h := s.Handler()
 	if code, _ := do(t, h, "POST", "/v1/reviews", "", reviewHTTPBody(t, "repo-a")); code != 401 {
@@ -109,9 +109,6 @@ func TestReviewRESTReadTokenCanReadButCannotPost(t *testing.T) {
 	tenant := remoteCreateTenant(t, h, origin, sess, "review")
 	_, readToken := remoteIssueToken(t, h, origin, sess, tenant, TokenScopeRead, "1d")
 	s.cfg.ReviewToken = "secret"
-	s.cfg.ReviewModel = "claude-haiku-5-5"
-	s.cfg.ReviewUSDCap = 5
-	s.cfg.ReviewRepositories = map[string]bool{tenant + "/repo-a": true}
 	if code, body := do(t, h, "POST", "/v1/reviews", readToken, reviewHTTPBody(t, "repo-a")); code != 403 || !strings.Contains(body, "read_write scope required") {
 		t.Fatalf("read token POST=%d %s", code, body)
 	}
@@ -120,15 +117,61 @@ func TestReviewRESTReadTokenCanReadButCannotPost(t *testing.T) {
 	}
 }
 
+func reviewPost(t *testing.T, s *Server, key, body string) (int, string) {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodPost, "/v1/reviews", strings.NewReader(body))
+	req.Host = "127.0.0.1:8770"
+	if key != "" {
+		req.Header.Set("Authorization", "Bearer "+key)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, req)
+	return rec.Code, rec.Body.String()
+}
+
+func TestReviewRESTUnavailableWithoutToken(t *testing.T) {
+	s := New(Config{Addr: "0.0.0.0:8770", Data: t.TempDir(), Keys: []KeyPair{{Tenant: "a", Key: "ka"}}}, Options{DisableWorker: true, PollInterval: time.Hour})
+	t.Cleanup(func() { _ = s.Close() })
+	code, body := reviewPost(t, s, "ka", reviewHTTPBody(t, "repo-a"))
+	var receipt review.Receipt
+	if code != 200 || json.Unmarshal([]byte(body), &receipt) != nil ||
+		receipt.Status != "unavailable" || receipt.Reason != "CLAUDE_API_TOKEN" {
+		t.Fatalf("token-less POST=%d %s", code, body)
+	}
+}
+
+func TestReviewRESTUnavailableInLocalMode(t *testing.T) {
+	s := New(Config{Addr: "127.0.0.1:8770", Data: t.TempDir(), ReviewToken: "secret"}, Options{DisableWorker: true, PollInterval: time.Hour})
+	t.Cleanup(func() { _ = s.Close() })
+	code, body := reviewPost(t, s, "", reviewHTTPBody(t, "repo-a"))
+	var receipt review.Receipt
+	if code != 200 || json.Unmarshal([]byte(body), &receipt) != nil ||
+		receipt.Status != "unavailable" || receipt.Reason != "authenticated remote mode required" {
+		t.Fatalf("local POST=%d %s", code, body)
+	}
+}
+
 func TestReviewEnvironmentConfigValidation(t *testing.T) {
 	env := func(m map[string]string) func(string) string { return func(k string) string { return m[k] } }
-	c, err := ConfigFromEnv(env(map[string]string{"CLAUDE_API_TOKEN": "private-value", "YAKKA_REVIEW_MODEL": "claude-haiku-5-5", "YAKKA_REVIEW_EFFORT": "high", "YAKKA_REVIEW_USD_CAP": "2.5", "YAKKA_REVIEW_REPOS": "tenant/github.com/org/repo,other/r"}))
-	if err != nil || c.ReviewToken != "private-value" || c.ReviewUSDCap != 2.5 || !c.ReviewRepositories["tenant/github.com/org/repo"] {
-		t.Fatalf("config=%+v err=%v", c, err)
+	unset, err := ConfigFromEnv(env(map[string]string{"CLAUDE_API_TOKEN": "private-value"}))
+	if err != nil || unset.ReviewToken != "private-value" || unset.ReviewModel != "" || unset.EffectiveReviewModel() != review.LiveModel {
+		t.Fatalf("unset model: config=%+v err=%v", unset, err)
 	}
-	for _, m := range []map[string]string{{"YAKKA_REVIEW_USD_CAP": "zero"}, {"YAKKA_REVIEW_REPOS": "not-qualified"}} {
-		if _, err := ConfigFromEnv(env(m)); err == nil || strings.Contains(err.Error(), "private-value") {
-			t.Fatalf("invalid review config accepted or leaked: %v", err)
-		}
+	// YAKKA_REVIEW_MODEL is optional; effort, cap and repo allowlist are still ignored and
+	// an invalid cap does not fail startup.
+	withOptional := map[string]string{
+		"CLAUDE_API_TOKEN":     "private-value",
+		"YAKKA_REVIEW_MODEL":   "optional-env-model",
+		"YAKKA_REVIEW_EFFORT":  "high",
+		"YAKKA_REVIEW_USD_CAP": "zero",
+		"YAKKA_REVIEW_REPOS":   "not-qualified",
+	}
+	c, err := ConfigFromEnv(env(withOptional))
+	if err != nil || c.ReviewToken != "private-value" {
+		t.Fatalf("optional model: config=%+v err=%v", c, err)
+	}
+	if c.ReviewModel != "optional-env-model" || c.EffectiveReviewModel() != "optional-env-model" {
+		t.Fatalf("optional model not applied: %+v", c)
 	}
 }
