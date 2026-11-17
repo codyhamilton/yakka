@@ -17,16 +17,36 @@ def freeze(value):
     return value
 
 
-def make_manifest(count, target=None):
-    cases = []
+def make_manifest(count, target=None, *, phase3=False, floor=None, censored=None):
+    history = {"repository": "codyhamilton/yakka", "tip_sha": "a" * 40,
+               "shallow": False, "object_complete": True,
+               "enumerated_commits": 3, "verified_count": 3}
+    if phase3:
+        tiers = ("phase", "unit", "pr")
+        cases = [{"case_id": f"case-{i}", "head_sha": f"case-{i}", "eligible": True,
+                  "tier": tiers[i % len(tiers)], "stratum": tiers[i % len(tiers)],
+                  "outcomes": [], "later_fixes": [], "censored": i == 0,
+                  "criteria": {"source": "base_blob"}} for i in range(count)]
+        counts = {name: {"candidates": sum(c["tier"] == name for c in cases),
+                         "eligible": sum(c["tier"] == name for c in cases),
+                         "frozen": sum(c["tier"] == name for c in cases)} for name in tiers}
+        target_value = target if target is not None else count
+        floor_value = floor if floor is not None else target_value
+        manifest = {"schema_version": 1, "seed": 23, "target": target_value,
+                    "target_per_effort": target_value, "floor": floor_value,
+                    "tiers": counts, "exclusions": {"no_tier": 4}, "excluded_total": 4,
+                    "censored": censored if censored is not None else sum(c["censored"] for c in cases),
+                    "shortfall_against_floor": max(0, floor_value - count),
+                    "history": history, "cases": cases,
+                    "comparators": {"curated": [], "pr_export_by_head": {}}}
+        return freeze(manifest)
     strata = ("phase", "pr", "unaccompanied")
+    cases = []
     for i in range(count):
         cases.append({"case_id": f"case-{i}", "head_sha": f"case-{i}", "eligible": True,
                       "stratum": strata[i % len(strata)]})
     return freeze({"schema_version": 1, "seed": 23, "target_per_effort": target or count,
-                   "history": {"repository": "codyhamilton/yakka", "tip_sha": "a" * 40,
-                               "shallow": False, "object_complete": True,
-                               "enumerated_commits": 3, "verified_count": 3},
+                   "history": history,
                    "cases": cases, "comparators": {"curated": [], "pr_export_by_head": {}}})
 
 
@@ -202,6 +222,52 @@ class AlignmentReportTests(unittest.TestCase):
         self.assertIsNone(result["usage"]["input_tokens"])
         self.assertEqual(result["usage"]["missing_data"]["input_token_fields"], 1)
         self.assertEqual(result["arms"]["high"]["missing_usage_fields"]["input_tokens"], 1)
+
+    def test_phase3_manifest_population_and_floor_shortfall(self):
+        manifest = make_manifest(3, target=6, phase3=True, floor=5, censored=2)
+        rows = [record(manifest, f"case-{i}", e) for e in report.EFFORTS for i in range(3)]
+        rows.append(record(manifest, "case-0", "high", rid="duplicate-case-0-high"))
+        refs = [(f"case-{i}", e, f"case-{i}-{e}") for e in report.EFFORTS for i in range(3)]
+        result = report_for(manifest, rows, refs)
+        population = result["population"]
+        self.assertEqual(population["eligible"], 3)
+        self.assertEqual(population["frozen"], 3)
+        self.assertEqual(population["target"], 6)
+        self.assertEqual(population["floor"], 5)
+        self.assertEqual(population["censored"], 2)
+        self.assertEqual(population["shortfall_against_floor"], 2)
+        self.assertEqual(population["by_tier"],
+                         {"phase": {"eligible": 1, "frozen": 1},
+                          "unit": {"eligible": 1, "frozen": 1},
+                          "pr": {"eligible": 1, "frozen": 1}})
+        self.assertEqual(population["exclusions"]["manifest"], {"no_tier": 4})
+        self.assertEqual(population["exclusions"]["run"]["duplicate_receipt"], 1)
+        for effort in report.EFFORTS:
+            self.assertEqual(result["arms"][effort]["floor"], 5)
+            self.assertEqual(result["arms"][effort]["shortfall_against_floor"], 2)
+            self.assertEqual(population["by_effort"][effort]["completed"], 3)
+            self.assertEqual(population["by_effort"][effort]["shortfall_against_floor"], 2)
+        self.assertEqual(population["by_effort"]["high"]["attempted"], 4)
+        self.assertEqual(population["by_effort"]["high"]["failed"], 1)
+        self.assertEqual(population["by_effort"]["high"]["by_tier"]["phase"],
+                         {"attempted": 2, "completed": 1})
+
+    def test_legacy_manifest_aliases_still_read(self):
+        manifest = make_manifest(3, target=50)
+        rows = [record(manifest, f"case-{i}", e) for e in report.EFFORTS for i in range(3)]
+        refs = [(f"case-{i}", e, f"case-{i}-{e}") for e in report.EFFORTS for i in range(3)]
+        result = report_for(manifest, rows, refs)
+        self.assertEqual(result["population"]["target"], 50)
+        self.assertEqual(result["population"]["floor"], 50)
+        self.assertEqual(result["population"]["shortfall_against_floor"], 47)
+        self.assertEqual(result["population"]["by_tier"],
+                         {"phase": {"eligible": 1, "frozen": 1},
+                          "unit": {"eligible": 0, "frozen": 0},
+                          "pr": {"eligible": 1, "frozen": 1},
+                          "unaccompanied": {"eligible": 1, "frozen": 1}})
+        for effort in report.EFFORTS:
+            self.assertEqual(result["arms"][effort]["floor"], 50)
+            self.assertEqual(result["arms"][effort]["completed"], 3)
 
 
 if __name__ == "__main__":

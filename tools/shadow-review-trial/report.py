@@ -88,8 +88,13 @@ def _validate_manifest(manifest: dict[str, Any]) -> None:
         case_ids.add(case_id)
         if case.get("eligible") is not True:
             raise ValueError(f"manifest.cases contains ineligible case: {case_id}")
-        if case.get("stratum") not in ("phase", "pr", "unaccompanied"):
+        tier = case.get("tier")
+        if tier is not None and tier not in ("phase", "unit", "pr"):
+            raise ValueError(f"invalid tier for case {case_id}")
+        if case.get("stratum") not in ("phase", "unit", "pr", "unaccompanied"):
             raise ValueError(f"invalid stratum for case {case_id}")
+        if tier is not None and case["stratum"] != tier:
+            raise ValueError(f"case {case_id} tier and stratum disagree")
 
 
 def _validate_export(export: dict[str, Any], manifest: dict[str, Any]) -> None:
@@ -509,15 +514,38 @@ def _models(record: dict[str, Any]) -> list[str]:
     return models or ["unknown"]
 
 
+def _case_tier(case: dict[str, Any]) -> str:
+    """The case's tier, falling back to a legacy stratum, never invented."""
+    tier = case.get("tier")
+    if tier in ("phase", "unit", "pr"):
+        return tier
+    stratum = case.get("stratum")
+    if stratum in ("phase", "unit", "pr"):
+        return stratum
+    return "unaccompanied"
+
+
+def _record_effort(record: dict[str, Any]) -> str | None:
+    tags = record.get("tags")
+    if isinstance(tags, list):
+        for effort in EFFORTS:
+            if "effort:" + effort in tags:
+                return effort
+    return None
+
+
 def build_report(manifest: dict[str, Any], export: dict[str, Any], ledger: dict[str, Any],
                  comparator_evidence: dict[str, Any], adjudications: dict[str, Any]) -> dict[str, Any]:
     """Build a JSON-serializable report. No input is mutated and no I/O occurs."""
     validate_inputs(manifest, export, ledger, comparator_evidence, adjudications)
     cases = {case["case_id"]: case for case in manifest["cases"]}
     spend = _ledger_spend(ledger, set(cases))
-    target = manifest.get("target_per_effort", 50)
-    if not isinstance(target, int) or target < 1:
-        raise ValueError("manifest.target_per_effort must be a positive integer")
+    target = manifest.get("target", manifest.get("target_per_effort", 50))
+    if isinstance(target, bool) or not isinstance(target, int) or target < 1:
+        raise ValueError("manifest target must be a positive integer")
+    floor = manifest.get("floor", target)
+    if isinstance(floor, bool) or not isinstance(floor, int) or floor < 1:
+        raise ValueError("manifest floor must be a positive integer")
     manifest_hash = manifest["manifest_sha256"]
     run_id = export["run_id"]
     tenant_id = export["tenant_id"]
@@ -555,25 +583,39 @@ def build_report(manifest: dict[str, Any], export: dict[str, Any], ledger: dict[
 
     status_counts = Counter()
     exclusions = Counter()
+    exclusions_by_effort: dict[str, Counter] = {effort: Counter() for effort in EFFORTS}
+    unattributed_exclusions: Counter = Counter()
     for record in rows:
         status_counts[record.get("status", "unknown")] += 1
+
+    def attribute_exclusion(reason: str, record: dict[str, Any]) -> None:
+        effort = _record_effort(record)
+        if effort is None:
+            unattributed_exclusions[reason] += 1
+        else:
+            exclusions_by_effort[effort][reason] += 1
+
     for record in rows:
         identity = record["id"]
         if identity in canonical_ids:
             continue
         if record.get("tenant_id") not in (None, tenant_id):
             exclusions["unrelated_tenant"] += 1
+            attribute_exclusion("unrelated_tenant", record)
             continue
         record_tags = set(record["tags"]) if isinstance(record.get("tags"), list) else set()
         if run_tag not in record_tags or manifest_tag not in record_tags:
             exclusions["unrelated_run"] += 1
+            attribute_exclusion("unrelated_run", record)
             continue
         if record.get("duplicate_of") or record.get("original_review_id") or any(
                 {_case_tag(case_id), "effort:" + effort}.issubset(record_tags)
                 for case_id, effort, _ in canonical_refs):
             exclusions["duplicate_receipt"] += 1
+            attribute_exclusion("duplicate_receipt", record)
             continue
         exclusions["non_canonical_record"] += 1
+        attribute_exclusion("non_canonical_record", record)
 
     attempts_by_arm: dict[str, list[dict[str, Any]]] = {e: [] for e in EFFORTS}
     valid_by_arm: dict[str, dict[str, dict[str, Any]]] = {e: {} for e in EFFORTS}
@@ -594,6 +636,7 @@ def build_report(manifest: dict[str, Any], export: dict[str, Any], ledger: dict[
         elif case_id in valid_by_arm[effort]: reason = "duplicate_completed_case_effort"
         if reason:
             exclusions[reason] += 1
+            exclusions_by_effort[effort][reason] += 1
             continue
         normalized = {**record, "case_id": case_id, "effective_effort": effort}
         valid_by_arm[effort][case_id] = normalized
@@ -607,13 +650,20 @@ def build_report(manifest: dict[str, Any], export: dict[str, Any], ledger: dict[
         if identity[0] == "review" and identity not in valid_review_finding_ids:
             raise ValueError(f"adjudication does not match a completed review finding: {identity[1]}/{identity[3]}")
 
+    case_by_tag = {_case_tag(case_id): case_id for case_id in cases}
     attempted_by_arm = Counter()
+    attempted_tier_by_arm: dict[str, Counter] = {effort: Counter() for effort in EFFORTS}
+    attempted_cases_by_arm: dict[str, set[str]] = {effort: set() for effort in EFFORTS}
     for record in rows:
         record_tags = set(record["tags"]) if isinstance(record.get("tags"), list) else set()
         if manifest_tag in record_tags and run_tag in record_tags:
             for effort in EFFORTS:
                 if "effort:" + effort in record_tags:
                     attempted_by_arm[effort] += 1
+                    case_id = next((case_by_tag[tag] for tag in record_tags if tag in case_by_tag), None)
+                    if case_id is not None:
+                        attempted_tier_by_arm[effort][_case_tier(cases[case_id])] += 1
+                        attempted_cases_by_arm[effort].add(case_id)
                     break
 
     arm_reports = {}
@@ -667,6 +717,7 @@ def build_report(manifest: dict[str, Any], export: dict[str, Any], ledger: dict[
                                "completed": len(available), "completion_shortfall": max(0, target - len(available)),
                                "partial_records": sum(valid_by_arm[effort][case_id].get("status") == "ok_partial" for case_id in available),
                                "shortfall": max(0, target - len(available)),
+                               "floor": floor, "shortfall_against_floor": max(0, floor - len(available)),
                                "target": target, "attempted_records": attempted_by_arm[effort],
                                "completed_case_ids": sorted(available), "per_case": per_case,
                                "partial_coverage_case_ids": sorted(case_id for case_id in available
@@ -679,6 +730,52 @@ def build_report(manifest: dict[str, Any], export: dict[str, Any], ledger: dict[
                                "output_tokens": None if missing_output else output_tokens,
                                "missing_usage_fields": {"cost_usd": missing_cost, "input_tokens": missing_input, "output_tokens": missing_output},
                                "latency_ms": _distribution(latencies)}
+
+    tier_counts = Counter(_case_tier(case) for case in cases.values())
+    tier_names = ["phase", "unit", "pr"]
+    if tier_counts["unaccompanied"]:
+        tier_names.append("unaccompanied")
+    manifest_tiers = manifest.get("tiers")
+    by_tier: dict[str, Any] = {}
+    for tier in tier_names:
+        row = manifest_tiers.get(tier) if isinstance(manifest_tiers, dict) else None
+        if isinstance(row, dict) and isinstance(row.get("eligible"), int) and not isinstance(row.get("eligible"), bool) \
+                and isinstance(row.get("frozen"), int) and not isinstance(row.get("frozen"), bool):
+            by_tier[tier] = {"eligible": row["eligible"], "frozen": row["frozen"]}
+        else:
+            by_tier[tier] = {"eligible": tier_counts[tier], "frozen": tier_counts[tier]}
+    raw_censored = manifest.get("censored")
+    censored = raw_censored if isinstance(raw_censored, int) and not isinstance(raw_censored, bool) \
+        else sum(1 for case in cases.values() if case.get("censored") is True)
+    censored_case_ids = {case_id for case_id, case in cases.items() if case.get("censored") is True}
+    completed_tier_by_arm: dict[str, Counter] = {effort: Counter() for effort in EFFORTS}
+    for effort in EFFORTS:
+        for case_id in valid_by_arm[effort]:
+            completed_tier_by_arm[effort][_case_tier(cases[case_id])] += 1
+    population_by_effort: dict[str, Any] = {}
+    for effort in EFFORTS:
+        arm_completed = len(valid_by_arm[effort])
+        population_by_effort[effort] = {
+            "eligible": len(cases), "attempted": attempted_by_arm[effort], "completed": arm_completed,
+            "failed": max(0, attempted_by_arm[effort] - arm_completed),
+            "censored": len(attempted_cases_by_arm[effort] & censored_case_ids),
+            "shortfall_against_floor": max(0, floor - arm_completed),
+            "by_tier": {tier: {"attempted": attempted_tier_by_arm[effort][tier],
+                               "completed": completed_tier_by_arm[effort][tier]} for tier in tier_names},
+            "exclusions": dict(sorted(exclusions_by_effort[effort].items()))}
+    if unattributed_exclusions:
+        population_by_effort["unattributed"] = {
+            "eligible": 0, "attempted": 0, "completed": 0,
+            "failed": sum(unattributed_exclusions.values()), "censored": 0,
+            "shortfall_against_floor": 0, "by_tier": {},
+            "exclusions": dict(sorted(unattributed_exclusions.items()))}
+    manifest_exclusions = manifest.get("exclusions")
+    population = {"eligible": len(cases), "frozen": len(cases),
+                  "target": target, "floor": floor, "censored": censored,
+                  "shortfall_against_floor": max(0, floor - len(cases)),
+                  "exclusions": {"manifest": dict(sorted(manifest_exclusions.items())) if isinstance(manifest_exclusions, dict) else {},
+                                 "run": dict(sorted(exclusions.items()))},
+                  "by_tier": by_tier, "by_effort": population_by_effort}
     intersection = set.intersection(*(set(valid_by_arm[e]) for e in EFFORTS)) if EFFORTS else set()
     paired = {e: _outcome_summary([valid_by_arm[e][case_id] for case_id in sorted(intersection)], adj) for e in EFFORTS}
     available = {e: _outcome_summary(list(valid_by_arm[e].values()), adj) for e in EFFORTS}
@@ -799,6 +896,7 @@ def build_report(manifest: dict[str, Any], export: dict[str, Any], ledger: dict[
                            "terminal": {"complete": pages[-1]["complete"], "cursor_out": pages[-1]["cursor_out"]},
                            "pages": pages},
             "excluded_records": dict(sorted(exclusions.items())),
+            "population": population,
             "arms": arm_reports, "paired_intersection": {"completed_cases": len(intersection), "case_ids": sorted(intersection)},
             "outcomes": {"by_build_model": dict(sorted(model_strata.items())), "by_reviewer_model": dict(sorted(reviewer_strata.items())),
                          "by_effective_effort": dict(sorted(effort_strata.items())), **arm_outcomes},
