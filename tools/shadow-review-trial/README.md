@@ -77,6 +77,32 @@ python3 tools/shadow-review-trial/cli.py report \
 
 The exported `filters`, high-water identity carried in the cursor chain, page chain and counts are validated before calculation. `--ledger` is the frozen run journal; the report selects only the run's canonical review ids, checks their canonical tags and tenant/effort/case, and counts completion, attempts and usage/cost from canonical records alone. Duplicate receipts, unrelated tenant/run rows and wrong-model rows are exclusions and add no completed case or cost. Adjudication is version 1 JSON with `low_sample_rate` and `findings`; comparator evidence defaults to the frozen manifest and can be supplied with `--comparators`. The report is deterministic for the same frozen inputs, reports per-effort/paired counts and honest shortfalls, and writes its full provenance and result to `--output`. Cost comes from the ledger's canonical run receipts: actual cost per case, per effort and for the whole run. An unknown cost (`cost_usd` null with `cost_known: false`) is counted as unknown, never estimated; `skipped_busy` and legacy `skipped_budget` records are accepted.
 
+`--output` receives the JSON report. The CLI also writes a deterministic rendered Markdown summary at the sibling path `output.with_suffix(".md")` (for example `alignment-report.json` → `alignment-report.md`) and prints `report`, `summary`, `manifest_sha256`, `report_sha256`, `arms` and `usage`. The summary is pure formatting of the report, with a fixed section order: **Population**; **Comparisons (a)–(g)**; **Validation controls**; **Reproducibility**; **Reconciliation**. It prints no path, commit SHA, diff line, outcome excerpt, finding title or case list, and carries no timestamp, host or run-time content.
+
+The JSON report carries the `population` section (eligible, frozen, attempted, completed, failures and exclusions by reason, tier breakdowns and shortfalls); the `comparisons` section with the keys `finding_recall`, `fix_recall`, `corroboration`, `verdict_agreement`, `severity_agreement` and `paired_deltas`; the `validation` controls; `cost_latency`; `reproducibility` (including `report_sha256`); and `reconciliation`. Every recall figure appears beside its shuffled-comparator null, every match carries a `structural` or `adjudicated` method tag, and the paired deltas use seeded bootstrap intervals on the common completed cases.
+
+Adjudication version 1 is extended with optional `second_label`, `labeler_model` and `second_labeler_model` fields; double-labelled pairs produce Cohen's kappa. Review-finding decisions use the `valid`, `invalid` and `unknown` categories in addition to the new-finding categories, while historical comparator decisions use `matched`, `partial` and `unmatched`.
+
+### Leak check
+
+> **Leak check.** The trial reconstructs every request the runner would send
+> from the frozen manifest (`runner.build_request`) and fails the report when a
+> case's own `docs/plans/<plan>/REVIEW.md`, `IMPLEMENTATION.md` or `DESIGN.md`
+> path appears in a capture diff, or a recorded outcome excerpt appears in a
+> diff or criteria text (`scope: case_plan_and_outcome_excerpts`). Changed paths
+> under another plan's `docs/plans/` folder are counted as
+> `foreign_plan_document_captures` and never fail the check.
+
+The request check covers the case's own plan documents and every recorded outcome excerpt. Changed files under another plan's `docs/plans/` folder are counted as `foreign_plan_document_captures`, not failed, because Phase 3 strips only the case's own plan folder.
+
+### Evidence check
+
+```bash
+python3 tools/shadow-review-trial/cli.py evidence-check --folder tools/shadow-review-trial-data/
+```
+
+`evidence-check` is the metric-only pre-commit gate. It exits non-zero and names the offenders when the folder contains a manifest or certified export, and prints `{"evidence_check": "pass", "folder": ..., "files_checked": n}` when the folder holds only aggregate, metric-only files such as the report JSON and its summary.
+
 ## Smoke
 
 ```bash

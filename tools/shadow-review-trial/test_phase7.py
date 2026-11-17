@@ -31,6 +31,7 @@ class RehearsalHandler(http.server.BaseHTTPRequestHandler):
     model_calls = 0
     tenant = "fixture-tenant"
     case_by_hash = {}
+    cases = {}
     page_size = 3
     unavailable = False
 
@@ -64,13 +65,32 @@ class RehearsalHandler(http.server.BaseHTTPRequestHandler):
             return
         type(self).model_calls += 1
         rid = f"review-{case_id}-{effort}"
+        case = type(self).cases.get(case_id, {})
+        targets = [outcome for outcome in case.get("outcomes") or []
+                   if isinstance(outcome, dict) and outcome.get("kind") == "review_finding"
+                   and isinstance(outcome.get("path"), str)]
+        if targets:
+            target = targets[0]
+            severity = str(target.get("severity") or "medium").lower()
+            if severity not in ("blocker", "high", "medium", "low"):
+                severity = "medium"
+            finding = {"id": f"{case_id}-{effort}-f1", "severity": severity,
+                       "path": target["path"],
+                       "line_start": int(target.get("line_start") or 1),
+                       "line_end": int(target.get("line_end") or target.get("line_start") or 1),
+                       "title": f"fixture finding {case_id} {effort}",
+                       "evidence": target.get("excerpt") or "fixture evidence"}
+        else:
+            finding = {"id": f"{case_id}-{effort}-f1", "severity": "medium",
+                       "path": "src/fixture.py", "line_start": 1, "line_end": 1,
+                       "title": f"fixture finding {case_id} {effort}", "evidence": "fixture evidence"}
         record = {"id": rid, "case_id": case_id, "effective_effort": effort,
                   "profile": "historical_trial", "manifest_hash": manifest_hash, "tags": tags,
                   "configured_model": report.REVIEWER_MODEL, "returned_model": report.REVIEWER_MODEL,
                   "model_mismatch": False, "status": "ok", "build_models": payload["build_models"],
                   "attempts": [{"status": "ok", "latency_ms": 4, "cost_usd": 0.01,
                                 "input_tokens": 12, "output_tokens": 3}],
-                  "payload": {"findings": [], "coverage": "complete"}}
+                  "payload": {"findings": [finding], "coverage": "complete"}}
         type(self).records.append(record)
         self._send(200, {"id": rid, "status": "ok", "cost_usd": 0.01,
                          "attempts": [{"status": "ok", "latency_ms": 4, "cost_usd": 0.01,
@@ -202,6 +222,7 @@ class Phase7Tests(unittest.TestCase):
         self.assertEqual(len(frozen["cases"]), 3)
         RehearsalHandler.case_by_hash = {
             hashlib.sha256(case["case_id"].encode()).hexdigest(): case["case_id"] for case in frozen["cases"]}
+        RehearsalHandler.cases = {case["case_id"]: case for case in frozen["cases"]}
         manifest_bytes = manifest_path.read_bytes()
         manifest_hash = frozen["manifest_sha256"]
         self.assertEqual(hashlib.sha256(
@@ -282,13 +303,74 @@ class Phase7Tests(unittest.TestCase):
         client = runner.TrialRunner(endpoint, lambda: "fixture-auth")
         export = client.get_reviews(manifest_hash, "rehearsal-1", RehearsalHandler.tenant)
         records_path.write_text(json.dumps(export), encoding="utf-8")
-        adjudication_path.write_text(json.dumps({"version": 1, "low_sample_rate": 1.0, "findings": []}), encoding="utf-8")
+        decisions = []
+        for index, record in enumerate(RehearsalHandler.records):
+            for finding in record["payload"]["findings"]:
+                decisions.append({"source": "review", "case_id": record["case_id"],
+                                  "effort": record["effective_effort"], "finding_id": finding["id"],
+                                  "category": "valid",
+                                  "second_label": "valid" if index % 2 == 0 else "invalid"})
+        adjudication_path.write_text(json.dumps({
+            "version": 1, "low_sample_rate": 1.0, "labeler_model": "labeler-a",
+            "second_labeler_model": "labeler-b", "findings": decisions}), encoding="utf-8")
+        adjudication = {"version": 1, "low_sample_rate": 1.0, "labeler_model": "labeler-a",
+                        "second_labeler_model": "labeler-b", "findings": decisions}
         output = io.StringIO()
         with contextlib.redirect_stdout(output):
             self.assertEqual(cli.main(["report", "--manifest", str(manifest_path), "--records", str(records_path),
                                        "--ledger", str(ledger_path),
                                        "--adjudication", str(adjudication_path), "--output", str(report_path)]), 0)
+        printed = json.loads(output.getvalue())
         result = json.loads(report_path.read_text())
+        summary_path = report_path.with_suffix(".md")
+        self.assertEqual(printed["summary"], str(summary_path.resolve()))
+        self.assertEqual(printed["report_sha256"], result["reproducibility"]["report_sha256"])
+        second_path = self.root / "alignment-report-2.json"
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            self.assertEqual(cli.main(["report", "--manifest", str(manifest_path), "--records", str(records_path),
+                                       "--ledger", str(ledger_path),
+                                       "--adjudication", str(adjudication_path), "--output", str(second_path)]), 0)
+        second_printed = json.loads(output.getvalue())
+        self.assertEqual(printed["report_sha256"], second_printed["report_sha256"])
+        self.assertEqual(report_path.read_bytes(), second_path.read_bytes())
+        self.assertEqual(summary_path.read_bytes(), second_path.with_suffix(".md").read_bytes())
+
+        for key in ("population", "comparisons", "validation", "cost_latency",
+                    "reproducibility", "reconciliation"):
+            self.assertIn(key, result)
+        for key in ("finding_recall", "fix_recall", "corroboration", "verdict_agreement",
+                    "severity_agreement", "paired_deltas"):
+            self.assertIn(key, result["comparisons"])
+        for group in ("by_effort", "by_tier"):
+            for row in result["comparisons"]["finding_recall"][group].values():
+                self.assertIn("null", row)
+            for row in result["comparisons"]["fix_recall"][group].values():
+                self.assertIn("null", row)
+        matching_validation = result["validation"]["matching"]
+        self.assertGreater(matching_validation["matches"], 0)
+        self.assertEqual(sum(matching_validation["method_counts"].values()),
+                         matching_validation["matches"])
+        self.assertIsNotNone(result["validation"]["adjudication"]["kappa"])
+        self.assertTrue(result["validation"]["leak_check"]["pass"])
+
+        evidence_folder = self.root / "evidence-refused"
+        evidence_folder.mkdir()
+        (evidence_folder / "run-export.json").write_text(json.dumps(export), encoding="utf-8")
+        with contextlib.redirect_stderr(io.StringIO()):
+            with self.assertRaises(SystemExit):
+                cli.main(["evidence-check", "--folder", str(evidence_folder)])
+        metric_folder = self.root / "evidence-metric-only"
+        metric_folder.mkdir()
+        (metric_folder / "alignment-report.json").write_text(report_path.read_text(), encoding="utf-8")
+        (metric_folder / "alignment-report.md").write_text(summary_path.read_text(), encoding="utf-8")
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            self.assertEqual(cli.main(["evidence-check", "--folder", str(metric_folder)]), 0)
+        receipt = json.loads(output.getvalue())
+        self.assertEqual(receipt["evidence_check"], "pass")
+        self.assertEqual(receipt["files_checked"], 2)
+
         self.assertNotIn("live_trial", result)
         self.assertNotIn("deployed_smoke", result)
         self.assertEqual(result["paired_intersection"]["completed_cases"], 3)
@@ -310,7 +392,7 @@ class Phase7Tests(unittest.TestCase):
             for row in result["arms"][effort]["per_case"].values():
                 self.assertAlmostEqual(row["cost_usd"], 0.01)
         self.assertEqual(result, report.build_report(frozen, export, json.loads(ledger_path.read_text()), {},
-                                                      {"version": 1, "low_sample_rate": 1.0, "findings": []}))
+                                                      adjudication))
 
         parser = cli._parser()
         run_namespace = parser.parse_args(run_args)

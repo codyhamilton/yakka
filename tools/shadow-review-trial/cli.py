@@ -12,8 +12,10 @@ import urllib.request
 
 from manifest import ManifestFrozenError, compare_candidates, create_manifest
 from runner import RunnerError, TrialRunner, run as run_trial
+import evidence_check
 import history_profile
 import report as alignment_report
+import summary as report_summary
 
 
 def _json_file(path: pathlib.Path, label: str):
@@ -134,6 +136,9 @@ def _parser():
     report.add_argument("--output", type=pathlib.Path, required=True)
     report.add_argument("--comparators", type=pathlib.Path, help="optional saved comparator evidence JSON")
 
+    evidence = commands.add_parser("evidence-check", help="reject an evidence folder holding a manifest or export")
+    evidence.add_argument("--folder", type=pathlib.Path, required=True)
+
     commands.add_parser("smoke", help="print fake-endpoint fixture evidence; makes no provider call")
 
     compare = commands.add_parser("compare", help="read-only comparison of the candidate extractors")
@@ -173,8 +178,17 @@ def main(argv=None):
             comparators = _json_file(args.comparators, "comparators") if args.comparators else {}
             result = alignment_report.build_report(frozen, export, ledger, comparators, adjudication)
             _write_json(args.output, result)
-            print(json.dumps({"report": str(args.output.resolve()), "manifest_sha256": frozen["manifest_sha256"],
+            summary_path = args.output.with_suffix(".md")
+            summary_path.parent.mkdir(parents=True, exist_ok=True)
+            summary_path.write_text(report_summary.render(result), encoding="utf-8")
+            print(json.dumps({"report": str(args.output.resolve()), "summary": str(summary_path.resolve()),
+                              "manifest_sha256": frozen["manifest_sha256"],
+                              "report_sha256": result["reproducibility"]["report_sha256"],
                               "arms": result["arms"], "usage": result["usage"]}, sort_keys=True))
+        elif args.command == "evidence-check":
+            checked = evidence_check.require_metric_only(args.folder)
+            print(json.dumps({"evidence_check": "pass", "folder": str(args.folder.resolve()),
+                              "files_checked": checked["files_checked"]}, sort_keys=True))
         elif args.command == "smoke":
             print(json.dumps(smoke_record(), sort_keys=True))
         elif args.command == "compare":

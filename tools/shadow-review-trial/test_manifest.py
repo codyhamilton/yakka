@@ -243,8 +243,9 @@ class ManifestFixtures(unittest.TestCase):
                                  "--repo", str(self.repo), "--output", str(output), "--seed", "7",
                                  "--remote", "origin", "--expected-repository", self.identity],
                                 capture_output=True, text=True, check=True)
-        self.assertIn('"eligible": 2', result.stdout)
+        self.assertIn('"frozen": 2', result.stdout)
         summary = json.loads(result.stdout)
+        self.assertEqual(summary["frozen"], 2)
         self.assertEqual(summary["target"], 360)
         self.assertEqual(summary["floor"], 300)
         self.assertEqual(summary["tiers"]["phase"]["frozen"], 1)
