@@ -52,6 +52,13 @@ The phase outcome is approach-open; this run uses the signed outcome and CONTRAC
 - Deviations / unfinished: non-session populations reuse the post-restriction count for `scope_n` and `cohort_n`; `/scores` and `/score-series` expose one content-hash population rather than one per check; no store-level unit test. 6-07 must check these against the invariants.
 - Verification: focused cohort population tests passed; store passed (6.934s); serve failed only the two pre-existing activity tests.
 
+### `6-06-time-cohorts-and-activity.md`
+
+- Outcome: committed as `8123c1b` (`Resolve time cohorts and report activity observation types`); time scope include/exclude and the time `id` lens resolve, inapplicable time filters are 400 `unsupported_join`, `/entities?grain=time` reports `relation.target_sessions`, `/activity` reports `population.by_type` and a cohort `relation`, source and target rejection associations are counted without dropping unassociated rows, and the two activity fixtures are now deterministic.
+- Surfaces: `packages/yakka/internal/store/{analytics_cohort.go,activity.go,analytics.go}`, `packages/yakka/internal/serve/{analytics_activity.go,analytics_entities.go,analytics_population.go,analytics.go}`, focused tests and `reports/6-06-time-cohorts-and-activity.md`.
+- Deviations / unfinished: the own-path list in the brief omitted `serve/analytics.go`, `analytics_population.go` and `analytics_entities.go`, which the unit touched; recorded in its report. Non-session scope/cohort counts and the single content-hash population remain as 6-05b described.
+- Verification: full `GOMEMLIMIT=8GiB GOMAXPROCS=3 go test -p=3 ./internal/store ./internal/serve -count=1` passed (store 7.498s; serve 28.454s), including the formerly time-dependent activity tests.
+
 ## Phase 6 (earlier run) — Plan and execution entities and the cohort predicate
 
 Refinement commit: `c85e5b9` (`docs: refine Phase 6 analytics work`). Four sequential units; plan/execution entity rows, cohort resolution, target-route application, then time cohorts/activity and schema publication. The signed contract in CONTRACTS.md 17.3 supplies the implementation boundaries. `artifact_feedback` on all four briefs returned delivered / screen pass (`jev-1.13.0`). Phase 5 carried items remain outside this phase: artifact file-to-time-bucket assignment and score-lens memory-growth evidence.
