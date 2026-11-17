@@ -20,13 +20,15 @@ from typing import Any
 EFFORTS = ("high", "xhigh", "max")
 RUN_ID = re.compile(r"[A-Za-z0-9_-]{1,32}")
 STATUSES = ("ok", "ok_partial", "timeout", "api_error", "invalid_output", "unavailable",
-            "refused_capture", "refused_disclosure", "refused_criteria", "skipped_budget", "skipped_duplicate")
+            "refused_capture", "refused_disclosure", "refused_criteria", "skipped_budget",
+            "skipped_busy", "skipped_duplicate")
 HISTORICAL = ("matched", "partial", "unmatched")
 NEW = ("matched", "partial", "disputed", "new-valid", "unadjudicated")
 CATEGORIES = set(HISTORICAL) | set(NEW)
 REVIEWER_MODEL = "claude-haiku-5-5"
-RETRY_EXPOSURE = 2  # mirrors runner.py: one bounded retry per started review
 UNKNOWN_STATES = ("started", "started_unknown")
+NO_PROVIDER_CALL_STATUSES = ("unavailable", "skipped_busy", "skipped_budget")
+USAGE_FIELDS = ("cost_usd", "cost_known", "input_tokens", "output_tokens", "latency_ms")
 
 
 def _canonical_hash(value: Any) -> str:
@@ -188,7 +190,8 @@ def _validate_export(export: dict[str, Any], manifest: dict[str, Any]) -> None:
             raise ValueError(f"reviews[{index}].attempts must be an array")
         for a_index, attempt in enumerate(review.get("attempts", [])):
             attempt = _mapping(attempt, f"reviews[{index}].attempts[{a_index}]")
-            for field in ("cost_usd", "latency_ms"):
+            _validate_cost(attempt, f"reviews[{index}].attempts[{a_index}]")
+            for field in ("latency_ms",):
                 if field in attempt and (isinstance(attempt[field], bool) or not isinstance(attempt[field], (int, float))
                                          or not math.isfinite(attempt[field]) or attempt[field] < 0):
                     raise ValueError(f"invalid {field} in reviews[{index}].attempts[{a_index}]")
@@ -209,6 +212,18 @@ def _token_count(value: Any, label: str) -> int:
     return value
 
 
+def _validate_cost(scope: dict[str, Any], label: str) -> None:
+    """A null cost must say it is unknown; a present amount must be real spend."""
+    if "cost_known" in scope and not isinstance(scope["cost_known"], bool):
+        raise ValueError(f"{label}.cost_known must be a bool")
+    if "cost_usd" in scope:
+        if scope["cost_usd"] is None:
+            if scope.get("cost_known") is not False:
+                raise ValueError(f"{label}.cost_usd may be null only with cost_known false")
+        else:
+            _finite_amount(scope["cost_usd"], f"{label}.cost_usd")
+
+
 def _validate_receipt(receipt: Any, label: str) -> None:
     """Reject malformed or impossible usage before it can reach cost totals."""
     receipt = _mapping(receipt, label)
@@ -216,18 +231,15 @@ def _validate_receipt(receipt: Any, label: str) -> None:
     if raw_attempts is not None:
         for index, raw in enumerate(_list(raw_attempts, label + ".attempts")):
             attempt = _mapping(raw, f"{label}.attempts[{index}]")
-            if "cost_usd" in attempt:
-                _finite_amount(attempt["cost_usd"], f"{label}.attempts[{index}].cost_usd")
-            if "estimated_usd" in attempt:
-                _finite_amount(attempt["estimated_usd"], f"{label}.attempts[{index}].estimated_usd")
+            _validate_cost(attempt, f"{label}.attempts[{index}]")
             if "latency_ms" in attempt:
                 _finite_amount(attempt["latency_ms"], f"{label}.attempts[{index}].latency_ms")
             for field in ("input_tokens", "output_tokens"):
                 if field in attempt:
                     _token_count(attempt[field], f"{label}.attempts[{index}].{field}")
-    for field in ("cost_usd", "estimated_usd", "latency_ms"):
-        if field in receipt:
-            _finite_amount(receipt[field], f"{label}.{field}")
+    _validate_cost(receipt, label)
+    if "latency_ms" in receipt:
+        _finite_amount(receipt["latency_ms"], f"{label}.latency_ms")
     for field in ("input_tokens", "output_tokens"):
         if field in receipt:
             _token_count(receipt[field], f"{label}.{field}")
@@ -274,14 +286,27 @@ def _validate_ledger(ledger: dict[str, Any], manifest: dict[str, Any], export: d
         canonical_ids.add(identity)
 
 
+def _is_no_provider_call(status: Any) -> bool:
+    return status in NO_PROVIDER_CALL_STATUSES or (isinstance(status, str) and status.startswith("refused_"))
+
+
+def _carries_usage(scope: dict[str, Any]) -> bool:
+    return any(field in scope for field in USAGE_FIELDS)
+
+
 def _receipt_usage(receipt: dict[str, Any]) -> dict[str, Any]:
-    """Sum one run receipt's real usage; a missing amount stays unknown, never zero."""
+    """Sum one run receipt's real usage; a null cost stays unknown, never estimated."""
     raw_attempts = receipt.get("attempts")
     items = [a for a in raw_attempts if isinstance(a, dict)] if isinstance(raw_attempts, list) and raw_attempts else []
     usage: dict[str, Any] = {"cost_usd": None, "input_tokens": None, "output_tokens": None, "latencies": [],
+                             "unknown_cost": 0,
                              "missing": {"cost_usd": 0, "input_tokens": 0, "output_tokens": 0, "latency_ms": 0}}
     scopes = items or [receipt]
-    for field in ("cost_usd", "input_tokens", "output_tokens"):
+    if _is_no_provider_call(receipt.get("status")) and not _carries_usage(receipt) \
+            and not any(_carries_usage(scope) for scope in scopes):
+        usage.update({"cost_usd": 0.0, "input_tokens": 0, "output_tokens": 0})
+        return usage
+    for field in ("input_tokens", "output_tokens"):
         values = [scope[field] for scope in scopes if field in scope]
         if values:
             usage[field] = sum(values)
@@ -290,6 +315,27 @@ def _receipt_usage(receipt: dict[str, Any]) -> dict[str, Any]:
             usage[field] = receipt[field]
         else:
             usage["missing"][field] = max(1, len(scopes))
+    known, unknown = 0.0, 0
+    cost_scopes = [scope for scope in scopes if "cost_usd" in scope or "cost_known" in scope]
+    for scope in cost_scopes:
+        if "cost_usd" in scope:
+            if scope["cost_usd"] is None:
+                unknown += 1
+            else:
+                known += float(scope["cost_usd"])
+        elif scope.get("cost_known") is False:
+            unknown += 1
+    if cost_scopes:
+        usage["cost_usd"] = known
+        usage["unknown_cost"] = unknown
+        usage["missing"]["cost_usd"] = len(scopes) - len(cost_scopes)
+    elif "cost_usd" in receipt or "cost_known" in receipt:
+        if receipt.get("cost_usd") is None:
+            usage["unknown_cost"] = 1
+        else:
+            usage["cost_usd"] = float(receipt.get("cost_usd", 0.0))
+    else:
+        usage["missing"]["cost_usd"] = max(1, len(scopes))
     usage["latencies"] = [int(scope["latency_ms"]) for scope in scopes if "latency_ms" in scope]
     usage["missing"]["latency_ms"] = len(scopes) - len(usage["latencies"])
     return usage
@@ -298,7 +344,7 @@ def _receipt_usage(receipt: dict[str, Any]) -> dict[str, Any]:
 def _empty_spend() -> dict[str, Any]:
     return {"cost_usd": 0.0, "input_tokens": 0, "output_tokens": 0, "latencies": [],
             "missing": {"cost_usd": 0, "input_tokens": 0, "output_tokens": 0, "latency_ms": 0},
-            "unknown_entries": 0}
+            "unknown_entries": 0, "unknown_cost_entries": 0}
 
 
 def _add_usage(target: dict[str, Any], usage: dict[str, Any]) -> None:
@@ -308,6 +354,7 @@ def _add_usage(target: dict[str, Any], usage: dict[str, Any]) -> None:
     target["latencies"].extend(usage["latencies"])
     for field, count in usage["missing"].items():
         target["missing"][field] += count
+    target["unknown_cost_entries"] += usage.get("unknown_cost", 0)
 
 
 def _ledger_spend(ledger: dict[str, Any], case_ids: set[str]) -> dict[str, Any]:
@@ -315,7 +362,6 @@ def _ledger_spend(ledger: dict[str, Any], case_ids: set[str]) -> dict[str, Any]:
     total, per_effort = _empty_spend(), {effort: _empty_spend() for effort in EFFORTS}
     unknown: list[str] = []
     has_receipts = False
-    reservation, reservation_known, reservation_complete = 0.0, False, True
     for key in sorted(ledger["entries"]):
         entry = ledger["entries"][key]
         if entry["case_id"] not in case_ids or entry["effort"] not in EFFORTS:
@@ -336,18 +382,8 @@ def _ledger_spend(ledger: dict[str, Any], case_ids: set[str]) -> dict[str, Any]:
         if entry.get("state") in UNKNOWN_STATES and not receipts:
             unknown.append(key)
             per_effort[effort]["unknown_entries"] += 1
-            preflight = entry.get("preflight_receipt")
-            estimate = preflight.get("estimated_usd") if isinstance(preflight, dict) else None
-            if isinstance(estimate, (int, float)) and not isinstance(estimate, bool) \
-                    and math.isfinite(estimate) and estimate >= 0:
-                reservation += float(estimate) * RETRY_EXPOSURE
-                reservation_known = True
-            else:
-                reservation_complete = False
     return {"has_receipts": has_receipts, "total": total, "by_effort": per_effort,
-            "unknown_entries": unknown,
-            "reservation_usd": round(reservation, 12) if reservation_known and reservation_complete else None,
-            "retry_exposure": RETRY_EXPOSURE}
+            "unknown_entries": unknown}
 
 
 def validate_inputs(manifest: dict[str, Any], export: dict[str, Any], ledger: dict[str, Any],
@@ -474,13 +510,9 @@ def _models(record: dict[str, Any]) -> list[str]:
 
 
 def build_report(manifest: dict[str, Any], export: dict[str, Any], ledger: dict[str, Any],
-                 comparator_evidence: dict[str, Any], adjudications: dict[str, Any],
-                 cost_cap_usd: float | None = None) -> dict[str, Any]:
+                 comparator_evidence: dict[str, Any], adjudications: dict[str, Any]) -> dict[str, Any]:
     """Build a JSON-serializable report. No input is mutated and no I/O occurs."""
     validate_inputs(manifest, export, ledger, comparator_evidence, adjudications)
-    if cost_cap_usd is not None and (isinstance(cost_cap_usd, bool) or not isinstance(cost_cap_usd, (int, float))
-                                     or not math.isfinite(cost_cap_usd) or cost_cap_usd < 0):
-        raise ValueError("cost_cap_usd must be a finite non-negative number or null")
     cases = {case["case_id"]: case for case in manifest["cases"]}
     spend = _ledger_spend(ledger, set(cases))
     target = manifest.get("target_per_effort", 50)
@@ -587,22 +619,33 @@ def build_report(manifest: dict[str, Any], export: dict[str, Any], ledger: dict[
     arm_reports = {}
     for effort in EFFORTS:
         arm_attempts = attempts_by_arm[effort]
-        cost = sum(float(a["cost_usd"]) for a in arm_attempts if "cost_usd" in a)
+        cost = sum(float(a["cost_usd"]) for a in arm_attempts
+                   if isinstance(a.get("cost_usd"), (int, float)) and not isinstance(a.get("cost_usd"), bool))
         input_tokens = sum(a["input_tokens"] for a in arm_attempts if "input_tokens" in a)
         output_tokens = sum(a["output_tokens"] for a in arm_attempts if "output_tokens" in a)
         missing_input = sum("input_tokens" not in a for a in arm_attempts)
         missing_output = sum("output_tokens" not in a for a in arm_attempts)
-        missing_cost = sum("cost_usd" not in a for a in arm_attempts)
+        missing_cost = sum("cost_usd" not in a and "cost_known" not in a for a in arm_attempts)
         latencies = sorted(int(a["latency_ms"]) for a in arm_attempts if "latency_ms" in a and a["latency_ms"] >= 0)
         available = set(valid_by_arm[effort])
         per_case = {}
         for case_id in sorted(available):
             record = valid_by_arm[effort][case_id]
             case_attempts = _attempts(record)
-            missing_case_usage = {field: sum(field not in a for a in case_attempts)
-                                  for field in ("cost_usd", "input_tokens", "output_tokens", "latency_ms")}
+            missing_case_cost = sum("cost_usd" not in a and "cost_known" not in a for a in case_attempts)
+            unknown_case_cost = sum("cost_usd" in a and a["cost_usd"] is None
+                                    or "cost_usd" not in a and a.get("cost_known") is False
+                                    for a in case_attempts)
+            known_case_cost = sum(float(a["cost_usd"]) for a in case_attempts
+                                  if isinstance(a.get("cost_usd"), (int, float)) and not isinstance(a.get("cost_usd"), bool))
+            missing_case_usage = {"cost_usd": missing_case_cost,
+                                  "input_tokens": sum("input_tokens" not in a for a in case_attempts),
+                                  "output_tokens": sum("output_tokens" not in a for a in case_attempts),
+                                  "latency_ms": sum("latency_ms" not in a for a in case_attempts)}
             per_case[case_id] = {"status": record["status"], "coverage": record.get("coverage", {}).get("state", "unknown"),
-                                 "cost_usd": None if missing_case_usage["cost_usd"] else round(sum(float(a["cost_usd"]) for a in case_attempts), 12),
+                                 "cost_usd": None if missing_case_cost or unknown_case_cost else round(known_case_cost, 12),
+                                 "known_cost_usd": round(known_case_cost, 12),
+                                 "unknown_cost_attempts": unknown_case_cost,
                                  "input_tokens": None if missing_case_usage["input_tokens"] else sum(a["input_tokens"] for a in case_attempts),
                                  "output_tokens": None if missing_case_usage["output_tokens"] else sum(a["output_tokens"] for a in case_attempts),
                                  "missing_usage_fields": missing_case_usage,
@@ -616,9 +659,10 @@ def build_report(manifest: dict[str, Any], export: dict[str, Any], ledger: dict[
             missing_input = arm_spend["missing"]["input_tokens"]
             missing_output = arm_spend["missing"]["output_tokens"]
             latencies = sorted(arm_spend["latencies"])
-            spend_unknown = arm_spend["unknown_entries"]
+            spend_unknown = arm_spend["unknown_entries"] + arm_spend["unknown_cost_entries"]
         else:
-            spend_unknown = 0
+            spend_unknown = sum(("cost_usd" in a and a["cost_usd"] is None)
+                                or ("cost_usd" not in a and a.get("cost_known") is False) for a in arm_attempts)
         arm_reports[effort] = {"eligible": len(cases), "eligible_shortfall": max(0, target - len(cases)),
                                "completed": len(available), "completion_shortfall": max(0, target - len(available)),
                                "partial_records": sum(valid_by_arm[effort][case_id].get("status") == "ok_partial" for case_id in available),
@@ -694,20 +738,24 @@ def build_report(manifest: dict[str, Any], export: dict[str, Any], ledger: dict[
         for summary in d.values(): _finish_summary(summary)
     all_attempts = [a for effort in EFFORTS for a in attempts_by_arm[effort] if isinstance(a, dict)]
     attempt_status_counts = Counter(a.get("status", "unknown") for a in all_attempts)
-    all_cost = sum(float(a["cost_usd"]) for a in all_attempts if "cost_usd" in a)
+    all_cost = sum(float(a["cost_usd"]) for a in all_attempts
+                   if isinstance(a.get("cost_usd"), (int, float)) and not isinstance(a.get("cost_usd"), bool))
     all_input_tokens = sum(a["input_tokens"] for a in all_attempts if "input_tokens" in a)
     all_output_tokens = sum(a["output_tokens"] for a in all_attempts if "output_tokens" in a)
     all_latencies = [int(a["latency_ms"]) for a in all_attempts if "latency_ms" in a and a["latency_ms"] >= 0]
     missing_attempt_records = sum(not isinstance(rows_by_id[identity].get("attempts"), list)
                                   for _, _, identity in canonical_refs)
-    missing_cost_fields = sum("cost_usd" not in a for a in all_attempts)
+    unknown_cost_fields = sum(("cost_usd" in a and a["cost_usd"] is None)
+                              or ("cost_usd" not in a and a.get("cost_known") is False) for a in all_attempts)
+    missing_cost_fields = sum("cost_usd" not in a and "cost_known" not in a for a in all_attempts)
     missing_input_fields = sum("input_tokens" not in a for a in all_attempts)
     missing_output_fields = sum("output_tokens" not in a for a in all_attempts)
     missing_latency_fields = sum("latency_ms" not in a for a in all_attempts)
     if spend["has_receipts"]:
         receipt_total = spend["total"]
         known_cost = round(receipt_total["cost_usd"], 12)
-        cost_unknown = bool(receipt_total["missing"]["cost_usd"] or spend["unknown_entries"])
+        unknown_cost_entries = receipt_total["unknown_cost_entries"] + len(spend["unknown_entries"])
+        cost_unknown = bool(receipt_total["missing"]["cost_usd"] or unknown_cost_entries)
         usage_cost = None if cost_unknown else known_cost
         usage_input = None if receipt_total["missing"]["input_tokens"] else receipt_total["input_tokens"]
         usage_output = None if receipt_total["missing"]["output_tokens"] else receipt_total["output_tokens"]
@@ -720,7 +768,8 @@ def build_report(manifest: dict[str, Any], export: dict[str, Any], ledger: dict[
         cost_basis = "ledger_run_receipts"
     else:
         known_cost = round(all_cost, 12)
-        cost_unknown = bool(missing_cost_fields or missing_attempt_records or spend["unknown_entries"])
+        unknown_cost_entries = unknown_cost_fields + len(spend["unknown_entries"])
+        cost_unknown = bool(missing_cost_fields or missing_attempt_records or unknown_cost_entries)
         usage_cost = None if cost_unknown else known_cost
         usage_input = None if missing_input_fields else all_input_tokens
         usage_output = None if missing_output_fields else all_output_tokens
@@ -759,12 +808,8 @@ def build_report(manifest: dict[str, Any], export: dict[str, Any], ledger: dict[
             "usage": {"cost_usd": usage_cost, "known_cost_usd": known_cost,
                       "cost_basis": cost_basis, "input_tokens": usage_input,
                       "output_tokens": usage_output, "latency_ms": usage_latency,
-                      "missing_data": missing_data, "cap_usd": cost_cap_usd,
-                      "unknown_cost_entries": len(spend["unknown_entries"]),
-                      "unknown_reservation_usd": spend["reservation_usd"],
-                      "reservation_retry_exposure": spend["retry_exposure"],
-                      "cap_comparison": "unknown" if cost_cap_usd is None or cost_unknown
-                      else ("within" if known_cost <= cost_cap_usd else "exceeded")}}
+                      "missing_data": missing_data,
+                      "unknown_cost_entries": unknown_cost_entries}}
 
 
 def _distribution(values: list[int]) -> dict[str, int | float | None]:

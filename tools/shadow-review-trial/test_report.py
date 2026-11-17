@@ -75,10 +75,10 @@ def adjudication(rows=(), rate=1.0):
     return {"version": 1, "low_sample_rate": rate, "findings": list(rows)}
 
 
-def report_for(manifest, records, refs, comparators=None, decisions=None, cap=None, **export_kwargs):
+def report_for(manifest, records, refs, comparators=None, decisions=None, **export_kwargs):
     return report.build_report(manifest, make_export(manifest, records, **export_kwargs),
                                make_ledger(manifest, refs), comparators or {},
-                               adjudication(decisions or ()), cap)
+                               adjudication(decisions or ()))
 
 
 class AlignmentReportTests(unittest.TestCase):
@@ -86,7 +86,7 @@ class AlignmentReportTests(unittest.TestCase):
         manifest50 = make_manifest(50)
         rows50 = [record(manifest50, f"case-{i}", e) for e in report.EFFORTS for i in range(50)]
         refs50 = [(f"case-{i}", e, f"case-{i}-{e}") for e in report.EFFORTS for i in range(50)]
-        result50 = report_for(manifest50, rows50, refs50, cap=100)
+        result50 = report_for(manifest50, rows50, refs50)
         for e in report.EFFORTS:
             self.assertEqual(result50["arms"][e]["completed"], 50)
             self.assertEqual(result50["arms"][e]["shortfall"], 0)
@@ -147,8 +147,8 @@ class AlignmentReportTests(unittest.TestCase):
             {"case_id": "case-0", "effort": "xhigh", "finding_id": "F1", "category": "partial"},
             {"case_id": "case-0", "effort": "max", "finding_id": "F1", "category": "matched"},
         ]
-        one = report_for(manifest, reviews, refs, comps, decisions, 5)
-        two = report_for(manifest, reviews, refs, comps, decisions, 5)
+        one = report_for(manifest, reviews, refs, comps, decisions)
+        two = report_for(manifest, reviews, refs, comps, decisions)
         self.assertEqual(one, two)
         self.assertEqual(one["historical_findings"]["by_category"]["matched"], 1)
         self.assertEqual(one["historical_findings"]["by_category"]["partial"], 1)
@@ -163,7 +163,6 @@ class AlignmentReportTests(unittest.TestCase):
         self.assertEqual(one["usage"]["output_tokens"], 180)
         self.assertEqual(one["usage"]["cost_usd"], 1.2)
         self.assertEqual(one["usage"]["latency_ms"], {"count": 9, "min": 10, "p50": 20, "p90": 30, "max": 30})
-        self.assertEqual(one["usage"]["cap_comparison"], "within")
         self.assertEqual(one["outcomes"]["by_build_model"]["unknown"]["records"], 6)
         self.assertEqual(one["outcomes"]["by_build_model"]["builder-a"]["records"], 3)
         self.assertEqual(one["arms"]["high"]["partial_records"], 1)
@@ -181,6 +180,19 @@ class AlignmentReportTests(unittest.TestCase):
         bad = dict(manifest); bad["seed"] = 9
         with self.assertRaisesRegex(ValueError, "manifest_sha256"):
             report.build_report(bad, export, ledger, {}, adjudication())
+
+    def test_skipped_busy_and_legacy_skipped_budget_are_visible_and_not_completions(self):
+        manifest = make_manifest(2)
+        busy = record(manifest, "case-0", "high", status="skipped_busy", rid="busy")
+        legacy = record(manifest, "case-1", "high", status="skipped_budget", rid="legacy")
+        for row in (busy, legacy):
+            row["attempts"] = [{"status": row["status"]}]
+        result = report_for(manifest, [busy, legacy], [("case-0", "high", "busy"), ("case-1", "high", "legacy")])
+        self.assertEqual(result["records_by_status"]["skipped_busy"], 1)
+        self.assertEqual(result["records_by_status"]["skipped_budget"], 1)
+        self.assertEqual(result["arms"]["high"]["completed"], 0)
+        self.assertEqual(result["usage"]["cost_usd"], 0.0)
+        self.assertEqual(result["usage"]["unknown_cost_entries"], 0)
 
     def test_missing_usage_is_not_reported_as_zero(self):
         manifest = make_manifest(1)
