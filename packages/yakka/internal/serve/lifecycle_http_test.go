@@ -537,7 +537,6 @@ func TestLifecycleHTTPResetAndDeleteSucceed(t *testing.T) {
 		t.Fatal(err)
 	}
 	beforeA := lifecycleRecord(t, s, a)
-	beforeTotal, _ := reservationSpent(t, s)
 	bDigest := digestTree(t, filepath.Join(dir, b))
 
 	reset := func(tenant string) *httptest.ResponseRecorder {
@@ -590,16 +589,14 @@ func TestLifecycleHTTPResetAndDeleteSucceed(t *testing.T) {
 		t.Fatal("reset left device grant")
 	}
 	if s.reviewReservations.TenantResidue(a) || !s.reviewReservations.TenantResidue(b) {
-		t.Fatal("reset claim/spend attribution is wrong")
+		t.Fatal("reset claim attribution is wrong")
 	}
-	afterTotal, attributed := reservationSpent(t, s)
-	if afterTotal != beforeTotal {
-		t.Fatalf("provider-wide spend changed: %v -> %v", beforeTotal, afterTotal)
+	claims, hasSpent := reservationClaims(t, s)
+	if claims[a] != 0 || claims[b] == 0 {
+		t.Fatalf("saved claims after reset=%v", claims)
 	}
-	for _, tenant := range attributed {
-		if tenant == a {
-			t.Fatalf("reset left attributed spend: %v", attributed)
-		}
+	if hasSpent {
+		t.Fatal("reset left the spend array in the saved reservations")
 	}
 	if got := digestTree(t, filepath.Join(dir, b)); got != bDigest {
 		t.Fatal("other tenant's bytes changed")

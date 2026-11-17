@@ -67,6 +67,24 @@ func TestReviewMCPRegistrationContract(t *testing.T) {
 	}
 }
 
+func TestReviewMCPRegistrationAvailability(t *testing.T) {
+	token := New(Config{Addr: "0.0.0.0:8770", Data: t.TempDir(), Keys: []KeyPair{{"a", "ka"}}, ReviewToken: "fixture-only"}, Options{DisableWorker: true})
+	t.Cleanup(func() { _ = token.Close() })
+	if token.mcpTool("review_change") == nil {
+		t.Fatal("token in remote mode did not register review_change")
+	}
+	noToken := New(Config{Addr: "0.0.0.0:8770", Data: t.TempDir(), Keys: []KeyPair{{"a", "ka"}}}, Options{DisableWorker: true})
+	t.Cleanup(func() { _ = noToken.Close() })
+	if noToken.mcpTool("review_change") != nil {
+		t.Fatal("token-less server registered review_change")
+	}
+	local := New(Config{Addr: "127.0.0.1:8770", Data: t.TempDir(), ReviewToken: "fixture-only"}, Options{DisableWorker: true})
+	t.Cleanup(func() { _ = local.Close() })
+	if local.mcpTool("review_change") != nil {
+		t.Fatal("local token server registered review_change")
+	}
+}
+
 func TestReviewMCPMissingReaderIsCaptureUnsupportedWithoutRecord(t *testing.T) {
 	s, _ := newServer(t, true)
 	defer s.Close()
@@ -111,7 +129,7 @@ func TestReviewMCPAndRESTShareOrchestrationAndReceipt(t *testing.T) {
 	}))
 	defer fake.Close()
 	dir := t.TempDir()
-	s := New(Config{Data: dir, Keys: []KeyPair{{"a", "ka"}}, ReviewToken: "fixture-only", ReviewModel: "claude-haiku-5-5", ReviewEffort: "", ReviewUSDCap: 2, ReviewRepositories: map[string]bool{"a/repo-a": true}}, Options{DisableWorker: true, ReviewEndpoint: fake.URL, PollInterval: time.Hour})
+	s := New(Config{Data: dir, Keys: []KeyPair{{"a", "ka"}}, ReviewToken: "fixture-only"}, Options{DisableWorker: true, ReviewEndpoint: fake.URL, PollInterval: time.Hour})
 	defer s.Close()
 	h := s.Handler()
 	for _, mode := range []string{"uncommitted", "range"} {

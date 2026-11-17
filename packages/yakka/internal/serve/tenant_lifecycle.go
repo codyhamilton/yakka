@@ -303,7 +303,7 @@ func (s *Server) tenantResidualClean(tenant string) error {
 		return fmt.Errorf("device grant remains")
 	}
 	if s.reviewReservations.TenantResidue(tenant) {
-		return fmt.Errorf("claim or attributed spend remains")
+		return fmt.Errorf("claim remains")
 	}
 	if _, err := os.Stat(s.tenantDir(tenant)); !os.IsNotExist(err) {
 		return fmt.Errorf("tenant directory remains")

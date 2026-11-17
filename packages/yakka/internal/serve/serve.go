@@ -9,7 +9,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math"
 	"net"
 	"net/http"
 	"net/url"
@@ -42,10 +41,8 @@ type Config struct {
 	GitHubOAuthClientSecret string
 	// CORSOrigins are the exact origins allowed to read a keyed server from a browser. Local mode
 	// ignores it and allows loopback origins.
-	CORSOrigins                            []string
-	ReviewToken, ReviewModel, ReviewEffort string
-	ReviewUSDCap                           float64
-	ReviewRepositories                     map[string]bool
+	CORSOrigins []string
+	ReviewToken string
 }
 
 // KeyPair maps one key to one tenant.
@@ -83,27 +80,6 @@ func ConfigFromEnv(getenv func(string) string) (Config, error) {
 	}
 	c := Config{Addr: getenv("YAKKA_SERVE_ADDR"), Data: getenv("YAKKA_SERVE_DATA")}
 	c.ReviewToken = strings.TrimSpace(getenv("CLAUDE_API_TOKEN"))
-	c.ReviewModel = strings.TrimSpace(getenv("YAKKA_REVIEW_MODEL"))
-	c.ReviewEffort = strings.TrimSpace(getenv("YAKKA_REVIEW_EFFORT"))
-	if raw := strings.TrimSpace(getenv("YAKKA_REVIEW_USD_CAP")); raw != "" {
-		v, err := strconv.ParseFloat(raw, 64)
-		if err != nil || v <= 0 || math.IsNaN(v) || math.IsInf(v, 0) {
-			return Config{}, errors.New("YAKKA_REVIEW_USD_CAP must be a positive number")
-		}
-		c.ReviewUSDCap = v
-	}
-	c.ReviewRepositories = map[string]bool{}
-	for _, entry := range strings.Split(getenv("YAKKA_REVIEW_REPOS"), ",") {
-		entry = strings.TrimSpace(entry)
-		if entry == "" {
-			continue
-		}
-		parts := strings.SplitN(entry, "/", 2)
-		if len(parts) != 2 || !tenantRE.MatchString(parts[0]) || strings.TrimSpace(parts[1]) == "" || strings.ContainsAny(parts[1], "\r\n\x00") {
-			return Config{}, errors.New("YAKKA_REVIEW_REPOS entries must be <tenant>/<repo_id>")
-		}
-		c.ReviewRepositories[parts[0]+"/"+strings.TrimSpace(parts[1])] = true
-	}
 	if c.Addr == "" {
 		c.Addr = "127.0.0.1:8770"
 	}
@@ -311,19 +287,16 @@ func New(cfg Config, opts Options) *Server {
 	}
 	s := &Server{cfg: cfg, opts: opts, registry: reg, mcpTools: mcpTools, mcpDiscovery: newMCPDiscoveryLimits(), grants: newDeviceGrants(), tenants: map[string]*tenantState{}, gates: map[string]*sync.RWMutex{}, stop: make(chan struct{}), screen: opts.ScreenStep}
 	// A review tool is advertised only when its declared 150-second contract
-	// fits this server's configured MCP call ceiling and review is configured.
-	// This keeps an unavailable optional capability out of minimal/local servers.
-	if cfg.ReviewModel != "" && mcpTools.maxCall >= 150 {
+	// fits this server's configured MCP call ceiling, a token is configured and
+	// the server is authenticated remote mode.
+	if cfg.ReviewToken != "" && !cfg.Local() && mcpTools.maxCall >= 150 {
 		if err := s.RegisterReviewMCPTool(); err != nil {
 			panic("serve: review MCP tool: " + err.Error())
 		}
 	}
 	s.reviewReservations = opts.ReviewReservations
 	if s.reviewReservations == nil {
-		reservations, err := review.NewPersistentReservations(cfg.ReviewUSDCap, 2, filepath.Join(cfg.Data, "review-reservations.json"))
-		if err != nil {
-			reservations = review.NewUnavailableReservations()
-		}
+		reservations, _ := review.NewPersistentReservations(2, filepath.Join(cfg.Data, "review-reservations.json"))
 		s.reviewReservations = reservations
 	}
 	s.ctx, s.cancel = context.WithCancel(context.Background())
@@ -761,7 +734,7 @@ func (s *Server) auth(h tenantHandler) http.HandlerFunc {
 }
 
 func (s *Server) reviewAvailability() review.Availability {
-	return review.Availability{Token: s.cfg.ReviewToken, Model: s.cfg.ReviewModel, Effort: s.cfg.ReviewEffort, USDCap: s.cfg.ReviewUSDCap, Repositories: s.cfg.ReviewRepositories, Local: s.cfg.Local()}
+	return review.Availability{Token: s.cfg.ReviewToken, Local: s.cfg.Local()}
 }
 
 func (s *Server) reviewsRoute(w http.ResponseWriter, r *http.Request) {
