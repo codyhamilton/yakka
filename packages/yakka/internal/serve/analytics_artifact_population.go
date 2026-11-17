@@ -335,6 +335,14 @@ func (s *Server) analyticsArtifactEntities(w http.ResponseWriter, r *http.Reques
 	if !ok {
 		return
 	}
+	// The writing session's model lens is named session_model; model= stays its alias.
+	if values := q["session_model"]; len(values) > 0 {
+		f.Models = append(f.Models, values...)
+	}
+	if values := f.Excludes["session_model"]; len(values) > 0 {
+		f.Excludes["model"] = append(f.Excludes["model"], values...)
+		delete(f.Excludes, "session_model")
+	}
 
 	checks, err := s.artifactChecks(r.Context(), ts.t)
 	if err != nil {

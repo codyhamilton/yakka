@@ -178,6 +178,22 @@ func tooWide(from, to time.Time, weeks bool) bool {
 	return int(b.Sub(a).Hours()/24)+1 > maxBuckets
 }
 
+// publishedFilterNames is the exclude dimension whitelist, derived from the same scope-filter
+// table /schema publishes (store.CohortGrainFilters). A dynamic band:<check> lens contributes
+// its base band dimension because exclude=<name>:<value> cuts at the first colon.
+func publishedFilterNames() map[string]bool {
+	out := map[string]bool{}
+	for _, grain := range []string{"session", "artifact", "content", "execution", "plan", "time"} {
+		for _, name := range store.CohortGrainFilters(grain) {
+			if strings.HasSuffix(name, ":<check>") {
+				name = strings.TrimSuffix(name, ":<check>")
+			}
+			out[name] = true
+		}
+	}
+	return out
+}
+
 type filterOpts struct {
 	weeks      bool    // count the cap in ISO weeks
 	scoresKind bool    // exactly one kind required
@@ -247,7 +263,7 @@ func parseFilter(w http.ResponseWriter, r *http.Request, o filterOpts) (store.An
 		return f, false
 	}
 	excludes := map[string][]string{}
-	allowedExclude := map[string]bool{"repo_id": true, "harness": true, "kind": true, "plan": true, "norm_event": true, "event": true, "tool": true, "model": true, "source": true, "conversation_id": true, "stage": true}
+	allowedExclude := publishedFilterNames()
 	for _, item := range q["exclude"] {
 		dim, value, ok := strings.Cut(item, ":")
 		if !ok || !allowedExclude[dim] || value == "" {

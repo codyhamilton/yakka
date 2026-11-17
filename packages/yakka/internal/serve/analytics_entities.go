@@ -1,6 +1,8 @@
 package serve
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
 	"math"
 	"net/http"
@@ -556,6 +558,122 @@ func (s *Server) analyticsPlanDetail(w http.ResponseWriter, r *http.Request, ts 
 	writeJSON(w, 200, out)
 }
 
+// sessionLensFilter carries the session route's lens filters. On this route only, harness,
+// session_model and session_repo name the lifetime-derived values the entity row returns, not
+// the fact-level dimensions legacy routes keep; model= is session_model's alias and id names the
+// conversation identity.
+type sessionLensFilter struct {
+	include map[string][]string
+	exclude map[string][]string
+}
+
+func sessionLensFilterFor(q map[string][]string, f store.AnalyticsFilter) sessionLensFilter {
+	l := sessionLensFilter{include: map[string][]string{}, exclude: map[string][]string{}}
+	add := func(dst map[string][]string, lens string, values []string) {
+		for _, value := range values {
+			if value != "" {
+				dst[lens] = append(dst[lens], value)
+			}
+		}
+	}
+	add(l.include, "harness", q["harness"])
+	add(l.include, "session_model", q["session_model"])
+	add(l.include, "session_model", q["model"])
+	add(l.include, "session_repo", q["session_repo"])
+	add(l.include, "id", q["id"])
+	add(l.exclude, "harness", f.Excludes["harness"])
+	add(l.exclude, "session_model", f.Excludes["session_model"])
+	add(l.exclude, "session_model", f.Excludes["model"])
+	add(l.exclude, "session_repo", f.Excludes["session_repo"])
+	add(l.exclude, "id", f.Excludes["id"])
+	return l
+}
+
+func (l sessionLensFilter) active() bool { return len(l.include) > 0 || len(l.exclude) > 0 }
+
+func (l sessionLensFilter) match(id string, p store.SessionProvenance) bool {
+	values := map[string]string{"harness": p.Harness, "session_model": p.Model, "session_repo": p.Repo, "id": id}
+	for lens, allowed := range l.include {
+		if !containsValue(allowed, values[lens]) {
+			return false
+		}
+	}
+	for lens, denied := range l.exclude {
+		if containsValue(denied, values[lens]) {
+			return false
+		}
+	}
+	return true
+}
+
+// sessionLensPage filters a lens-scoped session population after the lifetime provenance read,
+// then applies the keyset cursor and page limit in the same order the SQL route uses.
+func sessionLensPage(ctx context.Context, t *store.Tenant, f store.AnalyticsFilter, sortBy string, desc bool, cur *cursor, limit int, lens sessionLensFilter) ([]store.SessionEntityRow, bool, map[string]store.SessionProvenance, int, error) {
+	memberFilter := f
+	memberFilter.Harnesses = nil
+	memberFilter.Models = nil
+	memberFilter.ConversationIDs = append(append([]string{}, f.ConversationIDs...), lens.include["id"]...)
+	memberFilter.Excludes = map[string][]string{}
+	for dim, values := range f.Excludes {
+		switch dim {
+		case "harness", "model", "session_model", "session_repo", "id":
+		default:
+			memberFilter.Excludes[dim] = values
+		}
+	}
+
+	var filtered []store.SessionEntityRow
+	prov := map[string]store.SessionProvenance{}
+	var sc *store.ConvCursor
+	for {
+		page, more, err := t.SessionEntitiesPage(ctx, memberFilter, sortBy, desc, sc, 500)
+		if err != nil {
+			return nil, false, nil, 0, err
+		}
+		ids := make([]string, len(page))
+		for i := range page {
+			ids[i] = page[i].ID
+		}
+		pageProv, err := t.SessionProvenanceFor(ctx, ids)
+		if err != nil {
+			return nil, false, nil, 0, err
+		}
+		for _, row := range page {
+			if lens.match(row.ID, pageProv[row.ID]) {
+				filtered = append(filtered, row)
+				prov[row.ID] = pageProv[row.ID]
+			}
+		}
+		if !more {
+			break
+		}
+		last := page[len(page)-1]
+		sc = &store.ConvCursor{TS: last.Measures[sortBy], ConversationID: last.ID}
+	}
+	count := len(filtered)
+	if cur != nil {
+		start := 0
+		for start < len(filtered) {
+			value, id := filtered[start].Measures[sortBy], filtered[start].ID
+			after := value < cur.TS || (value == cur.TS && id > firstKey(cur.Key))
+			if !desc {
+				after = value > cur.TS || (value == cur.TS && id > firstKey(cur.Key))
+			}
+			if after {
+				break
+			}
+			start++
+		}
+		filtered = filtered[start:]
+	}
+	more := false
+	if len(filtered) > limit {
+		filtered = filtered[:limit]
+		more = true
+	}
+	return filtered, more, prov, count, nil
+}
+
 func (s *Server) analyticsSessionEntities(w http.ResponseWriter, r *http.Request, ts *tenantState) {
 	q := r.URL.Query()
 	mode := q.Get("mode")
@@ -610,28 +728,41 @@ func (s *Server) analyticsSessionEntities(w http.ResponseWriter, r *http.Request
 		errJSON(w, 400, "cursor mismatch")
 		return
 	}
-	count, err := ts.t.ConversationCount(r.Context(), f)
-	if err != nil {
-		readFailed(w)
-		return
-	}
-	var sc *store.ConvCursor
-	if cur != nil {
-		sc = &store.ConvCursor{TS: cur.TS, ConversationID: firstKey(cur.Key)}
-	}
-	page, more, err := ts.t.SessionEntitiesPage(r.Context(), f, sortBy, desc, sc, limit)
-	if err != nil {
-		readFailed(w)
-		return
-	}
-	ids := make([]string, len(page))
-	for i := range page {
-		ids[i] = page[i].ID
-	}
-	prov, err := ts.t.SessionProvenanceFor(r.Context(), ids)
-	if err != nil {
-		readFailed(w)
-		return
+	lens := sessionLensFilterFor(q, f)
+	var page []store.SessionEntityRow
+	var more bool
+	var prov map[string]store.SessionProvenance
+	var count int
+	if lens.active() {
+		page, more, prov, count, err = sessionLensPage(r.Context(), ts.t, f, sortBy, desc, cur, limit, lens)
+		if err != nil {
+			readFailed(w)
+			return
+		}
+	} else {
+		count, err = ts.t.ConversationCount(r.Context(), f)
+		if err != nil {
+			readFailed(w)
+			return
+		}
+		var sc *store.ConvCursor
+		if cur != nil {
+			sc = &store.ConvCursor{TS: cur.TS, ConversationID: firstKey(cur.Key)}
+		}
+		page, more, err = ts.t.SessionEntitiesPage(r.Context(), f, sortBy, desc, sc, limit)
+		if err != nil {
+			readFailed(w)
+			return
+		}
+		ids := make([]string, len(page))
+		for i := range page {
+			ids[i] = page[i].ID
+		}
+		prov, err = ts.t.SessionProvenanceFor(r.Context(), ids)
+		if err != nil {
+			readFailed(w)
+			return
+		}
 	}
 	rows := make([]map[string]any, 0, len(page))
 	for _, row := range page {
@@ -985,6 +1116,7 @@ func (s *Server) analyticsTimeEntities(w http.ResponseWriter, r *http.Request, t
 		return
 	}
 	grid := map[string]map[string]float64{}
+	ignored := map[string]bool{}
 	for _, measure := range fields {
 		res, err := ts.t.Query(r.Context(), f, store.QueryParams{Measure: measure, Bucket: bucket, Top: 100})
 		if err != nil {
@@ -994,6 +1126,9 @@ func (s *Server) analyticsTimeEntities(w http.ResponseWriter, r *http.Request, t
 				readFailed(w)
 			}
 			return
+		}
+		for _, name := range res.Ignored {
+			ignored[name] = true
 		}
 		for _, row := range res.Rows {
 			if grid[row.T] == nil {
@@ -1020,7 +1155,32 @@ func (s *Server) analyticsTimeEntities(w http.ResponseWriter, r *http.Request, t
 		}
 		rows = append(rows, map[string]any{"id": map[string]any{"t": k, "tz": fTZ(f)}, "m": m, "l": map[string]any{}, "flags": map[string]any{}})
 	}
-	writeJSON(w, 200, map[string]any{"grain": "time", "bucket": bucket, "fields": fields, "rows": rows, "population": map[string]any{"grain": "time", "unit": "bucket", "scope_n": len(rows), "cohort_n": len(rows), "eligible_n": len(rows), "returned_n": len(rows), "missing_by_reason": map[string]int{}}, "window": window})
+	if include, exclude := q["id"], f.Excludes["id"]; len(include) > 0 || len(exclude) > 0 {
+		kept := rows[:0]
+		for _, row := range rows {
+			id := timeBucketID(row["id"].(map[string]any))
+			if len(include) > 0 && !containsValue(include, id) || containsValue(exclude, id) {
+				continue
+			}
+			kept = append(kept, row)
+		}
+		rows = kept
+	}
+	out := map[string]any{"grain": "time", "bucket": bucket, "fields": fields, "rows": rows, "population": map[string]any{"grain": "time", "unit": "bucket", "scope_n": len(rows), "cohort_n": len(rows), "eligible_n": len(rows), "returned_n": len(rows), "missing_by_reason": map[string]int{}}, "window": window}
+	if len(ignored) > 0 {
+		names := make([]string, 0, len(ignored))
+		for name := range ignored {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		out["ignored_filters"] = names
+	}
+	writeJSON(w, 200, out)
+}
+
+func timeBucketID(id map[string]any) string {
+	raw, _ := json.Marshal(id)
+	return string(raw)
 }
 
 func fTZ(f store.AnalyticsFilter) string {
