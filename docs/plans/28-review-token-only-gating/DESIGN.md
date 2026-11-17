@@ -249,9 +249,20 @@ None blocking. Whether the unit and PR tiers will be needed is answered by Phase
 ### Phase 3 — garcia-music manifest of at least 300 eligible cases
 
 - Outcome: `cli.py manifest --repo <full clone of codyhamilton/garcia-music> --expected-repository codyhamilton/garcia-music --history-profile garcia-music-workflow --seed <n> --output <local path>` verifies a non-shallow, object-complete clone and writes a frozen, hashed manifest whose `cases` number at least 300 (at most 360; below 300 the phase is not closed), every case carrying `tier`, `base_sha`, `head_sha`, a non-empty capture, criteria from `DESIGN.md` at `base_sha`, at least one cited recorded review outcome, a `later_fixes` list (possibly empty) with `censored` set where the window is open, and no commit in two cases; it records per-tier eligible counts and an exclusion count for every ineligible candidate reason; a fixture suite built from synthetic repos covers each tier, censoring, base-criteria leak avoidance, and a shortfall under 300 reported rather than padded; running against the real clone reports the actual counts. Nothing from the clone is committed.
-- Surfaces: `tools/shadow-review-trial/{manifest.py,cli.py,test_manifest.py}`, a new history-profile module and fixtures in the same folder, the capture import path (Plan 27 location), `.gitignore` for the local trial data directory.
+- Surfaces: `tools/shadow-review-trial/{manifest.py,cli.py,test_manifest.py,test_phase7.py}` (the last for the fixture update the new eligibility requires), a new history-profile module, extractor and fixture modules in the same folder, the capture import path (Plan 27 location), `.gitignore` for the local trial data directory.
 - Approach: open — extracting findings, verdicts, phase boundaries and later fixes from garcia-music's heterogeneous markdown and commit conventions has no settled method. Yardsticks are the real count and a hand-checked sample of 30 cases whose outcome citations and fix attributions must all resolve to the cited blobs/commits. Bound: two candidate extractors are built and compared; if neither reaches 300 after the tier fallback the phase stops and reports.
+- Declared approach (invoker, recorded at refinement): build and compare two candidate extractors; freeze at most 360 eligible cases with a floor of 300; never pad. If neither candidate reaches 300 after the phase → unit → PR tier fallback, the phase stops and reports the per-tier counts and blockers; it does not invent or pad cases.
 - Depends on: nothing (sequenced after Phase 2 only because both edit `cli.py`; it is independent of Phase 1)
+- Units:
+
+| Unit | Brief | Depends on | Runs alongside |
+|---|---|---|---|
+| 1 — Manifest contract, history profile and candidate accounting | `briefs/phase3-01-manifest-contract.md` | nothing | nothing |
+| 2 — Candidate extractor A (trailer- and commit-driven) | `briefs/phase3-02-extractor-a.md` | 1 | 3 |
+| 3 — Candidate extractor B (document- and report-driven) | `briefs/phase3-03-extractor-b.md` | 1 | 2 |
+| 4 — Compare candidates, integrate and gate eligibility | `briefs/phase3-04-compare-integrate.md` | 1, 2, 3 | nothing |
+| 5 — Real-clone freeze at the 300 floor | `briefs/phase3-05-real-freeze.md` | 4 | nothing |
+| 6 — Independent manifest verification and 30-case hand-check | `briefs/phase3-06-verify-manifest.md` | 5 | nothing |
 
 ### Phase 4 — Comparison and validation report
 

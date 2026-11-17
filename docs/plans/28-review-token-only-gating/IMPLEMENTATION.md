@@ -66,4 +66,4 @@ Artifact feedback: all three briefs and all three reports `delivered`, screen pa
 
 Run: OpenCode `opencode run` — model `opencode-go/deepseek-v4.1-flash`; start 2026-11-18 04:39 AEST. Phase is `approach: open`; the invoker declares its approach as two candidate extractors compared, freezing at most 360 eligible with a 300 floor and no padding.
 
-Units: TBD by refine.
+Units: `phase3-01-manifest-contract`, `phase3-02-extractor-a`, `phase3-03-extractor-b`, `phase3-04-compare-integrate`, `phase3-05-real-freeze`, `phase3-06-verify-manifest`. Wave 1: 01. Wave 2: 02 and 03 in parallel. Wave 3: 04. Wave 4: 05. Wave 5: 06 (fresh verifier).
