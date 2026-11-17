@@ -3,3 +3,4 @@
 __pycache__/
 .scratch/
 output/
+tools/shadow-review-trial/.trial-data/

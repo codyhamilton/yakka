@@ -2,7 +2,6 @@
 import hashlib
 import importlib.util
 import json
-import os
 import pathlib
 import subprocess
 import sys
@@ -21,7 +20,7 @@ def git(repo, *args):
 
 class ManifestFixtures(unittest.TestCase):
     def setUp(self):
-        tmp_root = pathlib.Path(os.environ.get("TMPDIR", ROOT))
+        tmp_root = ROOT / ".scratch"
         tmp_root.mkdir(parents=True, exist_ok=True)
         self.tmp = tempfile.TemporaryDirectory(dir=tmp_root)
         self.repo = pathlib.Path(self.tmp.name) / "repo"
@@ -37,8 +36,10 @@ class ManifestFixtures(unittest.TestCase):
         git(self.repo, "add", ".")
         git(self.repo, "commit", "-qm", "base")
         self.base = git(self.repo, "rev-parse", "HEAD")
+        self.branch = git(self.repo, "rev-parse", "--abbrev-ref", "HEAD")
         (self.repo / "code.py").write_text("base = 2\n")
-        git(self.repo, "add", "code.py")
+        (self.repo / "docs/plans/demo/DESIGN.md").write_text("# Criteria amended at head, not base\n")
+        git(self.repo, "add", "code.py", "docs/plans/demo/DESIGN.md")
         git(self.repo, "commit", "-qm", "reviewed change\n\nYakka-Plan: docs/plans/demo\nYakka-Phase: llm-review-shadow:6")
         self.head = git(self.repo, "rev-parse", "HEAD")
         (self.repo / "code.py").write_text("base = 3\n")
@@ -60,39 +61,46 @@ class ManifestFixtures(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
-    def test_freeze_capture_criteria_shortages_and_seeded_order(self):
+    def test_freeze_capture_base_criteria_tiers_and_seeded_order(self):
         frozen = manifest.create_manifest(self.repo, self.out, seed=19, target=50, expected_repository=self.identity)
         case = next(c for c in frozen["cases"] if c["head_sha"] == self.head)
         self.assertTrue(case["eligible"], case["eligibility_reason"])
+        self.assertEqual(case["tier"], "phase")
         self.assertEqual(case["base_sha"], self.base)
         self.assertEqual(case["capture"]["base"], case["base_sha"])
         self.assertEqual(case["capture"]["resolved_head"], case["head_sha"])
         self.assertEqual(case["capture"]["diff_sha256"], hashlib.sha256(case["capture"]["diff"].encode()).hexdigest())
         self.assertNotIn("created after phase head", case["capture"]["diff"])
-        self.assertEqual(case["criteria"]["source"], "head_blob")
-        self.assertEqual(case["criteria"]["content_hash"], git(self.repo, "rev-parse", f"{self.head}:docs/plans/demo/DESIGN.md"))
+        self.assertEqual(case["criteria"]["source"], "base_blob")
+        self.assertEqual(case["criteria"]["content_hash"], git(self.repo, "rev-parse", f"{self.base}:docs/plans/demo/DESIGN.md"))
+        self.assertNotEqual(case["criteria"]["content_hash"], git(self.repo, "rev-parse", f"{self.head}:docs/plans/demo/DESIGN.md"))
         self.assertEqual(case["build_models"]["source"], "unknown")
-        self.assertNotIn("docs/plans/demo/IMPLEMENTATION.md", case["capture"]["diff"])
-        self.assertNotIn("docs/plans/demo/REVIEW.md", case["capture"]["diff"])
-        self.assertEqual(frozen["shortages"]["high"]["eligible_shortfall"], 48)
-        self.assertEqual(frozen["shortages"]["max"]["eligible_shortfall"], 48)
-        self.assertEqual(frozen["shortages"]["xhigh"]["eligible_shortfall"], 48)
+        self.assertEqual(frozen["target"], 50)
+        self.assertEqual(frozen["floor"], 300)
+        self.assertEqual(frozen["shortfall_against_floor"], 300 - len(frozen["cases"]))
         self.assertEqual(frozen["settings"]["shared_case_set"], True)
         self.assertEqual(frozen["settings"]["non_effort"]["kind"], "range")
         self.assertEqual(frozen["settings"]["non_effort"]["review_profile"], "historical_trial")
-        self.assertEqual(frozen["strata"]["phase"]["eligible"], 1)
-        self.assertEqual(frozen["strata"]["pr"]["eligible"], 1)
-        self.assertEqual(frozen["strata"]["unaccompanied"]["eligible"], 0)
-        unaccompanied = next(c for c in frozen["candidates"] if c["stratum"] == "unaccompanied" and c["head_sha"] != self.base)
+        self.assertEqual(frozen["tiers"]["phase"]["eligible"], 1)
+        self.assertEqual(frozen["tiers"]["unit"]["eligible"], 0)
+        self.assertEqual(frozen["tiers"]["pr"]["eligible"], 1)
+        self.assertEqual(sum(tier["frozen"] for tier in frozen["tiers"].values()), len(frozen["cases"]))
+        self.assertEqual(sum(frozen["exclusions"].values()), frozen["excluded_total"])
+        self.assertEqual(frozen["excluded_total"] + sum(tier["eligible"] for tier in frozen["tiers"].values()),
+                         len(frozen["candidates"]))
+        unaccompanied = next(c for c in frozen["candidates"]
+                             if c["tier"] is None and c["head_sha"] not in {self.base, self.head, self.pr_head})
         self.assertFalse(unaccompanied["eligible"])
-        self.assertEqual(unaccompanied["eligibility_reason"], "criteria_unavailable")
+        self.assertEqual(unaccompanied["eligibility_reason"], "no_tier")
         pr_case = next(c for c in frozen["cases"] if c["head_sha"] == self.pr_head)
+        self.assertEqual(pr_case["tier"], "pr")
         self.assertTrue(all("IMPLEMENTATION.md" not in p for p in pr_case["comparator_pointers"]))
         self.assertTrue(any("REVIEW.md" in p for p in pr_case["comparator_pointers"]))
         self.assertNotIn("docs/plans/demo/REVIEW.md", pr_case["capture"]["diff"])
         self.assertFalse(frozen["history"]["shallow"])
         self.assertTrue(frozen["history"]["object_complete"])
         self.assertEqual(frozen["history"]["enumerated_commits"], frozen["history"]["verified_count"])
+        self.assertTrue(frozen["history"]["enumerated_refs"])
         persisted = json.loads(self.out.read_text())
         self.assertEqual(persisted["run_order"], frozen["run_order"])
         with self.assertRaises(manifest.ManifestFrozenError):
@@ -133,11 +141,78 @@ class ManifestFixtures(unittest.TestCase):
         frozen = manifest.create_manifest(self.repo, self.out, seed=2, target=50, expected_repository=self.identity)
         for head, number in phase_heads:
             case = next(c for c in frozen["cases"] if c["head_sha"] == head)
-            self.assertEqual(case["stratum"], "phase")
+            self.assertEqual(case["tier"], "phase")
             self.assertEqual(case["plan"], "demo")
             self.assertEqual(case["phase"], number)
-            self.assertEqual(case["criteria"]["source"], "head_blob")
+            self.assertEqual(case["criteria"]["source"], "base_blob")
             self.assertTrue(any("IMPLEMENTATION.md" in pointer for pointer in case["comparator_pointers"]))
+
+    def test_three_tiers_with_overlapping_heads_never_repeat_a_case(self):
+        git(self.repo, "checkout", "-q", self.branch)
+        reports = self.repo / "docs/plans/demo/reports"
+        reports.mkdir(parents=True)
+        (reports / "unit-1.md").write_text("# Unit handoff\n")
+        (self.repo / "code.py").write_text("base = 5\n")
+        git(self.repo, "add", "code.py", "docs/plans/demo/reports/unit-1.md")
+        git(self.repo, "commit", "-qm", "land unit one")
+        self.unit_head = git(self.repo, "rev-parse", "HEAD")
+        git(self.repo, "push", "-q", "origin", f"{self.unit_head}:refs/heads/unit")
+        git(self.repo, "fetch", "-q", "origin")
+
+        def extract(repo, profile, *, now):
+            data = {}
+            for line in git(repo, "rev-list", "--parents", "HEAD").splitlines():
+                sha, *parents = line.split()
+                base = parents[0] if parents else None
+                plan, phase, pr, tier = None, None, None, None
+                if sha == self.head:
+                    tier, plan, phase = "phase", "docs/plans/demo", 6
+                elif sha == self.unit_head:
+                    tier, plan, phase = "unit", "docs/plans/demo", 6
+                elif sha == self.pr_head:
+                    tier, plan, pr = "pr", "docs/plans/demo", "23"
+                data[sha] = {"tier": tier, "plan": plan, "phase": phase, "pr": pr, "base_sha": base,
+                             "outcomes": [], "later_fixes": [], "censored": False, "window_end": None}
+            return data
+
+        frozen = manifest.create_manifest(self.repo, self.out, seed=4, target=3,
+                                          expected_repository=self.identity, extractor=extract,
+                                          now="2026-01-01T00:00:00Z")
+        self.assertEqual(frozen["window_reference"], "2026-01-01T00:00:00Z")
+        self.assertEqual({case["tier"] for case in frozen["cases"]}, {"phase", "unit", "pr"})
+        case_ids = [case["case_id"] for case in frozen["cases"]]
+        self.assertEqual(len(case_ids), len(set(case_ids)))
+        self.assertEqual(sum(tier["frozen"] for tier in frozen["tiers"].values()), len(frozen["cases"]))
+        self.assertEqual(sum(frozen["exclusions"].values()), frozen["excluded_total"])
+        self.assertEqual(frozen["excluded_total"] + sum(tier["eligible"] for tier in frozen["tiers"].values()),
+                         len(frozen["candidates"]))
+        self.assertEqual(set(frozen["run_order"]), set(case_ids))
+
+    def test_shortfall_under_the_floor_is_reported_and_never_padded(self):
+        frozen = manifest.create_manifest(self.repo, self.out, seed=5, target=360, floor=300,
+                                          expected_repository=self.identity)
+        self.assertLess(len(frozen["cases"]), 300)
+        self.assertEqual(frozen["target"], 360)
+        self.assertEqual(frozen["floor"], 300)
+        self.assertEqual(frozen["shortfall_against_floor"], 300 - len(frozen["cases"]))
+        self.assertEqual(len(frozen["cases"]), sum(1 for c in frozen["candidates"] if c["eligible"]))
+
+    def test_history_enumerates_every_remote_ref_not_only_the_tip(self):
+        git(self.repo, "branch", "side", self.base)
+        git(self.repo, "checkout", "-q", "side")
+        (self.repo / "code.py").write_text("side = 1\n")
+        git(self.repo, "add", "code.py")
+        git(self.repo, "commit", "-qm", "side phase\n\nYakka-Phase: demo:9")
+        side_head = git(self.repo, "rev-parse", "HEAD")
+        git(self.repo, "push", "-q", "origin", "side:refs/heads/side")
+        git(self.repo, "fetch", "-q", "origin")
+        git(self.repo, "checkout", "-q", self.branch)
+
+        frozen = manifest.create_manifest(self.repo, self.out, seed=6, target=50, expected_repository=self.identity)
+        self.assertIn(side_head, {c["head_sha"] for c in frozen["candidates"]})
+        self.assertIn(f"refs/remotes/origin/side", frozen["history"]["enumerated_refs"])
+        self.assertEqual(len(frozen["candidates"]), frozen["history"]["enumerated_commits"])
+        self.assertEqual(frozen["history"]["enumerated_commits"], frozen["history"]["verified_count"])
 
     def test_cli_freezes_fixture_repository(self):
         output = pathlib.Path(self.tmp.name) / "cli-manifest.json"
@@ -146,6 +221,12 @@ class ManifestFixtures(unittest.TestCase):
                                  "--remote", "origin", "--expected-repository", self.identity],
                                 capture_output=True, text=True, check=True)
         self.assertIn('"eligible": 2', result.stdout)
+        summary = json.loads(result.stdout)
+        self.assertEqual(summary["target"], 360)
+        self.assertEqual(summary["floor"], 300)
+        self.assertEqual(summary["tiers"]["phase"]["frozen"], 1)
+        self.assertEqual(summary["tiers"]["pr"]["frozen"], 1)
+        self.assertIn("exclusions", summary)
         self.assertEqual(json.loads(output.read_text())["seed"], 7)
 
     def test_shallow_clone_from_complete_remote_is_unshallowed_and_frozen(self):

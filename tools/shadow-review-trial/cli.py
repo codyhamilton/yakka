@@ -99,12 +99,15 @@ def _parser():
     manifest.add_argument("--repo", type=pathlib.Path, default=pathlib.Path.cwd())
     manifest.add_argument("--output", type=pathlib.Path, required=True)
     manifest.add_argument("--seed", type=int, default=1)
-    manifest.add_argument("--target", type=int, default=50)
+    manifest.add_argument("--target", type=int, default=360)
+    manifest.add_argument("--floor", type=int, default=300)
     manifest.add_argument("--comparators", type=pathlib.Path)
     manifest.add_argument("--pr-export", type=pathlib.Path)
     manifest.add_argument("--remote", default="origin", help="configured Git remote to fetch and verify")
     manifest.add_argument("--expected-repository", default="codyhamilton/yakka",
                           help="expected remote repository identity (owner/repo or fixture path)")
+    manifest.add_argument("--history-profile", default="garcia-music-workflow",
+                          help="named repository history profile for trailers and plan layout")
 
     run = commands.add_parser("run", help="preflight or run a frozen historical trial")
     run.add_argument("--manifest", type=pathlib.Path, required=True)
@@ -139,11 +142,15 @@ def main(argv=None):
     args = parser.parse_args(argv)
     try:
         if args.command == "manifest":
-            frozen = create_manifest(args.repo, args.output, args.seed, args.target, args.comparators, args.pr_export,
-                                     remote=args.remote, expected_repository=args.expected_repository)
+            frozen = create_manifest(args.repo, args.output, seed=args.seed, target=args.target, floor=args.floor,
+                                     comparator_path=args.comparators, pr_export_path=args.pr_export,
+                                     remote=args.remote, expected_repository=args.expected_repository,
+                                     profile=args.history_profile)
             print(json.dumps({"manifest": str(args.output.resolve()), "manifest_sha256": frozen["manifest_sha256"],
                               "candidates": len(frozen["candidates"]), "eligible": len(frozen["cases"]),
-                              "shortages": frozen["shortages"]}, sort_keys=True))
+                              "target": frozen["target"], "floor": frozen["floor"], "tiers": frozen["tiers"],
+                              "exclusions": frozen["exclusions"],
+                              "shortfall_against_floor": frozen["shortfall_against_floor"]}, sort_keys=True))
         elif args.command == "run":
             client = TrialRunner(args.base_url, lambda: args.auth_token)
             summary = run_trial(args.manifest, args.ledger, client, args.reviewer_model,

@@ -124,7 +124,7 @@ def build_request(manifest: dict[str, Any], case: dict[str, Any], effort: str, d
     if cap["mode"] != "range" or cap["base"] != case.get("base_sha") or range_head != case.get("head_sha"):
         raise RunnerError(f"case {case['case_id']} capture differs from its frozen range")
     criteria = case.get("criteria")
-    if (not isinstance(criteria, dict) or criteria.get("source") not in {"head_blob", "explicit_text", "pinned"}
+    if (not isinstance(criteria, dict) or criteria.get("source") not in {"head_blob", "base_blob", "explicit_text", "pinned"}
             or not isinstance(criteria.get("text"), str) or not criteria["text"]
             or not criteria.get("content_hash")):
         raise RunnerError(f"case {case['case_id']} has no frozen criteria text and hash")
