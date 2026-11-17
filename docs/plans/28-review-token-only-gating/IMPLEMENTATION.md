@@ -32,3 +32,9 @@ $ git diff --check 34bb808..HEAD                                       # clean
 The Phase 1 outcome is exercised through its own entry points: MCP `tools/list` includes `review_change` with a token and omits it without; a token-less and a local-mode REST POST return `unavailable` with the stated reasons; a fake endpoint returns `ok` at model `claude-haiku-5-5` and effort `high`, with `xhigh`/`max` accepted and an invalid effort refused with no request or row; all four removed variables (including `USD_CAP=zero` and a malformed repo list) are ignored without a startup error; actual cost and token fields, `cost_known`, usage-bearing invalid output, null cost on usage-free failures, six uncapped calls, a third concurrent `skipped_busy`, v1/v2 reservations with spend, claims-only reset/delete residue, and dry-run ordering with no `estimated_usd` all pass. Runner addition: `TestReviewMCPRegistrationAvailability` now asserts the MCP `tools/list` observable in the committed suite, not only `mcpTool`.
 
 **Carried:** None.
+
+## Phase 2 — Trial tooling without spend gates
+
+Run: OpenCode `opencode run` — model `opencode-go/deepseek-v4.1-flash`; start 2026-11-18 04:16 AEST. Refined as 3 units (`7288e46`): wave 1 unit 1; wave 2 units 2 and 3.
+
+Units: `phase2-01-run-path`, `phase2-02-report-cost`, `phase2-03-readme`.
