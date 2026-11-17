@@ -222,6 +222,15 @@ None blocking. Whether the unit and PR tiers will be needed is answered by Phase
 - Surfaces: `packages/yakka/internal/serve/{serve.go,mcp_review.go,reviews_test.go,tenant_isolation_test.go,mcp_review_test.go}`; `packages/yakka/internal/review/{availability.go,orchestrator.go,availability_test.go,orchestrator_test.go}`; `packages/yakka/internal/store/{pricing.go,pricing_test.go,review_usage.go}`; `packages/yakka/internal/ingest/{ingest.go,ingest_test.go}` (status vocabulary, nullable cost); `packages/yakka/internal/serve/lifecycle_*_test.go` (residue and purge); `CHANGELOG.md`; `docs/design/{01,03,04,08}*.md`, `docs/design/system-architecture.md`, `docs/ARCHITECTURE.md`, `docs/OVERVIEW.md`, `fly.toml`, `tools/README.md`, `docs/plans/23-llm-review-shadow.md` (pointer).
 - Approach: known
 - Depends on: nothing
+- Units:
+
+| Unit | Brief | Depends on | Runs alongside |
+|---|---|---|---|
+| 1 — Token-only availability, durable claims and orchestration | `briefs/phase1-01-review-core.md` | nothing | 3, 5 |
+| 2 — Priced live model test and reservation-cost removal | `briefs/phase1-02-store-pricing.md` | 1 | 4 |
+| 3 — Ingest status vocabulary and nullable cost | `briefs/phase1-03-ingest-vocabulary.md` | nothing | 1, 5 |
+| 4 — Server wiring and claims-only lifecycle residue | `briefs/phase1-04-serve-wiring.md` | 1 | 2 |
+| 5 — Stable docs, changelog and Plan 23 pointer | `briefs/phase1-05-stable-docs.md` | nothing | 1, 3 |
 
 ### Phase 2 — Trial tooling without spend gates
 
