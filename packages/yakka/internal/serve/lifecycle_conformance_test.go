@@ -63,7 +63,6 @@ func TestLifecycleConformanceResetDeleteThroughHTTP(t *testing.T) {
 		reviewTestRow("conf-b", "conf-b", 20, nil),
 	})
 	before := lifecycleRecord(t, s, tg.tenant)
-	beforeTotal, _ := reservationSpent(t, s)
 	otherDigest := digestTree(t, filepath.Join(dir, other))
 
 	first := reviewPage(t, s, "/v1/reviews?limit=1", tg.key)
@@ -110,16 +109,14 @@ func TestLifecycleConformanceResetDeleteThroughHTTP(t *testing.T) {
 		t.Fatal("reset left a device grant")
 	}
 	if s.reviewReservations.TenantResidue(tg.tenant) || !s.reviewReservations.TenantResidue(other) {
-		t.Fatal("reset claim/spend attribution is wrong")
+		t.Fatal("reset claim attribution is wrong")
 	}
-	afterTotal, attributed := reservationSpent(t, s)
-	if afterTotal != beforeTotal {
-		t.Fatalf("provider-wide exposure changed: %v -> %v", beforeTotal, afterTotal)
+	claims, hasSpent := reservationClaims(t, s)
+	if claims[tg.tenant] != 0 || claims[other] == 0 {
+		t.Fatalf("saved claims after reset=%v", claims)
 	}
-	for _, tenant := range attributed {
-		if tenant == tg.tenant {
-			t.Fatalf("reset left attributed spend: %v", attributed)
-		}
+	if hasSpent {
+		t.Fatal("reset left the spend array in the saved reservations")
 	}
 	if got := digestTree(t, filepath.Join(dir, other)); got != otherDigest {
 		t.Fatal("reset changed the other tenant's bytes")
@@ -413,7 +410,6 @@ func TestLifecycleConformanceCrashRestartExactlyOnce(t *testing.T) {
 			seedTenantReservations(t, s1, map[string]float64{a: 1.5, other: 2.5})
 			approveGrant(t, s1, "crash-a", a)
 			before := lifecycleRecord(t, s1, a)
-			beforeTotal, _ := reservationSpent(t, s1)
 
 			rec := httptest.NewRecorder()
 			h.ServeHTTP(rec, conformanceLifecycleRequest(origin, sess, http.MethodPost, a, "reset"))
@@ -444,14 +440,12 @@ func TestLifecycleConformanceCrashRestartExactlyOnce(t *testing.T) {
 			if _, err := os.Stat(filepath.Join(dir, a)); !os.IsNotExist(err) {
 				t.Fatalf("resume left the directory: %v", err)
 			}
-			total2, attributed := reservationSpent(t, s2)
-			if total2 != beforeTotal {
-				t.Fatalf("resume changed provider-wide exposure: %v -> %v", beforeTotal, total2)
+			claims2, spent2 := reservationClaims(t, s2)
+			if claims2[a] != 0 || claims2[other] == 0 {
+				t.Fatalf("resume claim attribution=%v", claims2)
 			}
-			for _, tenant := range attributed {
-				if tenant == a {
-					t.Fatalf("resume left attributed spend: %v", attributed)
-				}
+			if spent2 {
+				t.Fatal("resume left the spend array in the saved reservations")
 			}
 			if got := digestTree(t, filepath.Join(dir, other)); got != otherDigest {
 				t.Fatal("resume changed the other tenant's bytes")
@@ -463,11 +457,12 @@ func TestLifecycleConformanceCrashRestartExactlyOnce(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			// A second restart must not transfer the same spend again.
+			// A second restart must be a no-op for claims.
 			s3 := newLifecycleServer(dir, gh.URL, Options{})
 			defer s3.Close()
-			if total3, _ := reservationSpent(t, s3); total3 != beforeTotal {
-				t.Fatalf("second resume double-counted spend: %v -> %v", beforeTotal, total3)
+			claims3, spent3 := reservationClaims(t, s3)
+			if claims3[a] != 0 || claims3[other] != claims2[other] || spent3 {
+				t.Fatalf("second resume changed claims: %v -> %v", claims2, claims3)
 			}
 			if got := digestTree(t, filepath.Join(dir, other)); got != otherDigest {
 				t.Fatal("second resume changed the other tenant's bytes")

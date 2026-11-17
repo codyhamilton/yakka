@@ -186,6 +186,68 @@ func TestReviewRunAcceptanceValidationAndIdempotency(t *testing.T) {
 	}
 }
 
+func TestReviewRunStatusVocabulary(t *testing.T) {
+	tn := open(t)
+	base := map[string]any{"id": "r#0", "type": "review_run", "conversation_id": "review:abc", "repo_id": "repo",
+		"kind": "pr", "capture_id": "abc", "ts": 10}
+	for _, status := range []string{"skipped_busy", "skipped_budget", "skipped_duplicate"} {
+		f := map[string]any{}
+		for k, v := range base {
+			f[k] = v
+		}
+		f["id"], f["status"] = "s-"+status, status
+		got, err := IngestReviewRuns(context.Background(), tn, marshal(t, f))
+		if err != nil || got[0].Status != Accepted {
+			t.Fatalf("status %s = %+v, %v", status, got, err)
+		}
+	}
+}
+
+func TestReviewRunNullableCost(t *testing.T) {
+	tn := open(t)
+	ctx := context.Background()
+	base := func(id string) map[string]any {
+		return map[string]any{"id": id, "type": "review_run", "conversation_id": "review:abc",
+			"repo_id": "repo", "kind": "phase", "capture_id": "abc", "status": "api_error", "ts": 10}
+	}
+	unknown := base("c#0")
+	unknown["cost_usd"], unknown["cost_known"] = nil, false
+	if got, err := IngestReviewRuns(ctx, tn, marshal(t, unknown)); err != nil || got[0].Status != Accepted {
+		t.Fatalf("null cost = %+v, %v", got, err)
+	}
+	numeric := base("c#1")
+	numeric["cost_usd"] = 0.0018
+	if got, err := IngestReviewRuns(ctx, tn, marshal(t, numeric)); err != nil || got[0].Status != Accepted {
+		t.Fatalf("numeric cost = %+v, %v", got, err)
+	}
+	for name, mutate := range map[string]func(map[string]any){
+		"null without flag": func(m map[string]any) { m["cost_usd"] = nil },
+		"non-boolean flag":  func(m map[string]any) { m["cost_usd"] = nil; m["cost_known"] = "no" },
+		"non-number cost":   func(m map[string]any) { m["cost_usd"] = "cheap" },
+	} {
+		f := base("bad-" + name)
+		mutate(f)
+		if got, err := IngestReviewRuns(ctx, tn, marshal(t, f)); err != nil || got[0].Status != Rejected || !strings.HasPrefix(got[0].Reason, "invalid:") {
+			t.Fatalf("%s = %+v, %v", name, got, err)
+		}
+	}
+}
+
+func TestReviewUsageNullableCost(t *testing.T) {
+	tn := open(t)
+	ctx := context.Background()
+	unknown := usageFact("q#0")
+	unknown["cost_usd"], unknown["cost_known"] = nil, false
+	if got, err := IngestReviewUsage(ctx, tn, marshal(t, unknown)); err != nil || got[0].Status != Accepted {
+		t.Fatalf("null cost = %+v, %v", got, err)
+	}
+	bad := usageFact("q#1")
+	bad["usage_id"], bad["cost_usd"] = "usage-2", nil
+	if got, err := IngestReviewUsage(ctx, tn, marshal(t, bad)); err != nil || got[0].Status != Rejected || !strings.HasPrefix(got[0].Reason, "invalid:") {
+		t.Fatalf("null without flag = %+v, %v", got, err)
+	}
+}
+
 func usageFact(id string) map[string]any {
 	return map[string]any{"id": id, "type": "review_usage", "usage_id": "usage-1",
 		"configured_model": "claude-haiku-5-5", "returned_model": "claude-haiku-5-5-20261101",

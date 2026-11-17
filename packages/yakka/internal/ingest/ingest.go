@@ -126,6 +126,30 @@ func walk(v any, path string, top bool) string {
 	return ""
 }
 
+// validateCost enforces the Phase 1 nullable-cost encoding: cost_usd is a number or null, and a
+// null requires cost_known to be the boolean false. Older rows carry a number with no flag.
+func validateCost(obj map[string]any) string {
+	if v, ok := obj["cost_known"]; ok {
+		if _, isBool := v.(bool); !isBool {
+			return invalid("cost_known is not a boolean")
+		}
+	}
+	v, ok := obj["cost_usd"]
+	if !ok {
+		return ""
+	}
+	if v == nil {
+		if known, present := obj["cost_known"].(bool); !present || known {
+			return invalid("cost_usd null requires cost_known false")
+		}
+		return ""
+	}
+	if _, isNum := v.(json.Number); !isNum {
+		return invalid("cost_usd is not a number or null")
+	}
+	return ""
+}
+
 func validate(obj map[string]any) string {
 	typ, _ := str(obj, "type")
 	conv, _ := str(obj, "conversation_id")
@@ -179,9 +203,13 @@ func validate(obj map[string]any) string {
 		status, _ := str(obj, "status")
 		switch status {
 		case "ok", "ok_partial", "timeout", "api_error", "invalid_output", "unavailable",
-			"refused_capture", "refused_disclosure", "refused_criteria", "skipped_budget", "skipped_duplicate":
+			"refused_capture", "refused_disclosure", "refused_criteria", "skipped_budget", "skipped_duplicate",
+			"skipped_busy":
 		default:
 			return invalid("review_run has unknown status")
+		}
+		if r := validateCost(obj); r != "" {
+			return r
 		}
 	case "review_usage":
 		for _, k := range []string{"usage_id", "configured_model", "configured_effort", "requested_effort", "effective_effort", "status"} {
@@ -218,6 +246,9 @@ func validate(obj map[string]any) string {
 		case "ok", "ok_partial", "timeout", "api_error", "invalid_output", "unavailable":
 		default:
 			return invalid("review_usage has unknown status")
+		}
+		if r := validateCost(obj); r != "" {
+			return r
 		}
 	}
 	return ""

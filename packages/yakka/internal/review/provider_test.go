@@ -3,6 +3,7 @@ package review
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -73,6 +74,52 @@ func TestReviewerClassifiesProviderErrorsWithoutBody(t *testing.T) {
 				t.Fatalf("error = %v", err)
 			}
 		})
+	}
+}
+
+func TestReviewerInvalidOutputReportsUsageOnlyWhenPresent(t *testing.T) {
+	reply := func(body string) error {
+		t.Helper()
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusOK)
+			io.WriteString(w, body)
+		}))
+		t.Cleanup(server.Close)
+		_, err := NewReviewer("token", "claude-haiku-5-5", "high", server.URL).Review(context.Background(), testPacket(), nil)
+		return err
+	}
+	missing := reply(`{"model":"claude-haiku-5-5","content":[{"type":"text","text":"not json"}]}`)
+	var absent *ProviderError
+	if !errors.As(missing, &absent) || absent.Status != ProviderInvalid || absent.UsageReported || absent.InputTokens != 0 || absent.OutputTokens != 0 {
+		t.Fatalf("missing usage = %v", missing)
+	}
+	present := reply(`{"model":"claude-haiku-5-5","content":[],"usage":{"input_tokens":1000,"output_tokens":500}}`)
+	var reported *ProviderError
+	if !errors.As(present, &reported) || !reported.UsageReported || reported.InputTokens != 1000 || reported.OutputTokens != 500 {
+		t.Fatalf("reported usage = %v", present)
+	}
+}
+
+func TestRunInvalidOutputWithoutUsageIsUnknownCost(t *testing.T) {
+	tenant := reviewTenant(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		io.WriteString(w, `{"model":"claude-haiku-5-5","content":[{"type":"text","text":"not json"}]}`)
+	}))
+	defer srv.Close()
+	out, err := Run(context.Background(), tenant, "tenant", reviewRequest(true), availableConfig(srv.URL))
+	if err != nil || out.Status != "invalid_output" {
+		t.Fatalf("%+v %v", out, err)
+	}
+	rec := readReviewRecord(t, tenant)
+	if rec["cost_usd"] != nil || rec["cost_known"] != false {
+		t.Fatalf("cost=%v known=%v", rec["cost_usd"], rec["cost_known"])
+	}
+	attempts := recordAttempts(t, tenant)
+	if len(attempts) != 1 || attempts[0]["cost_known"] != false {
+		t.Fatalf("attempts=%v", attempts)
+	}
+	if _, ok := attempts[0]["cost_usd"]; ok {
+		t.Fatalf("unknown attempt carries cost: %v", attempts[0])
 	}
 }
 

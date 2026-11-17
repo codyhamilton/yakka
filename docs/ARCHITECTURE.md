@@ -75,16 +75,18 @@ design ──sign-off──▶ ┌ per phase, in the design's order ┐ ──�
 ## Advisory change review
 
 `review_change` is owned by the Go server: definition/schema, prompt and exclusion policy, stored
-brief or plan/phase criteria resolution, provider call, validation, spend limits and tenant-local
-records. It shares the `POST /v1/reviews` orchestrator. The Python shim alone captures a bounded,
+brief or plan/phase criteria resolution, provider call, validation, actual-cost recording and
+tenant-local records. It shares the `POST /v1/reviews` orchestrator. The Python shim alone captures a bounded,
 secret-scanned local diff and omission manifest through the declared `change` reader, in
 uncommitted or explicit Git range mode. The server rescans and alone holds the provider credential;
 machines use their existing Yakka login and need no provider key. The tool is `read_write`,
-`readOnlyHint:false`: its effect is server spend and record. Its declaration allows 150 seconds and
-no local actions. Registration requires review model configuration and a sufficient MCP timeout
-ceiling; source integration does not establish deployed availability. Per-call `effort`, `tags` and
-`store` are validated on the server; `YAKKA_REVIEW_EFFORT` is a high-only default that never caps a
-valid override. A completed `store=true` duplicate returns the earlier review in full, with
+`readOnlyHint:false`: its effect is a server-side provider call and record. Its declaration allows 150 seconds and
+no local actions. Registration requires a non-empty `CLAUDE_API_TOKEN` in authenticated remote mode
+and a sufficient MCP timeout ceiling of at least 150 seconds; source integration does not establish
+deployed availability. The model defaults to `claude-haiku-5-5` (optional `YAKKA_REVIEW_MODEL` override); any authenticated tenant's
+repo is reviewable, and `skipped_busy` reports the two-call per-tenant in-flight limit. Per-call
+`effort`, `tags` and `store` are validated on the server; effort defaults to `high` and is never
+capped by a setting. A completed `store=true` duplicate returns the earlier review in full, with
 `cached`, `original_review_id` and `original_status`, not fresh evidence; `store=false` skips dedupe
 and records, so `review_change` does not promise unconditional idempotency. The separate `read`-only
 `list_reviews` tool returns the same tenant-bound cursor pages as `GET /v1/reviews` and declares no
