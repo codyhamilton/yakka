@@ -313,7 +313,7 @@ func (s *Server) parseFilter(w http.ResponseWriter, r *http.Request, ts *tenantS
 			errCodeJSON(w, 400, "cohort_invalid", err.Error(), nil)
 			return f, false
 		}
-		sql, args, _, err := store.CohortSessionSubquery(cohort, s.cohortResolveOptions(ts))
+		sql, args, rel, err := store.CohortSessionSubquery(cohort, s.cohortResolveOptions(ts))
 		if err != nil {
 			code := "cohort_invalid"
 			if errors.Is(err, store.ErrUnsupportedJoin) {
@@ -324,6 +324,7 @@ func (s *Server) parseFilter(w http.ResponseWriter, r *http.Request, ts *tenantS
 		}
 		f.CohortSQL, f.CohortArgs = sql, args
 		f.CohortExclude = cohort.Definition.Op == "exclude"
+		f.CohortSourceGrain, f.CohortMapping, f.CohortOp = rel.SourceGrain, rel.Mapping, cohort.Definition.Op
 	}
 	if o.scoresKind && len(f.Kinds) != 1 {
 		errJSON(w, 400, "kind required")
@@ -488,6 +489,19 @@ func (s *Server) analyticsSummary(w http.ResponseWriter, r *http.Request, _ stri
 		"model_calls":      sm.ModelCalls, "unpriced_calls": sm.UnpricedCalls, "cost_usd": sm.CostUSD,
 		"tokens_in": sm.TokensIn, "tokens_out": sm.TokensOut, "tokens_cache_read": sm.TokensCacheRead,
 		"tokens_cache_write": sm.TokensCacheWrite, "tokens_reasoning": sm.TokensReasoning}
+	if f.CohortSQL != "" {
+		scopeN, cohortN, err := cohortSessionCounts(r.Context(), ts.t, f)
+		if err != nil {
+			readFailed(w)
+			return
+		}
+		rel, err := cohortRelation(r.Context(), ts.t, f, true, scopeN, cohortN, false)
+		if err != nil {
+			readFailed(w)
+			return
+		}
+		out["population"] = sessionPopulation(scopeN, cohortN, 0, rel)
+	}
 	addAnalyticsPartial(out, ts)
 	writeJSON(w, 200, out)
 }
@@ -561,6 +575,19 @@ func (s *Server) analyticsSeries(w http.ResponseWriter, r *http.Request, _ strin
 		list = []*entry{}
 	}
 	out := map[string]any{"bucket": bucket, "series": list}
+	if f.CohortSQL != "" {
+		scopeN, cohortN, err := cohortSessionCounts(r.Context(), ts.t, f)
+		if err != nil {
+			readFailed(w)
+			return
+		}
+		rel, err := cohortRelation(r.Context(), ts.t, f, metric == "rejections", scopeN, cohortN, false)
+		if err != nil {
+			readFailed(w)
+			return
+		}
+		out["population"] = sessionPopulation(scopeN, cohortN, 0, rel)
+	}
 	addAnalyticsPartial(out, ts)
 	writeJSON(w, 200, out)
 }
@@ -591,6 +618,14 @@ func (s *Server) analyticsScores(w http.ResponseWriter, r *http.Request, _ strin
 			"p75": round3(percentile(v, .75)), "max": round3(percentile(v, 1))})
 	}
 	resp := map[string]any{"kind": kind, "checks": out}
+	if f.CohortSQL != "" {
+		pop, err := contentPopulation(r.Context(), r, ts, f, kind)
+		if err != nil {
+			readFailed(w)
+			return
+		}
+		resp["population"] = pop
+	}
 	addAnalyticsPartial(resp, ts)
 	writeJSON(w, 200, resp)
 }
@@ -736,6 +771,14 @@ func (s *Server) analyticsScoresByLens(w http.ResponseWriter, r *http.Request, t
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i]["name"].(string) < out[j]["name"].(string) })
 	resp := map[string]any{"kind": kind, "dim": dim, "checks": out, "offset": offset, "limit": limit}
+	if f.CohortSQL != "" {
+		pop, err := contentPopulation(r.Context(), r, ts, f, kind)
+		if err != nil {
+			readFailed(w)
+			return
+		}
+		resp["population"] = pop
+	}
 	addAnalyticsPartial(resp, ts)
 	writeJSON(w, 200, resp)
 }
@@ -832,6 +875,22 @@ func (s *Server) analyticsExecutions(w http.ResponseWriter, r *http.Request, _ s
 		out = append(out, row{x.RepoID, x.Plan, x.ConversationID, x.BriefPath, x.Harness, x.Shape, rfc(x.TS)})
 	}
 	resp := map[string]any{"counts": cnt, "rows": out}
+	if f.CohortSQL != "" {
+		n := cnt["complete"] + cnt["unreported"] + cnt["started"]
+		scopeN, cohortN, err := cohortSessionCounts(r.Context(), ts.t, f)
+		if err != nil {
+			readFailed(w)
+			return
+		}
+		rel, err := cohortRelation(r.Context(), ts.t, f, false, scopeN, cohortN, true)
+		if err != nil {
+			readFailed(w)
+			return
+		}
+		resp["population"] = map[string]any{"grain": "execution", "unit": "repo_id,conversation_id,brief_path",
+			"scope_n": n, "cohort_n": n, "eligible_n": n, "returned_n": len(out),
+			"missing_by_reason": map[string]int{}, "relation": rel}
+	}
 	if bucket != "" {
 		series, err := ts.t.ExecutionsShapeSeries(r.Context(), f, bucket)
 		if err != nil {
@@ -900,6 +959,19 @@ func (s *Server) analyticsConversations(w http.ResponseWriter, r *http.Request, 
 			x.ModelCalls, x.UnpricedCalls, x.CostUSD, x.TokensIn, x.TokensOut})
 	}
 	resp := map[string]any{"rows": out}
+	if f.CohortSQL != "" {
+		scopeN, cohortN, err := cohortSessionCounts(r.Context(), ts.t, f)
+		if err != nil {
+			readFailed(w)
+			return
+		}
+		rel, err := cohortRelation(r.Context(), ts.t, f, false, scopeN, cohortN, false)
+		if err != nil {
+			readFailed(w)
+			return
+		}
+		resp["population"] = sessionPopulation(scopeN, cohortN, len(out), rel)
+	}
 	if more {
 		last := rows[len(rows)-1]
 		resp["next"] = cursor{Route: "conversations", Filter: canonFilter(r.URL.Query()), From: f.From.UnixNano(), To: f.To.UnixNano(),
@@ -969,6 +1041,19 @@ func (s *Server) analyticsExplore(w http.ResponseWriter, r *http.Request, _ stri
 	if more && next != nil {
 		resp["next"] = cursor{Route: "explore", Filter: canonFilter(r.URL.Query()), From: f.From.UnixNano(), To: f.To.UnixNano(),
 			TS: next.TS, NS: next.NS, Key: []string{next.Type, next.Key}, FactWatermark: next.FactWatermark, RejectionWatermark: next.RejectionWatermark}.encode()
+	}
+	if f.CohortSQL != "" {
+		scopeN, cohortN, err := cohortSessionCounts(r.Context(), ts.t, f)
+		if err != nil {
+			readFailed(w)
+			return
+		}
+		rel, err := cohortRelation(r.Context(), ts.t, f, true, scopeN, cohortN, false)
+		if err != nil {
+			readFailed(w)
+			return
+		}
+		resp["population"] = sessionPopulation(scopeN, cohortN, 0, rel)
 	}
 	addAnalyticsPartial(resp, ts)
 	writeJSON(w, 200, resp)

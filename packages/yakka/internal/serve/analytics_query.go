@@ -226,6 +226,19 @@ func (s *Server) analyticsQuery(w http.ResponseWriter, r *http.Request, _ string
 		out := map[string]any{"measure": measure, "bucket": bucket, "requested_bucket": requestedBucket,
 			"bucket_step": step, "coarsened": false, "cells": 0, "max_cells": cellBudget, "dims": nz(dims), "rows": []any{},
 			"window": window}
+		if f.CohortSQL != "" {
+			scopeN, cohortN, err := cohortSessionCounts(r.Context(), ts.t, f)
+			if err != nil {
+				readFailed(w)
+				return
+			}
+			rel, err := cohortRelation(r.Context(), ts.t, f, measure == "rejections", scopeN, cohortN, false)
+			if err != nil {
+				readFailed(w)
+				return
+			}
+			out["population"] = sessionPopulation(scopeN, cohortN, 0, rel)
+		}
 		addAnalyticsPartial(out, ts)
 		writeJSON(w, 200, out)
 		return
@@ -281,6 +294,19 @@ func (s *Server) analyticsQuery(w http.ResponseWriter, r *http.Request, _ string
 		"window": window}
 	if len(res.Ignored) > 0 {
 		out["ignored_filters"] = res.Ignored
+	}
+	if f.CohortSQL != "" {
+		scopeN, cohortN, err := cohortSessionCounts(r.Context(), ts.t, f)
+		if err != nil {
+			readFailed(w)
+			return
+		}
+		rel, err := cohortRelation(r.Context(), ts.t, f, measure == "rejections", scopeN, cohortN, false)
+		if err != nil {
+			readFailed(w)
+			return
+		}
+		out["population"] = sessionPopulation(scopeN, cohortN, 0, rel)
 	}
 	addAnalyticsPartial(out, ts)
 	if res.Truncated {

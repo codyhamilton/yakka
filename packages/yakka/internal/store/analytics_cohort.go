@@ -2,6 +2,7 @@ package store
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"database/sql/driver"
 	"encoding/hex"
@@ -1373,6 +1374,52 @@ type CohortRelation struct {
 	Distinct    bool   `json:"distinct"`
 	// ResolvedN reports that resolved_n is |C| before the target window, as 17.3.1 requires.
 	ResolvedN bool `json:"resolved_n_support"`
+}
+
+// CohortCount returns |C|: the distinct sessions the positive source predicate resolves to,
+// before the target window is applied. It counts inside SQL rather than materialising ids.
+func (t *Tenant) CohortCount(ctx context.Context, f AnalyticsFilter) (int, error) {
+	if f.CohortSQL == "" {
+		return 0, nil
+	}
+	var n int
+	err := t.rdb.QueryRowContext(ctx, "SELECT COUNT(*) FROM ("+f.CohortSQL+")", f.CohortArgs...).Scan(&n)
+	return n, err
+}
+
+// RejectionAssociation counts rejection-association outcomes in the filter's own scope. The
+// caller passes a filter with the cohort restriction cleared so total_n is before restriction.
+// A rejection is associated when its conversation id names a session (a conversation holding at
+// least one fact other than session_action), missing with no conversation id, and orphan with an
+// id naming no such session. Unassociated rows are never inner-joined away.
+type RejectionAssociation struct {
+	Total, Associated, NoConversationID, OrphanConversationID int
+}
+
+func (t *Tenant) RejectionAssociations(ctx context.Context, f AnalyticsFilter) (RejectionAssociation, error) {
+	var a RejectionAssociation
+	w, args := f.rejWhere()
+	q := `SELECT COUNT(*),
+		COALESCE(SUM(CASE WHEN r.conversation_id<>'' AND EXISTS (
+			SELECT 1 FROM facts x WHERE x.conversation_id=r.conversation_id AND x.type<>'session_action') THEN 1 ELSE 0 END),0),
+		COALESCE(SUM(CASE WHEN r.conversation_id='' THEN 1 ELSE 0 END),0),
+		COALESCE(SUM(CASE WHEN r.conversation_id<>'' AND NOT EXISTS (
+			SELECT 1 FROM facts x WHERE x.conversation_id=r.conversation_id AND x.type<>'session_action') THEN 1 ELSE 0 END),0)
+		FROM rejections r WHERE ` + w
+	err := t.rdb.QueryRowContext(ctx, q, args...).Scan(&a.Total, &a.Associated, &a.NoConversationID, &a.OrphanConversationID)
+	return a, err
+}
+
+// ContentHashCount returns the distinct in-scope content hashes of one artifact kind. It is the
+// content population of /scores and /score-series; the caller supplies the target-window filter.
+func (t *Tenant) ContentHashCount(ctx context.Context, f AnalyticsFilter, kind string) (int, error) {
+	f.Kinds = nil
+	w, args := f.factWhere()
+	a := append([]any{kind}, args...)
+	var n int
+	err := t.rdb.QueryRowContext(ctx, `SELECT count(DISTINCT content_hash) FROM facts
+		WHERE type='artifact_version' AND content_hash!='' AND kind=? AND `+w, a...).Scan(&n)
+	return n, err
 }
 
 func (n cohortNode) MarshalJSON() ([]byte, error) {

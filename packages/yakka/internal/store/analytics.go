@@ -101,8 +101,13 @@ type AnalyticsFilter struct {
 	CohortSQL     string
 	CohortArgs    []any
 	CohortExclude bool
-	SessionRanges []SessionRange
-	TZ            *time.Location // nil means UTC
+	// CohortSourceGrain, CohortMapping and CohortOp describe the resolved source mapping so
+	// responses can report population.relation without re-resolving the definition.
+	CohortSourceGrain string
+	CohortMapping     string
+	CohortOp          string
+	SessionRanges     []SessionRange
+	TZ                *time.Location // nil means UTC
 	// All is set for all=1 with no cursor. Handlers resolve From to retained coverage
 	// before choosing a bucket; the stored minimum is only the requested bound.
 	All bool

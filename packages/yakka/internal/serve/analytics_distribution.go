@@ -73,6 +73,19 @@ func (s *Server) analyticsDistribution(w http.ResponseWriter, r *http.Request, _
 	if len(res.IgnoredFilters) > 0 {
 		out["ignored_filters"] = res.IgnoredFilters
 	}
+	if f.CohortSQL != "" {
+		scopeN, cohortN, err := cohortSessionCounts(r.Context(), ts.t, f)
+		if err != nil {
+			readFailed(w)
+			return
+		}
+		rel, err := cohortRelation(r.Context(), ts.t, f, false, scopeN, cohortN, false)
+		if err != nil {
+			readFailed(w)
+			return
+		}
+		out["population"] = sessionPopulation(scopeN, cohortN, 0, rel)
+	}
 	addAnalyticsPartial(out, ts)
 	writeJSON(w, 200, out)
 }

@@ -663,6 +663,29 @@ func (s *Server) analyticsArtifactEntities(w http.ResponseWriter, r *http.Reques
 	for _, p := range populations {
 		p.(map[string]any)["returned_n"] = out["population"].(map[string]any)["returned_n"]
 	}
+	if f.CohortSQL != "" {
+		scopeN, cohortN, err := cohortSessionCounts(r.Context(), ts.t, f)
+		if err != nil {
+			readFailed(w)
+			return
+		}
+		rel, err := cohortRelation(r.Context(), ts.t, f, false, scopeN, cohortN, true)
+		if err != nil {
+			readFailed(w)
+			return
+		}
+		out["population"].(map[string]any)["relation"] = rel
+		for _, p := range populations {
+			p.(map[string]any)["relation"] = rel
+		}
+		if groups, ok := out["groups"].([]map[string]any); ok {
+			for _, g := range groups {
+				if p, ok := g["population"].(map[string]any); ok {
+					p["relation"] = rel
+				}
+			}
+		}
+	}
 	writeJSON(w, 200, out)
 }
 

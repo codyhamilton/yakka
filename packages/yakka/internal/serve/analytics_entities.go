@@ -319,7 +319,20 @@ func (s *Server) analyticsPlanEntities(w http.ResponseWriter, r *http.Request, t
 		}
 		rows = append(rows, map[string]any{"id": map[string]any{"repo_id": x.RepoID, "plan": x.Plan}, "m": m, "l": lenses, "flags": flags})
 	}
-	out := map[string]any{"grain": "plan", "rows": rows, "sort": sortSpec, "population": map[string]any{"grain": "plan", "unit": "repo_id,plan", "scope_n": n, "cohort_n": n, "eligible_n": n, "returned_n": len(rows), "missing_by_reason": map[string]int{}}}
+	var planRel map[string]any
+	if f.CohortSQL != "" {
+		scopeN, cohortN, err := cohortSessionCounts(r.Context(), ts.t, f)
+		if err != nil {
+			readFailed(w)
+			return
+		}
+		planRel, err = cohortRelation(r.Context(), ts.t, f, false, scopeN, cohortN, true)
+		if err != nil {
+			readFailed(w)
+			return
+		}
+	}
+	out := map[string]any{"grain": "plan", "rows": rows, "sort": sortSpec, "population": map[string]any{"grain": "plan", "unit": "repo_id,plan", "scope_n": n, "cohort_n": n, "eligible_n": n, "returned_n": len(rows), "missing_by_reason": map[string]int{}, "relation": planRel}}
 	if more && len(page) > 0 {
 		last := page[len(page)-1]
 		ts := planMeasure(last, p[0])
@@ -469,7 +482,20 @@ func (s *Server) analyticsExecutionEntities(w http.ResponseWriter, r *http.Reque
 		rows = append(rows, map[string]any{"id": map[string]any{"repo_id": x.RepoID, "conversation_id": x.ConversationID, "brief_path": x.BriefPath}, "m": m, "l": map[string]any{"shape": x.Shape, "plan": x.Plan, "repo_id": x.RepoID, "harness": x.Harness, "session_model": prov[x.ConversationID].Model}, "flags": flags})
 	}
 	n := counts["complete"] + counts["unreported"] + counts["started"]
-	out := map[string]any{"grain": "execution", "rows": rows, "population": map[string]any{"grain": "execution", "unit": "repo_id,conversation_id,brief_path", "scope_n": n, "cohort_n": n, "eligible_n": n, "returned_n": len(rows), "missing_by_reason": map[string]int{}}}
+	var execRel map[string]any
+	if f.CohortSQL != "" {
+		scopeN, cohortN, err := cohortSessionCounts(r.Context(), ts.t, f)
+		if err != nil {
+			readFailed(w)
+			return
+		}
+		execRel, err = cohortRelation(r.Context(), ts.t, f, false, scopeN, cohortN, true)
+		if err != nil {
+			readFailed(w)
+			return
+		}
+	}
+	out := map[string]any{"grain": "execution", "rows": rows, "population": map[string]any{"grain": "execution", "unit": "repo_id,conversation_id,brief_path", "scope_n": n, "cohort_n": n, "eligible_n": n, "returned_n": len(rows), "missing_by_reason": map[string]int{}, "relation": execRel}}
 	if more && len(page) > 0 {
 		last := page[len(page)-1]
 		out["next"] = (cursor{Route: "entities:execution", Filter: canonFilter(q), From: f.From.UnixNano(), To: f.To.UnixNano(), TS: last.TS, Key: []string{last.ConversationID, last.BriefPath, last.RepoID}, FactWatermark: snapshot.FactWatermark, FactRowID: snapshot.FactRowID, Revision: snapshot.Revision}).encode()
@@ -834,7 +860,21 @@ func (s *Server) analyticsSessionEntities(w http.ResponseWriter, r *http.Request
 		}
 		rows = append(rows, map[string]any{"id": row.ID, "m": m, "l": l, "flags": flags})
 	}
-	out := map[string]any{"grain": "session", "rows": rows, "population": map[string]any{"grain": "session", "unit": "conversation_id", "scope_n": count, "cohort_n": count, "eligible_n": count, "returned_n": len(rows), "missing_by_reason": map[string]int{}}, "sort": sortSpec, "partial": ts.t.CompactionState() != "complete"}
+	scopeN, cohortN := count, count
+	var rel map[string]any
+	if f.CohortSQL != "" {
+		scopeN, cohortN, err = cohortSessionCounts(r.Context(), ts.t, f)
+		if err != nil {
+			readFailed(w)
+			return
+		}
+		rel, err = cohortRelation(r.Context(), ts.t, f, false, scopeN, cohortN, false)
+		if err != nil {
+			readFailed(w)
+			return
+		}
+	}
+	out := map[string]any{"grain": "session", "rows": rows, "population": map[string]any{"grain": "session", "unit": "conversation_id", "scope_n": scopeN, "cohort_n": cohortN, "eligible_n": cohortN, "returned_n": len(rows), "missing_by_reason": map[string]int{}, "relation": rel}, "sort": sortSpec, "partial": ts.t.CompactionState() != "complete"}
 	if more && len(page) > 0 {
 		last := page[len(page)-1]
 		out["next"] = (cursor{Route: "entities:session", Filter: canonFilter(q), From: f.From.UnixNano(), To: f.To.UnixNano(), TS: last.Measures[sortBy], Key: []string{last.ID}}).encode()
@@ -926,7 +966,21 @@ func (s *Server) analyticsSessionAggregate(w http.ResponseWriter, r *http.Reques
 	if field == "cost_usd" && eligible < pop {
 		missing["unpriced_cost"] = pop - eligible
 	}
-	result["population"] = map[string]any{"grain": "session", "unit": "conversation_id", "scope_n": pop, "cohort_n": pop, "eligible_n": eligible, "returned_n": 1, "missing_by_reason": missing}
+	scopeN, cohortN := pop, pop
+	var rel map[string]any
+	if f.CohortSQL != "" {
+		scopeN, cohortN, err = cohortSessionCounts(r.Context(), ts.t, f)
+		if err != nil {
+			readFailed(w)
+			return
+		}
+		rel, err = cohortRelation(r.Context(), ts.t, f, false, scopeN, cohortN, false)
+		if err != nil {
+			readFailed(w)
+			return
+		}
+	}
+	result["population"] = map[string]any{"grain": "session", "unit": "conversation_id", "scope_n": scopeN, "cohort_n": cohortN, "eligible_n": eligible, "returned_n": 1, "missing_by_reason": missing, "relation": rel}
 	if lowerBound {
 		result["cost_lower_bound"] = true
 	}
@@ -1118,7 +1172,21 @@ func (s *Server) analyticsSessionScatter(w http.ResponseWriter, r *http.Request,
 		}
 	}
 	sampled := population > len(points)
-	writeJSON(w, 200, map[string]any{"grain": "session", "mode": "scatter", "fields": fields, "rows": points, "sampled": sampled, "sample_rule": "lowest SHA-256 of conversation_id", "population_n": population, "returned_n": len(points), "marginals": marginals, "population": map[string]any{"grain": "session", "unit": "conversation_id", "scope_n": population, "cohort_n": population, "eligible_n": eligible, "returned_n": len(points), "missing_by_reason": missing}, "sample_limit": 5000})
+	scopeN, cohortN := population, population
+	var rel map[string]any
+	if filter.CohortSQL != "" {
+		scopeN, cohortN, err = cohortSessionCounts(r.Context(), ts.t, filter)
+		if err != nil {
+			readFailed(w)
+			return
+		}
+		rel, err = cohortRelation(r.Context(), ts.t, filter, false, scopeN, cohortN, false)
+		if err != nil {
+			readFailed(w)
+			return
+		}
+	}
+	writeJSON(w, 200, map[string]any{"grain": "session", "mode": "scatter", "fields": fields, "rows": points, "sampled": sampled, "sample_rule": "lowest SHA-256 of conversation_id", "population_n": population, "returned_n": len(points), "marginals": marginals, "population": map[string]any{"grain": "session", "unit": "conversation_id", "scope_n": scopeN, "cohort_n": cohortN, "eligible_n": eligible, "returned_n": len(points), "missing_by_reason": missing, "relation": rel}, "sample_limit": 5000})
 }
 
 func (s *Server) analyticsTimeEntities(w http.ResponseWriter, r *http.Request, ts *tenantState) {

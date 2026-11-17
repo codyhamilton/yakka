@@ -57,6 +57,14 @@ func (s *Server) analyticsScoreSeries(w http.ResponseWriter, r *http.Request, _ 
 		outChecks = append(outChecks, map[string]any{"name": c.Name, "points": pts})
 	}
 	resp := map[string]any{"kind": kind, "bucket": bucket, "checks": outChecks}
+	if f.CohortSQL != "" {
+		pop, err := contentPopulation(r.Context(), r, ts, f, kind)
+		if err != nil {
+			readFailed(w)
+			return
+		}
+		resp["population"] = pop
+	}
 	addAnalyticsPartial(resp, ts)
 	writeJSON(w, 200, resp)
 }
@@ -216,6 +224,14 @@ func (s *Server) analyticsScoreSeriesByLens(w http.ResponseWriter, r *http.Reque
 		resp["dim"] = dim
 		resp["offset"] = offset
 		resp["limit"] = limit
+	}
+	if f.CohortSQL != "" {
+		pop, err := contentPopulation(r.Context(), r, ts, f, kind)
+		if err != nil {
+			readFailed(w)
+			return
+		}
+		resp["population"] = pop
 	}
 	addAnalyticsPartial(resp, ts)
 	writeJSON(w, 200, resp)
