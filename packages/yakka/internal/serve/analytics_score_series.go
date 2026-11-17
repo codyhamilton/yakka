@@ -28,7 +28,7 @@ func (s *Server) analyticsScoreSeries(w http.ResponseWriter, r *http.Request, _ 
 		errJSON(w, 400, "bucket must be day, week, or month")
 		return
 	}
-	f, ok := parseFilter(w, r, filterOpts{weeks: bucket == "week"})
+	f, ok := s.parseFilter(w, r, ts, filterOpts{weeks: bucket == "week"})
 	if !ok {
 		return
 	}

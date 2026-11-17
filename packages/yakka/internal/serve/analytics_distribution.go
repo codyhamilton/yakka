@@ -51,7 +51,7 @@ func (s *Server) analyticsDistribution(w http.ResponseWriter, r *http.Request, _
 			top = n
 		}
 	}
-	f, ok := parseFilter(w, r, filterOpts{})
+	f, ok := s.parseFilter(w, r, ts, filterOpts{})
 	if !ok {
 		return
 	}

@@ -10,6 +10,7 @@ import (
 	"math"
 	"net/http"
 	"net/url"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -114,6 +115,16 @@ func errCodeJSON(w http.ResponseWriter, status int, code, msg string, extra map[
 
 func readFailed(w http.ResponseWriter) { errJSON(w, 500, "read failed") }
 
+// refuseCohort enforces 17.3.1's accepted route set: a route that does not apply the cohort
+// answers 400 cohort_invalid/route_not_supported instead of ignoring the parameter.
+func refuseCohort(w http.ResponseWriter, r *http.Request) bool {
+	if r.URL.Query().Get("cohort") == "" {
+		return false
+	}
+	errCodeJSON(w, http.StatusBadRequest, "cohort_invalid", "cohort is not supported on this route", map[string]any{"reason": "route_not_supported"})
+	return true
+}
+
 // cursor is the opaque paging token: the route and filter it was issued for, the first page's
 // resolved window, and the sort key of the last row returned.
 type cursor struct {
@@ -180,9 +191,10 @@ func tooWide(from, to time.Time, weeks bool) bool {
 
 // publishedFilterNames is the exclude dimension whitelist, derived from the same scope-filter
 // table /schema publishes (store.CohortGrainFilters). A dynamic band:<check> lens contributes
-// its base band dimension because exclude=<name>:<value> cuts at the first colon.
+// its base band dimension because exclude=<name>:<value> cuts at the first colon. stage stays a
+// legacy exclude dimension even though no grain publishes it as an include filter.
 func publishedFilterNames() map[string]bool {
-	out := map[string]bool{}
+	out := map[string]bool{"stage": true}
 	for _, grain := range []string{"session", "artifact", "content", "execution", "plan", "time"} {
 		for _, name := range store.CohortGrainFilters(grain) {
 			if strings.HasSuffix(name, ":<check>") {
@@ -202,9 +214,28 @@ type filterOpts struct {
 	cur        *cursor // paged routes: the request's cursor
 }
 
+// cohortResolveOptions supplies the active check catalogue and tenant blob directory to cohort
+// resolution. Dynamic names (score:<check>, band:<check>) validate against the catalogue, and the
+// blob directory lets the artifact resolver measure content_bytes.
+func (s *Server) cohortResolveOptions(ts *tenantState) store.CohortResolveOptions {
+	var opts store.CohortResolveOptions
+	if ts != nil {
+		opts.BlobDir = filepath.Join(ts.t.Dir(), "blobs")
+	}
+	if s.opts.Checks != nil {
+		opts.Checks = map[string][]string{}
+		for _, kind := range kindOrder {
+			for _, check := range s.opts.Checks.For(kind) {
+				opts.Checks[kind] = append(opts.Checks[kind], check.Name)
+			}
+		}
+	}
+	return opts
+}
+
 // parseFilter resolves the shared filter, or writes the 400 and returns false. With a cursor it
 // must match this route and these filter parameters, and its window replaces from/to.
-func parseFilter(w http.ResponseWriter, r *http.Request, o filterOpts) (store.AnalyticsFilter, bool) {
+func (s *Server) parseFilter(w http.ResponseWriter, r *http.Request, ts *tenantState, o filterOpts) (store.AnalyticsFilter, bool) {
 	q := r.URL.Query()
 	var f store.AnalyticsFilter
 	var from, to time.Time
@@ -282,7 +313,7 @@ func parseFilter(w http.ResponseWriter, r *http.Request, o filterOpts) (store.An
 			errCodeJSON(w, 400, "cohort_invalid", err.Error(), nil)
 			return f, false
 		}
-		sql, args, _, err := store.CohortSessionSubquery(cohort)
+		sql, args, _, err := store.CohortSessionSubquery(cohort, s.cohortResolveOptions(ts))
 		if err != nil {
 			code := "cohort_invalid"
 			if errors.Is(err, store.ErrUnsupportedJoin) {
@@ -409,7 +440,10 @@ func (s *Server) catalogChecks(kinds ...string) []struct{ Kind, Name string } {
 }
 
 func (s *Server) analyticsFacets(w http.ResponseWriter, r *http.Request, _ string, ts *tenantState) {
-	f, ok := parseFilter(w, r, filterOpts{})
+	if refuseCohort(w, r) {
+		return
+	}
+	f, ok := s.parseFilter(w, r, ts, filterOpts{})
 	if !ok {
 		return
 	}
@@ -434,7 +468,7 @@ func (s *Server) analyticsFacets(w http.ResponseWriter, r *http.Request, _ strin
 }
 
 func (s *Server) analyticsSummary(w http.ResponseWriter, r *http.Request, _ string, ts *tenantState) {
-	f, ok := parseFilter(w, r, filterOpts{})
+	f, ok := s.parseFilter(w, r, ts, filterOpts{})
 	if !ok {
 		return
 	}
@@ -491,7 +525,7 @@ func (s *Server) analyticsSeries(w http.ResponseWriter, r *http.Request, _ strin
 			return
 		}
 	}
-	f, ok := parseFilter(w, r, filterOpts{weeks: bucket == "week"})
+	f, ok := s.parseFilter(w, r, ts, filterOpts{weeks: bucket == "week"})
 	if !ok {
 		return
 	}
@@ -532,7 +566,7 @@ func (s *Server) analyticsSeries(w http.ResponseWriter, r *http.Request, _ strin
 }
 
 func (s *Server) analyticsScores(w http.ResponseWriter, r *http.Request, _ string, ts *tenantState) {
-	f, ok := parseFilter(w, r, filterOpts{scoresKind: true})
+	f, ok := s.parseFilter(w, r, ts, filterOpts{scoresKind: true})
 	if !ok {
 		return
 	}
@@ -767,7 +801,7 @@ func (s *Server) analyticsExecutions(w http.ResponseWriter, r *http.Request, _ s
 		errJSON(w, 400, "bucket must be day, week, or month")
 		return
 	}
-	f, ok := parseFilter(w, r, filterOpts{route: "executions", cur: cur, weeks: bucket == "week"})
+	f, ok := s.parseFilter(w, r, ts, filterOpts{route: "executions", cur: cur, weeks: bucket == "week"})
 	if !ok {
 		return
 	}
@@ -829,7 +863,7 @@ func (s *Server) analyticsConversations(w http.ResponseWriter, r *http.Request, 
 	if !ok {
 		return
 	}
-	f, ok := parseFilter(w, r, filterOpts{route: "conversations", cur: cur})
+	f, ok := s.parseFilter(w, r, ts, filterOpts{route: "conversations", cur: cur})
 	if !ok {
 		return
 	}
@@ -883,7 +917,7 @@ func (s *Server) analyticsExplore(w http.ResponseWriter, r *http.Request, _ stri
 	if limit > exploreCap {
 		limit = exploreCap
 	}
-	f, ok := parseFilter(w, r, filterOpts{route: "explore", cur: cur})
+	f, ok := s.parseFilter(w, r, ts, filterOpts{route: "explore", cur: cur})
 	if !ok {
 		return
 	}

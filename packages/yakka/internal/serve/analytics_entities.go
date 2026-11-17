@@ -1,7 +1,9 @@
 package serve
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -93,6 +95,9 @@ func parseArtifactRanges(values []string) ([]store.SessionRange, error) {
 }
 
 func (s *Server) analyticsEntity(w http.ResponseWriter, r *http.Request, _ string, ts *tenantState) {
+	if refuseCohort(w, r) {
+		return
+	}
 	q := r.URL.Query()
 	if q.Get("grain") == "plan" {
 		s.analyticsPlanDetail(w, r, ts)
@@ -237,7 +242,7 @@ func (s *Server) analyticsPlanEntities(w http.ResponseWriter, r *http.Request, t
 	if !ok {
 		return
 	}
-	f, ok := parseFilter(w, r, filterOpts{route: "entities:plan", cur: cur})
+	f, ok := s.parseFilter(w, r, ts, filterOpts{route: "entities:plan", cur: cur})
 	if !ok {
 		return
 	}
@@ -403,7 +408,7 @@ func (s *Server) analyticsExecutionEntities(w http.ResponseWriter, r *http.Reque
 	if !ok {
 		return
 	}
-	f, ok := parseFilter(w, r, filterOpts{route: "entities:execution", cur: cur})
+	f, ok := s.parseFilter(w, r, ts, filterOpts{route: "entities:execution", cur: cur})
 	if !ok {
 		return
 	}
@@ -523,7 +528,7 @@ func (s *Server) analyticsPlanDetail(w http.ResponseWriter, r *http.Request, ts 
 		copy.Filter = canonFilter(q)
 		filterCursor = &copy
 	}
-	f, ok := parseFilter(w, r, filterOpts{route: "entity:plan:" + collection, cur: filterCursor})
+	f, ok := s.parseFilter(w, r, ts, filterOpts{route: "entity:plan:" + collection, cur: filterCursor})
 	if !ok {
 		return
 	}
@@ -591,6 +596,61 @@ func sessionLensFilterFor(q map[string][]string, f store.AnalyticsFilter) sessio
 
 func (l sessionLensFilter) active() bool { return len(l.include) > 0 || len(l.exclude) > 0 }
 
+// sessionMemberFilter is the base population query for lens-scoped session reads: fact-level
+// harness/model filters are cleared because the lens meaning is lifetime-derived, and the id
+// includes pre-filter the rows the lens will check.
+func sessionMemberFilter(f store.AnalyticsFilter, lens sessionLensFilter) store.AnalyticsFilter {
+	mf := f
+	mf.Harnesses = nil
+	mf.Models = nil
+	mf.ConversationIDs = append(append([]string{}, f.ConversationIDs...), lens.include["id"]...)
+	mf.Excludes = map[string][]string{}
+	for dim, values := range f.Excludes {
+		switch dim {
+		case "harness", "model", "session_model", "session_repo", "id":
+		default:
+			mf.Excludes[dim] = values
+		}
+	}
+	return mf
+}
+
+// sessionLensPopulation scans the in-window member population in paged last_ts order and keeps
+// the rows whose lifetime provenance matches the lens. Callers order the returned slice for
+// their own mode; the scan cursor uses last_ts, which the page-level measures always carry.
+func sessionLensPopulation(ctx context.Context, t *store.Tenant, f store.AnalyticsFilter, lens sessionLensFilter) ([]store.SessionEntityRow, map[string]store.SessionProvenance, error) {
+	memberFilter := sessionMemberFilter(f, lens)
+	var rows []store.SessionEntityRow
+	prov := map[string]store.SessionProvenance{}
+	var sc *store.ConvCursor
+	for {
+		page, more, err := t.SessionEntitiesPage(ctx, memberFilter, "last_ts", true, sc, 500)
+		if err != nil {
+			return nil, nil, err
+		}
+		ids := make([]string, len(page))
+		for i := range page {
+			ids[i] = page[i].ID
+		}
+		pageProv, err := t.SessionProvenanceFor(ctx, ids)
+		if err != nil {
+			return nil, nil, err
+		}
+		for _, row := range page {
+			if lens.match(row.ID, pageProv[row.ID]) {
+				rows = append(rows, row)
+				prov[row.ID] = pageProv[row.ID]
+			}
+		}
+		if !more {
+			break
+		}
+		last := page[len(page)-1]
+		sc = &store.ConvCursor{TS: last.Measures["last_ts"], ConversationID: last.ID}
+	}
+	return rows, prov, nil
+}
+
 func (l sessionLensFilter) match(id string, p store.SessionProvenance) bool {
 	values := map[string]string{"harness": p.Harness, "session_model": p.Model, "session_repo": p.Repo, "id": id}
 	for lens, allowed := range l.include {
@@ -609,24 +669,13 @@ func (l sessionLensFilter) match(id string, p store.SessionProvenance) bool {
 // sessionLensPage filters a lens-scoped session population after the lifetime provenance read,
 // then applies the keyset cursor and page limit in the same order the SQL route uses.
 func sessionLensPage(ctx context.Context, t *store.Tenant, f store.AnalyticsFilter, sortBy string, desc bool, cur *cursor, limit int, lens sessionLensFilter) ([]store.SessionEntityRow, bool, map[string]store.SessionProvenance, int, error) {
-	memberFilter := f
-	memberFilter.Harnesses = nil
-	memberFilter.Models = nil
-	memberFilter.ConversationIDs = append(append([]string{}, f.ConversationIDs...), lens.include["id"]...)
-	memberFilter.Excludes = map[string][]string{}
-	for dim, values := range f.Excludes {
-		switch dim {
-		case "harness", "model", "session_model", "session_repo", "id":
-		default:
-			memberFilter.Excludes[dim] = values
-		}
-	}
+	memberFilter := sessionMemberFilter(f, lens)
 
 	var filtered []store.SessionEntityRow
 	prov := map[string]store.SessionProvenance{}
 	var sc *store.ConvCursor
 	for {
-		page, more, err := t.SessionEntitiesPage(ctx, memberFilter, sortBy, desc, sc, 500)
+		page, more, err := t.SessionEntitiesPage(ctx, memberFilter, "last_ts", true, sc, 500)
 		if err != nil {
 			return nil, false, nil, 0, err
 		}
@@ -710,7 +759,7 @@ func (s *Server) analyticsSessionEntities(w http.ResponseWriter, r *http.Request
 	if !ok {
 		return
 	}
-	f, ok := parseFilter(w, r, filterOpts{route: "entities:session", cur: cur})
+	f, ok := s.parseFilter(w, r, ts, filterOpts{route: "entities:session", cur: cur})
 	if !ok {
 		return
 	}
@@ -824,7 +873,7 @@ func (s *Server) analyticsSessionAggregate(w http.ResponseWriter, r *http.Reques
 		errJSON(w, 400, "unsupported session sum field "+field)
 		return
 	}
-	f, ok := parseFilter(w, r, filterOpts{query: true})
+	f, ok := s.parseFilter(w, r, ts, filterOpts{query: true})
 	if !ok {
 		return
 	}
@@ -834,6 +883,20 @@ func (s *Server) analyticsSessionAggregate(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	f.SessionRanges = ranges
+	lens := sessionLensFilterFor(q, f)
+	if lens.active() {
+		members, _, err := sessionLensPopulation(r.Context(), ts.t, f, lens)
+		if err != nil {
+			readFailed(w)
+			return
+		}
+		ids := make([]string, len(members))
+		for i := range members {
+			ids[i] = members[i].ID
+		}
+		f = sessionMemberFilter(f, lens)
+		f.ConversationIDs = ids
+	}
 	result, err := ts.t.SessionAggregate(r.Context(), f, stat, field)
 	if err != nil {
 		readFailed(w)
@@ -938,7 +1001,7 @@ func (s *Server) analyticsSessionScatter(w http.ResponseWriter, r *http.Request,
 		}
 		seen[f] = true
 	}
-	filter, ok := parseFilter(w, r, filterOpts{})
+	filter, ok := s.parseFilter(w, r, ts, filterOpts{})
 	if !ok {
 		return
 	}
@@ -952,25 +1015,50 @@ func (s *Server) analyticsSessionScatter(w http.ResponseWriter, r *http.Request,
 		return
 	}
 	filter.SessionRanges = ranges
-	population, err := ts.t.ConversationCount(r.Context(), filter)
-	if err != nil {
-		readFailed(w)
-		return
-	}
-	limit := min(population, 5000)
-	page, _, err := ts.t.SessionEntitiesPage(r.Context(), filter, "sample_hash", false, nil, limit)
-	if err != nil {
-		readFailed(w)
-		return
-	}
-	ids := make([]string, len(page))
-	for i := range page {
-		ids[i] = page[i].ID
-	}
-	prov, err := ts.t.SessionProvenanceFor(r.Context(), ids)
-	if err != nil {
-		readFailed(w)
-		return
+	lens := sessionLensFilterFor(q, filter)
+	var population int
+	var page []store.SessionEntityRow
+	var prov map[string]store.SessionProvenance
+	if lens.active() {
+		members, memberProv, err := sessionLensPopulation(r.Context(), ts.t, filter, lens)
+		if err != nil {
+			readFailed(w)
+			return
+		}
+		sort.Slice(members, func(i, j int) bool {
+			a, b := sha256.Sum256([]byte(members[i].ID)), sha256.Sum256([]byte(members[j].ID))
+			return bytes.Compare(a[:], b[:]) < 0
+		})
+		population = len(members)
+		page = members[:min(population, 5000)]
+		prov = memberProv
+		ids := make([]string, len(members))
+		for i := range members {
+			ids[i] = members[i].ID
+		}
+		filter = sessionMemberFilter(filter, lens)
+		filter.ConversationIDs = ids
+	} else {
+		var err error
+		population, err = ts.t.ConversationCount(r.Context(), filter)
+		if err != nil {
+			readFailed(w)
+			return
+		}
+		page, _, err = ts.t.SessionEntitiesPage(r.Context(), filter, "sample_hash", false, nil, min(population, 5000))
+		if err != nil {
+			readFailed(w)
+			return
+		}
+		ids := make([]string, len(page))
+		for i := range page {
+			ids[i] = page[i].ID
+		}
+		prov, err = ts.t.SessionProvenanceFor(r.Context(), ids)
+		if err != nil {
+			readFailed(w)
+			return
+		}
 	}
 	points := make([]map[string]any, 0, len(page))
 	for _, row := range page {
@@ -1076,7 +1164,7 @@ func (s *Server) analyticsTimeEntities(w http.ResponseWriter, r *http.Request, t
 		errJSON(w, 400, "time entities support stat=sum")
 		return
 	}
-	f, ok := parseFilter(w, r, filterOpts{query: true})
+	f, ok := s.parseFilter(w, r, ts, filterOpts{query: true})
 	if !ok {
 		return
 	}

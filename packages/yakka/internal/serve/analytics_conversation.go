@@ -31,6 +31,9 @@ func addAnalyticsPartial(out map[string]any, ts *tenantState) {
 // id is required; an id with no facts is a 404. Facts are returned in time order, capped by the
 // store, with no bodies. Optional from/to set window_totals only; events stay the full run.
 func (s *Server) analyticsConversation(w http.ResponseWriter, r *http.Request, _ string, ts *tenantState) {
+	if refuseCohort(w, r) {
+		return
+	}
 	id := r.URL.Query().Get("id")
 	if id == "" {
 		errJSON(w, 400, "id required")

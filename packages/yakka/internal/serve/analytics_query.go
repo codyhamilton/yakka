@@ -15,6 +15,9 @@ import (
 
 // The measure × dimension matrix and the bucket units, served verbatim (DESIGN.md plan 12).
 func (s *Server) analyticsSchema(w http.ResponseWriter, r *http.Request, _ string, ts *tenantState) {
+	if refuseCohort(w, r) {
+		return
+	}
 	measures := []map[string]any{}
 	for _, m := range store.Measures() {
 		measures = append(measures, map[string]any{"name": m.Name, "unit": m.Unit, "dims": m.Dims})
@@ -205,7 +208,7 @@ func (s *Server) analyticsQuery(w http.ResponseWriter, r *http.Request, _ string
 		}
 		cellBudget = min(n, cellBudget)
 	}
-	f, ok := parseFilter(w, r, filterOpts{query: true})
+	f, ok := s.parseFilter(w, r, ts, filterOpts{query: true})
 	if !ok {
 		return
 	}

@@ -8,7 +8,7 @@ import (
 )
 
 func (s *Server) analyticsActivity(w http.ResponseWriter, r *http.Request, _ string, ts *tenantState) {
-	f, ok := parseFilter(w, r, filterOpts{})
+	f, ok := s.parseFilter(w, r, ts, filterOpts{})
 	if !ok {
 		return
 	}

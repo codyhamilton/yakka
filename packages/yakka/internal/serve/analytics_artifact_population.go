@@ -307,11 +307,8 @@ func (s *Server) analyticsArtifactEntities(w http.ResponseWriter, r *http.Reques
 		errJSON(w, 400, "unsupported artifact mode")
 		return
 	}
-	// Cohort resolution belongs to the later cohort phase and is never silently ignored.
-	if q.Get("cohort") != "" {
-		errCodeJSON(w, 400, "cohort_invalid", "artifact cohorts are not available", nil)
-		return
-	}
+	// Cohort resolution runs through the shared filter below, so an artifact cohort is accepted
+	// and restricts file membership exactly like the shared conversation_id filter.
 	limit, cur, ok := pageParams(w, r)
 	if !ok {
 		return
@@ -331,7 +328,7 @@ func (s *Server) analyticsArtifactEntities(w http.ResponseWriter, r *http.Reques
 		fq.Del("all")
 		fr.URL.RawQuery = fq.Encode()
 	}
-	f, ok := parseFilter(w, fr, filterOpts{})
+	f, ok := s.parseFilter(w, fr, ts, filterOpts{})
 	if !ok {
 		return
 	}

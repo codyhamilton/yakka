@@ -152,8 +152,9 @@ var cohortGrainFilters = map[string][]string{
 	"execution": {"shape", "plan", "repo_id", "harness", "session_model", "id"},
 	"plan":      {"repo_id", "harness", "session_model", "id"},
 	// The shared-filter dimensions the time measures apply, plus id. session_repo and
-	// session_model stay absent until the time route parses them (17.3.1).
-	"time": {"repo_id", "harness", "kind", "plan", "norm_event", "event", "tool", "model", "source", "conversation_id", "stage", "id"},
+	// session_model stay absent until the time route parses them (17.3.1). stage is not an
+	// accepted include filter, so it is not published; /schema and the resolver share this table.
+	"time": {"repo_id", "harness", "kind", "plan", "norm_event", "event", "tool", "model", "source", "conversation_id", "id"},
 }
 
 // CohortGrainFilters returns a copy of the scope-filter names a grain accepts, in table order.

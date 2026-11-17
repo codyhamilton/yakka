@@ -59,6 +59,9 @@ func percentile(sorted []float64, q float64) float64 {
 func round3(v float64) float64 { return math.Round(v*1000) / 1000 }
 
 func (s *Server) baselines(w http.ResponseWriter, r *http.Request, _ string, ts *tenantState) {
+	if refuseCohort(w, r) {
+		return
+	}
 	q := r.URL.Query()
 	kind := q.Get("kind")
 	if !validKind(kind) {

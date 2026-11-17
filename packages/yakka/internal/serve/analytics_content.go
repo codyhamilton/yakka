@@ -13,6 +13,9 @@ import (
 const analyticsContentLimit int64 = 16 * 1024 * 1024
 
 func (s *Server) analyticsContent(w http.ResponseWriter, r *http.Request, _ string, ts *tenantState) {
+	if refuseCohort(w, r) {
+		return
+	}
 	q := r.URL.Query()
 	repo, path, hash := q.Get("repo_id"), q.Get("path"), q.Get("hash")
 	if repo == "" || path == "" || len(hash) != 64 {
