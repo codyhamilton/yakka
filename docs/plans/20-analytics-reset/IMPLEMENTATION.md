@@ -31,6 +31,13 @@ The phase outcome is approach-open; this run uses the signed outcome and CONTRAC
 - Deviations / unfinished: time scope and the time `id` lens remain `unsupported_join` and are owned by 6-06; dynamic check validation only runs when the serve call supplies `CohortResolveOptions.Checks`; `content_bytes` needs `CohortResolveOptions.BlobDir`. 6-04/6-05 must wire both into `parseFilter`/resolution.
 - Verification: store suite passed (6.75s); full store/serve failed only the two pre-existing activity tests; report records the new resolver cases.
 
+### `6-04-schema-capability-publication.md`
+
+- Outcome: committed as `ab1b95f` (`Publish capability schema filters and content grain`); `/schema.grains` now publishes `filters` and `predicate` for all six grains, adds the aggregate/cohort-only `content` grain and the scope budgets; `/entities?grain=session` filters on lifetime lenses in list mode; time entities report `ignored_filters`; the exclude whitelist comes from the shared filter table; artifact parses `session_model` with `model=` as alias.
+- Surfaces: `packages/yakka/internal/serve/{analytics_query.go,analytics_entities.go,analytics.go,analytics_artifact_population.go}`, focused schema tests and `reports/6-04-schema-capability-publication.md`.
+- Deviations / unfinished: session scatter and aggregate still apply fact-level filters (list only is lens-derived); `stage` is published for the time grain but not accepted as an include filter; filtered session paging scans in-window rows in 500-row chunks; artifact `cohort=` still rejects. 6-05 must close the scatter/aggregate lens filters, the `stage` publication/acceptance mismatch and artifact cohorts.
+- Verification: focused schema/entity/time tests passed 8/8; store passed (6.913s); serve failed only the two pre-existing activity tests; `go build ./internal/...` and `git diff --check` clean.
+
 ## Phase 6 (earlier run) — Plan and execution entities and the cohort predicate
 
 Refinement commit: `c85e5b9` (`docs: refine Phase 6 analytics work`). Four sequential units; plan/execution entity rows, cohort resolution, target-route application, then time cohorts/activity and schema publication. The signed contract in CONTRACTS.md 17.3 supplies the implementation boundaries. `artifact_feedback` on all four briefs returned delivered / screen pass (`jev-1.13.0`). Phase 5 carried items remain outside this phase: artifact file-to-time-bucket assignment and score-lens memory-growth evidence.
