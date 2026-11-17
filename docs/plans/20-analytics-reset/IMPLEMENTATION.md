@@ -40,6 +40,34 @@ Refinement commit `2b246b9` (`docs: refine Phase 8 distribution and categorical 
 - Deviations / unfinished: worker reported **over budget** (~1,362 changed lines). `spec.lanes`/`spec.data.lanes` is an array because the base `data` setter only accepts arrays. Each lanes mark group opts out locally with `transform:none; clip-path:none` because the shared `[data-shape]` swatch selectors in `web/css/charts.css:258-265` would otherwise rotate/clip a plotted `<g>`. Lane table rows stop propagation so the base keyboard grammar and table do not both fire. Touch drags use `touchstart/move/end`. No owned-path gaps.
 - Verification: `lanes.test.mjs` 6/6; combined `tests/charts-cat/*.test.mjs` 25/25 (Chromium); `git diff --check` clean.
 
+### `8-05-treemap-acceptance.md`
+
+- Outcome: committed as `f200ce5` (`Add the treemap and Phase 8 acceptance proof`). Added `<yk-treemap>` (squarified two-level layout, parent entity colouring, labelled `(other)`, parent legend, shared table/tooltip/selection/keyboard, `brush: null`), its gallery/fixture and Chromium spec, the five Phase 8 gallery index links, and the phase acceptance spec. The first attempt stopped uncommitted, correctly refusing to weaken its acceptance check; after the fixer below it re-ran the evidence and committed.
+- Surfaces: `web/js/charts/yk-treemap.js`, `tests/gallery/{treemap.html,treemap.js,fixture-treemap.js,index.html,index.js}`, `tests/charts-cat/{treemap.test.mjs,acceptance.test.mjs}`, and its report.
+- Deviations / unfinished: worker reported **done with concerns**. One known problem remains outside its owned paths: the 8-02 box legend lists summary statistics with summary colours rather than entity colours (carried below). The budget clause conflicted with its owned-path restriction, so its earlier handoff was supplied as the report rather than `IMPLEMENTATION.md`.
+- Verification: `treemap.test.mjs` 5/5; `acceptance.test.mjs` 8/8; combined `tests/charts-cat/*.test.mjs` 38/38 (Chromium, real mouse/keyboard/touch); `tests/*.test.mjs` 12/12; `git diff --check` clean.
+
+Fixer before the re-dispatch: 8-05 found two real defects while proving the phase. Committed as `3246525` (`Fix calendar matrix values and shared table keyboard bubbling`): `yk-matrix.js`'s calendar branch now reads `cell.data.value`/`n`/`coverage` after `calendarLayout()` moves the source row into `data` (the table had shown `—` and `inspect().marks[].values` was `{}`), and `table.js` now stops propagation for Space/Enter/Arrow keys so the row handler and the base root grammar no longer both toggle a selection. No check was weakened; the fix was verified by the full Phase 8 suite before 8-05 re-ran.
+
+Second fixer: the combined suite then showed the Phase 7 index acceptance still asserting exactly the four Phase 7 links. Because 8-05 deliberately adds the five Phase 8 links to the same shared index (keeping the Phase 7 links intact), committed as `77945cb` (`Accept Phase 8 gallery links in the Phase 7 index check`): the Phase 7 spec now asserts its four cases are the first four links rather than the only links, and still validates every href. Phase 7's own outcomes are unchanged.
+
+### Phase 8 integrated verification — closed
+
+- Entry point → action → result, run independently on the closing tree (`tests/gallery/index.html` and every Phase 8 page through the committed harness):
+  - The index exposes all nine cases (`foundations`, `time-series`, `gestures`, `scatter`, `bars`, `ranges`, `matrix`, `lanes`, `treemap`). Each Phase 8 page settles as designed: bars 5 `ready` plus the intended `empty`/`unsupported`, ranges 4 `ready`, matrix 2 `ready`, lanes 2 `ready`, treemap 1 `ready`. A real mouse click on each engine's first mark inspected the same shared key `model:atlas`, with no console error, page error or CSP violation. The probe printed `PROBE OK`.
+  - `NODE_PATH=…/yakka/packages/yakka-analytics/node_modules node --test packages/yakka-analytics/tests/charts-cat/*.test.mjs packages/yakka-analytics/tests/charts-time/*.test.mjs packages/yakka-analytics/tests/*.test.mjs` → 80/80 pass in one run (38 Phase 8, 30 Phase 7 time-series, 12 existing), all browser specs driving Chromium with real mouse/keyboard/touch at `inspect()` coordinates and waiting on `data-idle`/`data-state`; `git diff --check` clean. No fixed sleeps, no `/tmp`, no inline style attributes, no animation/transition, and no test branch in product code.
+  - `artifact_feedback` on all five Phase 8 briefs and all five reports returned delivered / screen pass by `jev-1.13.0`, no flagged checks.
+- Carried
+
+- `gate: browser acceptance needs playwright-core 1.63.0 (under NODE_PATH) and the Chromium 1243 cache in CI; both live outside this worktree, and the specs skip with a named reason when absent.`
+- `gate: the external Pages automation must accept ./web as its output directory (carried from Phase 1; verified only in Phase 13).`
+- The 8-02 box legend lists the six summary statistics with summary colours rather than entity colours, because the shared base couples tooltip and legend to one series list; a seam that separates tooltip series from legend series is owed if a Phase 10 distribution panel shows a box legend.
+- The shared `[data-shape]` swatch selectors (`web/css/charts.css:258-265`) match any plotted group carrying `data-shape`, not only `.yk-swatch`; lanes opts out locally with `transform:none; clip-path:none`. Future SVG elements that set `data-shape` on mark groups must do the same, or the selectors should be scoped.
+- The shared base `data` setter only accepts arrays and exposes no model/rows accessor or table-arrow/`[`/`]` hook; matrix keeps `_matrixModel` and a capture keydown listener and lanes passes its lane list as an array. Phase 9 to 12 consumers must use the same conventions.
+- Heatmap cells and calendar days share entity keys by design, so selecting or highlighting a key marks every cell for it and the table repeats the key.
+- The diverging ramp is implemented and pure-tested but no gallery element renders it; only the sequential heatmap is browser-proven.
+- Bars legends list measures, so legend focus emits `filter` with a null filter/value; Phase 9/10 board chips must map those series keys to contract lens names (carried from Phase 7's note, now also true of bars).
+
 ## Phase 7 — Time-series chart kit
 
 The phase outcome is approach-open (composing uPlot's hooks into the gesture table; 2-D scatter hit-testing). This run uses the signed outcome and CONTRACTS.md 17.5 and 17.7 as the fixed yardstick. No new grain, join, route, dependency, gesture or contract is authorized. Refinement decides the units.
