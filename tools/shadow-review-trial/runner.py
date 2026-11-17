@@ -174,8 +174,10 @@ class HTTPTransport:
 
 
 class TrialRunner:
+    # Outlast the 120s server review wall. A shorter client timeout cancels the POST,
+    # and that cancel is stored as a cacheable api_error.
     def __init__(self, base_url: str, auth_provider: Callable[[], str], transport: Any | None = None,
-                 timeout: float = 30.0):
+                 timeout: float = 150.0):
         self.base_url = base_url.rstrip("/")
         self.auth_provider = auth_provider
         self.transport = transport or HTTPTransport()

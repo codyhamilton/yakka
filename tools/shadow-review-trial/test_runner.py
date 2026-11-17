@@ -127,6 +127,10 @@ class FakeREST:
 
 
 class RunnerTests(unittest.TestCase):
+    def test_default_timeout_outlasts_the_review_wall(self):
+        client = runner.TrialRunner("http://127.0.0.1:9", lambda: "token")
+        self.assertGreaterEqual(client.timeout, 150)
+
     def test_review_page_accepts_stored_review_id(self):
         rows, cursor, complete = runner.TrialRunner._review_page({
             "reviews": [{"review_id": "rev-1", "status": "ok"}],
