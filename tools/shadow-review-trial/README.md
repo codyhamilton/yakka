@@ -86,14 +86,20 @@ Adjudication version 1 is extended with optional `second_label`, `labeler_model`
 ### Leak check
 
 > **Leak check.** The trial reconstructs every request the runner would send
-> from the frozen manifest (`runner.build_request`) and fails the report when a
-> case's own `docs/plans/<plan>/REVIEW.md`, `IMPLEMENTATION.md` or `DESIGN.md`
-> path appears in a capture diff, or a recorded outcome excerpt appears in a
-> diff or criteria text (`scope: case_plan_and_outcome_excerpts`). Changed paths
-> under another plan's `docs/plans/` folder are counted as
-> `foreign_plan_document_captures` and never fail the check.
+> from the frozen manifest (`runner.build_request`) and resolves each capture
+> diff section by its `diff --git` path. It fails the report when a diff
+> *section* is the case's own `docs/plans/<plan>/REVIEW.md`,
+> `IMPLEMENTATION.md` or `DESIGN.md`, or when a distinctive recorded outcome
+> excerpt appears in the non-plan diff bodies or criteria text
+> (`scope: case_plan_and_outcome_excerpts`). A code or prose line that merely
+> names an own-plan document is not a leak. Outcome excerpts are searched only
+> when normalised to at least `min_excerpt_words` (5) words; shorter boilerplate
+> is counted in `short_excerpts_skipped` and not searched. Sections under any
+> other plan's `docs/plans/` folder are counted once per case as
+> `foreign_plan_document_captures` and never fail the check, and their bodies
+> are excluded from the outcome-excerpt search.
 
-The request check covers the case's own plan documents and every recorded outcome excerpt. Changed files under another plan's `docs/plans/` folder are counted as `foreign_plan_document_captures`, not failed, because Phase 3 strips only the case's own plan folder.
+The request check covers the case's own plan document sections and distinctive recorded outcome excerpts outside every plan-document section. Changed files under another plan's `docs/plans/` folder are counted as `foreign_plan_document_captures`, not failed, because Phase 3 strips only the case's own plan folder. No path, SHA, excerpt or diff line is printed.
 
 ### Evidence check
 

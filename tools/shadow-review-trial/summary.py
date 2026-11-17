@@ -158,11 +158,14 @@ def _validation(lines: list[str], validation: Any) -> None:
     lines.append(f"- shuffled null: seed {_fmt(null.get('seed'))}, method {_fmt(null.get('method'))}")
     leak = validation.get("leak_check") if isinstance(validation.get("leak_check"), dict) else {}
     errors = leak.get("request_errors") if isinstance(leak.get("request_errors"), list) else []
-    lines.append(f"- leak check: pass {_fmt(leak.get('pass'))}, scope {_fmt(leak.get('scope'))}, requests "
-                 f"checked {_fmt(leak.get('requests_checked'))}, own plan document hits "
+    lines.append(f"- leak check: pass {_fmt(leak.get('pass'))}, scope {_fmt(leak.get('scope'))} "
+                 f"(own-plan document sections only; outcome excerpts at least "
+                 f"{_fmt(leak.get('min_excerpt_words'))} words), requests checked "
+                 f"{_fmt(leak.get('requests_checked'))}, own plan document section hits "
                  f"{_fmt(leak.get('own_plan_document_hits'))}, outcome text hits "
                  f"{_fmt(leak.get('outcome_text_hits'))}, foreign plan document captures "
-                 f"{_fmt(leak.get('foreign_plan_document_captures'))}, request errors {_fmt(len(errors))}")
+                 f"{_fmt(leak.get('foreign_plan_document_captures'))}, short excerpts skipped "
+                 f"{_fmt(leak.get('short_excerpts_skipped'))}, request errors {_fmt(len(errors))}")
 
 
 def _reproducibility(lines: list[str], reproducibility: Any) -> None:

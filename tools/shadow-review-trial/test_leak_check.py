@@ -91,7 +91,15 @@ class LeakCheckTest(unittest.TestCase):
         self.assertEqual(result["own_plan_document_hits"], 0)
         self.assertEqual(result["outcome_text_hits"], 0)
         self.assertEqual(result["foreign_plan_document_captures"], 0)
+        self.assertEqual(result["short_excerpts_skipped"], 0)
+        self.assertEqual(result["min_excerpt_words"], 5)
         self.assertEqual(result["scope"], "case_plan_and_outcome_excerpts")
+
+    def test_bare_own_plan_path_reference_does_not_fail(self):
+        diff = with_section("src/app.py", "see docs/plans/demo/REVIEW.md for details\n")
+        result = leak_check.check_requests(self.manifest([make_case(diff=diff)]), "run-1")
+        self.assertTrue(result["pass"])
+        self.assertEqual(result["own_plan_document_hits"], 0)
 
     def test_own_plan_review_document_fails(self):
         diff = with_section("docs/plans/demo/REVIEW.md")
@@ -124,9 +132,26 @@ class LeakCheckTest(unittest.TestCase):
         result = leak_check.check_requests(self.manifest([case]), "run-1")
         self.assertTrue(result["pass"])
         self.assertEqual(result["outcome_text_hits"], 0)
+        self.assertGreater(result["short_excerpts_skipped"], 0)
+
+    def test_short_verdict_excerpt_is_skipped_and_counted(self):
+        case = make_case(outcomes=[{"kind": "review_verdict", "excerpt": "pass"}])
+        result = leak_check.check_requests(self.manifest([case]), "run-1")
+        self.assertTrue(result["pass"])
+        self.assertEqual(result["outcome_text_hits"], 0)
+        self.assertEqual(result["short_excerpts_skipped"], 3)
+        self.assertEqual(result["min_excerpt_words"], 5)
 
     def test_foreign_plan_document_is_counted_but_passes(self):
         diff = with_section("docs/plans/other/REVIEW.md")
+        result = leak_check.check_requests(self.manifest([make_case(diff=diff)]), "run-1")
+        self.assertTrue(result["pass"])
+        self.assertEqual(result["own_plan_document_hits"], 0)
+        self.assertEqual(result["outcome_text_hits"], 0)
+        self.assertEqual(result["foreign_plan_document_captures"], 1)
+
+    def test_outcome_excerpt_in_foreign_plan_document_is_foreign_not_a_leak(self):
+        diff = with_section("docs/plans/other/IMPLEMENTATION.md", EXCERPT + "\n")
         result = leak_check.check_requests(self.manifest([make_case(diff=diff)]), "run-1")
         self.assertTrue(result["pass"])
         self.assertEqual(result["own_plan_document_hits"], 0)

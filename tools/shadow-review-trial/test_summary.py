@@ -47,6 +47,9 @@ class SummaryTests(unittest.TestCase):
         self.assertIn("null", text)
         self.assertIn(built["reproducibility"]["report_sha256"], text)
         self.assertIn(f"{built['validation']['adjudication']['kappa']:.4f}", text)
+        self.assertIn("own-plan document sections only", text)
+        self.assertIn("at least 5 words", text)
+        self.assertIn("short excerpts skipped", text)
 
     def test_render_is_deterministic_and_carries_no_run_time_content(self):
         built = full_report()
