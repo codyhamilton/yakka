@@ -110,18 +110,6 @@ func CostAtInputSize(harness, model string, tok Tokens, inputSize int64, reporte
 	return usd, true
 }
 
-// ReservationCost prices an uncached request bound. If input size is uncertain,
-// it selects the most expensive published tier even when the estimate is below
-// the boundary. Callers reserve this amount independently for each attempt.
-func ReservationCost(model string, maxInputTokens, maxOutputTokens int64, uncertain bool) (float64, bool) {
-	r, ok := lookupRates(model)
-	if !ok {
-		return 0, false
-	}
-	r = rateForInputSize(r, maxInputTokens, uncertain)
-	return (float64(maxInputTokens)*r.Input + float64(maxOutputTokens)*r.Output) / 1e6, true
-}
-
 // PricingTableID identifies the exact embedded pricing bytes for durable records.
 func PricingTableID() string {
 	sum := sha256.Sum256(pricingJSON)
