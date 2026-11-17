@@ -1,5 +1,46 @@
 # Changelog
 
+## Unreleased — Claude flavour of the cloud installer
+
+- `scripts/cloud-install.sh --target claude` does the same full user-level install for Claude Code cloud environments: client and `yakka` on PATH, MCP merged into `~/.claude.json` (server `yakka`, no `env` block), hooks merged into `~/.claude/settings.json` with absolute `spool.sh` paths, and skills under `~/.claude/skills/<name>/`. Default `--target cursor` is unchanged. The key is read from `YAKKA_KEY` at runtime and is never printed or written into config. Set `YAKKA_ENDPOINT=https://api.yakka.build` as well so drain is not left with a partial override.
+
+
+## 3.4.12 — 2026-11-15 — Full user-level Cursor cloud install
+
+- `scripts/cloud-install.sh` is the single environment-build installer when the Yakka plugin is absent: client under `~/.local/share/yakka/install`, `yakka` on PATH, merged `~/.cursor/mcp.json` (server `yakka`, absolute `client/yakka.py mcp`, no `env` block), merged `~/.cursor/hooks.json` (absolute `spool.sh`, idempotent reruns), and core plugin skills under `~/.cursor/skills/<name>/` (per Cursor docs — not `skills-cursor/`). Removes stale `~/.cursor/skills/yakka/<name>/` layouts from older bootstraps. Plugin surface is skills, hooks and MCP only (no separate rules or agents manifest). Fix `skills/close-out/SKILL.md` YAML `description`. `check_skills.py --cursor-user` verifies the tree. Delete stale account-level Yakka MCP in the Cursor dashboard that still expands `${CLAUDE_PLUGIN_ROOT}`.
+- All three manifests at `3.4.12`.
+
+## 3.4.11 — 2026-11-15 — Cloud user-level install, spool dedupe, Codex events
+
+- Added `scripts/cloud-install.sh` for Cursor Cloud environment builds: installs the plugin client under `~/.local/share/yakka/install`, puts `yakka` on `~/.local/bin`, and writes workspace `.cursor/hooks.json` pointing at the installed `spool.sh` (no plugin cache). The yakka repo commits `.cursor/environment.json` that runs this script plus the existing skills bootstrap.
+- `spool.sh` dedupes repeat events within `YAKKA_SPOOL_DEDUPE_SECS` (default 10) keyed on conversation id, event name and payload hash, so Cursor CLI double-fire and overlapping hook sources drop harmlessly.
+- Codex `hooks/codex.json` passes `--event` on every spool invocation so envelopes carry the hook name. All three manifests at `3.4.11`.
+
+## 3.4.9 — 2026-11-15 — Split Claude MCP config from Cursor auto-discovery
+
+- Renamed `plugins/yakka/.mcp.json` to `claude-mcp.json` and declared it in `.claude-plugin/plugin.json` via `mcpServers`, so Claude Code still loads the shim with `${CLAUDE_PLUGIN_ROOT}` without relying on the default `.mcp.json` scan.
+- Removed the plugin-root `.mcp.json` so Cursor's agent-host does not prefer Claude's config: cloud runs scan only `PLUGIN_MCP_CONFIG_FILE_NAMES` (`.mcp.json`, then `mcp.json`); the manifest `mcpServers` override does not apply there. Cursor keeps `plugins/yakka/mcp.json` with `${CURSOR_PLUGIN_ROOT}` and env forwarding. All three manifests at `3.4.9`.
+
+## 3.4.8 — 2026-11-15 — Cursor MCP uses expanded args (no PLUGIN_ROOT)
+
+- Cursor `plugins/yakka/mcp.json` matches Claude layout: `python3` with `${CURSOR_PLUGIN_ROOT}/client/yakka.py` in `args` (no `cwd`). Cursor does not expand `${PLUGIN_ROOT}` or shell `:-` fallbacks in `mcp.json`. Discovery still forwards `${env:YAKKA_ENDPOINT}` and `${env:YAKKA_KEY}`. Plugin manifests at `3.4.8`.
+
+## 3.4.7 — 2026-11-15 — Cursor MCP spawn without cwd (superseded)
+
+- Attempted direct script `command` with `${CURSOR_PLUGIN_ROOT:-${PLUGIN_ROOT}}`; cloud spawn left literal `${PLUGIN_ROOT}`. Superseded by `3.4.8`.
+
+## 3.4.6 — 2026-11-14 — Cursor `mcp.json` standard layout
+
+- The Cursor plugin uses `plugins/yakka/mcp.json` (replacing `.cursor-mcp.json`). The stdio shim sets `cwd` to `${CURSOR_PLUGIN_ROOT}` and runs `python3` with `./client/yakka.py mcp`. Claude keeps `plugins/yakka/.mcp.json`; Codex keeps `.codex-mcp.json`. All three manifests are `3.4.6`.
+
+## 3.4.5 — 2026-11-14 — Cursor MCP config
+
+- The Cursor plugin manifest points at `.cursor-mcp.json`, which expands `${CURSOR_PLUGIN_ROOT}` for the stdio shim. Claude keeps `plugins/yakka/.mcp.json` with `${CLAUDE_PLUGIN_ROOT}`; Codex keeps `.codex-mcp.json`. All three manifests are `3.4.5`.
+
+## 3.4.4 — 2026-11-14 — Cursor loads the Yakka MCP
+
+- The Cursor plugin manifest pointed at `.mcp.json`, so Cursor tried to expand `${CLAUDE_PLUGIN_ROOT}` and the shim did not start. Superseded by 3.4.5.
+
 ## 3.4.0 — 2026-10-30 — token lifetime and name
 
 - Tokens have a name and are issued for a lifetime chosen from a dropdown (1 day, 1 week, 1 month, 3 months, 6 months, 1 year; default 3 months) instead of a date. The server computes the expiry and rejects `expires_at`.

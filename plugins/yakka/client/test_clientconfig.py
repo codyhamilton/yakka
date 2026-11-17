@@ -84,6 +84,14 @@ class TestEnvRemoteNoFile(ClientConfigTestCase):
 
 
 class TestPartialEnv(ClientConfigTestCase):
+    def test_env_placeholder_treated_as_unset(self) -> None:
+        write_config('endpoint = "https://file.example"\nkey = "k"\n')
+        os.environ["YAKKA_ENDPOINT"] = "${env:YAKKA_ENDPOINT}"
+        os.environ["YAKKA_KEY"] = "${env:YAKKA_KEY}"
+        c = yakka.Load()
+        self.assertEqual(c.Endpoint, "https://file.example")
+        self.assertEqual(c.Key, "k")
+
     def test_partial_env(self) -> None:
         secret = "super-secret-key-value"
         os.environ["YAKKA_KEY"] = secret
@@ -113,6 +121,78 @@ class TestMalformed(ClientConfigTestCase):
         with self.assertRaises(ValueError) as ctx:
             yakka.Load()
         self.assertIn("missing endpoint", str(ctx.exception))
+
+
+class TestEmptyEnvFallsBack(ClientConfigTestCase):
+    def test_empty_env_uses_client_toml(self) -> None:
+        write_config('endpoint = "https://file.example"\nkey = "file-key"\n')
+        os.environ["YAKKA_ENDPOINT"] = ""
+        os.environ["YAKKA_KEY"] = ""
+        c = yakka.Load()
+        self.assertEqual(c.Endpoint, "https://file.example")
+        self.assertEqual(c.Key, "file-key")
+
+    def test_literal_env_placeholders_use_client_toml(self) -> None:
+        write_config('endpoint = "https://file.example"\nkey = "file-key"\n')
+        os.environ["YAKKA_ENDPOINT"] = "${env:YAKKA_ENDPOINT}"
+        os.environ["YAKKA_KEY"] = "${env:YAKKA_KEY}"
+        c = yakka.Load()
+        self.assertEqual(c.Endpoint, "https://file.example")
+        self.assertEqual(c.Key, "file-key")
+
+    def test_literal_env_placeholders_loadmcp(self) -> None:
+        write_config('endpoint = "https://file.example"\nkey = "file-key"\n')
+        os.environ["YAKKA_ENDPOINT"] = "${env:YAKKA_ENDPOINT}"
+        os.environ["YAKKA_KEY"] = "${env:YAKKA_KEY}"
+        c = yakka.LoadMCP()
+        self.assertEqual(c.Endpoint, "https://file.example")
+        self.assertEqual(c.Key, "file-key")
+
+
+class TestLoadMCP(ClientConfigTestCase):
+    def test_missing_file_defaults_remote(self) -> None:
+        os.environ["YAKKA_CLIENT_CONFIG"] = os.path.join(
+            tempfile.mkdtemp(), "none.toml"
+        )
+        c = yakka.LoadMCP()
+        self.assertEqual(c.Endpoint, yakka.DefaultEndpoint)
+        self.assertEqual(c.Key, "")
+        self.assertFalse(c.Local)
+
+    def test_endpoint_override_without_key(self) -> None:
+        write_config('endpoint = "http://file.example"\nkey = "file-key"\n')
+        os.environ["YAKKA_ENDPOINT"] = "http://override.example"
+        c = yakka.LoadMCP()
+        self.assertEqual(c.Endpoint, "http://override.example")
+        self.assertEqual(c.Key, "")
+
+    def test_key_only_uses_file_then_default_endpoint(self) -> None:
+        write_config('endpoint = "https://file.example"\nkey = "file-key"\n')
+        os.environ["YAKKA_KEY"] = "env-key"
+        c = yakka.LoadMCP()
+        self.assertEqual(c.Endpoint, "https://file.example")
+        self.assertEqual(c.Key, "env-key")
+
+    def test_key_only_no_file_uses_default_endpoint(self) -> None:
+        os.environ["YAKKA_CLIENT_CONFIG"] = os.path.join(
+            tempfile.mkdtemp(), "none.toml"
+        )
+        os.environ["YAKKA_KEY"] = "solo-key"
+        c = yakka.LoadMCP()
+        self.assertEqual(c.Endpoint, yakka.DefaultEndpoint)
+        self.assertEqual(c.Key, "solo-key")
+
+    def test_partial_file_fields_ok(self) -> None:
+        write_config('endpoint = "http://only-ep.example"\n')
+        c = yakka.LoadMCP()
+        self.assertEqual(c.Endpoint, "http://only-ep.example")
+        self.assertEqual(c.Key, "")
+
+    def test_partial_env_does_not_raise(self) -> None:
+        os.environ["YAKKA_ENDPOINT"] = "http://only-endpoint.example"
+        c = yakka.LoadMCP()
+        self.assertEqual(c.Endpoint, "http://only-endpoint.example")
+        self.assertEqual(c.Key, "")
 
 
 if __name__ == "__main__":

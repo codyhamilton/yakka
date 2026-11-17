@@ -1,0 +1,3 @@
+{
+  "install": "export PATH=\"$HOME/.local/bin:$PATH\" && export YAKKA_BIN=\"$HOME/.local/share/yakka/install/bin/yakka\" && bash scripts/cloud-install.sh && python3 tools/driver/check_skills.py --cursor-user"
+}

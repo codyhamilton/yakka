@@ -1,9 +1,10 @@
 {
   "name": "yakka",
   "description": "Cloud-safe core workflow skills for Cursor: design, refine, execute, comprehensive-review, close-out, post-build. Also login (interactive).",
-  "version": "3.4.1",
+  "version": "3.4.12",
   "author": {
     "name": "William Hamilton"
   },
+  "mcpServers": "./mcp.json",
   "hooks": "./hooks/cursor.json"
 }

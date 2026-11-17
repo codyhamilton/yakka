@@ -92,6 +92,42 @@
         1
       ],
       "params": {}
+    },
+    {
+      "name": "change",
+      "versions": [
+        1
+      ],
+      "bulk": true,
+      "params": {},
+      "typed_params": {
+        "exclusion_policy_version": {"type": "string", "values": ["review-exclusions-v1"]},
+        "change_max_file_bytes": {"type": "integer", "min": 1, "max": 262144},
+        "change_max_total_bytes": {"type": "integer", "min": 1, "max": 2097152},
+        "change_max_files": {"type": "integer", "min": 1, "max": 200},
+        "context_lines": {"type": "integer", "min": 0, "max": 100},
+        "docs_never_noise": {"type": "boolean"},
+        "change_exclude": {"type": "string_array"},
+        "excluded_files": {"type": "string_array"},
+        "excluded_directories": {"type": "string_array"},
+        "lockfiles": {"type": "string_array"},
+        "truncation_order": {"type": "string_array", "values": ["code", "tests", "config", "docs"], "exact": ["code", "tests", "config", "docs"]},
+        "budget_bytes": {"type": "integer", "min": 2097152, "max": 2097152}
+      },
+      "required_params": [
+        "exclusion_policy_version",
+        "change_max_file_bytes",
+        "change_max_total_bytes",
+        "change_max_files",
+        "context_lines",
+        "docs_never_noise",
+        "change_exclude",
+        "excluded_files",
+        "excluded_directories",
+        "lockfiles",
+        "truncation_order",
+        "budget_bytes"
+      ]
     }
   ]
 }

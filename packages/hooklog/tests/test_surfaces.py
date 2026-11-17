@@ -64,17 +64,44 @@ class SurfaceTests(unittest.TestCase):
                     self.assertEqual(len(new), 1, (event, new))
                     lines = next(iter(new)).read_text().splitlines()
                     envelope = json.loads(lines[0])
-                    # Codex registers no --event: its event is the payload's hook_event_name.
-                    self.assertEqual(envelope['event'] or json.loads(lines[1])['hook_event_name'], event)
-                    if harness != 'codex':
-                        self.assertEqual(envelope['event'], event)
+                    self.assertEqual(envelope['event'], event)
                     self.assertEqual(envelope['harness'], harness)
                 self.assertEqual(prefetch_seen, 0)
+
+    def test_claude_manifest_selects_native_registration(self):
+        manifest = json.loads((PLUGIN / '.claude-plugin/plugin.json').read_text())
+        self.assertEqual(manifest['mcpServers'], './claude-mcp.json')
+        rel = manifest['mcpServers'][2:]
+        self.assertTrue((PLUGIN / rel).exists())
 
     def test_cursor_manifest_selects_native_registration(self):
         manifest = json.loads((PLUGIN / '.cursor-plugin/plugin.json').read_text())
         self.assertEqual(manifest['hooks'], './hooks/cursor.json')
-        self.assertTrue((PLUGIN / manifest['hooks'].lstrip('./')).is_file())
+        self.assertEqual(manifest['mcpServers'], './mcp.json')
+        for key in ('hooks', 'mcpServers'):
+            rel = manifest[key][2:] if manifest[key].startswith('./') else manifest[key]
+            rel = rel.rstrip('/')
+            self.assertTrue((PLUGIN / rel).exists(), key)
+
+    def test_plugin_root_has_no_dot_mcp_json(self):
+        self.assertFalse((PLUGIN / '.mcp.json').exists())
+
+    def test_harness_mcp_configs_use_matching_plugin_roots(self):
+        claude_mcp = (PLUGIN / 'claude-mcp.json').read_text()
+        cursor_mcp = (PLUGIN / 'mcp.json').read_text()
+        codex_mcp = (PLUGIN / '.codex-mcp.json').read_text()
+        self.assertIn('${CLAUDE_PLUGIN_ROOT}', claude_mcp)
+        self.assertNotIn('${CURSOR_PLUGIN_ROOT}', claude_mcp)
+        self.assertIn('"command": "python3"', cursor_mcp)
+        self.assertIn('${CURSOR_PLUGIN_ROOT}/client/yakka.py', cursor_mcp)
+        self.assertNotIn('${CLAUDE_PLUGIN_ROOT}', cursor_mcp)
+        self.assertNotIn('${PLUGIN_ROOT}', cursor_mcp)
+        self.assertNotIn('"cwd"', cursor_mcp)
+        self.assertNotIn('"env"', cursor_mcp)
+        self.assertNotIn("YAKKA_KEY", cursor_mcp)
+        self.assertNotIn("YAKKA_ENDPOINT", cursor_mcp)
+        self.assertIn('./client/yakka.py', codex_mcp)
+        self.assertNotIn('PLUGIN_ROOT', codex_mcp)
 
     def test_codex_manifest_selects_native_registration(self):
         # Without a Codex manifest, Codex loads hooks/hooks.json and records Codex events as claude.
@@ -85,6 +112,9 @@ class SurfaceTests(unittest.TestCase):
             rel = rel.rstrip('/')
             self.assertTrue((PLUGIN / rel).exists(), key)
         self.assertNotIn('--harness claude', (PLUGIN / manifest['hooks'].lstrip('./')).read_text())
+        codex_hooks = (PLUGIN / manifest['hooks'].lstrip('./')).read_text()
+        self.assertIn('--event SessionStart', codex_hooks)
+        self.assertNotRegex(codex_hooks, r'spool\.sh" --harness codex"')
 
     def test_manifest_versions_match(self):
         versions = {f: json.loads((PLUGIN / f).read_text())['version']

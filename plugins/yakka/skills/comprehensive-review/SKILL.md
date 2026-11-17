@@ -36,6 +36,16 @@ You did not build this; that independence is the value. Your output is read by a
 
 ## Rules
 
+Alongside this independent review, at its settled reviewed head after any in-place fixes and review artifacts are committed, make exactly one non-gating advisory `review_change` call:
+
+```json
+{"mode":"range","base":"<default-branch merge-base SHA>","head":"<reviewed head SHA>","kind":"pr","plan":"<NN>-<slug>","build_models":[{"id":"unknown"}],"detail":"full"}
+```
+
+Resolve `base` and `head` to explicit commit SHAs, including for local execution, and add the numeric `pr` when available. Substitute the actual plan folder name to use all stored phase outcomes as criteria. Omit `plan` for a recovered intent or legacy plan without a stored design and let the receipt expose missing criteria. Take contributor model IDs only from the run record for `build_models`; retain `unknown` for unavailable provenance, never guess. Send no `trial` argument.
+
+This call uses `read_write` scope and a server-declared 150-second timeout to spend and record on the server; it has no local actions. If the tool is absent, unavailable or failed, continue. Summarize the receipt ID, status, coverage/limitations and returned findings only in session output, outside the review handoff; a `skipped_duplicate` receipt refers to an earlier review and is not new independent evidence. Never feed the result into a gate, verdict, commit, trailer, exit code or any plan-folder file (including `REVIEW.md`); never fix or dispatch work from it. Your independent findings and verdict remain the only review handoff.
+
 - Focus beats breadth; underlying risk before easy nits.
 - Fix in place only what is mechanical and verifiable now. Never start a structural fix you would finish by guessing intent.
 - A briefed finding's fixer must never need this conversation.

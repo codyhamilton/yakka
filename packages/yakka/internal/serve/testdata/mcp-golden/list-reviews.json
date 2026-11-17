@@ -1,0 +1,31 @@
+{
+  "tools": [
+    {
+      "name": "list_reviews",
+      "description": "Read a tenant's reviews as one complete, cursor-paged listing. Read-only and tenant-scoped; honours the review filters and returns the same reviews, next_cursor and complete data as GET /v1/reviews.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "repo_id": {"type": "string"},
+          "plan": {"type": "string"},
+          "phase": {"type": "integer", "minimum": 1},
+          "kind": {"type": "string", "enum": ["phase", "pr", "adhoc"]},
+          "status": {"type": "string"},
+          "effort": {"type": "string", "enum": ["high", "xhigh", "max"]},
+          "profile": {"type": "string"},
+          "manifest_hash": {"type": "string"},
+          "since": {"type": "number"},
+          "tags": {"type": "array", "items": {"type": "string"}, "maxItems": 16},
+          "detail": {"type": "string", "enum": ["full"]},
+          "limit": {"type": "integer", "minimum": 1, "maximum": 500},
+          "cursor": {"type": "string"}
+        },
+        "additionalProperties": false
+      },
+      "annotations": {"readOnlyHint": true},
+      "_meta": {
+        "yakka/tool": {"v": 1, "scope": "read", "timeout_s": 20, "context": [], "rev": "71aa1b57b5bba561"}
+      }
+    }
+  ]
+}

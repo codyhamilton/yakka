@@ -52,15 +52,30 @@ Any request carrying an `Origin` header is refused with `403`. Callers are progr
 closes browser cross-origin posts to the keyless loopback server.
 
 Tenant and scope come from the credential alone. Nothing in a request body, including `_local`,
-selects or changes either. A missing or bad credential is `401` with the REST error body. A valid key
+selects or changes either. On a non-local server, a request with no `Authorization` header is an
+anonymous discovery principal: it has no tenant and uses the `read` catalog for `initialize`,
+`ping`, and `tools/list`; notifications are accepted with `202` and no handler runs; `tools/call`
+with an `id` is `401` with the REST error body and no handler runs. The anonymous path admits bodies
+only up to the default MCP cap (256 KiB), enforces a per-client-IP rolling budget before the body is
+read, and does not accept cookies or `?tenant=` as identity. A present `Authorization` header that
+fails bearer resolution is `401` with the REST error body and the body is not read. A valid key
 that lacks a tool's scope gets a `200` JSON-RPC error `-32003` with data
 `{"code":"insufficient_scope","need":"read_write"}`, which the shim relays unchanged.
+
+Only the human owner may reset or delete a tenant. Agents must not perform or attempt this on a user's behalf.
+There is no reset/delete MCP tool. The [owner lifecycle API](03-remote-service.md#owner-tenant-lifecycle-api)
+is cookie-session/profile-UI-only, with same-origin and dedicated UI-header guards; keys never
+qualify, even beside an owner cookie. Agents must not try REST, browser automation or header
+spoofing to bypass that boundary. The guards are spoofable, not proof of a human; a future
+human-verification/captcha step is out of scope for this amendment.
 
 ### Scope
 
 Each tool declares `read` (the default) or `read_write`. The registry enforces it before the handler
 runs, and `tools/list` lists only the tools the caller's scope satisfies. A `read_write` tool sets
-`readOnlyHint` to false. All three shipped tools are `read`.
+`readOnlyHint` to false. `artifact_feedback`, `list_checks`, `search_artifacts` and `list_reviews`
+are `read`; `review_change` is `read_write` because it spends on a provider call and stores a review
+record.
 
 ### Tool definition (the registration seam)
 
@@ -128,13 +143,25 @@ but the server trusts neither place.
 
 ### Trust
 
+The [Plan 23 follow-up amendment](../plans/23-llm-review-shadow.md) added full cached
+duplicate replies, effort/tags/store call controls and tenant-bound cursor paging through a
+`list_reviews` tool. They are implemented and preserve server-owned definitions and
+credential-derived tenancy. The amendment's owner-only tenant reset/delete is also implemented, but
+it is cookie-session/profile-UI-only and has no MCP surface, so it adds no tool authority.
+
 `_local` and `arguments` are claims by the caller. A handler may use them to word an answer, to select
 a row inside the caller's own tenant (for example `(repo_id, rel_path)`), or to compare hashes. It must
 not use them to choose a tenant, open a path, run a command, build a URL or SQL text, or decide
 authorization. The server never touches a filesystem path that arrives in `_local`.
 
-A direct authenticated call with the same `_local` gets the same answer as the call through the shim,
-and cannot reach another tenant's data. Absolute paths in `_local` (`cwd`, `project_dir`,
+A direct authenticated call with the same `_local` uses the same handler as the call through the shim
+and cannot reach another tenant's data. Repeating a `store=true` review capture returns the earlier
+completed review in the full fresh response shape, with `cached=true`, `original_review_id`,
+`original_status` and the original findings even at receipt detail. A still-running or unknown
+original returns `in_progress` or `outcome_unknown` with `cached=false` and no second provider call,
+and a missing or corrupt original returns `cache_unavailable`. `store=false` calls are independent
+paid work and are never deduplicated, so `review_change` no longer promises unconditional
+idempotency. Captured content is never returned. Absolute paths in `_local` (`cwd`, `project_dir`,
 `resolved_path`) are transient: the registry and handlers neither log nor store them. Server request
 logs hold method, tool name, tenant id, status and duration, and never arguments, `_local` or tokens.
 
@@ -160,6 +187,14 @@ per-tool rate limits, and registering tool handlers from outside the Go binary.
 - `list_checks` and `search_artifacts` declare no context. Their names, descriptions, schemas,
   annotations and result text are the server's own. They read the functions behind `/v1/checks` and
   `/v1/search` in process.
+- `list_reviews` is `read`, `readOnlyHint` true, declares no context and has no local readers or
+  actions. It validates a closed schema of the existing review filters (`repo_id`, `plan`, `phase`,
+  `kind`, `status`, `effort`, `profile`, `manifest_hash`, `since`), repeated `tags` (at most 16 exact
+  strings, conjunctive/ALL), `detail=full`, `limit` (default 100, range 1–500) and `cursor`, and
+  returns the same `{reviews, next_cursor, complete}` data object as `GET /v1/reviews`. Cursors are
+  bound to the authenticated tenant, route, filters, detail and fixed high-water mark; malformed,
+  mismatched or foreign-tenant cursors are tool errors. The shim learns the tool through the
+  registry; no tool-name or schema logic is added to the client.
 - `artifact_feedback` is `read`, `readOnlyHint` true, and makes no service write, ingest or worker
   wake. It declares `cwd` (optional, used only to word an error), `resolved_path` with
   `path_arg:"path"` and `bases:["cwd"]`, `file` of `resolved_path`, `git` of `resolved_path`,
@@ -167,6 +202,32 @@ per-tool rate limits, and registering tool handlers from outside the Go binary.
   the path kind, the state, the order of checks and the wording. [Design 4](04-advisory-surface.md#artifact_feedback)
   holds the states. `bases:["cwd"]` is today's behaviour; whether a harness exposes `project_dir` is
   open question 4.
+- `review_change` is server-owned, `read_write`, `readOnlyHint:false`, with `timeout_s:150` and has no local actions.
+  Registration requires review model configuration and a server call ceiling of at
+  least 150 seconds. Required arguments are `mode` (`uncommitted` or `range`) and `build_models`;
+  a range uses `base` and `head`. Optional `kind`, `plan`, `phase`, `pr` and `brief` supply review
+  identity and stored criteria references; `detail:full` includes validated findings. Optional
+  `effort` (default `high`; `high`, `xhigh` or `max` only), `tags` (at most 16 exact strings) and
+  `store` (default `true`; `false` skips all dedupe, cache, input and review-record writes and
+  returns the full review) are validated before any spend or storage, and a valid per-call effort is
+  never capped by the server's high-only default. The declaration
+  orders optional `project_dir`, `cwd`, `git` of `project_dir`, then `change`. All are optional at
+  the registry gate so the handler can translate a missing/unsupported capture to
+  `capture_unsupported`; an actual capture is mandatory to review. No `session_hint` is declared.
+  `change` is content-bearing/bulk with a 2 MiB serialized budget, typed server policy constants,
+  and argument-fed capture settings. The shim overwrites agent-supplied `_local` and alone performs
+  local capture. The server owns criteria resolution, prompt policy, provider credential/call,
+  validation, spend and tenant-local records, sharing the `POST /v1/reviews` orchestrator. Machines
+  need no provider key. Fresh receipts never return captured diff content, and a completed duplicate
+  returns the original review's full fresh-shape content with `cached`, `original_review_id` and
+  `original_status`; `store=false` is never deduplicated.
+
+Stage calls are advisory: one non-gating range invocation per phase close in `execute`, and one at
+the reviewed/candidate PR head in each of `comprehensive-review` and `post-build`. They use explicit
+base/head SHAs, available criteria references, and `build_models` from the run record or `unknown`,
+without a `trial` argument. Receipt summaries/findings stay in session output, never in gates,
+verdicts, commits, trailers, exit codes or plan-folder files. Missing, unavailable or failed review
+does not affect existing stage decisions. Duplicate receipts are earlier evidence, not new findings.
 
 ## Shim (`yakka mcp`)
 
@@ -264,6 +325,7 @@ command, path, URL or script.
 | `git` | `of`: `resolved_path`, `project_dir` or `cwd` | the work tree top and identity of that path's directory, by the drain's `RepoID`/`RepoPath` rules | `{"repo_id","rel_path","error"}`; `error` is `no_repo`, `no_commit` or `git_unavailable`, a fact and not a failure |
 | `queue` | `of`: `git`; `path`: `resolved_path` | spool and `rejected/` entries whose normalised write path equals `(repo_id, rel_path)` or the absolute `resolved_path`, by the drain's path function | `{"pending":[{"age_s","mtime"}],"rejected":[{"reason","mtime"}]}`, at most 50 of each; `reason` is the drain's `.reason` text; no payloads, no paths, no entries for other files |
 | `drain` | none | a non-blocking probe of `<queue>/.drain.lock` | `{"running"}` |
+| `change` | argument mappings for mode, view, untracked policy, range refs and expected repo id; typed server policy constants; `bulk`, `budget_bytes` | bounded Git diff and omission manifest from `project_dir`; no `cwd` fallback | content-bearing value with `repo_id`, linked-worktree identity, branch, `HEAD`, dirty counts, mode, diff, `diff_sha256`, manifest and completeness |
 
 `git.top` is absent on purpose. The server needs the identity and the relative path, and an absolute
 repository path adds egress with no use. The `queue` reader reports what is on disk at call time, and
@@ -284,7 +346,8 @@ Safety, for every reader including later plans':
    a repository, and nothing else.
 5. A reader whose value can contain file or diff content is marked `content` in the table. It must run
    the secret scan before returning, withhold a file with a hit (naming the pattern and line, never the
-   match), and carry a `budget_bytes`. No v1 reader returns content. `file` returns a hash and has no
+   match), and carry a `budget_bytes`. The registered v1 `change` reader is content-bearing;
+   `file` returns a hash and has no
    content parameter. A declaration that asks for content from a reader that does not offer it is
    `bad_params`.
 6. Non-bulk readers return at most 64 KiB. A bulk reader declares `bulk` and `budget_bytes`, truncates by
@@ -294,6 +357,23 @@ Safety, for every reader including later plans':
    reader's value with `secret_in_context`.
 8. No environment variable, hostname, username or other value is sent unless a declared reader's table
    entry names it.
+9. `change` validates mode, view, booleans, refs and policy limits. It resolves refs with
+   `rev-parse --verify --end-of-options <ref>^{commit}` and reads range content from Git objects. It
+   uses fixed Git argument arrays without a shell, fetch, index writes or object writes. It uses only
+   `project_dir` to locate a repository, reports linked-worktree identity, and checks `HEAD` plus a
+   status fingerprint before and after capture, retrying once before returning `changed_during_capture`.
+10. `change` disables external diff, textconv and fsmonitor helpers. It discovers filter attributes
+   before status or diff, disables each discovered clean command for those operations, and withholds
+   affected worktree paths as `filter_driver`. It does not follow symlinks or return non-regular files.
+   Untracked paths come from `ls-files --others --exclude-standard`; ignored paths are listed as
+   `ignored` and never included. The existing secret scan checks added and removed diff lines and
+   added-file content before return. A hit withholds the whole path and records only pattern and line.
+11. `change` receives exclusions, per-file, total-byte and file-count caps, truncation class order and
+   context lines from the server declaration. It embeds no policy values in the shim registration.
+   Excluded, secret, filtered, invalid-encoding, symlink, ignored, untracked-not-included and capped
+   paths have manifest entries with no captured content. Truncation drops whole files by code, tests,
+   config, then docs; `docs/` is never excluded as noise. `diff_sha256` covers the exact UTF-8 diff
+   bytes returned.
 
 Failure codes form a closed set: `unsupported_reader` (not in the table), `unsupported_reader_version`
 (a known reader at a higher `v`), `unsupported_declaration` (the declaration's `v` is above what the shim
