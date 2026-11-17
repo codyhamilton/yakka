@@ -98,3 +98,9 @@ Artifact feedback: all six briefs and all six reports `delivered`, screen pass; 
 - Phase 4 report: unit 4 dropped `missing_comparator_source` because DESIGN's eligibility list has four conditions; the report/comparator path must accept the frozen manifest's `tiers`, `base_blob` criteria and `outcomes`/`later_fixes` shape (the `stratum`/`target_per_effort` aliases remain for the current `report.py`).
 - Cosmetic: `cli.py manifest` prints the frozen case count under the label `eligible` while tier eligible totals 534; the manifest shape is correct.
 - The unselected document-led extractor (`history_extract_b.py` and its test) remains committed as comparison provenance; Phase 4/close-out may keep or drop it.
+
+## Phase 4 — Comparison and validation report
+
+Run: OpenCode `opencode run` — model `opencode-go/deepseek-v4.1-flash`; start 2026-11-18 06:47 AEST.
+
+Units: TBD by refine.
