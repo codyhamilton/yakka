@@ -382,7 +382,7 @@ func (t *Tenant) ArtifactEntityCount(ctx context.Context, f AnalyticsFilter, ran
 
 // ArtifactVersionHistory returns versions ordered received_at DESC, content_hash ASC. The
 // cursor boundary is stable when receive timestamps tie.
-type ArtifactVersion struct {
+type ArtifactHistoryVersion struct {
 	Hash, ConversationID, Source, SHA string
 	TS                                float64
 	ReceivedAt                        int64
@@ -412,7 +412,7 @@ func (t *Tenant) ArtifactVersionWriter(ctx context.Context, repo, path, hash str
 	return conv, err
 }
 
-func (t *Tenant) ArtifactVersionHistory(ctx context.Context, repo, path string, afterReceived *int64, afterHash string, limit int) ([]ArtifactVersion, bool, error) {
+func (t *Tenant) ArtifactVersionHistory(ctx context.Context, repo, path string, afterReceived *int64, afterHash string, limit int) ([]ArtifactHistoryVersion, bool, error) {
 	q := `SELECT f.content_hash,
 	 (SELECT w.conversation_id FROM facts w WHERE w.type='artifact_version' AND w.repo_id=f.repo_id AND w.path=f.path AND w.content_hash=f.content_hash ORDER BY w.ts ASC,w.row_hash ASC LIMIT 1),
 	 f.source,f.sha,f.ts,f.received_at,
@@ -430,9 +430,9 @@ func (t *Tenant) ArtifactVersionHistory(ctx context.Context, repo, path string, 
 		return nil, false, err
 	}
 	defer rows.Close()
-	out := []ArtifactVersion{}
+	out := []ArtifactHistoryVersion{}
 	for rows.Next() {
-		var v ArtifactVersion
+		var v ArtifactHistoryVersion
 		if err := rows.Scan(&v.Hash, &v.ConversationID, &v.Source, &v.SHA, &v.TS, &v.ReceivedAt, &v.AlsoSeen); err != nil {
 			return nil, false, err
 		}

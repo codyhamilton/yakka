@@ -50,7 +50,7 @@ func TestArtifactEntitiesMembershipLifetimeVersionAndHistory(t *testing.T) {
 	if err != nil || more || len(history) != 2 {
 		t.Fatalf("history=%+v more=%v err=%v", history, more, err)
 	}
-	var old ArtifactVersion
+	var old ArtifactHistoryVersion
 	for _, v := range history {
 		if v.Hash == keys.ContentHash([]byte("same")) {
 			old = v
