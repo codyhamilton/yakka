@@ -59,6 +59,13 @@ The phase outcome is approach-open; this run uses the signed outcome and CONTRAC
 - Deviations / unfinished: the own-path list in the brief omitted `serve/analytics.go`, `analytics_population.go` and `analytics_entities.go`, which the unit touched; recorded in its report. Non-session scope/cohort counts and the single content-hash population remain as 6-05b described.
 - Verification: full `GOMEMLIMIT=8GiB GOMAXPROCS=3 go test -p=3 ./internal/store ./internal/serve -count=1` passed (store 7.498s; serve 28.454s), including the formerly time-dependent activity tests.
 
+### `6-07-cohort-proof-enumeration.md`
+
+- Outcome: committed as `e238be6` (`Prove schema-driven cohorts and advertise the feature`); a schema-driven enumeration resolves 132 published measure/lens pairs across the six grains, the five 17.3.1 invariants pass on fixtures, and `features.cohort` is advertised only after that proof. Fixed in earlier units: artifact/plan/execution `scope_n` now reports pre-cohort with post `cohort_n`; session lens targets count the lens population; a hashless legacy artifact version reports `content_unavailable` instead of 500.
+- Surfaces: new `analytics_cohort_proof_test.go`, `analytics_query.go`, `analytics_entities.go`, `analytics_artifact_population.go`, updated existing tests and `reports/6-07-cohort-proof-enumeration.md`.
+- Deviations / unfinished: the proof expands dynamic `<check>`/`<kind>` families through one design check and the design kind (same resolver path); legacy `exclude=<name>:<value>` cannot name `band:<check>` because it cuts at the first colon (include is proved, structured cohort `scope.exclude` accepts it); `content` is proved through `/scores` because it has no `/entities` route; time uses two fields because its route requires 2–4.
+- Verification: full `GOMEMLIMIT=8GiB GOMAXPROCS=3 go test -p=3 ./internal/store ./internal/serve -count=1` passed (store 6.914s; serve 29.490s); report records the before/after invariant failures.
+
 ## Phase 6 (earlier run) — Plan and execution entities and the cohort predicate
 
 Refinement commit: `c85e5b9` (`docs: refine Phase 6 analytics work`). Four sequential units; plan/execution entity rows, cohort resolution, target-route application, then time cohorts/activity and schema publication. The signed contract in CONTRACTS.md 17.3 supplies the implementation boundaries. `artifact_feedback` on all four briefs returned delivered / screen pass (`jev-1.13.0`). Phase 5 carried items remain outside this phase: artifact file-to-time-bucket assignment and score-lens memory-growth evidence.
