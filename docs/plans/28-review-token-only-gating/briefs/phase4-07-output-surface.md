@@ -1,8 +1,8 @@
 # Brief: phase4-07 — Report output surface, CLI and README
 
 Consumer: a build worker wiring the Plan 28 Phase 4 report's rendered summary, CLI options, evidence-check command, rehearsal fixture and README, dispatched by `execute`.
-Owned paths: `tools/shadow-review-trial/summary.py`, `tools/shadow-review-trial/test_summary.py`, `tools/shadow-review-trial/cli.py`, `tools/shadow-review-trial/test_phase7.py`, `tools/shadow-review-trial/README.md`; report `docs/plans/28-review-token-only-gating/reports/phase4-07-output-surface.md`. Touch nothing else.
-Do not edit `report.py`, `matching.py`, `leak_check.py`, `evidence_check.py`, `runner.py`, `manifest.py` or their tests — earlier Phase 4 units own them.
+Owned paths: `tools/shadow-review-trial/summary.py`, `tools/shadow-review-trial/test_summary.py`, `tools/shadow-review-trial/cli.py`, `tools/shadow-review-trial/test_phase7.py`, `tools/shadow-review-trial/test_manifest.py`, `tools/shadow-review-trial/README.md`; report `docs/plans/28-review-token-only-gating/reports/phase4-07-output-surface.md`. Touch nothing else.
+Do not edit `report.py`, `matching.py`, `leak_check.py`, `evidence_check.py`, `runner.py`, `manifest.py` or their other tests — earlier Phase 4 units own them. `test_manifest.py` is owned here only for the stale-label assertion.
 Commits: commit to `feat/28-review-token-only-gating` when done evidence passes, with a plain-summary title; include the report. Never push.
 Depends on: `phase4-03-evidence-check`, `phase4-04-manifest-population`, `phase4-05-comparisons`, `phase4-06-deltas-cost-validation`.
 Runs alongside: nothing (last Phase 4 unit).
@@ -17,7 +17,7 @@ Budget: 8 files to read, about 400 lines to change including tests, 80 tool turn
 5. `tools/shadow-review-trial/evidence_check.py` — `require_metric_only`.
 6. `tools/shadow-review-trial/test_phase7.py` — `RehearsalHandler` (28-93) and the 3-case/3-effort rehearsal (185-325).
 7. `tools/shadow-review-trial/README.md` — Report section (65-78), evidence format (88-98), comparator evidence (99-113).
-8. `docs/plans/28-review-token-only-gating/IMPLEMENTATION.md` — the cosmetic carried item: `cli.py manifest` prints the frozen count under the label `eligible`.
+8. `docs/plans/28-review-token-only-gating/IMPLEMENTATION.md` — the cosmetic carried item. The label fix already landed in `dbef5d8`: `cli.py manifest` now prints `"frozen"`, but `tools/shadow-review-trial/test_manifest.py:246` still asserts `'"eligible": 2'`, so the suite is red at HEAD. The repair is the stale assertion, not the label.
 
 Read ranges and grep; do not read a whole file to find one section, do not re-read a file already in context, and truncate long tool output.
 
@@ -41,7 +41,7 @@ Settled decisions:
 - `summary.render(report: dict) -> str` — pure, deterministic Markdown. Fixed section order: Population; Comparisons (a)–(g) including the null beside each recall and the paired deltas; Validation controls (matching/method counts, adjudication and kappa, shuffled null, leak check); Reproducibility; Reconciliation. Format numbers with fixed precision, sorted keys, no HTML, no ANSI, no trailing spaces. It must render any report produced by `report.build_report` and must not recompute metrics.
 - `cli.py report`: keep `--manifest --records --ledger --adjudication --output [--comparators]` unchanged; after `build_report`, write `--output` JSON with `_write_json` and write the summary to `output.with_suffix(".md")`; print `{"report": ..., "summary": ..., "manifest_sha256": ..., "report_sha256": ..., "arms": ..., "usage": ...}`.
 - `cli.py evidence-check --folder <path>`: call `evidence_check.require_metric_only`; on `ValueError` let `parser.error` exit non-zero with the offender names; on success print `{"evidence_check": "pass", "folder": ..., "files_checked": n}`. Add it to `_parser` and `main`.
-- Cosmetic carried item: `cli.py manifest`'s printed `"frozen"` count currently says `"eligible"`; fix the label to `"frozen"` (no shape change).
+- Cosmetic carried item (corrected after units 1, 3 and 4 reported it): `cli.py manifest` already prints `"frozen"` (`dbef5d8`); `test_manifest.py`'s `test_cli_freezes_fixture_repository` still asserts `"eligible": 2`. Fix the stale test assertion to the committed `"frozen"` summary key (no CLI or shape change), so the suite is green. Do not change the printed label back.
 
 ## Changes
 
@@ -60,7 +60,7 @@ Implement `render(report: dict) -> str` as described. Include a table or bullet 
 - Import `summary` and `evidence_check`.
 - Report branch: write JSON and sibling summary, print `report_sha256` and summary path.
 - Add `evidence-check` subcommand and handler.
-- Fix the `manifest` printed label from `eligible` to `frozen`.
+- Fix the stale `test_manifest.py` assertion: the CLI label is already `frozen`; update the test expectation (and any other stale expectation for that summary key) to match the committed output. Do not change `cli.py`'s summary key.
 
 ### `test_phase7.py`
 
