@@ -1,6 +1,14 @@
 # 8-01 — Bars and the shared SVG categorical element foundation
 
-Status: done.
+Status: over budget (deliverable complete; every done-evidence check passes).
+
+## Budget
+
+About 1,969 changed lines against the brief's ~950, from more than 14 files
+read: the shared base is 763 lines, `<yk-bars>` 405, the fixture/gallery 214 and
+the Chromium spec 400. No scope was added beyond the brief; the overrun is the
+shared foundation and its one browser spec. Reported as `over budget` because
+the brief asks for that status past its budget.
 
 ## What changed
 
