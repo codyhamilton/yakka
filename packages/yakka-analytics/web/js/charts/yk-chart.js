@@ -1,8 +1,8 @@
 // <yk-chart> — the one uPlot-backed time-series element. It composes the 7-01
 // foundations (colour registry, formatters, tooltip, legend, badges, table,
 // cached stylesheet) with the mode transforms, scales and thresholds here.
-// The element owns no gesture grammar beyond uPlot's primitive select/brush
-// events; 7-03 composes those.
+// 7-03 adds the gesture engine, the Boolean entity selection and the settled
+// state history; the element owns that state and the engine only emits intent.
 
 import uPlot from '/vendor/uplot-1.6.32/uPlot.esm.js';
 import { ColourRegistry } from './colour-registry.js';
@@ -17,12 +17,36 @@ import {
   buildScales, scaleGroupKey, scaleRange, xIsNumeric, xPxToData, xToPx, yPxToData, yToPx
 } from './scales.js';
 import { createThresholdPlugin, renderThresholdTable, thresholdModel } from './thresholds.js';
+import { createGestureEngine, createHighlightPlugin } from './gestures.js';
+import { createHistory, decodeBrush } from './history.js';
+import {
+  addSelection, decodeSelection, emptySelection, isExcluded, isSelected,
+  normaliseSelection, removeSelection, selectedKeys, selectionIsEmpty, selectionPredicate,
+  toggleSelection
+} from './selection.js';
 
 const TAG = 'yk-chart';
 export const CHART_HEIGHT = 240;
 const registry = new ColourRegistry();
 const hostStyles = typeof CSSStyleSheet === 'undefined' ? null : new CSSStyleSheet();
-if (hostStyles) hostStyles.replaceSync(':host { display: block; min-width: 0; }');
+if (hostStyles) {
+  hostStyles.replaceSync(`
+    :host { display: block; min-width: 0; }
+    .yk-gesture-controls { display: flex; flex-wrap: wrap; gap: 0.5rem; margin: 0.4rem 0; }
+    .yk-gesture-button {
+      min-width: 44px; min-height: 44px; padding: 0.35rem 0.7rem;
+      border: 1px solid var(--yk-chart-border); border-radius: 0.4rem;
+      background: var(--yk-chart-surface); color: var(--yk-chart-text);
+      font: inherit; cursor: pointer;
+    }
+    .yk-gesture-button[data-active='true'] { border-color: var(--yk-chart-focus); outline: 2px solid var(--yk-chart-focus); }
+    .u-over { touch-action: none; }
+    input.yk-table-select { min-width: 44px; min-height: 44px; }
+    .yk-table tbody tr[data-selected='true'] { background: color-mix(in srgb, var(--yk-chart-focus) 12%, transparent); }
+    .yk-table tbody tr[data-excluded='true'] { opacity: 0.6; text-decoration: line-through; }
+    .yk-table tbody tr[data-highlighted='true'] { outline: 1px dashed var(--yk-chart-focus); outline-offset: -1px; }
+  `);
+}
 
 function withAlpha(colour, alpha) {
   const match = /^#([0-9a-f]{6})$/i.exec(colour);
@@ -48,10 +72,21 @@ export class YkChart extends HTMLElement {
   #token = 0;
   #u = null;
   #transform = null;
-  #selection = null;
+  #brush = null;
+  #selection = emptySelection();
   #thresholds = [];
   #observer = null;
   #stopTheme = null;
+  #history = null;
+  #engine = null;
+  #inspectedKey = null;
+  #inspectedIndex = 0;
+  #inspectedSeries = 0;
+  #highlight = null;
+  #selectMode = false;
+  #legendState = { hidden: [], active: null, isolated: null };
+  #highlightHandler = null;
+  #baseWindow = null;
 
   constructor() {
     super();
@@ -75,16 +110,40 @@ export class YkChart extends HTMLElement {
   connectedCallback() {
     if (this.#stopTheme) this.#stopTheme();
     this.#stopTheme = watchTheme(() => this.#schedule());
+    if (!this.#history) {
+      this.#history = createHistory({ onChange: state => this.#applyUrlState(state) });
+      this.#history.start();
+    }
+    if (!this.#highlightHandler) {
+      this.#highlightHandler = event => {
+        const detail = event.detail || {};
+        if (!detail.key || detail.chart === this.#chartId()) return;
+        if (!(this.#transform?.rows || []).some(row => row.key === detail.key)) return;
+        this.#setHighlight(detail.key, { propagate: false });
+      };
+      (this.ownerDocument || document).addEventListener('yk-highlight', this.#highlightHandler);
+    }
     this.#schedule();
   }
 
   disconnectedCallback() {
     this.#observer?.disconnect();
     this.#observer = null;
+    this.#engine?.destroy();
+    this.#engine = null;
     this.#u?.destroy();
     this.#u = null;
     this.#stopTheme?.();
     this.#stopTheme = null;
+    this.#history?.stop();
+    if (this.#highlightHandler) {
+      (this.ownerDocument || document).removeEventListener('yk-highlight', this.#highlightHandler);
+      this.#highlightHandler = null;
+    }
+  }
+
+  #chartId() {
+    return this.#spec?.chart || this.id || 'chart';
   }
 
   whenSettled() {
@@ -125,7 +184,15 @@ export class YkChart extends HTMLElement {
       stacked: Boolean(transform?.stacked),
       bucket: spec.bucket ?? spec.resolution ?? null,
       window: { from: xScale.min, to: xScale.max },
-      selection: this.#selection ? { ...this.#selection } : null,
+      selection: selectionPredicate(this.#selection),
+      selectionKeys: selectedKeys(this.#selection),
+      brush: this.#brush ? { ...this.#brush } : null,
+      inspectedKey: this.#inspectedKey,
+      inspectedIndex: this.#inspectedIndex,
+      inspectedSeries: this.#inspectedSeries,
+      highlight: this.#highlight,
+      selectMode: this.#selectMode,
+      urlState: this.#history ? this.#history.state : null,
       series: (transform?.spec?.series || []).map(item => ({
         key: item.key,
         label: item.label,
@@ -182,11 +249,12 @@ export class YkChart extends HTMLElement {
     const chartId = spec.chart || this.id || 'chart';
     this.dataset.chart = chartId;
     this.dataset.idle = 'false';
+    this.#engine?.destroy();
+    this.#engine = null;
     this.#u?.destroy();
     this.#u = null;
     this.#transform = null;
     this.#thresholds = [];
-    this.#selection = null;
 
     const unsupported = spec.unsupported;
     if (unsupported) {
@@ -214,6 +282,7 @@ export class YkChart extends HTMLElement {
     const root = this.#shell(chartId, 'ready');
     const frame = root.querySelector('.yk-chart-frame');
     const tooltip = createTooltip(this.shadowRoot.ownerDocument || document);
+    this.shadowRoot.querySelector(':scope > .yk-tooltip')?.remove();
     this.shadowRoot.append(tooltip.element);
 
     const group = scaleGroupKey(styledSpec);
@@ -253,6 +322,14 @@ export class YkChart extends HTMLElement {
     const gridStroke = readToken(this, '--yk-chart-grid');
     const units = styledSpec.units || seriesStyles[0]?.unit || '';
 
+    const plugins = [];
+    if (this.#thresholds.length > 0) plugins.push(createThresholdPlugin(this.#thresholds, { host: this }));
+    plugins.push(createHighlightPlugin({
+      getKey: () => this.#highlight,
+      getRows: () => this.#transform?.rows || [],
+      getColour: () => readToken(this, '--yk-chart-focus') || '#176b87'
+    }));
+
     const opts = {
       width: Math.max(320, frame.clientWidth || 640),
       height: CHART_HEIGHT,
@@ -260,7 +337,7 @@ export class YkChart extends HTMLElement {
       legend: { show: false },
       cursor: {
         points: { show: false },
-        drag: { x: true, y: false, setScale: false, uni: 12 },
+        drag: { x: false, y: false, setScale: false, uni: 12 },
         ...(group ? { sync: { key: group, scales: ['x', null] } } : {})
       },
       scales,
@@ -270,18 +347,45 @@ export class YkChart extends HTMLElement {
         { stroke: axisStroke, grid: { stroke: gridStroke }, ticks: { stroke: gridStroke }, labelFont: '12px system-ui, sans-serif' },
         { stroke: axisStroke, grid: { stroke: gridStroke }, ticks: { stroke: gridStroke }, label: units, labelFont: '12px system-ui, sans-serif' }
       ],
-      plugins: this.#thresholds.length > 0 ? [createThresholdPlugin(this.#thresholds, { host: this })] : [],
+      plugins,
       hooks: {
-        setCursor: [u => this.#onCursor(u, tooltip)],
-        setSelect: [u => this.#onSelect(u)]
+        setCursor: [u => this.#onCursor(u, tooltip)]
       }
     };
 
     this.#u = new uPlot(opts, data, frame);
     this._tooltipSpec = styledSpec;
     this._tooltip = tooltip;
+    this.#baseWindow = xs.length ? { min: Math.min(...xs), max: Math.max(...xs) } : { min: 0, max: 0 };
 
-    this.#u.over.addEventListener('click', event => this.#onClick(event));
+    this.#engine = createGestureEngine({
+      element: this,
+      handlers: {
+        getRows: () => this.#transform?.rows || [],
+        getSpec: () => this._tooltipSpec || this.#spec || {},
+        getInspected: () => ({ key: this.#inspectedKey, index: this.#inspectedIndex, series: this.#inspectedSeries }),
+        getBrush: () => this.#brush,
+        getSelection: () => selectionPredicate(this.#selection),
+        onHover: (key, index) => {
+          this.#inspectedKey = key;
+          this.#inspectedIndex = index;
+          this.#setHighlight(key);
+        },
+        onNavigate: (key, index, series) => this.#inspectKey(key, { index, series, source: 'keyboard' }),
+        onActivate: (key, { source } = {}) => this.#inspectKey(key, { source, open: true }),
+        onSelection: detail => this.#onSelectionIntent(detail),
+        onBrushPreview: brush => { this.#brush = brush; },
+        onBrush: brush => this.#commitBrush(brush),
+        onBrushCleared: () => this.#clearBrush(),
+        onZoom: window => this.#zoomTo(window),
+        onPan: window => this.#panTo(window),
+        onFilter: key => this.#focusInspected(key),
+        onOpen: key => this.#emit('open', { key, selection: selectionPredicate(this.#selection) }),
+        onCohort: (slot, key) => this.#emit('cohort', { slot, key, selection: selectionPredicate(this.#selection) }),
+        onSelectMode: value => { this.#selectMode = value; }
+      }
+    });
+    this.#engine.attach(this.#u, root);
 
     this.#observer?.disconnect();
     this.#observer = new ResizeObserver(entries => {
@@ -292,6 +396,7 @@ export class YkChart extends HTMLElement {
 
     this.#composeLegend(root, styledSpec);
     this.#composeTable(root, styledSpec, transform);
+    if (this.#history) this.#applyUrlState(this.#history.state);
     this.#applyState('ready');
   }
 
@@ -377,15 +482,32 @@ export class YkChart extends HTMLElement {
       series: spec.series.map(item => ({ key: item.key, label: item.label, shape: item.shape, pattern: item.pattern, cssVar: item.cssVar })),
       state: { hidden: [...this.#hidden] },
       onIntent: detail => {
-        this.#hidden = new Set(detail.state.hidden || []);
-        for (const [index, item] of spec.series.entries()) {
-          this.#u?.setSeries(index + 1, { show: !this.#hidden.has(item.key) });
+        this.#legendState = detail.state;
+        if (detail.type === 'focus') {
+          this.#focusLegend(detail.key);
+          return;
         }
+        if (detail.type === 'isolate') {
+          const keys = spec.series.map(item => item.key);
+          this.#applyHidden(new Set(keys.filter(key => key !== detail.key)));
+          legend.update({ hidden: [...this.#hidden], isolated: detail.key });
+        } else {
+          this.#applyHidden(new Set(detail.state.hidden || []));
+        }
+        this.#history?.hide([...this.#hidden]);
+        this.#emit('legend', { type: detail.type, key: detail.key, hidden: [...this.#hidden] });
       }
     });
     host.append(legend.element);
     root.append(host);
     this._legend = legend;
+  }
+
+  #applyHidden(hidden) {
+    this.#hidden = new Set(hidden);
+    for (const [index, item] of (this._tooltipSpec?.series || []).entries()) {
+      this.#u?.setSeries(index + 1, { show: !this.#hidden.has(item.key) });
+    }
   }
 
   #composeTable(root, spec, transform) {
@@ -398,13 +520,39 @@ export class YkChart extends HTMLElement {
     const table = createTable(doc, {
       spec,
       data: transform.tableRows,
-      onSelect: detail => this.#emit('select', detail),
-      onInspect: detail => this.#emit('inspect', detail)
+      onSelect: detail => this.#onSelectionIntent(detail),
+      onInspect: detail => this.#inspectKey(detail.key, { source: 'table', open: true })
     });
     details.append(summary, table.element);
     root.append(details);
     renderThresholdTable(table.table, this.#thresholds);
     this._table = table;
+  }
+
+  #tooltipModel(row) {
+    return tooltipModel({
+      spec: this._tooltipSpec,
+      datum: {
+        key: row.key,
+        label: `${this._tooltipSpec.x?.label || 'Time'} ${row.key}`,
+        values: row.values,
+        n: row.n,
+        coverage: this.#spec?.coverage,
+        hidden: [...this.#hidden]
+      },
+      key: row.key
+    });
+  }
+
+  #showTooltip(index) {
+    const u = this.#u;
+    const tooltip = this._tooltip;
+    const row = this.#transform?.rows[index];
+    if (!u || !tooltip || !row) return;
+    const rect = u.over.getBoundingClientRect();
+    const x = rect.left + u.valToPos(row.x, 'x');
+    const y = rect.top + rect.height / 2;
+    tooltip.show(this.#tooltipModel(row), { x, y });
   }
 
   #onCursor(u, tooltip) {
@@ -417,51 +565,192 @@ export class YkChart extends HTMLElement {
     }
     const row = transform.rows[index];
     if (!row) return;
-    const model = tooltipModel({
-      spec: this._tooltipSpec,
-      datum: {
-        key: row.key,
-        label: `${this._tooltipSpec.x?.label || 'Time'} ${row.key}`,
-        values: row.values,
-        n: row.n,
-        coverage: this.#spec?.coverage,
-        hidden: [...this.#hidden]
-      },
-      key: row.key
-    });
+    this.#inspectedKey = row.key;
+    this.#inspectedIndex = index;
+    this.#setHighlight(row.key);
     const rect = u.over.getBoundingClientRect();
-    tooltip.show(model, { x: rect.left + u.cursor.left, y: rect.top + u.cursor.top });
+    tooltip.show(this.#tooltipModel(row), { x: rect.left + u.cursor.left, y: rect.top + u.cursor.top });
   }
 
-  #onSelect(u) {
-    if (!u.select) return;
-    if (u.select.width > 0) {
-      const from = u.posToVal(u.select.left, 'x');
-      const to = u.posToVal(u.select.left + u.select.width, 'x');
-      this.#selection = { from: Math.min(from, to), to: Math.max(from, to) };
-      this.#emit('brush', { aligned: true, ...this.#selection });
-    } else if (this.#selection) {
-      this.#selection = null;
-      this.#emit('brush', { cleared: true, from: null, to: null });
+  #inspectKey(key, { index = null, series = null, source = 'pointer', open = false } = {}) {
+    const rows = this.#transform?.rows || [];
+    const position = index ?? rows.findIndex(row => row.key === key);
+    if (position < 0 || !rows[position]) return;
+    const row = rows[position];
+    this.#inspectedKey = row.key;
+    this.#inspectedIndex = position;
+    if (Number.isInteger(series)) {
+      const count = Math.max(1, (this._tooltipSpec?.series || []).length);
+      this.#inspectedSeries = Math.min(Math.max(series, 0), count - 1);
+    }
+    this.#setHighlight(row.key);
+    this.#showTooltip(position);
+    this.#emit('inspect', {
+      key: row.key,
+      index: position,
+      x: row.x,
+      values: row.values,
+      source,
+      open: Boolean(open)
+    });
+  }
+
+  #setHighlight(key, { propagate = true } = {}) {
+    if (key === this.#highlight) return;
+    this.#highlight = key;
+    for (const row of this.shadowRoot.querySelectorAll('.yk-table tbody tr')) {
+      if (row.dataset.entityKey === key) row.dataset.highlighted = 'true';
+      else delete row.dataset.highlighted;
+    }
+    this.#u?.redraw(false);
+    if (propagate && key) {
+      this.#emit('yk-highlight', { key, chart: this.#chartId() });
     }
   }
 
-  #onClick(event) {
-    const u = this.#u;
-    if (!u || u.cursor.idx == null) return;
-    const row = this.#transform?.rows[u.cursor.idx];
-    if (!row) return;
-    const detail = {
-      key: row.key,
-      index: u.cursor.idx,
-      x: row.x,
-      values: row.values,
-      additive: Boolean(event.shiftKey || event.ctrlKey || event.metaKey),
-      exclude: Boolean(event.altKey)
-    };
-    this.#emit('select', detail);
-    this.#emit('inspect', detail);
+  #onSelectionIntent(detail = {}) {
+    let next;
+    if (detail.clear || detail.key == null) next = emptySelection();
+    else if (detail.selected === true) next = addSelection(this.#selection, detail.key);
+    else if (detail.selected === false) next = removeSelection(this.#selection, detail.key);
+    else next = toggleSelection(this.#selection, detail.key, { exclude: Boolean(detail.exclude) });
+    this.#selection = normaliseSelection(next);
+    this.#history?.commitSelection(selectionIsEmpty(this.#selection) ? null : this.#selection);
+    this.#syncSelectionUI();
+    this.#emit('select', {
+      key: detail.key ?? null,
+      selected: detail.selected ?? null,
+      additive: Boolean(detail.additive),
+      exclude: Boolean(detail.exclude),
+      selection: selectionPredicate(this.#selection),
+      keys: selectedKeys(this.#selection)
+    });
   }
+
+  #syncSelectionUI() {
+    for (const row of this.shadowRoot.querySelectorAll('.yk-table tbody tr')) {
+      const key = row.dataset.entityKey;
+      const box = row.querySelector('input.yk-table-select');
+      if (box) box.checked = isSelected(this.#selection, key);
+      if (isExcluded(this.#selection, key)) row.dataset.excluded = 'true';
+      else delete row.dataset.excluded;
+      if (isSelected(this.#selection, key)) row.dataset.selected = 'true';
+      else delete row.dataset.selected;
+    }
+  }
+
+  #commitBrush(brush) {
+    const next = { from: Number(brush.from), to: Number(brush.to) };
+    if (!Number.isFinite(next.from) || !Number.isFinite(next.to)) return;
+    this.#brush = next;
+    this.#history?.commitBrush(next);
+    this.#emit('brush', { aligned: true, from: next.from, to: next.to });
+  }
+
+  #clearBrush() {
+    this.#brush = null;
+    this.#history?.commitBrush(null);
+    this.#u?.setSelect({ left: 0, top: 0, width: 0, height: 0 }, false);
+    this.#emit('brush', { cleared: true, from: null, to: null });
+  }
+
+  #zoomTo(window) {
+    const from = Number(window?.from);
+    const to = Number(window?.to);
+    if (!Number.isFinite(from) || !Number.isFinite(to) || to <= from) return;
+    this.#brush = null;
+    this.#history?.zoom({ from, to });
+    this.#setWindow({ from, to });
+    this.#u?.setSelect({ left: 0, top: 0, width: 0, height: 0 }, false);
+    this.#emit('zoom', { from, to });
+  }
+
+  #panTo(window) {
+    const from = Number(window?.from);
+    const to = Number(window?.to);
+    if (!Number.isFinite(from) || !Number.isFinite(to) || to <= from) return;
+    this.#brush = null;
+    this.#history?.pan({ from, to });
+    this.#setWindow({ from, to });
+    this.#emit('pan', { from, to });
+  }
+
+  #focusLegend(key) {
+    const filter = legendFilter(key);
+    if (filter) this.#history?.filter(filter.key, [filter.value]);
+    this.#emit('filter', { key, filter: filter?.key ?? null, value: filter?.value ?? null });
+  }
+
+  #focusInspected(key) {
+    const rows = this.#transform?.rows || [];
+    const index = rows.findIndex(row => row.key === key);
+    if (index >= 0) {
+      const row = rows[index];
+      const next = rows[index + 1]?.x;
+      const previous = rows[index - 1]?.x;
+      const from = next === undefined ? (previous ?? row.x) : row.x;
+      const to = next === undefined ? row.x : next;
+      if (to > from) {
+        this.#brush = null;
+        this.#history?.zoom({ from, to });
+        this.#setWindow({ from, to });
+        this.#u?.setSelect({ left: 0, top: 0, width: 0, height: 0 }, false);
+        this.#emit('filter', { key, filter: 'bucket', value: `${from}..${to}` });
+        return;
+      }
+    }
+    this.#focusLegend(key);
+  }
+
+  #setWindow(window) {
+    if (!this.#u) return;
+    const min = Number(window?.from);
+    const max = Number(window?.to);
+    if (Number.isFinite(min) && Number.isFinite(max) && max > min) this.#u.setScale('x', { min, max });
+  }
+
+  #resetWindow() {
+    if (!this.#u || !this.#baseWindow) return;
+    const { min, max } = this.#baseWindow;
+    if (Number.isFinite(min) && Number.isFinite(max) && max > min) this.#u.setScale('x', { min, max });
+  }
+
+  #applyUrlState(state) {
+    if (!state) return;
+    this.#brush = decodeBrush(state.sel);
+    this.#selection = decodeSelection(state.pick);
+    this.#hidden = new Set(state.hide || []);
+    for (const [index, item] of (this._tooltipSpec?.series || []).entries()) {
+      this.#u?.setSeries(index + 1, { show: !this.#hidden.has(item.key) });
+    }
+    this._legend?.update({ hidden: [...this.#hidden] });
+    if (state.from && state.to) this.#setWindow({ from: Number(state.from), to: Number(state.to) });
+    else this.#resetWindow();
+    this.#syncSelectionUI();
+    this.#u?.redraw(false);
+  }
+}
+
+const LEGEND_FILTERS = {
+  model: 'model',
+  harness: 'harness',
+  repo: 'repo_id',
+  kind: 'kind',
+  plan: 'plan',
+  tool: 'tool',
+  source: 'source',
+  event: 'event',
+  conversation: 'conversation_id'
+};
+
+export function legendFilter(key) {
+  const text = String(key || '');
+  const at = text.indexOf(':');
+  if (at <= 0) return null;
+  const namespace = text.slice(0, at);
+  const value = text.slice(at + 1);
+  const filter = LEGEND_FILTERS[namespace];
+  return filter ? { key: filter, value } : null;
 }
 
 export function defineChart(tag = TAG) {
