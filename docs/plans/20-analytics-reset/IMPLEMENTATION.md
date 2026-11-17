@@ -19,6 +19,27 @@ Refinement commit `2b246b9` (`docs: refine Phase 8 distribution and categorical 
 - Deviations / unfinished: worker reported **over budget** (about 1,969 changed lines against ~950) with the deliverable complete and all done evidence passing. Ranked/lollipop plot the first series; slope requires exactly two series or reports `unsupported`; existing `(other)` data absorbs the ranked tail; zero-total percent rows yield zero shares; bars legends list measures so legend focus emits `filter` with null filter/value (Phase 9/10 lens mapping); `svg-base.js` has a non-browser fallback for pure model tests. No known gaps in owned paths.
 - Verification: `tests/charts-cat` 8/8 pass including Chromium (real mouse/keyboard/touch, six fixed neutrals, both themes, ≤4 in flight); accumulated `tests/charts-time` 30/30; `tests/*.test.mjs` 12/12; `git diff --check` clean. `artifact_feedback` on the brief returned delivered / screen pass before dispatch.
 
+### `8-02-ranges.md`
+
+- Outcome: committed as `71966c6` (`Add the ranges and distributions element`); `<yk-ranges>` now covers `box` (min/q1/median/q3/max/p95, labelled p95, optional named baseline band), `histogram` (fixed `spec.bins`, zero-based counts, zero-filled missing bins), `strip` (one mark per observation, sampled label) and `dots` (duplicate keys aggregated), with `brush: null` and no brush event.
+- Surfaces: `web/js/charts/yk-ranges.js`, `tests/gallery/{ranges.html,ranges.js,fixture-ranges.js}`, `tests/charts-cat/ranges.test.mjs`, and its report.
+- Deviations / unfinished: worker reported **over budget** (about 700 lines budgeted; more read/changed). Box derives six summary series so its legend lists summary statistics with summary colours rather than entity colours — a shared-base limitation needing a seam that separates tooltip series from legend series. Histogram follows `spec.bins` authoritatively; strip reuses an entity key across observations; p95 text is plot-level with `pointer-events: none`. No other owned-path gaps.
+- Verification: `ranges.test.mjs` 6/6; combined `tests/charts-cat/*.test.mjs` 25/25 after all three sibling units landed (Chromium, real mouse/keyboard/touch); `git diff --check` clean.
+
+### `8-03-matrix.md`
+
+- Outcome: committed as `43fe650` (`Add the matrix heatmap and calendar element`); `<yk-matrix>` covers heatmap and calendar on the 8-01 base, with pure model/layout/ramp/brush exports, a ramp legend with stop values, per-cell values, `inspect()`, selection/inspect and calendar brush (whole-day snap through `setBrush`).
+- Surfaces: `web/js/charts/yk-matrix.js`, `tests/gallery/{fixture-matrix.js,matrix.html,matrix.js}`, `tests/charts-cat/matrix.test.mjs`, and its report.
+- Deviations / unfinished: worker reported **over budget** (~1,110 changed lines vs ~700). The shared base exposes no model/rows accessor and no table-arrow/`[`/`]` hook, so the element keeps `_matrixModel` and a capture-phase keydown listener without editing the foundation. Calendar uses week columns on a real time domain (day-per-column would not form a week grid); brush values are day-snapped. Table shows the unit in the header. Heatmap cells and calendar days share entity keys by design; the diverging ramp is pure-tested but not browser-shown. No owned-path gaps.
+- Verification: `matrix.test.mjs` 5/5; combined `tests/charts-cat/*.test.mjs` 25/25 (Chromium); `git diff --check` clean.
+
+### `8-04-lanes.md`
+
+- Outcome: committed as `5a6796d` (`Add the timeline and gantt lanes element`); `<yk-lanes>` covers timeline and gantt lanes with kind-keyed colours/shapes, markers and spans, brush, priced/unpriced marking, keyboard and touch drag.
+- Surfaces: `web/js/charts/yk-lanes.js`, `tests/gallery/{lanes.html,lanes.js,fixture-lanes.js}`, `tests/charts-cat/lanes.test.mjs`, and its report.
+- Deviations / unfinished: worker reported **over budget** (~1,362 changed lines). `spec.lanes`/`spec.data.lanes` is an array because the base `data` setter only accepts arrays. Each lanes mark group opts out locally with `transform:none; clip-path:none` because the shared `[data-shape]` swatch selectors in `web/css/charts.css:258-265` would otherwise rotate/clip a plotted `<g>`. Lane table rows stop propagation so the base keyboard grammar and table do not both fire. Touch drags use `touchstart/move/end`. No owned-path gaps.
+- Verification: `lanes.test.mjs` 6/6; combined `tests/charts-cat/*.test.mjs` 25/25 (Chromium); `git diff --check` clean.
+
 ## Phase 7 — Time-series chart kit
 
 The phase outcome is approach-open (composing uPlot's hooks into the gesture table; 2-D scatter hit-testing). This run uses the signed outcome and CONTRACTS.md 17.5 and 17.7 as the fixed yardstick. No new grain, join, route, dependency, gesture or contract is authorized. Refinement decides the units.
