@@ -145,3 +145,24 @@ Artifact feedback: all 8 reports `delivered`, screen pass; briefs 01, 03, 04, 05
 - Phase 5 report: carry the leak check's `short_excerpts_skipped` (1458 on the real manifest) and `foreign_plan_document_captures` (54) beside `pass`; do not suppress them because they show the precision scope.
 - The unselected document-led extractor (`history_extract_b.py` and its test) remains committed as comparison provenance; close-out may keep or drop it.
 - Brief `phase4-02-leak-check` feedback remains stale/unavailable as recorded above; its committed content is the amended text the fixer implemented.
+
+## Phase 5 — Real-server trial on garcia-music history
+
+Run: OpenCode `opencode run` — model `opencode-go/deepseek-v4.1-flash`; start 2026-11-18 07:54 AEST. `DESIGN.md` gives Phase 5 no Units table; it is one operational unit (probe, trial, report, evidence), so no refine and no worker brief/report were produced.
+
+**Blocked at the non-spending probe; the phase outcome is not met.**
+
+- Probe (non-spending, 2026-11-18 07:56–07:59 AEST) against the deployed server `https://api.yakka.build`:
+  - `GET /v1/whoami` with the locally configured client credential returned `scope: read_write` (tenant `default`); the credential value was never printed, recorded or committed.
+  - `POST /v1/mcp` `{"jsonrpc":"2.0","id":1,"method":"tools/list"}` with that `read_write` bearer returned exactly `["list_checks","search_artifacts","artifact_feedback","list_reviews"]`. `review_change` is absent.
+  - The dry-run `POST /v1/reviews` half of the probe was not run: the first half already fails, and the only locally available key is the `default` tenant, not the design's dedicated synthetic trial tenant. No review POST, provider call or spend occurred.
+- Why it fails: the deployed server is not running the Phase 1 build. At the design baseline `34bb808`, `review_change` registration requires `YAKKA_REVIEW_MODEL` (`serve.go:316`); production sets only `CLAUDE_API_TOKEN`, exactly the condition the design describes. The design's Phase 5 gate therefore holds: the probe fails, the phase stops, and no deploy is attempted or worked around.
+- No trial was run. No manifest refresh, run ledger, certified export, adjudication file or alignment report was produced, and nothing was written under `docs/lab/RESEARCH/`. The Phase 3 frozen manifest stays local and gitignored; committing any trial evidence without a real run would be fabricated data. The paid-trial approval recorded on 18 Nov is unused.
+
+**Verification:** the Phase 5 entry point is the probe itself; its observable result is recorded above. `review_change` is absent from a `read_write` `tools/list` on the deployed server, so the phase outcome (trial completion and committed metric-only evidence) cannot be verified or met. No code changed; the Phase 1–4 suites stand as recorded.
+
+**Carried:**
+- gate: deploy the Phase 1 build to the Yakka server `https://api.yakka.build` (operator act; out of scope; no deploy was run).
+- gate: provision the dedicated synthetic trial tenant and its separate `read_write` key, and record its immutable tenant id (operator/human act; the locally configured key is tenant `default`, not a dedicated trial tenant).
+- gate: after both hold, re-run Phase 5 — probe, then the frozen 360-case set at `high`/`xhigh`/`max`, the Phase 4 report and metric-only evidence under `docs/lab/RESEARCH/<date>-shadow-review-trial/`. Never pad and never deploy from the build.
+- Phase 5 report (when it runs): carry the leak check's `short_excerpts_skipped` and `foreign_plan_document_captures` beside `pass` (Phase 4: 1458 and 54 on the real manifest).
