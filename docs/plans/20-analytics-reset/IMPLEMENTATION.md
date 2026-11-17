@@ -17,6 +17,20 @@ The phase outcome is approach-open; this run uses the signed outcome and CONTRAC
 - `GOMEMLIMIT=8GiB GOMAXPROCS=3 go build ./internal/...` → after `58bcca5`, passes.
 - `GOMEMLIMIT=8GiB GOMAXPROCS=3 go test -p=3 ./internal/store ./internal/serve -count=1` → store passes; serve fails `TestAnalyticsActivityMergesAndPagesEqualTimeRows` and `TestAnalyticsActivityProbeCountsLateArrivalWithoutRows`, both because the test uses `time.Now()` against a fixed 2026-11-08 window. Owned by 6-06.
 
+### `6-02-cohort-scope-elements.md`
+
+- Outcome: committed as `657dd6d` (`Add structured cohort scope elements and canonical grammar`); the scope lists are now `{lens, values}` element objects with the 17.3.1 budgets, canonical merge/sort and key, a shared `cohortGrainFilters` table, and one `CompileCohortScope` Boolean compiler for the resolver unit. `CohortSessionSubquery` still rejects non-empty scope pending 6-03.
+- Surfaces: `packages/yakka/internal/store/analytics_cohort.go`, focused store tests and `reports/6-02-cohort-scope-elements.md`.
+- Deviations / unfinished: `band:<check>` accepts any non-empty check at parse; catalogue validation is left to 6-03. The untouched predicate `cohortLenses` table still lists `origin`/`has_artifacts`/`repo_id`/`model` for session `in` and lacks `id`; predicate alignment is owed by 6-03/6-04.
+- Verification: `GOMEMLIMIT=8GiB GOMAXPROCS=3 go test -p=3 ./internal/store -run 'Cohort' -count=1` passed; full store passed (6.807s) and serve failed only the two pre-existing activity tests; `git diff --check` clean. `artifact_feedback` on the brief returned delivered / screen pass before dispatch.
+
+### `6-03-cohort-resolver-matrix.md`
+
+- Outcome: committed as `986a146` (`Add full cohort resolver matrix`); the kernel now resolves the 17.3.1 matrix for session, artifact, content, execution and plan (dynamic checks, `band:<check>`, `id`, plan derived measures, lifetime session lenses, scope include/exclude through `CompileCohortScope`), and plan resolution follows 17.3's active-session + lifetime-artifact association.
+- Surfaces: `packages/yakka/internal/store/analytics_cohort.go`, focused store tests and `reports/6-03-cohort-resolver-matrix.md`.
+- Deviations / unfinished: time scope and the time `id` lens remain `unsupported_join` and are owned by 6-06; dynamic check validation only runs when the serve call supplies `CohortResolveOptions.Checks`; `content_bytes` needs `CohortResolveOptions.BlobDir`. 6-04/6-05 must wire both into `parseFilter`/resolution.
+- Verification: store suite passed (6.75s); full store/serve failed only the two pre-existing activity tests; report records the new resolver cases.
+
 ## Phase 6 (earlier run) — Plan and execution entities and the cohort predicate
 
 Refinement commit: `c85e5b9` (`docs: refine Phase 6 analytics work`). Four sequential units; plan/execution entity rows, cohort resolution, target-route application, then time cohorts/activity and schema publication. The signed contract in CONTRACTS.md 17.3 supplies the implementation boundaries. `artifact_feedback` on all four briefs returned delivered / screen pass (`jev-1.13.0`). Phase 5 carried items remain outside this phase: artifact file-to-time-bucket assignment and score-lens memory-growth evidence.
