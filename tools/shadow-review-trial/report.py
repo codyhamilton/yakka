@@ -17,6 +17,9 @@ import re
 from collections import Counter, defaultdict
 from typing import Any
 
+import leak_check
+import matching
+
 EFFORTS = ("high", "xhigh", "max")
 RUN_ID = re.compile(r"[A-Za-z0-9_-]{1,32}")
 STATUSES = ("ok", "ok_partial", "timeout", "api_error", "invalid_output", "unavailable",
@@ -24,7 +27,11 @@ STATUSES = ("ok", "ok_partial", "timeout", "api_error", "invalid_output", "unava
             "skipped_busy", "skipped_duplicate")
 HISTORICAL = ("matched", "partial", "unmatched")
 NEW = ("matched", "partial", "disputed", "new-valid", "unadjudicated")
-CATEGORIES = set(HISTORICAL) | set(NEW)
+CORROBORATION = ("valid", "invalid", "unknown")
+REVIEW_CATEGORIES = tuple(NEW) + CORROBORATION
+CATEGORIES = set(HISTORICAL) | set(NEW) | set(CORROBORATION)
+TIER_ORDER = ("phase", "unit", "pr", "unaccompanied")
+CORROBORATING_BANDS = ("matched", "partial")
 REVIEWER_MODEL = "claude-haiku-5-5"
 UNKNOWN_STATES = ("started", "started_unknown")
 NO_PROVIDER_CALL_STATUSES = ("unavailable", "skipped_busy", "skipped_budget")
@@ -404,6 +411,10 @@ def validate_inputs(manifest: dict[str, Any], export: dict[str, Any], ledger: di
     rate = adjudications.get("low_sample_rate")
     if isinstance(rate, bool) or not isinstance(rate, (int, float)) or not 0 <= rate <= 1:
         raise ValueError("adjudications.low_sample_rate must be between 0 and 1")
+    for field in ("labeler_model", "second_labeler_model"):
+        value = adjudications.get(field)
+        if value is not None and (not isinstance(value, str) or not value):
+            raise ValueError(f"adjudications.{field} must be a non-empty string or null")
     rows = _list(adjudications.get("findings"), "adjudications.findings")
     seen: set[tuple[str, str, str, str]] = set()
     for raw in rows:
@@ -413,6 +424,9 @@ def validate_inputs(manifest: dict[str, Any], export: dict[str, Any], ledger: di
         category = row.get("category")
         if category not in CATEGORIES:
             raise ValueError(f"invalid adjudication category for {case_id}/{finding_id}: {category}")
+        second_label = row.get("second_label")
+        if second_label is not None and second_label not in CATEGORIES:
+            raise ValueError(f"invalid adjudication second_label category for {case_id}/{finding_id}: {second_label}")
         source = row.get("source", "review")
         if source not in ("review", "curated", "pr_export"):
             raise ValueError(f"invalid adjudication source for {case_id}/{finding_id}")
@@ -421,7 +435,7 @@ def validate_inputs(manifest: dict[str, Any], export: dict[str, Any], ledger: di
             raise ValueError(f"review adjudication requires a valid effort: {case_id}/{finding_id}")
         if source != "review" and effort:
             raise ValueError(f"comparator adjudication must not specify effort: {case_id}/{finding_id}")
-        if source == "review" and category not in NEW:
+        if source == "review" and category not in REVIEW_CATEGORIES:
             raise ValueError(f"review finding adjudication requires a new-finding category: {case_id}/{finding_id}")
         if source == "curated" and category not in HISTORICAL:
             raise ValueError(f"historical adjudication requires matched/partial/unmatched: {case_id}/{finding_id}")
@@ -532,6 +546,316 @@ def _record_effort(record: dict[str, Any]) -> str | None:
             if "effort:" + effort in tags:
                 return effort
     return None
+
+
+def _integer_line(value: Any) -> int | None:
+    if isinstance(value, bool) or not isinstance(value, int):
+        return None
+    return value
+
+
+def _payload_findings(record: dict[str, Any]) -> list[dict[str, Any]]:
+    payload = record.get("payload")
+    findings = payload.get("findings") if isinstance(payload, dict) else None
+    return [finding for finding in findings if isinstance(finding, dict)] if isinstance(findings, list) else []
+
+
+def _review_geometry(finding: dict[str, Any]) -> dict[str, Any] | None:
+    """A review finding needs a path and an integer line range to be matchable."""
+    path = finding.get("path")
+    start, end = _integer_line(finding.get("line_start")), _integer_line(finding.get("line_end"))
+    if not isinstance(path, str) or start is None or end is None:
+        return None
+    return {"path": path, "line_start": start, "line_end": end,
+            "title": finding.get("title", ""), "evidence": finding.get("evidence", ""),
+            "severity": finding.get("severity")}
+
+
+def _recorded_targets(case: dict[str, Any]) -> list[dict[str, Any]]:
+    """Reported review findings with a path and an integer line range."""
+    targets: list[dict[str, Any]] = []
+    for index, outcome in enumerate(case.get("outcomes") or []):
+        if not isinstance(outcome, dict) or outcome.get("kind") != "review_finding":
+            continue
+        path = outcome.get("path")
+        start, end = _integer_line(outcome.get("line_start")), _integer_line(outcome.get("line_end"))
+        if not isinstance(path, str) or start is None or end is None:
+            continue
+        targets.append({"key": ("recorded", index), "path": path, "line_start": start, "line_end": end,
+                        "excerpt": outcome.get("excerpt", ""), "severity": outcome.get("severity")})
+    return targets
+
+
+def _fix_targets(case: dict[str, Any]) -> list[dict[str, Any]]:
+    """Later-fix hunks mapped onto the matcher's line keys; the fix subject is the target text."""
+    targets: list[dict[str, Any]] = []
+    for fix_index, fix in enumerate(case.get("later_fixes") or []):
+        if not isinstance(fix, dict):
+            continue
+        subject = fix.get("subject", "") if isinstance(fix.get("subject"), str) else ""
+        for hunk_index, hunk in enumerate(fix.get("hunks") or []):
+            if not isinstance(hunk, dict):
+                continue
+            path = hunk.get("path")
+            start = _integer_line(hunk.get("start", hunk.get("line_start")))
+            end = _integer_line(hunk.get("end", hunk.get("line_end")))
+            if not isinstance(path, str) or start is None or end is None:
+                continue
+            targets.append({"key": ("fix", fix_index, hunk_index), "path": path,
+                            "line_start": start, "line_end": end, "excerpt": subject})
+    return targets
+
+
+def _best_candidate(review: dict[str, Any], targets: list[dict[str, Any]], band: str) -> tuple[dict[str, Any], dict[str, Any]] | None:
+    """Deterministic best target in one band: highest similarity, then lowest path/line."""
+    best = None
+    for target in targets:
+        result = matching.classify(review, target)
+        if result["band"] != band:
+            continue
+        key = (-result["text_similarity"], target["path"], target["line_start"], target["line_end"])
+        if best is None or key < best[0]:
+            best = (key, target, result)
+    return None if best is None else (best[1], best[2])
+
+
+def _match_review(review: dict[str, Any], targets: list[dict[str, Any]],
+                  decision: dict[str, Any] | None) -> tuple[dict[str, Any], str] | None:
+    """Structural first; an uncertain band becomes a match only under a matching adjudication label."""
+    structural = _best_candidate(review, targets, "structural")
+    if structural is not None:
+        return structural[0], matching.tag_method("structural", False)
+    if decision is not None and decision.get("category") in CORROBORATING_BANDS:
+        uncertain = _best_candidate(review, targets, "uncertain")
+        if uncertain is not None:
+            return uncertain[0], matching.tag_method("uncertain", True)
+    return None
+
+
+def _has_uncertain(review: dict[str, Any], targets: list[dict[str, Any]]) -> bool:
+    return _best_candidate(review, targets, "uncertain") is not None
+
+
+def _recorded_verdict(case: dict[str, Any]) -> str:
+    """pass/fail/unknown from the case's recorded review_verdict outcomes."""
+    verdicts = []
+    for outcome in case.get("outcomes") or []:
+        if not isinstance(outcome, dict) or outcome.get("kind") != "review_verdict":
+            continue
+        excerpt = outcome.get("excerpt")
+        text = matching.normalise_text(excerpt if isinstance(excerpt, str) else "")
+        if "pass" in text:
+            verdicts.append("pass")
+        elif any(term in text for term in ("fail", "blocked", "request changes", "changes requested")):
+            verdicts.append("fail")
+    if "fail" in verdicts:
+        return "fail"
+    if "pass" in verdicts:
+        return "pass"
+    return "unknown"
+
+
+def _review_verdict(findings: list[dict[str, Any]]) -> str:
+    return "fail" if any(finding.get("severity") in ("blocker", "high") for finding in findings) else "pass"
+
+
+def _rate(numerator: int, denominator: int) -> float | None:
+    return numerator / denominator if denominator else None
+
+
+def _analyse_record(record: dict[str, Any], case: dict[str, Any], effort: str, case_id: str,
+                    adjudications: dict[tuple[str, str, str, str], dict[str, Any]]) -> dict[str, Any]:
+    """One completed record's matches, counts and severity pairs (no I/O, no mutation)."""
+    reviews = _payload_findings(record)
+    recorded, fixes = _recorded_targets(case), _fix_targets(case)
+    matched_recorded: set[tuple[Any, ...]] = set()
+    matched_fixes: set[tuple[Any, ...]] = set()
+    matched_ids: set[Any] = set()
+    methods: list[str] = []
+    uncertain_findings = 0
+    severity_pairs: list[tuple[str, str]] = []
+    for finding in reviews:
+        decision = adjudications.get(("review", case_id, effort, finding.get("id", "")))
+        geometry = _review_geometry(finding)
+        if geometry is None:
+            continue
+        recorded_match = _match_review(geometry, recorded, decision)
+        if recorded_match is not None:
+            target, method = recorded_match
+            matched_recorded.add(target["key"])
+            matched_ids.add(finding.get("id"))
+            methods.append(method)
+            review_severity, recorded_severity = geometry["severity"], target["severity"]
+            if review_severity is not None and recorded_severity is not None:
+                severity_pairs.append((str(review_severity).lower(), str(recorded_severity).lower()))
+        fix_match = _match_review(geometry, fixes, decision)
+        if fix_match is not None:
+            target, method = fix_match
+            matched_fixes.add(target["key"])
+            matched_ids.add(finding.get("id"))
+            methods.append(method)
+        if _has_uncertain(geometry, recorded + fixes):
+            uncertain_findings += 1
+    return {"reviews": reviews, "recorded": recorded, "fixes": fixes,
+            "matched_recorded": matched_recorded, "matched_fixes": matched_fixes,
+            "matched_finding_ids": matched_ids, "methods": methods,
+            "uncertain_findings": uncertain_findings, "severity_pairs": severity_pairs}
+
+
+def _analyse_against(reviews: list[dict[str, Any]], recorded: list[dict[str, Any]], fixes: list[dict[str, Any]],
+                     case_id: str, effort: str,
+                     adjudications: dict[tuple[str, str, str, str], dict[str, Any]]
+                     ) -> tuple[int, int, int, int]:
+    """Count matched targets for the shuffled null: recorded matched/total, fix matched/total."""
+    matched_recorded: set[tuple[Any, ...]] = set()
+    matched_fixes: set[tuple[Any, ...]] = set()
+    for finding in reviews:
+        geometry = _review_geometry(finding)
+        if geometry is None:
+            continue
+        decision = adjudications.get(("review", case_id, effort, finding.get("id", "")))
+        recorded_match = _match_review(geometry, recorded, decision)
+        if recorded_match is not None:
+            matched_recorded.add(recorded_match[0]["key"])
+        fix_match = _match_review(geometry, fixes, decision)
+        if fix_match is not None:
+            matched_fixes.add(fix_match[0]["key"])
+    return len(matched_recorded), len(recorded), len(matched_fixes), len(fixes)
+
+
+def _empty_finding_recall() -> dict[str, Any]:
+    return {"matched": 0, "recorded": 0, "null_matched": 0, "null_recorded": 0}
+
+
+def _empty_fix_recall() -> dict[str, Any]:
+    return {"matched": 0, "hunks": 0, "null_matched": 0, "null_hunks": 0}
+
+
+def _finding_recall_row(row: dict[str, Any]) -> dict[str, Any]:
+    return {"matched": row["matched"], "recorded": row["recorded"],
+            "recall": _rate(row["matched"], row["recorded"]),
+            "null": {"matched": row["null_matched"], "recorded": row["null_recorded"],
+                     "recall": _rate(row["null_matched"], row["null_recorded"])}}
+
+
+def _fix_recall_row(row: dict[str, Any]) -> dict[str, Any]:
+    return {"matched": row["matched"], "hunks": row["hunks"],
+            "recall": _rate(row["matched"], row["hunks"]),
+            "null": {"matched": row["null_matched"], "hunks": row["null_hunks"],
+                     "recall": _rate(row["null_matched"], row["null_hunks"])}}
+
+
+def _comparisons_and_validation(manifest: dict[str, Any], cases: dict[str, dict[str, Any]],
+                                completed_records: list[tuple[str, str, dict[str, Any]]],
+                                adjudications: dict[str, Any],
+                                adj: dict[tuple[str, str, str, str], dict[str, Any]],
+                                run_id: str) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Build comparisons (a)-(e) and the matching/adjudication/leak validation controls."""
+    seed = int(manifest.get("seed", 0))
+    shuffled = matching.shuffled_case_map(sorted(cases), seed)
+    tier_names = [tier for tier in TIER_ORDER if any(_case_tier(case) == tier for case in cases.values())]
+    findings_by_effort = {effort: _empty_finding_recall() for effort in EFFORTS}
+    findings_by_tier = {tier: _empty_finding_recall() for tier in tier_names}
+    fixes_by_effort = {effort: _empty_fix_recall() for effort in EFFORTS}
+    fixes_by_tier = {tier: _empty_fix_recall() for tier in tier_names}
+    corroboration = {effort: Counter() for effort in EFFORTS}
+    verdicts = {effort: {"pass": Counter(), "fail": Counter()} for effort in EFFORTS}
+    severity = {effort: {"pairs": 0, "agree": 0} for effort in EFFORTS}
+    methods: Counter = Counter()
+    matches = 0
+    uncertain_band = 0
+    uncensored_cases: set[str] = set()
+    censored_cases: set[str] = set()
+
+    for case_id, effort, record in completed_records:
+        case = cases[case_id]
+        tier = _case_tier(case)
+        analysis = _analyse_record(record, case, effort, case_id, adj)
+        for group in (findings_by_effort[effort], findings_by_tier[tier]):
+            group["recorded"] += len(analysis["recorded"])
+            group["matched"] += len(analysis["matched_recorded"])
+        censored = case.get("censored") is True
+        (censored_cases if censored else uncensored_cases).add(case_id)
+        if not censored:
+            for group in (fixes_by_effort[effort], fixes_by_tier[tier]):
+                group["hunks"] += len(analysis["fixes"])
+                group["matched"] += len(analysis["matched_fixes"])
+        other_id = shuffled.get(case_id)
+        if other_id is not None:
+            other = cases[other_id]
+            null_recorded_match, null_recorded, null_fix_match, null_fixes = _analyse_against(
+                analysis["reviews"], _recorded_targets(other), _fix_targets(other), other_id, effort, adj)
+            for group in (findings_by_effort[effort], findings_by_tier[tier]):
+                group["null_matched"] += null_recorded_match
+                group["null_recorded"] += null_recorded
+            if not censored and not other.get("censored") is True:
+                for group in (fixes_by_effort[effort], fixes_by_tier[tier]):
+                    group["null_matched"] += null_fix_match
+                    group["null_hunks"] += null_fixes
+        corroboration[effort]["findings"] += len(analysis["reviews"])
+        for finding in analysis["reviews"]:
+            decision = adj.get(("review", case_id, effort, finding.get("id", "")))
+            if finding.get("id") in analysis["matched_finding_ids"]:
+                corroboration[effort]["corroborated"] += 1
+            else:
+                category = decision.get("category") if decision else None
+                corroboration[effort][category if category in CORROBORATION else "unadjudicated"] += 1
+        recorded_verdict = _recorded_verdict(case)
+        if recorded_verdict != "unknown":
+            verdicts[effort][_review_verdict(analysis["reviews"])][recorded_verdict] += 1
+        for review_severity, recorded_severity in analysis["severity_pairs"]:
+            severity[effort]["pairs"] += 1
+            severity[effort]["agree"] += review_severity == recorded_severity
+        matches += len(analysis["methods"])
+        methods.update(analysis["methods"])
+        uncertain_band += analysis["uncertain_findings"]
+
+    corroboration_rows = {}
+    for effort in EFFORTS:
+        counts = corroboration[effort]
+        corroboration_rows[effort] = {
+            "findings": counts["findings"], "corroborated": counts["corroborated"],
+            "valid": counts["valid"], "invalid": counts["invalid"],
+            "unknown": counts["unknown"], "unadjudicated": counts["unadjudicated"],
+            "rate": _rate(counts["corroborated"] + counts["valid"], counts["findings"])}
+    verdict_rows = {}
+    for effort in EFFORTS:
+        matrix = {"pass": {"pass": verdicts[effort]["pass"]["pass"], "fail": verdicts[effort]["pass"]["fail"]},
+                  "fail": {"pass": verdicts[effort]["fail"]["pass"], "fail": verdicts[effort]["fail"]["fail"]}}
+        cases_count = sum(sum(row.values()) for row in matrix.values())
+        agree = matrix["pass"]["pass"] + matrix["fail"]["fail"]
+        verdict_rows[effort] = {"cases": cases_count, "matrix": matrix,
+                                "agreement": _rate(agree, cases_count)}
+    severity_rows = {effort: {"pairs": severity[effort]["pairs"], "agree": severity[effort]["agree"],
+                              "rate": _rate(severity[effort]["agree"], severity[effort]["pairs"])}
+                     for effort in EFFORTS}
+    comparisons = {
+        "finding_recall": {"by_effort": {effort: _finding_recall_row(findings_by_effort[effort]) for effort in EFFORTS},
+                           "by_tier": {tier: _finding_recall_row(findings_by_tier[tier]) for tier in tier_names}},
+        "fix_recall": {"uncensored_cases": len(uncensored_cases), "censored_excluded": len(censored_cases),
+                       "by_effort": {effort: _fix_recall_row(fixes_by_effort[effort]) for effort in EFFORTS},
+                       "by_tier": {tier: _fix_recall_row(fixes_by_tier[tier]) for tier in tier_names}},
+        "corroboration": {"by_effort": corroboration_rows},
+        "verdict_agreement": {"by_effort": verdict_rows},
+        "severity_agreement": {"by_effort": severity_rows},
+    }
+    label_pairs = [(row["category"], row["second_label"]) for row in adjudications["findings"]
+                   if row.get("second_label") is not None]
+    validation = {
+        "matching": {"matches": matches,
+                     "method_counts": {"structural": methods.get("structural", 0),
+                                       "adjudicated": methods.get("adjudicated", 0)},
+                     "uncertain_band": uncertain_band},
+        "adjudication": {"double_labelled": len(label_pairs),
+                         "kappa": matching.cohen_kappa(label_pairs) if label_pairs else None,
+                         "labeler_model": adjudications.get("labeler_model"),
+                         "second_labeler_model": adjudications.get("second_labeler_model")},
+        "shuffled_null": {"seed": seed, "method": "shuffled_case_map"},
+        "leak_check": leak_check.check_requests(manifest, run_id),
+    }
+    return comparisons, validation
+
+
 
 
 def build_report(manifest: dict[str, Any], export: dict[str, Any], ledger: dict[str, Any],
@@ -875,6 +1199,8 @@ def build_report(manifest: dict[str, Any], export: dict[str, Any], ledger: dict[
                         "input_token_fields": missing_input_fields, "output_token_fields": missing_output_fields,
                         "latency_fields": missing_latency_fields}
         cost_basis = "canonical_record_attempts"
+    comparisons, validation = _comparisons_and_validation(
+        manifest, cases, completed_records, adjudications, adj, run_id)
     statuses = {status: status_counts.get(status, 0) for status in STATUSES}
     statuses.update({k: v for k, v in sorted(status_counts.items()) if k not in statuses})
     pages = [{key: page[key] for key in ("cursor_in", "cursor_out", "complete", "row_count", "row_ids_sha256")}
@@ -900,6 +1226,7 @@ def build_report(manifest: dict[str, Any], export: dict[str, Any], ledger: dict[
             "arms": arm_reports, "paired_intersection": {"completed_cases": len(intersection), "case_ids": sorted(intersection)},
             "outcomes": {"by_build_model": dict(sorted(model_strata.items())), "by_reviewer_model": dict(sorted(reviewer_strata.items())),
                          "by_effective_effort": dict(sorted(effort_strata.items())), **arm_outcomes},
+            "comparisons": comparisons, "validation": validation,
             "historical_findings": {"by_category": {k: category_counts.get(k, 0) for k in (*HISTORICAL, "unadjudicated")}, "items": historical_rows},
             "new_findings": {"by_category": {k: new_counts.get(k, 0) for k in NEW}, "items": finding_rows,
                              "low_sample_rate": adjudications["low_sample_rate"], "sampling_seed": manifest.get("seed", 0)},

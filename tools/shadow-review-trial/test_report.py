@@ -101,6 +101,31 @@ def report_for(manifest, records, refs, comparators=None, decisions=None, **expo
                                adjudication(decisions or ()))
 
 
+def refreeze(manifest):
+    return freeze({key: value for key, value in manifest.items() if key != "manifest_sha256"})
+
+
+def phase3_manifest(count):
+    """A Phase 3-shaped manifest with every case uncensored until a test says otherwise."""
+    manifest = make_manifest(count, target=count, phase3=True)
+    for case in manifest["cases"]:
+        case["censored"] = False
+    manifest["censored"] = 0
+    return refreeze(manifest)
+
+
+def outcome_finding(path, start, end, severity, excerpt, kind="review_finding"):
+    return {"kind": kind, "source": "REVIEW.md", "path": path, "commit": "recorded",
+            "blob": "blob", "line_start": start, "line_end": end,
+            "severity": severity, "excerpt": excerpt}
+
+
+def later_fix(sha, subject, path, start, end):
+    return {"sha": sha, "subject": subject, "paths": [path],
+            "hunks": [{"path": path, "start": start, "end": end}]}
+
+
+
 class AlignmentReportTests(unittest.TestCase):
     def test_50_per_effort_attains_target_and_49_shortfall_is_one(self):
         manifest50 = make_manifest(50)
@@ -268,6 +293,156 @@ class AlignmentReportTests(unittest.TestCase):
         for effort in report.EFFORTS:
             self.assertEqual(result["arms"][effort]["floor"], 50)
             self.assertEqual(result["arms"][effort]["completed"], 3)
+
+
+    def test_comparisons_a_to_e_report_rates_and_nulls(self):
+        manifest = phase3_manifest(4)
+        cases = {case["case_id"]: case for case in manifest["cases"]}
+        cases["case-0"]["outcomes"] = [
+            outcome_finding("src/a.py", 10, 20, "High", "missing nil check in loader"),
+            outcome_finding("src/b.py", 50, 60, "low", "rename counter variable"),
+            outcome_finding("docs/REVIEW.md", 1, 1, None, "Verdict: FAIL", kind="review_verdict"),
+        ]
+        cases["case-1"]["outcomes"] = [outcome_finding("docs/REVIEW.md", 1, 1, None, "Verdict: PASS",
+                                                       kind="review_verdict")]
+        cases["case-1"]["later_fixes"] = [
+            later_fix("f1", "missing nil check in loader", "src/a.py", 12, 14),
+            later_fix("f2", "unrelated cleanup", "src/z.py", 100, 110),
+        ]
+        cases["case-2"]["censored"] = True
+        cases["case-2"]["outcomes"] = [outcome_finding("docs/REVIEW.md", 1, 1, None, "Verdict: PASS",
+                                                       kind="review_verdict")]
+        cases["case-2"]["later_fixes"] = [later_fix("f3", "unrelated change", "src/a.py", 10, 20)]
+        manifest["censored"] = 1
+        manifest = refreeze(manifest)
+
+        findings = [
+            {"id": "H1", "severity": "high", "path": "src/a.py", "line_start": 10, "line_end": 20,
+             "title": "nil check", "evidence": "missing nil check in loader"},
+            {"id": "H2", "severity": "medium", "path": "src/c.py", "line_start": 1, "line_end": 5,
+             "title": "extra", "evidence": "extra finding about caching"},
+            {"id": "H3", "severity": "medium", "path": "src/d.py", "line_start": 1, "line_end": 5,
+             "title": "odd", "evidence": "odd finding about logging"},
+            {"id": "H4", "severity": "medium", "path": "src/e.py", "line_start": 1, "line_end": 5,
+             "title": "misc", "evidence": "misc finding about routing"},
+        ]
+        rows = [record(manifest, "case-0", "high", findings=findings),
+                record(manifest, "case-1", "high", findings=[
+                    {"id": "I1", "severity": "medium", "path": "src/a.py", "line_start": 12, "line_end": 14,
+                     "title": "nil", "evidence": "missing nil check in loader"}]),
+                record(manifest, "case-2", "high", findings=[])]
+        refs = [(case_id, "high", f"{case_id}-high") for case_id in ("case-0", "case-1", "case-2")]
+        decisions = [
+            {"case_id": "case-0", "effort": "high", "finding_id": "H2", "category": "valid"},
+            {"case_id": "case-0", "effort": "high", "finding_id": "H3", "category": "unknown"},
+        ]
+        result = report_for(manifest, rows, refs, decisions=decisions)
+        comparisons = result["comparisons"]
+
+        recall = comparisons["finding_recall"]["by_effort"]["high"]
+        self.assertEqual((recall["matched"], recall["recorded"], recall["recall"]), (1, 2, 0.5))
+        self.assertEqual(recall["null"]["recorded"], 2)
+        self.assertEqual(recall["null"]["matched"], 0)
+        self.assertEqual(recall["null"]["recall"], 0.0)
+        self.assertEqual(comparisons["finding_recall"]["by_tier"]["phase"],
+                         {"matched": 1, "recorded": 2, "recall": 0.5,
+                          "null": {"matched": 0, "recorded": 0, "recall": None}})
+
+        fix = comparisons["fix_recall"]
+        self.assertEqual((fix["uncensored_cases"], fix["censored_excluded"]), (2, 1))
+        self.assertEqual(fix["by_effort"]["high"],
+                         {"matched": 1, "hunks": 2, "recall": 0.5,
+                          "null": {"matched": 0, "hunks": 0, "recall": None}})
+        self.assertEqual(fix["by_tier"]["unit"],
+                         {"matched": 1, "hunks": 2, "recall": 0.5,
+                          "null": {"matched": 0, "hunks": 0, "recall": None}})
+
+        self.assertEqual(comparisons["corroboration"]["by_effort"]["high"],
+                         {"findings": 5, "corroborated": 2, "valid": 1, "invalid": 0,
+                          "unknown": 1, "unadjudicated": 1, "rate": 0.6})
+        verdict = comparisons["verdict_agreement"]["by_effort"]["high"]
+        self.assertEqual(verdict["cases"], 3)
+        self.assertEqual(verdict["matrix"], {"pass": {"pass": 2, "fail": 0},
+                                             "fail": {"pass": 0, "fail": 1}})
+        self.assertEqual(verdict["agreement"], 1.0)
+        self.assertEqual(comparisons["severity_agreement"]["by_effort"]["high"],
+                         {"pairs": 1, "agree": 1, "rate": 1.0})
+        self.assertEqual(result["validation"]["matching"]["matches"], 2)
+        self.assertEqual(result["validation"]["matching"]["method_counts"],
+                         {"structural": 2, "adjudicated": 0})
+
+    def test_validation_method_tags_kappa_and_leak_check(self):
+        manifest = phase3_manifest(2)
+        cases = {case["case_id"]: case for case in manifest["cases"]}
+        cases["case-0"]["outcomes"] = [
+            outcome_finding("src/a.py", 10, 20, "medium", "missing nil check in loader"),
+            outcome_finding("src/b.py", 30, 40, "low", "unused import cleanup"),
+        ]
+        for case in manifest["cases"]:
+            case["base_sha"] = "b" * 40
+            case["criteria"] = {"source": "base_blob", "text": "design criteria", "content_hash": "criteria-hash"}
+            case["build_models"] = {"source": "unknown", "models": []}
+            case["capture"] = {"repo_id": "repo", "mode": "range", "view": "diff",
+                               "base": "b" * 40, "head": case["head_sha"],
+                               "diff": "diff --git a/src/a.py b/src/a.py context",
+                               "diff_sha256": "d" * 64, "complete": True}
+        cases["case-0"]["capture"]["diff"] = "diff with leaked outcome: missing nil check in loader"
+        manifest["run_order"] = [case["case_id"] for case in manifest["cases"]]
+        manifest = refreeze(manifest)
+
+        rows = [record(manifest, "case-0", "high", findings=[
+            {"id": "U1", "severity": "medium", "path": "src/moved_a.py", "line_start": 10, "line_end": 20,
+             "title": "nil check", "evidence": "missing nil check in loader"},
+            {"id": "U2", "severity": "medium", "path": "src/moved_b.py", "line_start": 30, "line_end": 40,
+             "title": "imports", "evidence": "unused import cleanup"}])]
+        decisions = {"version": 1, "low_sample_rate": 1.0, "labeler_model": "labeler-a",
+                     "second_labeler_model": "labeler-b", "findings": [
+                         {"case_id": "case-0", "effort": "high", "finding_id": "U1", "category": "matched",
+                          "second_label": "matched"},
+                         {"case_id": "case-0", "effort": "high", "finding_id": "U2", "category": "partial",
+                          "second_label": "matched"}]}
+        export = make_export(manifest, rows)
+        ledger = make_ledger(manifest, [("case-0", "high", "case-0-high")])
+        result = report.build_report(manifest, export, ledger, {}, decisions)
+
+        matching_validation = result["validation"]["matching"]
+        self.assertEqual(matching_validation["matches"], 2)
+        self.assertEqual(matching_validation["method_counts"], {"structural": 0, "adjudicated": 2})
+        self.assertEqual(matching_validation["uncertain_band"], 2)
+        adjudication_validation = result["validation"]["adjudication"]
+        self.assertEqual(adjudication_validation["double_labelled"], 2)
+        self.assertEqual(adjudication_validation["kappa"], 0.0)
+        self.assertEqual(adjudication_validation["labeler_model"], "labeler-a")
+        self.assertEqual(adjudication_validation["second_labeler_model"], "labeler-b")
+        leak = result["validation"]["leak_check"]
+        self.assertFalse(leak["pass"])
+        self.assertEqual(leak["request_errors"], [])
+        self.assertGreaterEqual(leak["outcome_text_hits"], 1)
+        self.assertEqual(result["validation"]["shuffled_null"], {"seed": 23, "method": "shuffled_case_map"})
+
+    def test_deterministic_report_bytes_and_censored_fix_recall(self):
+        manifest = phase3_manifest(2)
+        cases = {case["case_id"]: case for case in manifest["cases"]}
+        cases["case-0"]["later_fixes"] = [later_fix("f1", "missing nil check in loader", "src/a.py", 10, 20)]
+        cases["case-1"]["censored"] = True
+        cases["case-1"]["later_fixes"] = [later_fix("f2", "missing nil check in loader", "src/a.py", 10, 20),
+                                          later_fix("f3", "other fix", "src/a.py", 30, 40)]
+        manifest["censored"] = 1
+        manifest = refreeze(manifest)
+        finding = [{"id": "F1", "severity": "medium", "path": "src/a.py", "line_start": 10, "line_end": 20,
+                    "title": "nil", "evidence": "missing nil check in loader"}]
+        rows = [record(manifest, "case-0", "high", findings=finding),
+                record(manifest, "case-1", "high", findings=finding)]
+        refs = [("case-0", "high", "case-0-high"), ("case-1", "high", "case-1-high")]
+        one = report_for(manifest, rows, refs)
+        two = report_for(manifest, rows, refs)
+        self.assertEqual(json.dumps(one, sort_keys=True), json.dumps(two, sort_keys=True))
+        fix = one["comparisons"]["fix_recall"]
+        self.assertEqual(fix["by_effort"]["high"]["hunks"], 1)
+        self.assertEqual(fix["by_effort"]["high"]["matched"], 1)
+        self.assertEqual((fix["uncensored_cases"], fix["censored_excluded"]), (1, 1))
+        self.assertEqual(fix["by_tier"]["unit"], {"matched": 0, "hunks": 0, "recall": None,
+                                                  "null": {"matched": 0, "hunks": 0, "recall": None}})
 
 
 if __name__ == "__main__":
