@@ -141,15 +141,15 @@ export function buildMatrixModel({ spec = {}, data = [] } = {}) {
       return {
         key: cell.key,
         label: `${isoDay(cell.time)} · ${column}`,
-        values: { [measure.key]: cell.value },
-        n: cell.n,
-        coverage: cell.coverage,
+        values: { [measure.key]: cell.data.value },
+        n: cell.data.n,
+        coverage: cell.data.coverage,
         x: cell.time,
         rowIndex: cell.weekIndex,
         columnIndex: cell.weekday,
         rowKey: rowLabel.get(cell.weekStart),
         columnKey: column,
-        value: cell.value
+        value: cell.data.value
       };
     });
     return {

@@ -104,6 +104,7 @@ export function createTable(doc, { spec = {}, data = [], onSelect = null, onInsp
   }
 
   function onKey(event, row, tr) {
+    if ([' ', 'Spacebar', 'Enter', 'ArrowDown', 'ArrowUp'].includes(event.key)) event.stopPropagation();
     if (event.key === ' ' || event.key === 'Spacebar') {
       event.preventDefault();
       const checkbox = tr.querySelector('input[type="checkbox"]');
