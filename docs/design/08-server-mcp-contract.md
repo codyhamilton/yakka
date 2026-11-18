@@ -305,7 +305,7 @@ arguments, `_local`, file paths or reply bodies.
 ### The shim's own ceilings
 
 The server is not trusted with the user's machine, so the shim enforces its own limits on
-server-supplied values. `timeout_s` above 300 is clamped to 300. A `budget_bytes` above 8 MiB, or any
+server-supplied values. `timeout_s` above 630 is clamped to 630. A `budget_bytes` above 8 MiB, or any
 param outside the reader's allowed set, is `bad_params`. Reader time is 5 s each and 10 s for the whole
 set. The connect timeout is 5 s. Replies are capped at 8 MiB. Eight requests run concurrently.
 Changing a limit changes no contract; each is one constant on one side.
@@ -567,7 +567,7 @@ Question 1 is resolved by the 7 Nov 2026 approval above. The open items are:
 3. Does an intermediary cut a call that runs longer than a minute? The Fly proxy idle timeout is not set in `fly.toml`
    (community reports of about 60 s are unverified). The Cloudflare edge in front of `api.yakka.build` has a read
    timeout that is not in the repository and not verified. Any harness's MCP tool timeout is also unknown. The route
-   and the shim support `timeout_s` up to 300 s, which may exceed what the edge allows. The shim maps an intermediary's
+   and the shim support `timeout_s` up to 630 s, which may still exceed what the edge allows. The shim maps an intermediary's
    `504` or `524` to `timeout`. The fallbacks are an SSE reply or an async call. Blocks only long-call smoke evidence.
 4. Does Codex (and Claude Code) expose the project directory to a stdio MCP server? (Plan 21 open question 1.) `project_dir`
    returns `null` until this is answered, and `bases:["cwd"]` is today's behaviour. Nothing here waits on it.

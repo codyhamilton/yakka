@@ -2314,6 +2314,7 @@ def RunStandalone(ctx: DrainContext, stderr: Any) -> int:
 # --- mcp ---
 
 _MCP_MAX_BODY = 8 << 20
+_MCP_MAX_TIMEOUT_S = 630.0
 _MCP_WORKERS = 8
 _MCP_CANCEL = "notifications/cancelled"
 _MCP_CONNECT_TIMEOUT_S = 5.0
@@ -3099,7 +3100,7 @@ class _McpRelay:
         seconds = declaration.get("timeout_s", 5) if isinstance(declaration, dict) else 5
         if isinstance(seconds, bool) or not isinstance(seconds, (int, float)) or seconds <= 0:
             seconds = 5
-        return min(float(seconds), 300.0) + 5.0
+        return min(float(seconds), _MCP_MAX_TIMEOUT_S) + 5.0
 
     def _dispatch(self, body: bytes, request: Optional[dict[str, Any]], ident: Any, method: str, expects_reply: bool, cancelled: threading.Event) -> None:
         host = ""
