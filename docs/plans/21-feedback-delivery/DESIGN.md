@@ -489,6 +489,13 @@ Carried placement: the previous phase's carried items stay carried, not absorbed
 - Surfaces: a `YAKKA_QUEUE`-scoped run of the Python drain on the staged copy, the remote ingest response, the admin operations page or a read-only store query for the independent count, the report file.
 - Approach: open (staging method, a dry-run count and the hook-events-only mode are the build's to settle against the code)
 - Depends on: 1, 2, 3 (Cody's order). Through phase 3 it still transitively requires Plan 24 and phase 3 implementation/closure (ledger 26); the E1 choice is approved, not its implementation; the upload itself uses neither the shim nor an effect.
+- Units:
+
+| Unit | Brief | Depends on | Runs alongside |
+|---|---|---|---|
+| 1 — Staged copy, dry-run manifest and hook-events-only upload | `briefs/phase6-01-backlog-upload.md` | nothing inside the phase (design phases 1-3 are closed; gate stays with Cody) | nothing |
+
+Carried placement: no earlier carried item touches Phase 6, so none is absorbed. The `tools/release/test_layout.py::test_repo_passes_layout_check` failure on ignored `packages/yakka-analytics/node_modules/**` is not chased here. Phase 3's Plan 24 v1 compatibility gap, the shim pointer-form mismatch, the 300.4 s display and the `_Runner.swept` guard all concern the shim, the server or the live drain, none of which Phase 6 uses; Phase 5's open question 1, design 08 wording and legacy Go client are likewise outside its surfaces. The live upload, the independent server-side count and the `artifact_feedback` checks remain Cody gates (egress).
 
 ### Phase 7 — Agents act on feedback
 
