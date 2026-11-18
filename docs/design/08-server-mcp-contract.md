@@ -172,7 +172,8 @@ logs hold method, tool name, tenant id, status and duration, and never arguments
   tool it names (the default for any other method). Over the cap is `413` and nothing executes.
 - A tool's cap is `max(default, 64 KiB + the sum of its bulk readers' budget_bytes)`, derived at
   registration from the declaration, so the cap and the declaration cannot disagree.
-- Default wall time 20 s; ceiling 300 s (`YAKKA_MCP_MAX_CALL`), declared as `timeout_s`. At `timeout_s`
+- Default wall time 20 s; ceiling 630 s (`YAKKA_MCP_MAX_CALL`), declared as `timeout_s`. The environment
+  override accepts values from 20 through 630 seconds. At `timeout_s`
   the server cancels the handler's context and answers `timeout after <n> s`.
 - A client disconnect cancels the handler's context. A handler with a non-idempotent effect states in
   its description whether an abandoned call may have run.
@@ -202,9 +203,10 @@ per-tool rate limits, and registering tool handlers from outside the Go binary.
   the path kind, the state, the order of checks and the wording. [Design 4](04-advisory-surface.md#artifact_feedback)
   holds the states. `bases:["cwd"]` is today's behaviour; whether a harness exposes `project_dir` is
   open question 4.
-- `review_change` is server-owned, `read_write`, `readOnlyHint:false`, with `timeout_s:150` and has no local actions.
+- `review_change` is server-owned, `read_write`, `readOnlyHint:false`, with `timeout_s:630` (one 10-minute
+  provider attempt plus 30 seconds of headroom) and has no local actions.
   Registration requires a non-empty `CLAUDE_API_TOKEN` in authenticated remote mode and a server call
-  ceiling of at least 150 seconds. Required arguments are `mode` (`uncommitted` or `range`) and `build_models`;
+  ceiling of at least 630 seconds. Required arguments are `mode` (`uncommitted` or `range`) and `build_models`;
   a range uses `base` and `head`. Optional `kind`, `plan`, `phase`, `pr` and `brief` supply review
   identity and stored criteria references; `detail:full` includes validated findings. Optional
   `effort` (default `high`; `high`, `xhigh` or `max` only), `tags` (at most 16 exact strings) and

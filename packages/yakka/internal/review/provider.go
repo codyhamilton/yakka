@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"time"
 )
 
 func reviewHTTPClient() *http.Client {
@@ -24,7 +23,7 @@ const (
 	// reviewHTTPClientTimeout must outlast one attempt so the attempt context,
 	// not the transport, decides a timeout. It leaves a little headroom for the
 	// response to be read after the provider's deadline.
-	reviewHTTPClientTimeout = defaultAttemptTimeout + 30*time.Second
+	reviewHTTPClientTimeout = AttemptTimeout + AttemptTimeoutHeadroom
 
 	claudeMessagesURL = "https://api.anthropic.com/v1/messages"
 	claudeAPIVersion  = "2023-06-01"

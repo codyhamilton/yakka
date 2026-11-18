@@ -80,9 +80,11 @@ tenant-local records. It shares the `POST /v1/reviews` orchestrator. The Python 
 secret-scanned local diff and omission manifest through the declared `change` reader, in
 uncommitted or explicit Git range mode. The server rescans and alone holds the provider credential;
 machines use their existing Yakka login and need no provider key. The tool is `read_write`,
-`readOnlyHint:false`: its effect is a server-side provider call and record. Its declaration allows 150 seconds and
-no local actions. Registration requires a non-empty `CLAUDE_API_TOKEN` in authenticated remote mode
-and a sufficient MCP timeout ceiling of at least 150 seconds; source integration does not establish
+`readOnlyHint:false`: its effect is a server-side provider call and record. Its declaration allows 630 seconds
+(one 10-minute provider attempt plus 30 seconds of headroom) and no local actions. The default MCP call
+timeout remains 20 seconds, and `YAKKA_MCP_MAX_CALL` may be set from 20 through the 630-second ceiling.
+Registration requires a non-empty `CLAUDE_API_TOKEN` in authenticated remote mode and a sufficient MCP
+timeout ceiling of at least 630 seconds; source integration does not establish
 deployed availability. The model defaults to `claude-haiku-5-5` (optional `YAKKA_REVIEW_MODEL` override); any authenticated tenant's
 repo is reviewable, and `skipped_busy` reports the two-call per-tenant in-flight limit. Per-call
 `effort`, `tags` and `store` are validated on the server; effort defaults to `high` and is never

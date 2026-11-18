@@ -18,13 +18,16 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"github.com/codyhamilton/yakka/packages/yakka/internal/review"
 )
 
 const (
 	mcpDefaultBody    = 256 << 10
 	mcpMaxBody        = 8 << 20
 	mcpDefaultTimeout = 20
-	mcpMaxTimeout     = 300
+	reviewMCPTimeoutS = int((review.AttemptTimeout + review.AttemptTimeoutHeadroom) / time.Second)
+	mcpMaxTimeout     = reviewMCPTimeoutS
 )
 
 // The shipped capability table is embedded so registration is independent of cwd.

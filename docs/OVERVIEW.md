@@ -61,10 +61,12 @@ actual-cost recording and tenant-local records, through the same orchestrator as
 Python shim alone captures a bounded diff and omission manifest, scans before egress and forwards
 declared local context; the server rescans. Machines use their existing Yakka login and need no
 provider key. `read_write` scope and `readOnlyHint:false` disclose the server-side provider
-call-and-record boundary; the tool declares 150 seconds and no local actions. Receipts omit captured diff content;
+call-and-record boundary; the tool declares 630 seconds (one 10-minute provider attempt plus 30 seconds of
+headroom) and no local actions. The default MCP call timeout remains 20 seconds, with `YAKKA_MCP_MAX_CALL`
+configurable from 20 through 630 seconds. Receipts omit captured diff content;
 `detail=full` includes validated findings, and a completed duplicate carries the original findings.
 The `read`-only `list_reviews` tool declares no local readers or actions. Registration requires a
-non-empty `CLAUDE_API_TOKEN` in authenticated remote mode and an MCP timeout ceiling of at least 150
+non-empty `CLAUDE_API_TOKEN` in authenticated remote mode and an MCP timeout ceiling of at least 630
 seconds; it does not depend on `YAKKA_REVIEW_MODEL`. Deployment and live availability require
 separate evidence. The model defaults to `claude-haiku-5-5` (optional `YAKKA_REVIEW_MODEL` override),
 any authenticated tenant's repo is reviewable, and `skipped_busy` reports the

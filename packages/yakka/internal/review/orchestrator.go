@@ -24,10 +24,14 @@ import (
 
 const (
 	MaxReviewBody = 3 << 20
-	// defaultAttemptTimeout bounds one provider attempt. It was raised from 60s
+	// AttemptTimeout bounds one provider attempt. It was raised from 60s
 	// after seven high-effort reviews timed out at exactly 60s. Tune it again
 	// once high/xhigh/max wall times have been measured.
-	defaultAttemptTimeout = 10 * time.Minute
+	AttemptTimeout = 10 * time.Minute
+	// AttemptTimeoutHeadroom lets the HTTP transport and outer MCP call finish
+	// response handling after the provider attempt deadline.
+	AttemptTimeoutHeadroom = 30 * time.Second
+	defaultAttemptTimeout  = AttemptTimeout
 	// reviewWallTime covers both allowed attempts plus a little overhead so a
 	// single 10-minute attempt is never cut short by the outer deadline.
 	reviewWallTime = 2*defaultAttemptTimeout + 30*time.Second
