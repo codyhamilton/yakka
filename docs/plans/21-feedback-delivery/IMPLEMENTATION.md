@@ -286,3 +286,65 @@ gated, not claimed.
   `~/workspace/yakka-backlog-stage/plan21-recon` is left for the gated upload.
 - The pre-existing `tools/release/test_layout.py::test_repo_passes_layout_check` failure on
   ignored `packages/yakka-analytics/node_modules/**` was not run or chased.
+
+## Phase 7 — Agents act on feedback
+
+Run (phase 7): tool opencode, model deepseek-v4.1-flash for refine and build, started
+2026-11-19T04:09:10+10:00; independent read-only verification by codex gpt-6-luna at 04:17:59.
+Logs: `/home/codyh/workspace/.briefs/q/21-p7-refine.log`, `21-p7-u1.log`, `21-p7-verify.log`. Run
+for Plan 21 phase 7 only; no review, terminal review or close-out.
+
+Approach: the design marks this phase `known`; the invoker asked for refine anyway. Refine ran
+against the code, settled the exact sentence and one unit, and committed `d4cfe35b` (DESIGN.md
+Units table and brief). The build worker left changes uncommitted; the orchestrator verified,
+recorded this phase and committed.
+
+### Brief `phase7-01-feedback-states.md`
+
+Status: closed.
+
+- `plugins/yakka/skills/design/SKILL.md:18` now names the terminal answers an agent can receive —
+  `queued`, `not tracked`, `not delivered`, `stale`, `unreachable`, `bad config` — and says a
+  `queued` answer means call once more after a few seconds. `delivered` and `rejected` were
+  deliberately not added: the surrounding sentences already cover them.
+- The server's fix wording was confirmed unchanged, read-only:
+  `mcpFeedbackFix = "Fix: rewrite the file; the new write is the repair."`
+  (`packages/yakka/internal/serve/mcp_feedback.go:15`) is appended on the rejected path (`:274`)
+  and the screen-flagged path (`:401`) and pinned in the golden rejected case. It already matches
+  DESIGN.md Phase 7 and the Feedback tool domain.
+- Surfaces touched: `plugins/yakka/skills/design/SKILL.md` and the report only. No other skill,
+  server handler, shim, declaration, golden, test or installed copy was changed.
+- Deviation: the build read/checked above the brief's nominal turn budget; the change itself was
+  verbatim the brief's substitution. The worker flagged an internal brief contradiction (its
+  over-budget clause says to write into `IMPLEMENTATION.md`, its owned paths say touch nothing
+  else); it kept to the owned paths. No outcome is affected.
+- Report: `reports/phase7-01-feedback-states.md`.
+
+### Verification
+
+The unit's done evidence was reproduced independently. The deterministic parse of the feedback
+bullet fails before the edit (`AssertionError: missing \`not tracked\``, exit 1) and passes after
+(`feedback states present`, exit 0), asserting all six named answers and the repeat-call clause.
+The focused server test passes
+(`go test ./internal/serve/ -run 'TestMCPArtifactFeedbackCorpus|TestMCPArtifactFeedback'` →
+`ok ... 0.856s`), and `git grep` confirms the constant and its rejected/screen-flagged append
+sites. `git status --short` shows only the skill file and the report; `git diff --check` is clean.
+The independent codex verifier reported PASS on all five points and found no scope creep, missed
+clause or overclaim. The phase outcome proper — one fresh Claude session and one fresh Codex
+session, each in a scratch repo — is a live/egress gate and was not run; the repo evidence does
+not close it.
+
+### Carried
+
+- Gate: one fresh Claude session in a scratch repo asked to design a small feature, transcript
+  showing `delivered` with `screen:` and `scoring:` lines (after a repeat call if the first answer
+  was `queued`), then either an edit addressing a named flagged check followed by a second call or,
+  on `pass`, a final message stating the pass with the score lines.
+- Gate: the same fresh-session transcript on Codex. Together these two are the issue's done-when.
+- Gate: `artifact_feedback` checks on the Phase 7 brief and report (egress; not run).
+- `docs/design/08-server-mcp-contract.md` and the golden description state list still omit `not
+  tracked` in their wording; that is a Phase 5 surface the design does not ask Phase 7 to reword.
+- The brief's over-budget clause and its "touch nothing else" owned paths conflict; the build kept
+  to the owned paths and reported the clash. A later refinement should not repeat the clause.
+- The pre-existing `tools/release/test_layout.py::test_repo_passes_layout_check` failure on ignored
+  `packages/yakka-analytics/node_modules/**` was not run or chased.
