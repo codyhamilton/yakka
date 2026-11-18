@@ -163,7 +163,14 @@ test('every Start question path opens its destination or names the missing capab
   record('Start enables every path on a full server', await page.locator('.question-paths [aria-disabled="true"]').count(), 0);
 
   const named = [];
+  const p10Panels = {
+    '/b/cost': ['trend-columns', 'rank', 'treemap', 'dist-ranges', 'dist-hist', 'dist-ecdf'],
+    '/b/quality': ['score-ranges', 'score-trend', 'score-strips', 'band-mix'],
+    '/b/tools': ['mix', 'treemap', 'rank', 'rhythm']
+  };
   for (const link of links) {
+    const target = new URL(`${harness.origin}${link.href}`).pathname;
+    if (p10Panels[target]) await control(harness.origin, { p10: true });
     await page.goto(`${harness.origin}${link.href}`);
     await settleShell(page);
     const path = new URL(page.url()).pathname;
@@ -173,15 +180,18 @@ test('every Start question path opens its destination or names the missing capab
       await settlePanels(page, ['ops-footprint']);
     } else if (path === '/ledger') {
       await settlePanels(page, ['ledger-table']);
+    } else if (p10Panels[path]) {
+      await settlePanels(page, p10Panels[path]);
+      await control(harness.origin, { p10: false });
     }
     const heading = await page.evaluate(() => document.querySelector('#app h1')?.textContent || '');
     assert.notEqual(heading, 'Not found', `${link.text} (${link.href}) is not a dead link`);
-    if (/^\/b\/(cost|quality|scatter|tools|workflow)$/.test(path) || path === '/plans') {
-      assert.match(heading.length ? await page.locator('main').innerText() : '', /Delivered in Phase (10|11|12)/, `${path} names its delivering phase`);
+    if (/^\/b\/(scatter|workflow)$/.test(path) || path === '/plans') {
+      assert.match(heading.length ? await page.locator('main').innerText() : '', /Delivered in Phase (11|12)/, `${path} names its delivering phase`);
       named.push(path);
     }
   }
-  record('every named later destination resolves through the shell', named.length, 11);
+  record('every named later destination resolves through the shell', named.length, 5);
 
   await control(harness.origin, { scenario: 'legacy' });
   await page.goto(`${harness.origin}/`);
