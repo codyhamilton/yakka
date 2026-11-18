@@ -149,7 +149,7 @@ func feedbackShort(hash string) string {
 }
 
 func feedbackStaleLine(a *store.Artifact, current string) string {
-	return fmt.Sprintf("current content not yet delivered (service has %s from %s; local file is %s); normally a write still in the batch window", feedbackShort(a.Latest.ContentHash), a.Latest.ReceivedAt.UTC().Format(time.RFC3339), feedbackShort(current))
+	return fmt.Sprintf("current content not yet delivered (service has %s from %s; local file is %s)", feedbackShort(a.Latest.ContentHash), a.Latest.ReceivedAt.UTC().Format(time.RFC3339), feedbackShort(current))
 }
 
 func (l LocalContext) feedbackFacts() (feedbackLocal, *LocalFailure) {

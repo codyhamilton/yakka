@@ -354,7 +354,7 @@ func TestMCPArtifactFeedbackDeliveredFormattingAndLogPrivacy(t *testing.T) {
 	got = result["content"].([]any)[0].(map[string]any)["text"].(string)
 	short := previousArtifact.Latest.ContentHash[:12]
 	currentHash := keys.ContentHash([]byte("current"))
-	want := fmt.Sprintf("state: stale\npath: %s\nrepo: r\ncontent_hash: %s\n\ncurrent content not yet delivered (service has %s from %s; local file is %s); normally a write still in the batch window\nlocal enqueue is unsupported by this shim; deliver the file with a Write-tool edit or the end-of-turn sweep.\nFix: save the file again with the Write tool or make a real Edit (a no-op edit may be refused and fires no event); otherwise the sweep delivers it at turn end, and a session killed before its Stop or SessionEnd hook runs loses the write.", path, currentHash, short, previousArtifact.Latest.ReceivedAt.UTC().Format("2006-01-02T15:04:05Z"), currentHash[:12])
+	want := fmt.Sprintf("state: stale\npath: %s\nrepo: r\ncontent_hash: %s\n\ncurrent content not yet delivered (service has %s from %s; local file is %s)\nlocal enqueue is unsupported by this shim; deliver the file with a Write-tool edit or the end-of-turn sweep.\nFix: save the file again with the Write tool or make a real Edit (a no-op edit may be refused and fires no event); otherwise the sweep delivers it at turn end, and a session killed before its Stop or SessionEnd hook runs loses the write.", path, currentHash, short, previousArtifact.Latest.ReceivedAt.UTC().Format("2006-01-02T15:04:05Z"), currentHash[:12])
 	if got != want {
 		t.Fatalf("stale feedback:\ngot:  %q\nwant: %q", got, want)
 	}
