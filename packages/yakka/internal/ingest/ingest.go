@@ -202,7 +202,7 @@ func validate(obj map[string]any) string {
 		}
 		status, _ := str(obj, "status")
 		switch status {
-		case "ok", "ok_partial", "timeout", "api_error", "invalid_output", "unavailable",
+		case "ok", "ok_partial", "timeout", "api_error", "invalid_output", "truncated", "input_too_large", "unavailable",
 			"refused_capture", "refused_disclosure", "refused_criteria", "skipped_budget", "skipped_duplicate",
 			"skipped_busy":
 		default:
@@ -243,7 +243,7 @@ func validate(obj map[string]any) string {
 		}
 		status, _ := str(obj, "status")
 		switch status {
-		case "ok", "ok_partial", "timeout", "api_error", "invalid_output", "unavailable":
+		case "ok", "ok_partial", "timeout", "api_error", "invalid_output", "truncated", "unavailable":
 		default:
 			return invalid("review_usage has unknown status")
 		}

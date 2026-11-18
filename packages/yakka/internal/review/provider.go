@@ -8,12 +8,12 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"time"
+	"strings"
 )
 
 func reviewHTTPClient() *http.Client {
 	return &http.Client{
-		Timeout: 120 * time.Second,
+		Timeout: reviewHTTPClientTimeout,
 		CheckRedirect: func(*http.Request, []*http.Request) error {
 			return http.ErrUseLastResponse
 		},
@@ -21,27 +21,38 @@ func reviewHTTPClient() *http.Client {
 }
 
 const (
+	// reviewHTTPClientTimeout must outlast one attempt so the attempt context,
+	// not the transport, decides a timeout. It leaves a little headroom for the
+	// response to be read after the provider's deadline.
+	reviewHTTPClientTimeout = AttemptTimeout + AttemptTimeoutHeadroom
+
 	claudeMessagesURL = "https://api.anthropic.com/v1/messages"
 	claudeAPIVersion  = "2023-06-01"
 	maxReplyBytes     = 2 << 20
 	maxPacketBytes    = 2 << 20
-	maxTokens         = 8000
+	// maxTokens is a temporary trial cap. Lower it once real output_tokens at
+	// high/xhigh/max have been measured.
+	maxTokens = 100000
 )
 
 // ProviderStatus is a safe, body-free provider failure classification.
 type ProviderStatus string
 
 const (
-	ProviderTimeout  ProviderStatus = "timeout"
-	ProviderAPIError ProviderStatus = "api_error"
-	ProviderInvalid  ProviderStatus = "invalid_output"
+	ProviderTimeout       ProviderStatus = "timeout"
+	ProviderAPIError      ProviderStatus = "api_error"
+	ProviderInvalid       ProviderStatus = "invalid_output"
+	ProviderTruncated     ProviderStatus = "truncated"
+	ProviderInputTooLarge ProviderStatus = "input_too_large"
 )
 
 // ProviderError never includes the request, credential, or provider response
-// body. UsageReported marks a parsed 200 envelope whose content or validation
+// body. Reason is a short body-free classification of an invalid reply.
+// UsageReported marks a parsed 200 envelope whose content or validation
 // failed after the provider reported token usage.
 type ProviderError struct {
 	Status        ProviderStatus
+	Reason        string
 	HTTPStatus    int
 	InputTokens   int
 	OutputTokens  int
@@ -121,8 +132,9 @@ type messagesUsage struct {
 }
 
 type messagesResponse struct {
-	Model   string `json:"model"`
-	Content []struct {
+	Model      string `json:"model"`
+	StopReason string `json:"stop_reason"`
+	Content    []struct {
 		Type string `json:"type"`
 		Text string `json:"text"`
 	} `json:"content"`
@@ -139,6 +151,11 @@ func (r *Reviewer) Review(ctx context.Context, packet Packet, criteria []Criteri
 	}
 	if len(packet.Prompt) == 0 || len(packet.Prompt) > maxPacketBytes {
 		return Result{}, errors.New("review provider invalid packet")
+	}
+	// Defense in depth: Build trims to this budget, and a packet that somehow
+	// exceeds it must never become a billed Messages call.
+	if estimateInputTokens(packet.Prompt) > maxInputTokens {
+		return Result{}, &ProviderError{Status: ProviderInputTooLarge}
 	}
 	body, err := json.Marshal(messagesRequest{
 		Model: r.model, MaxTokens: maxTokens,
@@ -175,10 +192,10 @@ func (r *Reviewer) Review(ctx context.Context, packet Packet, criteria []Criteri
 	}
 	var envelope messagesResponse
 	if err := json.Unmarshal(raw, &envelope); err != nil {
-		return Result{}, &ProviderError{Status: ProviderInvalid}
+		return Result{}, &ProviderError{Status: ProviderInvalid, Reason: "envelope_parse"}
 	}
-	invalid := func() error {
-		pe := &ProviderError{Status: ProviderInvalid}
+	failure := func(status ProviderStatus) *ProviderError {
+		pe := &ProviderError{Status: status}
 		if envelope.Usage != nil {
 			pe.InputTokens = envelope.Usage.InputTokens
 			pe.OutputTokens = envelope.Usage.OutputTokens
@@ -186,21 +203,35 @@ func (r *Reviewer) Review(ctx context.Context, packet Packet, criteria []Criteri
 		}
 		return pe
 	}
-	if len(envelope.Content) != 1 {
-		return Result{}, invalid()
+	invalid := func(reason string) error {
+		pe := failure(ProviderInvalid)
+		pe.Reason = reason
+		return pe
 	}
+	if envelope.StopReason == "max_tokens" {
+		return Result{}, failure(ProviderTruncated)
+	}
+	// The raw content blocks from the review that reported multiple_text_blocks
+	// were never stored, so the reply shape is not recoverable. It may have been
+	// one object split across blocks, several objects, or prose plus JSON.
+	// Concatenate text blocks in order, then fall back to the last valid object.
 	var texts []string
 	for _, block := range envelope.Content {
 		if block.Type == "text" {
 			texts = append(texts, block.Text)
 		}
 	}
-	if len(texts) != 1 {
-		return Result{}, invalid()
+	if len(texts) == 0 {
+		return Result{}, invalid("empty_text")
 	}
-	result, err := ValidateReply([]byte(texts[0]), packet, criteria)
+	joined := []byte(strings.Join(texts, ""))
+	result, err := ValidateReply(joined, packet, criteria)
 	if err != nil {
-		return Result{}, invalid()
+		selected, ok := lastValidReply(joined, packet, criteria)
+		if !ok {
+			return Result{}, invalid(InvalidReason(err))
+		}
+		result = selected
 	}
 	result.Model = envelope.Model
 	if envelope.Usage != nil {
@@ -208,4 +239,30 @@ func (r *Reviewer) Review(ctx context.Context, packet Packet, criteria []Criteri
 		result.OutputTokens = envelope.Usage.OutputTokens
 	}
 	return result, nil
+}
+
+// lastValidReply selects the last JSON object in text that satisfies the reply
+// contract. Joined text may hold several objects, or prose followed by JSON, so
+// every decodable object start is a candidate and validation walks them from the
+// end: the last valid object wins. Candidates that fail the strict schema are
+// skipped, never relaxed.
+func lastValidReply(text []byte, packet Packet, criteria []Criterion) (Result, bool) {
+	var candidates [][]byte
+	for i := 0; i < len(text); i++ {
+		if text[i] != '{' {
+			continue
+		}
+		dec := json.NewDecoder(bytes.NewReader(text[i:]))
+		var raw json.RawMessage
+		if err := dec.Decode(&raw); err != nil {
+			continue
+		}
+		candidates = append(candidates, append([]byte(nil), raw...))
+	}
+	for i := len(candidates) - 1; i >= 0; i-- {
+		if result, err := ValidateReply(candidates[i], packet, criteria); err == nil {
+			return result, true
+		}
+	}
+	return Result{}, false
 }

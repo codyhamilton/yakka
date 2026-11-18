@@ -172,7 +172,8 @@ logs hold method, tool name, tenant id, status and duration, and never arguments
   tool it names (the default for any other method). Over the cap is `413` and nothing executes.
 - A tool's cap is `max(default, 64 KiB + the sum of its bulk readers' budget_bytes)`, derived at
   registration from the declaration, so the cap and the declaration cannot disagree.
-- Default wall time 20 s; ceiling 300 s (`YAKKA_MCP_MAX_CALL`), declared as `timeout_s`. At `timeout_s`
+- Default wall time 20 s; ceiling 630 s (`YAKKA_MCP_MAX_CALL`), declared as `timeout_s`. The environment
+  override accepts values from 20 through 630 seconds. At `timeout_s`
   the server cancels the handler's context and answers `timeout after <n> s`.
 - A client disconnect cancels the handler's context. A handler with a non-idempotent effect states in
   its description whether an abandoned call may have run.
@@ -202,9 +203,10 @@ per-tool rate limits, and registering tool handlers from outside the Go binary.
   the path kind, the state, the order of checks and the wording. [Design 4](04-advisory-surface.md#artifact_feedback)
   holds the states. `bases:["cwd"]` is today's behaviour; whether a harness exposes `project_dir` is
   open question 4.
-- `review_change` is server-owned, `read_write`, `readOnlyHint:false`, with `timeout_s:150` and has no local actions.
+- `review_change` is server-owned, `read_write`, `readOnlyHint:false`, with `timeout_s:630` (one 10-minute
+  provider attempt plus 30 seconds of headroom) and has no local actions.
   Registration requires a non-empty `CLAUDE_API_TOKEN` in authenticated remote mode and a server call
-  ceiling of at least 150 seconds. Required arguments are `mode` (`uncommitted` or `range`) and `build_models`;
+  ceiling of at least 630 seconds. Required arguments are `mode` (`uncommitted` or `range`) and `build_models`;
   a range uses `base` and `head`. Optional `kind`, `plan`, `phase`, `pr` and `brief` supply review
   identity and stored criteria references; `detail:full` includes validated findings. Optional
   `effort` (default `high`; `high`, `xhigh` or `max` only), `tags` (at most 16 exact strings) and
@@ -303,7 +305,7 @@ arguments, `_local`, file paths or reply bodies.
 ### The shim's own ceilings
 
 The server is not trusted with the user's machine, so the shim enforces its own limits on
-server-supplied values. `timeout_s` above 300 is clamped to 300. A `budget_bytes` above 8 MiB, or any
+server-supplied values. `timeout_s` above 630 is clamped to 630. A `budget_bytes` above 8 MiB, or any
 param outside the reader's allowed set, is `bad_params`. Reader time is 5 s each and 10 s for the whole
 set. The connect timeout is 5 s. Replies are capped at 8 MiB. Eight requests run concurrently.
 Changing a limit changes no contract; each is one constant on one side.
@@ -394,9 +396,11 @@ without implementing any later plan's reader.
 **Status.** Approved on 7 Nov 2026 for one server-declared, call-bound `enqueue_file_snapshot`, in the
 approval's words: "Allow the bounded queue action". The approval is design authorization and is not
 evidence of implementation, verification or deployment. The shim side is built and was exercised against
-a compatible fake server. The server side is not built. The v1 registry still refuses `local_actions`,
-the server advertises no action, and it emits no directive. [Plan 21](../plans/21-feedback-delivery/DESIGN.md)'s
-P3 depends on the server side. Verify it at a new exact SHA before that phase relies on it.
+a compatible fake server. The server side is now built: the v2 registry accepts only this declaration,
+advertises the action under `initialize`, and returns the one `-32011` directive and accepts its single
+continuation. The product `artifact_feedback` tool still declares no action;
+[Plan 21](../plans/21-feedback-delivery/DESIGN.md)'s P3 decides when it does. Verify the built side at a
+new exact SHA before that phase relies on it.
 
 This is a separately versioned extension of the v1 contract. It adds no general local effect. The
 declaration cannot name a command, an executable, a queue directory, a payload template, a destination URL
@@ -565,7 +569,7 @@ Question 1 is resolved by the 7 Nov 2026 approval above. The open items are:
 3. Does an intermediary cut a call that runs longer than a minute? The Fly proxy idle timeout is not set in `fly.toml`
    (community reports of about 60 s are unverified). The Cloudflare edge in front of `api.yakka.build` has a read
    timeout that is not in the repository and not verified. Any harness's MCP tool timeout is also unknown. The route
-   and the shim support `timeout_s` up to 300 s, which may exceed what the edge allows. The shim maps an intermediary's
+   and the shim support `timeout_s` up to 630 s, which may still exceed what the edge allows. The shim maps an intermediary's
    `504` or `524` to `timeout`. The fallbacks are an SSE reply or an async call. Blocks only long-call smoke evidence.
 4. Does Codex (and Claude Code) expose the project directory to a stdio MCP server? (Plan 21 open question 1.) `project_dir`
    returns `null` until this is answered, and `bases:["cwd"]` is today's behaviour. Nothing here waits on it.

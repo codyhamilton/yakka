@@ -24,8 +24,14 @@ func TestReviewMCPRegistrationContract(t *testing.T) {
 	if tool == nil {
 		t.Fatal("review_change is not registered")
 	}
-	if tool.Scope != TokenScopeReadWrite || tool.TimeoutS != 150 || len(tool.LocalActions) != 0 || len(tool.Context) != 4 {
+	if tool.Scope != TokenScopeReadWrite || tool.TimeoutS != reviewMCPTimeoutS || len(tool.LocalActions) != 0 || len(tool.Context) != 4 {
 		t.Fatalf("registration scope=%q timeout=%d local_actions=%v context=%v", tool.Scope, tool.TimeoutS, tool.LocalActions, tool.Context)
+	}
+	if tool.TimeoutS < int((review.AttemptTimeout+review.AttemptTimeoutHeadroom)/time.Second) {
+		t.Fatalf("review timeout %d does not cover one attempt plus headroom", tool.TimeoutS)
+	}
+	if s.mcpTools.maxCall != mcpMaxTimeout || s.mcpTools.maxCall < tool.TimeoutS {
+		t.Fatalf("default MCP ceiling=%d review timeout=%d", s.mcpTools.maxCall, tool.TimeoutS)
 	}
 	want := []string{"project_dir", "cwd", "git", "change"}
 	for i, name := range want {
@@ -212,7 +218,7 @@ func TestReviewMCPReadScopeAndLocalSpoofStripping(t *testing.T) {
 	if err := s.RegisterReviewMCPTool(); err != nil {
 		t.Fatal(err)
 	}
-	result := s.mcpCall(context.Background(), "a", TokenScopeRead, "review_change", nil)
+	result := s.mcpCall(context.Background(), "a", TokenScopeRead, "review_change", nil, nil)
 	b, _ := json.Marshal(result)
 	if !strings.Contains(string(b), "insufficient_scope") {
 		t.Fatalf("read scope was not refused: %s", b)

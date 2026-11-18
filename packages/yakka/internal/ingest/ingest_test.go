@@ -190,7 +190,7 @@ func TestReviewRunStatusVocabulary(t *testing.T) {
 	tn := open(t)
 	base := map[string]any{"id": "r#0", "type": "review_run", "conversation_id": "review:abc", "repo_id": "repo",
 		"kind": "pr", "capture_id": "abc", "ts": 10}
-	for _, status := range []string{"skipped_busy", "skipped_budget", "skipped_duplicate"} {
+	for _, status := range []string{"truncated", "input_too_large", "skipped_busy", "skipped_budget", "skipped_duplicate"} {
 		f := map[string]any{}
 		for k, v := range base {
 			f[k] = v
@@ -240,6 +240,11 @@ func TestReviewUsageNullableCost(t *testing.T) {
 	unknown["cost_usd"], unknown["cost_known"] = nil, false
 	if got, err := IngestReviewUsage(ctx, tn, marshal(t, unknown)); err != nil || got[0].Status != Accepted {
 		t.Fatalf("null cost = %+v, %v", got, err)
+	}
+	truncated := usageFact("q#2")
+	truncated["usage_id"], truncated["status"] = "usage-2", "truncated"
+	if got, err := IngestReviewUsage(ctx, tn, marshal(t, truncated)); err != nil || got[0].Status != Accepted {
+		t.Fatalf("truncated = %+v, %v", got, err)
 	}
 	bad := usageFact("q#1")
 	bad["usage_id"], bad["cost_usd"] = "usage-2", nil
