@@ -9,8 +9,11 @@ import { createFollow } from './core/follow.js';
 import { encodePanelSpec } from './core/view-spec.js';
 import { assembleBoard } from './boards/board.js';
 import { createPanelFrame } from './panels/panel-frame.js';
+import './panels/index.js';
 import { currentBoardUrl, readBoards, saveBoard, deleteBoard, openBoard } from './core/saved-boards.js';
-import { addFilterChip, createChips, legendFocusFilter, stateUrl, withPick } from './core/chips.js';
+import {
+  addFilterChip, createChips, legendFocusFilter, removeCohortChip, removeExcludeChip, removeFilterChip, stateUrl, withPick
+} from './core/chips.js';
 import { buildCohort, createSelectionTray, nextCohortSlot, openListDestination, writeCohort } from './core/selection-tray.js';
 import { createInspector } from './core/inspector.js';
 import { createCapabilityInspector } from './core/capability-inspector.js';
@@ -270,6 +273,26 @@ async function renderBoard(container, record, state, schema, tenant) {
   const clearSelection = () => router.replaceTransient(stateUrl(withPick(currentState(), ''), globalThis.location?.search || '', record.path));
   const defaultGrain = board.panels.find(entry => entry.panel)?.panel?.grain || '';
 
+  // A panel can name an applied filter, cohort or selection as the cause of an
+  // empty result, but it never imports the router. This handle rebuilds the
+  // current state without that cause and pushes it; the router re-renders.
+  function clearPanelCause(cause = {}) {
+    const state = currentState();
+    let next = state;
+    if (cause.kind === 'filter') {
+      next = cause.key === 'exclude'
+        ? removeExcludeChip(state, cause.value)
+        : removeFilterChip(state, cause.key, cause.value);
+    } else if (cause.kind === 'cohort') {
+      next = removeCohortChip(state, cause.key);
+    } else if (cause.kind === 'selection') {
+      next = state.pick ? withPick(state, '') : { ...state, sel: '' };
+    } else {
+      return;
+    }
+    router.pushScope(stateUrl(next, globalThis.location?.search || '', record.path));
+  }
+
   function updateTray() {
     tray.update({
       state: currentState(),
@@ -303,7 +326,7 @@ async function renderBoard(container, record, state, schema, tenant) {
       ? {
         ...entry.panel,
         load: async context => {
-          const result = await entry.panel.load(context);
+          const result = await entry.panel.load({ ...context, clear: clearPanelCause });
           panelRuntime.population = result?.population || null;
           if (!runtime.population) runtime.population = panelRuntime.population;
           if (!runtime.unit && panelRuntime.population?.unit) runtime.unit = panelRuntime.population.unit;

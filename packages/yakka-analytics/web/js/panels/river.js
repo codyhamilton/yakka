@@ -8,7 +8,7 @@ import '../charts/yk-lanes.js';
 import { formatNumber } from '../charts/formatters.js';
 import { createFollow } from '../core/follow.js';
 import { cancelledState, emptyState, errorState } from '../core/panel-state.js';
-import { ensurePulseStyles, scopeParams, whenPanelBody } from './pulse-strips.js';
+import { emptyCausesFor, ensurePulseStyles, scopeParams, whenPanelBody } from './pulse-strips.js';
 
 export const OBSERVATION_TYPES = ['session_start', 'artifact_version', 'execution', 'rejection'];
 const TYPE_LABELS = {
@@ -192,11 +192,11 @@ function renderRiver(host, result, context, doc) {
   return chart;
 }
 
-export async function load({ scope = {}, transport, tenant, signal, doc = globalThis.document } = {}) {
+export async function load({ scope = {}, transport, tenant, signal, doc = globalThis.document, clear = null } = {}) {
   ensurePulseStyles(doc);
   const context = {
     transport, tenant, doc, scope,
-    refresh: () => load({ scope, transport, tenant, doc, signal: undefined })
+    refresh: () => load({ scope, transport, tenant, doc, signal: undefined, clear })
   };
   try {
     const params = scopeParams(scope);
@@ -206,7 +206,9 @@ export async function load({ scope = {}, transport, tenant, signal, doc = global
     if (result.state === 'error') return result;
     if (result.state === 'empty') {
       whenPanelBody('river', doc, host => host.querySelector('.river')?.replaceChildren());
-      return emptyState([{ kind: 'scope', label: `no observations in window ${scope.win || 'all'}`, clear: null }]);
+      const causes = emptyCausesFor(scope, clear);
+      if (!causes.length) causes.push({ kind: 'scope', label: `no observations in window ${scope.win || 'all'}`, clear: null });
+      return emptyState(causes);
     }
     whenPanelBody('river', doc, host => renderRiver(host, result, context, doc));
     return result;

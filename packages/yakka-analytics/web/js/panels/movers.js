@@ -6,9 +6,9 @@
 
 import '../charts/yk-bars.js';
 import { formatCount, formatMoney, formatNumber } from '../charts/formatters.js';
-import { cancelledState, errorState } from '../core/panel-state.js';
+import { cancelledState, emptyState, errorState } from '../core/panel-state.js';
 import {
-  ensurePulseStyles, previousWindow, scopeParams, table, whenPanelBody, windowParams
+  emptyCausesFor, ensurePulseStyles, previousWindow, scopeParams, table, whenPanelBody, windowParams
 } from './pulse-strips.js';
 
 export const MOVER_DEFAULT_MEASURE = 'cost_usd';
@@ -219,7 +219,7 @@ async function loadLens(transport, lens, measure, scope, prev, { tenant, signal,
   });
 }
 
-export async function load({ scope = {}, spec = {}, transport, tenant, signal, doc = globalThis.document } = {}) {
+export async function load({ scope = {}, spec = {}, transport, tenant, signal, doc = globalThis.document, clear = null } = {}) {
   spec = spec || {};
   ensurePulseStyles(doc);
   try {
@@ -236,8 +236,14 @@ export async function load({ scope = {}, spec = {}, transport, tenant, signal, d
     }
     const context = {
       measures: measuresList,
-      refresh: nextMeasure => load({ scope, spec: { ...spec, measures: [nextMeasure] }, transport, tenant, doc, signal: undefined })
+      refresh: nextMeasure => load({ scope, spec: { ...spec, measures: [nextMeasure] }, transport, tenant, doc, signal: undefined, clear })
     };
+    if (!models.some(model => model.rows.length)) {
+      whenPanelBody('movers', doc, host => host.replaceChildren());
+      const causes = emptyCausesFor(scope, clear);
+      if (!causes.length) causes.push({ kind: 'scope', label: `no ${measure} groups in window ${scope.win || 'all'}`, clear: null });
+      return emptyState(causes);
+    }
     whenPanelBody('movers', doc, host => {
       host.replaceChildren();
       const container = doc.createElement('div');

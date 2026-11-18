@@ -4,7 +4,7 @@
 // the node checks; the panel only renders what the server returned.
 
 import { formatCount, formatMoney, formatNumber } from '../charts/formatters.js';
-import { cancelledState, errorState } from '../core/panel-state.js';
+import { cancelledState, emptyState, errorState } from '../core/panel-state.js';
 
 export const WINDOW_MS = { h: 3600e3, d: 86400e3, w: 7 * 86400e3, m: 30 * 86400e3, y: 365 * 86400e3 };
 
@@ -44,6 +44,59 @@ export function windowParams(win) {
   params.set('from', new Date(win.from).toISOString());
   params.set('to', new Date(win.to).toISOString());
   return params;
+}
+
+const SCOPE_ONLY_KEYS = new Set(['win', 'from', 'to', 'tz', 'cohorts', 'sel', 'hide', 'cmp', 'pick']);
+
+// Applied scope causes for an empty result: only the shared filters, excludes,
+// cohorts or selection the panel's scope actually carries, each with a clear
+// callback. The board wraps the callback with its router handle; the panel
+// never imports the router. Nothing is guessed.
+export function emptyCausesFor(scope = {}, clear = null) {
+  const causes = [];
+  const handle = request => (typeof clear === 'function' ? () => clear(request) : null);
+  for (const [key, raw] of Object.entries(scope)) {
+    if (SCOPE_ONLY_KEYS.has(key)) continue;
+    const values = Array.isArray(raw) ? raw : [raw];
+    for (const value of values) {
+      if (typeof value !== 'string' || !value) continue;
+      if (key === 'exclude') {
+        causes.push({ kind: 'filter', key: 'exclude', label: `exclude ${value}`, clear: handle({ kind: 'filter', key: 'exclude', value }) });
+      } else {
+        causes.push({ kind: 'filter', key, label: `${key}: ${value}`, clear: handle({ kind: 'filter', key, value }) });
+      }
+    }
+  }
+  for (const [slot, text] of Object.entries(scope.cohorts || {})) {
+    if (!text) continue;
+    causes.push({ kind: 'cohort', key: slot, label: `cohort ${slot.slice(1).toUpperCase()}`, clear: handle({ kind: 'cohort', key: slot }) });
+  }
+  if (scope.pick) causes.push({ kind: 'selection', key: 'pick', label: 'selection', clear: handle({ kind: 'selection', key: 'pick' }) });
+  else if (scope.sel) causes.push({ kind: 'selection', key: 'sel', label: 'selection', clear: handle({ kind: 'selection', key: 'sel' }) });
+  return causes;
+}
+
+// True only when a summary explicitly reports every recognised headline measure
+// as zero. A missing field is "not supplied", never zero, so an older or absent
+// response is not treated as an empty scope.
+export function summaryIsEmpty(summary) {
+  if (!summary || typeof summary !== 'object') return false;
+  let known = 0;
+  for (const key of ['conversations', 'hook_events', 'artifact_versions', 'distinct_content', 'commits', 'model_calls', 'unpriced_calls']) {
+    if (summary[key] === undefined || summary[key] === null) continue;
+    known += 1;
+    if (Number(summary[key]) !== 0) return false;
+  }
+  if (summary.cost_usd !== undefined && summary.cost_usd !== null) {
+    known += 1;
+    if (Number(summary.cost_usd) !== 0) return false;
+  }
+  if (summary.rejections && typeof summary.rejections === 'object') {
+    known += 1;
+    const total = (Number(summary.rejections.precheck) || 0) + (Number(summary.rejections.screen) || 0);
+    if (total !== 0) return false;
+  }
+  return known > 0;
 }
 
 // Current absolute window, or null for all-history (and for a bare `all`).
@@ -271,10 +324,16 @@ async function fetchSummary(transport, params, { tenant, signal, stateKey }) {
   return body && typeof body === 'object' ? body : {};
 }
 
-export async function load({ scope = {}, transport, tenant, signal, doc = globalThis.document } = {}) {
+export async function load({ scope = {}, transport, tenant, signal, doc = globalThis.document, clear = null } = {}) {
   ensurePulseStyles(doc);
   try {
     const current = await fetchSummary(transport, scopeParams(scope), { tenant, signal, stateKey: 'pulse-summary' });
+    if (summaryIsEmpty(current)) {
+      whenPanelBody('pulse-strips', doc, host => host.replaceChildren());
+      const causes = emptyCausesFor(scope, clear);
+      if (!causes.length) causes.push({ kind: 'scope', label: `no measures in window ${scope.win || 'all'}`, clear: null });
+      return emptyState(causes);
+    }
     const prev = previousWindow(scope);
     let previous = null;
     if (prev) {

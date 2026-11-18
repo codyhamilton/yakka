@@ -2,7 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
-  currentWindow, previousWindow, stripModel, qualityMedian, formatStripCost, rejectionTotal
+  currentWindow, previousWindow, stripModel, qualityMedian, formatStripCost, rejectionTotal,
+  emptyCausesFor, summaryIsEmpty
 } from '../../web/js/panels/pulse-strips.js';
 import { moverLenses, repoLensOffered, offeredMeasures, buildMoverModel, groupTotals, sparkline } from '../../web/js/panels/movers.js';
 import { coverageModel } from '../../web/js/panels/coverage.js';
@@ -125,6 +126,33 @@ test('the five pulse panels are valid registry entries with real chart names and
   assert.equal(PULSE_PANELS.length <= 12, true);
 });
 
+test('empty causes name each applied scope and clear it through the board handle', () => {
+  const cleared = [];
+  const clear = request => cleared.push(request);
+  const causes = emptyCausesFor({
+    win: '30d',
+    harness: ['orca'],
+    exclude: ['repo_id:r2'],
+    cohorts: { ca: '{"grain":"session"}' },
+    pick: 'c2VsZWN0aW9u'
+  }, clear);
+  assert.deepEqual(causes.map(cause => cause.kind), ['filter', 'filter', 'cohort', 'selection']);
+  assert.match(causes[0].label, /harness: orca/);
+  assert.match(causes[1].label, /exclude repo_id:r2/);
+  assert.match(causes[2].label, /cohort A/);
+  for (const cause of causes) cause.clear();
+  assert.deepEqual(cleared.map(request => request.kind), ['filter', 'filter', 'cohort', 'selection']);
+  assert.deepEqual([cleared[0].key, cleared[0].value], ['harness', 'orca']);
+  assert.deepEqual([cleared[1].key, cleared[1].value], ['exclude', 'repo_id:r2']);
+  assert.equal(cleared[2].key, 'ca');
+  assert.equal(emptyCausesFor({ win: '30d' }, clear).length, 0);
+  assert.equal(emptyCausesFor({ win: '30d', cohort: null }, null).length, 0);
+  assert.equal(summaryIsEmpty({}), false);
+  assert.equal(summaryIsEmpty({ conversations: 0, model_calls: 0 }), true);
+  assert.equal(summaryIsEmpty({ conversations: 0, model_calls: 1 }), false);
+  assert.equal(summaryIsEmpty({ cost_usd: 0, rejections: { precheck: 0, screen: 0 } }), true);
+});
+
 // Deterministic responses for the panels the stub leaves empty (query rows).
 const ACTIVITY_ROWS = ['session_start', 'artifact_version', 'execution', 'rejection'].map((type, index) => ({
   event_time: new Date(Date.parse('2026-09-30T12:00:00Z') - index * DAY).toISOString(),
@@ -164,10 +192,6 @@ function queryBody(url) {
 
 async function openPulse(page, origin) {
   await page.goto(`${origin}/b/pulse?win=30d`);
-  // The shell does not import the panel barrel itself; the spec loads it and
-  // re-dispatches the current route so the delivered preset is exercised.
-  await page.evaluate(async () => { await import('/js/panels/index.js'); });
-  await page.evaluate(() => window.dispatchEvent(new PopStateEvent('popstate')));
   await page.waitForFunction(() => document.querySelectorAll('.workspace-panel').length === 5 &&
     [...document.querySelectorAll('.workspace-panel')].every(panel => panel.dataset.idle === 'true'));
 }
@@ -277,6 +301,59 @@ test('the pulse preset settles five panels, inspects the river, and brushes then
     assert.ok(search.get('from') && search.get('to'));
     assert.equal(search.get('sel'), null);
 
+    assert.ok(harness.stats.maxInFlight <= 4, `in-flight analytics requests peaked at ${harness.stats.maxInFlight}`);
+    await diagnostics.assertClean();
+  } finally {
+    if (browser) await browser.close();
+    await harness.close();
+  }
+});
+
+test('an empty river names the applied filter and its Clear button pushes the scope without it', async t => {
+  const environment = loadBrowserEnvironment();
+  if (!environment.ok) { t.skip(environment.reason || SKIP_REASON); return; }
+  const harness = await startWorkspaceHarness();
+  let browser;
+  try {
+    browser = await launchBrowser(environment);
+    const page = await browser.newPage({ viewport: { width: 1280, height: 2200 } });
+    const diagnostics = await watchPage(page);
+    await page.route(/\/v1\/analytics\/activity/, route => {
+      const url = new URL(route.request().url());
+      if (url.searchParams.get('mode') !== 'list') return route.continue();
+      const filtered = url.searchParams.getAll('harness').includes('orca');
+      const rows = filtered ? [] : ACTIVITY_ROWS;
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          mode: 'list',
+          rows,
+          population: { grain: 'activity', unit: 'typed_observation', scope_n: rows.length, cohort_n: rows.length, eligible_n: rows.length, returned_n: rows.length, missing_by_reason: {}, by_type: {} }
+        })
+      });
+    });
+    await page.route(/\/v1\/analytics\/query/, route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(queryBody(new URL(route.request().url()))) }));
+    await page.route(/\/v1\/analytics\/scores/, route => route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ kind: 'design', checks: [{ name: 'clarity', n: 10, median: 0.72, scorer: 'jev-1' }] })
+    }));
+
+    await page.goto(`${harness.origin}/b/pulse?win=30d&harness=orca`);
+    await page.waitForFunction(() => document.querySelector('[data-panel="river"]')?.dataset.state === 'empty');
+    const empty = await page.evaluate(() => {
+      const panel = document.querySelector('[data-panel="river"]');
+      return { text: panel.textContent, buttons: [...panel.querySelectorAll('button')].map(button => button.textContent) };
+    });
+    assert.match(empty.text, /harness: orca/);
+    assert.ok(empty.buttons.includes('Clear filter'), `expected a Clear filter button, saw ${empty.buttons.join(', ')}`);
+
+    await page.locator('[data-panel="river"] button', { hasText: 'Clear filter' }).click();
+    await page.waitForFunction(() => new URLSearchParams(location.search).getAll('harness').length === 0 &&
+      document.querySelector('[data-panel="river"]')?.dataset.state === 'ready');
+    const search = new URLSearchParams(await page.evaluate(() => location.search));
+    assert.equal(search.get('harness'), null);
     assert.ok(harness.stats.maxInFlight <= 4, `in-flight analytics requests peaked at ${harness.stats.maxInFlight}`);
     await diagnostics.assertClean();
   } finally {

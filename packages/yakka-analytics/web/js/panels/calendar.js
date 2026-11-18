@@ -4,9 +4,9 @@
 // double-click) commits `from`/`to`, pushes history and clears `sel`.
 
 import '../charts/yk-matrix.js';
-import { cancelledState, errorState } from '../core/panel-state.js';
+import { cancelledState, emptyState, errorState } from '../core/panel-state.js';
 import { decodeUrlState, encodeUrlState } from '../../contract/url-state.js';
-import { ensurePulseStyles, scopeParams, whenPanelBody } from './pulse-strips.js';
+import { emptyCausesFor, ensurePulseStyles, scopeParams, whenPanelBody } from './pulse-strips.js';
 
 const MEASURES = ['cost_usd', 'model_calls', 'commits'];
 const MEASURE_LABELS = { cost_usd: 'Cost', model_calls: 'Model calls', commits: 'Commits' };
@@ -154,7 +154,7 @@ function renderCalendar(host, result, doc, context) {
   return chart;
 }
 
-export async function load({ scope = {}, spec = {}, transport, tenant, signal, doc = globalThis.document } = {}) {
+export async function load({ scope = {}, spec = {}, transport, tenant, signal, doc = globalThis.document, clear = null } = {}) {
   spec = spec || {};
   ensurePulseStyles(doc);
   try {
@@ -172,7 +172,9 @@ export async function load({ scope = {}, spec = {}, transport, tenant, signal, d
     const rows = calendarRows(body, measure);
     if (!rows.length) {
       whenPanelBody('calendar', doc, host => host.replaceChildren());
-      return { state: 'empty', causes: [{ kind: 'scope', label: `no ${measure} buckets in window ${scope.win || 'all'}`, clear: null }] };
+      const causes = emptyCausesFor(scope, clear);
+      if (!causes.length) causes.push({ kind: 'scope', label: `no ${measure} buckets in window ${scope.win || 'all'}`, clear: null });
+      return emptyState(causes);
     }
     const result = {
       state: 'ready',
@@ -186,7 +188,7 @@ export async function load({ scope = {}, spec = {}, transport, tenant, signal, d
     const context = {
       measures,
       body,
-      refresh: nextMeasure => load({ scope, spec: { ...spec, measures: [nextMeasure] }, transport, tenant, doc, signal: undefined })
+      refresh: nextMeasure => load({ scope, spec: { ...spec, measures: [nextMeasure] }, transport, tenant, doc, signal: undefined, clear })
     };
     whenPanelBody('calendar', doc, host => renderCalendar(host, result, doc, context));
     return result;

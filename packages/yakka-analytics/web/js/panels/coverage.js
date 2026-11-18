@@ -3,8 +3,8 @@
 // into one blended percentage.
 
 import { formatCount } from '../charts/formatters.js';
-import { cancelledState, errorState, unsupportedState } from '../core/panel-state.js';
-import { ensurePulseStyles, scopeParams, table, whenPanelBody } from './pulse-strips.js';
+import { cancelledState, emptyState, errorState, unsupportedState } from '../core/panel-state.js';
+import { emptyCausesFor, ensurePulseStyles, scopeParams, summaryIsEmpty, table, whenPanelBody } from './pulse-strips.js';
 
 function timeText(value) {
   if (value === null || value === undefined || value === '') return 'not supplied';
@@ -178,7 +178,7 @@ export function renderCoverage(container, model, doc = globalThis.document) {
   return container;
 }
 
-export async function load({ scope = {}, transport, tenant, signal, doc = globalThis.document } = {}) {
+export async function load({ scope = {}, transport, tenant, signal, doc = globalThis.document, clear = null } = {}) {
   ensurePulseStyles(doc);
   try {
     const [{ body: schema }, { response, body: summary }] = await Promise.all([
@@ -191,6 +191,12 @@ export async function load({ scope = {}, transport, tenant, signal, doc = global
     const coverage = schema?.coverage || null;
     if (!coverage && !summary) {
       return unsupportedState({ feature: 'Coverage', reason: 'the server publishes neither /schema.coverage nor /summary', source: 'this plan\'s server phases' });
+    }
+    if (!coverage && summaryIsEmpty(summary)) {
+      whenPanelBody('coverage', doc, host => host.replaceChildren());
+      const causes = emptyCausesFor(scope, clear);
+      if (!causes.length) causes.push({ kind: 'scope', label: `no coverage data in window ${scope.win || 'all'}`, clear: null });
+      return emptyState(causes);
     }
     const model = coverageModel({ coverage, summary });
     whenPanelBody('coverage', doc, host => renderCoverage(host, model, doc));

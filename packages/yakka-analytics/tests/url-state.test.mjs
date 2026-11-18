@@ -17,6 +17,16 @@ test('from and to take precedence over a window; invalid windows use 30d', () =>
   assert.equal(decodeUrlState('?win=not-a-window').win, '30d');
 });
 
+test('a filter removed from the new state is not resurrected from the prior search', () => {
+  const search = '?win=30d&harness=orca&repo_id=r1&future=x';
+  const state = decodeUrlState(search);
+  delete state.filters.harness;
+  const encoded = encodeUrlState(state, search);
+  assert.equal(encoded.get('harness'), null);
+  assert.deepEqual(encoded.getAll('repo_id'), ['r1']);
+  assert.deepEqual(encoded.getAll('future'), ['x']);
+});
+
 test('all and long finite windows are preserved without a client reporting cap', () => {
   assert.equal(decodeUrlState('?win=all').win, 'all');
   assert.equal(decodeUrlState('?win=120y').win, '120y');

@@ -33,8 +33,13 @@ export function decodeUrlState(search = '') {
 export function encodeUrlState(state, current = '') {
   const out = new URLSearchParams();
   const prior = current instanceof URLSearchParams ? current : new URLSearchParams(current);
+  // A prior unknown key the new state does not carry still round-trips. A
+  // shared filter is owned by state.filters: if the new state no longer carries
+  // it, the filter was removed and must not be resurrected from the prior
+  // search. Reserved keys are emitted from the state below.
   for (const [key, value] of prior) {
-    if (!RESERVED.has(key) && !PANEL.test(key) && !(key in (state.filters || {})) && !(key in (state.unknown || {}))) out.append(key, value);
+    if (RESERVED.has(key) || PANEL.test(key) || FILTERS.has(key)) continue;
+    if (!(key in (state.unknown || {}))) out.append(key, value);
   }
   if (state.from || state.to) { if (state.from) out.set('from', state.from); if (state.to) out.set('to', state.to); }
   else out.set('win', VALID_WINDOW.test(state.win || '') ? state.win : '30d');
