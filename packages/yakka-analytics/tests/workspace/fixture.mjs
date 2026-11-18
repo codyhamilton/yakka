@@ -1483,7 +1483,8 @@ const P12_HASH = {
   designV1: 'a1'.repeat(32),
   briefLong: 'b3'.repeat(32),
   oversize: 'c4'.repeat(32),
-  integrity: 'c5'.repeat(32)
+  integrity: 'c5'.repeat(32),
+  diffA: 'd1'.repeat(32), diffB: 'd2'.repeat(32), other: 'd3'.repeat(32), diffLarge: 'd4'.repeat(32)
 };
 
 function p12Iso(offset) {
@@ -1527,6 +1528,8 @@ function p12LongBriefBody() {
 }
 
 const P12_LONG_BRIEF = p12LongBriefBody();
+const P12_DIFF_BEFORE = 'context line\nchanged old\nremoved line\n';
+const P12_DIFF_AFTER = 'context line\nchanged new\nadded line';
 
 function p12VersionSpec(repo, path, spec) {
   return {
@@ -1632,13 +1635,33 @@ const P12_ARTIFACT_SPECS = [
         source: 'worktree', sha: 'sha-report-integrity', screen: null, scores: {}
       }
     ]
+  },
+  {
+    repo_id: 'repo-a',
+    path: 'docs/plans/20-analytics-reset/briefs/diff-fixture.md',
+    versions: [
+      { hash: P12_HASH.diffB, received: 90000, ts: 89000, session: 'conv-20b', harness: 'orca', model: 'claude', source: 'worktree', sha: 'sha-diff-b', scores: {} },
+      { hash: P12_HASH.diffA, received: 88000, ts: 87000, session: 'conv-20c', harness: 'claude-code', model: 'gpt', source: 'commit', sha: 'sha-diff-a', scores: {} },
+      { hash: P12_HASH.diffLarge, received: 86000, ts: 85000, session: 'conv-20d', harness: 'orca', model: 'claude', source: 'worktree', sha: 'sha-diff-large', scores: {} },
+      { hash: P12_HASH.designV2, received: 84000, ts: 83000, session: 'conv-20e', harness: 'orca', model: 'claude', source: 'worktree', sha: 'sha-diff-missing', scores: {} }
+    ]
+  },
+  {
+    repo_id: 'repo-a',
+    path: 'docs/plans/20-analytics-reset/IMPLEMENTATION.md',
+    versions: [
+      { hash: P12_HASH.other, received: 83000, ts: 82000, session: 'conv-20e', harness: 'orca', model: 'claude', source: 'worktree', sha: 'sha-other', scores: {} }
+    ]
   }
 ].map(spec => ({ ...spec, versions: spec.versions.map(version => p12VersionSpec(spec.repo_id, spec.path, version)) }));
 
 const P12_CONTENT = new Map([
   [P12_HASH.designV6, { repo_id: 'repo-a', path: 'docs/plans/20-analytics-reset/DESIGN.md', text: P12_DESIGN_A, verdict: 'unscreened' }],
   [P12_HASH.designV5, { repo_id: 'repo-a', path: 'docs/plans/20-analytics-reset/DESIGN.md', text: P12_DESIGN_B, verdict: 'pass' }],
-  [P12_HASH.briefLong, { repo_id: 'repo-a', path: 'docs/plans/20-analytics-reset/briefs/12-03.md', text: P12_LONG_BRIEF, verdict: 'pass' }]
+  [P12_HASH.briefLong, { repo_id: 'repo-a', path: 'docs/plans/20-analytics-reset/briefs/12-03.md', text: P12_LONG_BRIEF, verdict: 'pass' }],
+  [P12_HASH.diffA, { repo_id: 'repo-a', path: 'docs/plans/20-analytics-reset/briefs/diff-fixture.md', text: P12_DIFF_BEFORE, verdict: 'pass' }],
+  [P12_HASH.diffB, { repo_id: 'repo-a', path: 'docs/plans/20-analytics-reset/briefs/diff-fixture.md', text: P12_DIFF_AFTER, verdict: 'pass' }],
+  [P12_HASH.diffLarge, { repo_id: 'repo-a', path: 'docs/plans/20-analytics-reset/briefs/diff-fixture.md', text: Array.from({ length: 2001 }, (_, index) => `large fixture line ${index + 1}`).join('\n'), verdict: 'pass' }]
 ]);
 
 function p12ArtifactSpec(repo_id, path) {

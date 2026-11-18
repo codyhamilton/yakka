@@ -140,3 +140,48 @@
   border-radius: 6px;
   padding: 8px;
 }
+
+.artifact-compare {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.artifact-compare label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.artifact-compare-ceiling,
+.artifact-diff-message,
+.artifact-diff-summary {
+  font-size: 0.9em;
+}
+
+.artifact-diff {
+  border-top: 1px solid var(--border, #d0d0d0);
+  padding-top: 8px;
+}
+
+.artifact-diff-hunk {
+  margin: 6px 0;
+}
+
+.artifact-diff-hunk > summary {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.artifact-diff-lines {
+  margin: 6px 0;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.85em;
+}
+
+.artifact-diff-lines [data-kind="add"] { color: var(--success, #176b35); }
+.artifact-diff-lines [data-kind="remove"] { color: var(--danger, #a12622); }

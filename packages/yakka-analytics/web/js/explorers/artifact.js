@@ -13,6 +13,7 @@ import { formatNumber } from '../charts/formatters.js';
 import {
   artifactKind, bandFor, chunkText, createBaselineCache, fetchArtifactText, mapContentError, parseOutline
 } from './artifact-content.js';
+import { DIFF_CEILING, loadDiff, renderDiff } from './artifact-diff.js';
 
 export const title = 'Artifact';
 export const phase = 12;
@@ -51,17 +52,20 @@ export function parseReaderIdentity(search = '') {
     repo_id: (params.get('repo_id') || '').trim(),
     path: (params.get('path') || '').trim(),
     hash,
+    compare: /^[0-9a-f]{64}$/.test((params.get('compare') || '').trim()) ? (params.get('compare') || '').trim() : '',
+    invalidCompare: params.has('compare') && !/^[0-9a-f]{64}$/.test((params.get('compare') || '').trim()),
     invalidHash: rawHash !== '' && hash === ''
   };
 }
 
-// The clean reader URL: exactly repo_id, path and an optional 64-hex hash.
-// Unknown parameters are dropped.
-export function readerUrl({ repo_id = '', path = '', hash = '' } = {}) {
+// The clean reader URL: artifact identity, selected hash and optional compare
+// hash. Unknown parameters are dropped.
+export function readerUrl({ repo_id = '', path = '', hash = '', compare = '' } = {}) {
   const params = new URLSearchParams();
   if (repo_id) params.set('repo_id', repo_id);
   if (path) params.set('path', path);
   if (hash) params.set('hash', hash);
+  if (compare) params.set('compare', compare);
   return `/artifact?${params.toString()}`;
 }
 
@@ -146,7 +150,9 @@ export function render(root, doc = globalThis.document, { signal } = {}) {
   const versionsSlot = el(doc, 'div', 'artifact-versions');
   const versionSlot = el(doc, 'section', 'artifact-version');
   versionSlot.dataset.state = 'idle';
-  section.append(statusSlot, versionsSlot, versionSlot);
+  const diffSlot = el(doc, 'section', 'artifact-diff-slot');
+  diffSlot.setAttribute('aria-live', 'polite');
+  section.append(statusSlot, versionsSlot, versionSlot, diffSlot);
 
   let disposed = false;
   let controller = new AbortController();
@@ -176,6 +182,7 @@ export function render(root, doc = globalThis.document, { signal } = {}) {
   let next = null;
   let latestHash = '';
   let selectedHash = identity.hash;
+  let compareHash = identity.compare;
   let check = '';
   let checks = [];
   let textCache = new Map();
@@ -185,6 +192,8 @@ export function render(root, doc = globalThis.document, { signal } = {}) {
   let contentRun = 0;
   let baselineCache = null;
   let tenant = '';
+  let compareController = null;
+  let diffRun = 0;
 
   function scopeText() {
     const returned = rows.length;
@@ -239,6 +248,7 @@ export function render(root, doc = globalThis.document, { signal } = {}) {
       }
     });
     versionsSlot.append(strip);
+    paintCompareControl();
     versionsSlot.append(el(doc, 'p', 'artifact-versions-population', rows.length ? `${scopeText()}${next ? '; more versions remain.' : '.'}` : 'No versions returned.'));
     if (next) {
       const more = el(doc, 'button', 'artifact-versions-more', 'Load more');
@@ -250,6 +260,69 @@ export function render(root, doc = globalThis.document, { signal } = {}) {
       versionsSlot.append(more);
     }
     await Promise.all(promises);
+  }
+
+  function paintCompareControl() {
+    const bar = el(doc, 'div', 'artifact-compare');
+    const leftLabel = el(doc, 'label', '', 'Left version');
+    const left = doc.createElement('select');
+    left.className = 'artifact-compare-left';
+    left.setAttribute('aria-label', 'Left version');
+    const rightLabel = el(doc, 'label', '', 'Right version');
+    const right = doc.createElement('select');
+    right.className = 'artifact-compare-right';
+    right.setAttribute('aria-label', 'Right version');
+    for (const row of rows) {
+      const label = `${row.received_at || row.ts || 'version'} · ${shortHash(row.content_hash)}`;
+      for (const select of [left, right]) {
+        const option = doc.createElement('option');
+        option.value = row.content_hash;
+        option.textContent = label;
+        select.append(option);
+      }
+    }
+    const leftDefault = rows.some(row => row.content_hash === selectedHash) ? selectedHash : (rows[0]?.content_hash || '');
+    const rightDefault = rows.some(row => row.content_hash === compareHash)
+      ? compareHash
+      : (rows.find(row => row.content_hash !== leftDefault)?.content_hash || '');
+    left.value = leftDefault;
+    right.value = rightDefault;
+    const compare = el(doc, 'button', 'artifact-compare-button', 'Compare');
+    compare.type = 'button';
+    const available = rows.length >= 2 && kind !== 'other';
+    compare.disabled = !available;
+    if (!available) compare.title = kind === 'other' ? 'Diff unavailable: this artifact kind is not stored.' : 'Diff unavailable: fewer than two stored versions.';
+    compare.addEventListener('click', () => runCompare(left.value, right.value));
+    leftLabel.append(left);
+    rightLabel.append(right);
+    bar.append(leftLabel, rightLabel, compare, el(doc, 'span', 'artifact-compare-ceiling', `Per-side ceiling: ${DIFF_CEILING.bytes.toLocaleString('en-US')} bytes and ${DIFF_CEILING.lines.toLocaleString('en-US')} lines.`));
+    if (identity.invalidCompare) bar.append(el(doc, 'p', 'artifact-diff-message', 'Compare version is invalid; expected a 64-hex hash.'));
+    else if (compareHash && !rows.some(row => row.content_hash === compareHash)) bar.append(el(doc, 'p', 'artifact-diff-message', 'Compare version not found among the stored versions.'));
+    versionsSlot.append(bar);
+  }
+
+  async function runCompare(leftHash, rightHash) {
+    compareController?.abort();
+    compareController = new AbortController();
+    if (controller.signal.aborted) compareController.abort();
+    const run = ++diffRun;
+    diffSlot.replaceChildren();
+    if (kind === 'other') { diffSlot.append(el(doc, 'p', 'artifact-diff-message', 'Diff unavailable: this artifact kind is not stored.')); return; }
+    if (!leftHash || !rightHash || leftHash === rightHash) { diffSlot.append(el(doc, 'p', 'artifact-diff-message', 'Diff declined: select two different stored versions.')); return; }
+    const selectionChanged = selectedHash !== leftHash;
+    selectedHash = leftHash;
+    for (const mark of versionsSlot.querySelectorAll('.artifact-version-mark')) mark.dataset.selected = mark.dataset.hash === leftHash ? 'true' : 'false';
+    compareHash = rightHash;
+    if (selectionChanged) await renderSelected();
+    const url = readerUrl({ repo_id: repo, path, hash: leftHash, compare: rightHash });
+    globalThis.history.pushState(null, '', url);
+    diffSlot.append(el(doc, 'p', 'artifact-diff-message', 'Loading complete version text…'));
+    const result = await loadDiff({ scheduler, repo, path, a: leftHash, b: rightHash, tenant, signal: compareController.signal }).catch(error => {
+      if (error?.name === 'AbortError') return null;
+      return { ok: false, reason: `Diff declined: ${error?.message || 'content request failed'}` };
+    });
+    if (disposed || run !== diffRun || !result) return;
+    diffSlot.replaceChildren(result.ok ? renderDiff(doc, result.result) : el(doc, 'p', 'artifact-diff-message', result.reason));
   }
 
   async function bandForVersion(row, score) {
@@ -479,12 +552,14 @@ export function render(root, doc = globalThis.document, { signal } = {}) {
 
   async function selectVersion(hash) {
     selectedHash = hash;
-    const url = readerUrl({ repo_id: repo, path, hash });
+    const url = readerUrl({ repo_id: repo, path, hash, compare: compareHash });
     globalThis.history.pushState(null, '', url);
     for (const mark of versionsSlot.querySelectorAll('.artifact-version-mark')) {
       mark.dataset.selected = mark.dataset.hash === hash ? 'true' : 'false';
     }
     await renderSelected();
+    paintCompareControl();
+    if (compareHash) await runCompare(selectedHash, compareHash);
   }
 
   async function loadMore() {
@@ -575,7 +650,7 @@ export function render(root, doc = globalThis.document, { signal } = {}) {
 
   start();
 
-  return () => { disposed = true; controller.abort(); };
+  return () => { disposed = true; controller.abort(); compareController?.abort(); };
 }
 
 export default { title, phase, render };
