@@ -30,6 +30,7 @@ CONTRACTS.md 12: “The bound is **p95 under 500 ms per case**”; “Phase 13 r
 CONTRACTS.md 17.1: “Every windowed analytics route accepts `all=1`.”
 
 Settled: retain an ungated smoke over the committed small fixture and the current profiling gate; the profile must use only a temporary copy of deterministic committed fixture data. Do not change routes, server contracts, p95 threshold, fixture populations or performance policy. The test must prove the recorded request set is non-empty and every recorded request returns 200; benchmark outputs must identify the exact case count and enforce p95 <=500 ms.
+Environment note: the worker sandbox blocks writes outside the worktree, so `TMPDIR` is the gitignored in-worktree `.scratch/p13` (never `/tmp`); remove it before the closing commit.
 
 ## Changes
 
@@ -45,9 +46,9 @@ Keep server routes/contracts, benchmark threshold, analytics fixture generator a
 
 Identify or write the failing check before changing code. Report its output before and after.
 
-- `mkdir -p /home/codyh/.cache/plan20p13` → scratch directory exists outside `/tmp`.
-- `TMPDIR=/home/codyh/.cache/plan20p13 GOMAXPROCS=3 GOMEMLIMIT=8GiB go test -p=3 ./internal/serve -run '^TestAnalyticsPageSetSmoke$' -count=1` → 1/1 test passes; it parses every committed record entry, asserts the record's pinned request count, and every request returns HTTP 200.
-- `TMPDIR=/home/codyh/.cache/plan20p13 GOMAXPROCS=3 GOMEMLIMIT=8GiB YAKKA_PAGESET_PROFILE=fixture go test -p=3 ./internal/serve -run '^TestAnalyticsPageSet$' -count=1 -v` → 1/1 profiler passes on the committed fixture; exact case count equals the record count and every case's p95 is <=500 ms. Keep this environment gate opt-in and document it in the test comment. If the current test seam needs another gate name, document the chosen name in the report and the exact command.
+- `mkdir -p .scratch/p13` → scratch directory exists outside `/tmp`.
+- `TMPDIR=.scratch/p13 GOMAXPROCS=3 GOMEMLIMIT=8GiB go test -p=3 ./internal/serve -run '^TestAnalyticsPageSetSmoke$' -count=1` → 1/1 test passes; it parses every committed record entry, asserts the record's pinned request count, and every request returns HTTP 200.
+- `TMPDIR=.scratch/p13 GOMAXPROCS=3 GOMEMLIMIT=8GiB YAKKA_PAGESET_PROFILE=fixture go test -p=3 ./internal/serve -run '^TestAnalyticsPageSet$' -count=1 -v` → 1/1 profiler passes on the committed fixture; exact case count equals the record count and every case's p95 is <=500 ms. Keep this environment gate opt-in and document it in the test comment. If the current test seam needs another gate name, document the chosen name in the report and the exact command.
 - `git diff --check` → clean.
 - Data audit → committed JSON is request metadata only and includes a canonical `all=1`; the fixture is test-only, generated from the committed analyticsfixture package, and all temporary copies are removed.
 

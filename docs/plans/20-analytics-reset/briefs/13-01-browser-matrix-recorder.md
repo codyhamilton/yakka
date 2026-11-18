@@ -30,6 +30,7 @@ CONTRACTS.md 17.7: “Tests wait on `html[data-idle="true"]` and explicit end-st
 CONTRACTS.md 17.1: “Every windowed analytics route accepts `all=1`”; this tests the shipped client request shape and server behavior without adding or changing a route, grain, join, gesture or capability.
 
 Settled: use the existing Node built-in test runner, `playwright-core` through `NODE_PATH`, Chromium 1243, `PUBLIC_CANVAS_TEST_MODE=true`, deterministic fixture/stub data, current browser helpers and suite entry points. The old `.spec.ts` tests are stale; do not activate, delete or rewrite them as part of this unit. The shared matrix runner must select a Pages-style static origin or a locally built `YAKKA_BIN` origin without deploying or reading production data.
+Environment note: the worker sandbox blocks writes outside the worktree, so `TMPDIR` is the gitignored in-worktree `.scratch/p13` (never `/tmp`); remove it before the closing commit.
 
 ## Changes
 
@@ -47,9 +48,9 @@ Keep product files under `web/` unchanged. Do not touch `tests/e2e/*.spec.ts`, `
 
 Identify or write the failing check before changing code. Report its output before and after.
 
-- `mkdir -p /home/codyh/.cache/plan20p13` → scratch directory exists outside `/tmp`.
-- `TMPDIR=/home/codyh/.cache/plan20p13 NODE_PATH=/home/codyh/workspace/yakka/packages/yakka-analytics/node_modules PUBLIC_CANVAS_TEST_MODE=true NODE_OPTIONS=--max-old-space-size=8192 node --test --test-concurrency=1 packages/yakka-analytics/tests/workspace/acceptance.test.mjs packages/yakka-analytics/tests/trends-quality/acceptance.test.mjs packages/yakka-analytics/tests/scatter-sessions/acceptance.test.mjs packages/yakka-analytics/tests/plans-artifacts/acceptance.test.mjs` → baseline counts 4/4, 4/4, 5/5, 4/4 respectively.
-- `TMPDIR=/home/codyh/.cache/plan20p13 NODE_PATH=/home/codyh/workspace/yakka/packages/yakka-analytics/node_modules PUBLIC_CANVAS_TEST_MODE=true NODE_OPTIONS=--max-old-space-size=8192 node --test --test-concurrency=1 packages/yakka-analytics/tests/release-matrix/matrix.test.mjs` → 2/2 target runs pass (Pages-style static and embedded binary); each reuses those same four acceptance entry points/counts with no skips.
+- `mkdir -p .scratch/p13` → scratch directory exists outside `/tmp`.
+- `TMPDIR=.scratch/p13 NODE_PATH=/home/codyh/workspace/yakka/packages/yakka-analytics/node_modules PUBLIC_CANVAS_TEST_MODE=true NODE_OPTIONS=--max-old-space-size=8192 node --test --test-concurrency=1 packages/yakka-analytics/tests/workspace/acceptance.test.mjs packages/yakka-analytics/tests/trends-quality/acceptance.test.mjs packages/yakka-analytics/tests/scatter-sessions/acceptance.test.mjs packages/yakka-analytics/tests/plans-artifacts/acceptance.test.mjs` → baseline counts 4/4, 4/4, 5/5, 4/4 respectively.
+- `TMPDIR=.scratch/p13 NODE_PATH=/home/codyh/workspace/yakka/packages/yakka-analytics/node_modules PUBLIC_CANVAS_TEST_MODE=true NODE_OPTIONS=--max-old-space-size=8192 node --test --test-concurrency=1 packages/yakka-analytics/tests/release-matrix/matrix.test.mjs` → 2/2 target runs pass (Pages-style static and embedded binary); each reuses those same four acceptance entry points/counts with no skips.
 - `... node --test --test-concurrency=1 packages/yakka-analytics/tests/release-matrix/record.test.mjs` → 1/1 recorder test; its canonical output exactly matches `browser-request-shapes.json`, contains the all-history `all=1` request shape and no data payload or volatile timestamp.
 - Matrix report → every existing acceptance suite completes against both selected origins; every page settles through `data-idle`/`data-state`/URL/`inspect()`, zero page/CSP/console errors except the existing deliberately asserted legacy 4xx, and maximum in-flight requests is at most 4.
 - Build/matrix setup → build output is local and temporary; fixture is deterministic; `TMPDIR` is not `/tmp`; no deploy or tenant/credential action occurred.

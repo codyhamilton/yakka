@@ -42,13 +42,15 @@ Do not alter component code/tests to make a failing integrated run pass; return 
 
 ## Done evidence
 
+Environment note: the worker sandbox blocks writes outside the worktree, so `TMPDIR` is the gitignored in-worktree `.scratch/p13` (never `/tmp`); remove it before the closing commit.
+
 Identify or write the failing check before changing code. Report its output before and after.
 
-- `TMPDIR=/home/codyh/.cache/plan20p13 NODE_PATH=/home/codyh/workspace/yakka/packages/yakka-analytics/node_modules PUBLIC_CANVAS_TEST_MODE=true NODE_OPTIONS=--max-old-space-size=8192 node --test --test-concurrency=1 packages/yakka-analytics/tests/release-matrix/acceptance.test.mjs` → 1/1 integrated acceptance test passes; it verifies the 13-01 matrix's two targets and exact component counts, with zero skips and <=4 in flight.
+- `TMPDIR=.scratch/p13 NODE_PATH=/home/codyh/workspace/yakka/packages/yakka-analytics/node_modules PUBLIC_CANVAS_TEST_MODE=true NODE_OPTIONS=--max-old-space-size=8192 node --test --test-concurrency=1 packages/yakka-analytics/tests/release-matrix/acceptance.test.mjs` → 1/1 integrated acceptance test passes; it verifies the 13-01 matrix's two targets and exact component counts, with zero skips and <=4 in flight.
 - Server smoke + fixture profiler from 13-02 → smoke all recorded request shapes returns 200; profile exact same case count and p95 <=500 ms, including all-history.
 - Identity/route command from 13-03 → identity browser subtests pass; local shell paths and remote callback JSON pass.
 - Release and docs checks from 13-04 → release, layout, residual-name and bundle-secret checks pass with exact counts; README and stable docs match final release state.
-- `TMPDIR=/home/codyh/.cache/plan20p13 GOMAXPROCS=3 GOMEMLIMIT=8GiB go test -p=3 ./... -count=1` from `packages/yakka` → all Go packages pass (report exact package/test totals from output).
+- `TMPDIR=.scratch/p13 GOMAXPROCS=3 GOMEMLIMIT=8GiB go test -p=3 ./... -count=1` from `packages/yakka` → all Go packages pass (report exact package/test totals from output).
 - `git diff --check` → clean; report every check and output count, temporary scratch cleanup, deviations and contradictions.
 - `gate:` external Pages automation must accept `./web`; `gate:` ready implementation PR body must carry `Yakka-Plan: docs/plans/20-analytics-reset`. No deploy or configuration action is performed or claimed.
 - The 12-04 report feedback gap is recorded as a process carry: artifact feedback had no version/queued copy for `reports/12-04-artifact-diff.md`; it did not block product evidence and is not repaired here.

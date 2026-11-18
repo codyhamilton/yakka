@@ -28,6 +28,7 @@ DESIGN.md Phase 13: “Account flows pass the Pages-faithful rig; embedded local
 CONTRACTS.md 10.1: “On an embedded remote serve `/oauth/callback` is the API's JSON callback, not a UI page”; local non-file routes return `index.html`. CONTRACTS.md 10.2: “Pages serves unknown paths as `/` when there is no `404.html`”. CONTRACTS.md 17.7 requires a Pages-faithful host-mapped identity rig and no fixed sleeps.
 
 Settled: do not alter OAuth/device request contracts or production route policy. Existing focused Go route test passed during refinement (`GOMAXPROCS=3 GOMEMLIMIT=8GiB go test -p=3 ./internal/serve -run 'TestSiteBuiltMode|TestOAuthCallbackRouteIsShellLocallyAndJSONRemotely' -count=1`: pass). The account rig must remain local/stubbed and use the existing Chromium 1243 cache and Playwright-core.
+Environment note: the worker sandbox blocks writes outside the worktree, so `TMPDIR` is the gitignored in-worktree `.scratch/p13` (never `/tmp`); remove it before the closing commit.
 
 ## Changes
 
@@ -45,8 +46,8 @@ Keep `serve.go` and all OAuth/device product contracts untouched unless a test d
 
 Identify or write the failing check before changing code. Report its output before and after.
 
-- `TMPDIR=/home/codyh/.cache/plan20p13 NODE_PATH=/home/codyh/workspace/yakka/packages/yakka-analytics/node_modules PUBLIC_CANVAS_TEST_MODE=true NODE_OPTIONS=--max-old-space-size=8192 node --test --test-concurrency=1 packages/yakka-analytics/tests/identity/*.test.mjs` → existing contracts tests remain 6/6 or higher; new browser account-flow test has a fixed reported subtest count and no skips.
-- `TMPDIR=/home/codyh/.cache/plan20p13 GOMAXPROCS=3 GOMEMLIMIT=8GiB go test -p=3 ./internal/serve -run 'TestSiteBuiltMode|TestOAuthCallbackRouteIsShellLocallyAndJSONRemotely' -count=1` → 2/2 named tests pass; assertions cover local shell paths `/device`, `/oauth/callback`, `/login`, `/profile`, `/settings` and remote callback JSON.
+- `TMPDIR=.scratch/p13 NODE_PATH=/home/codyh/workspace/yakka/packages/yakka-analytics/node_modules PUBLIC_CANVAS_TEST_MODE=true NODE_OPTIONS=--max-old-space-size=8192 node --test --test-concurrency=1 packages/yakka-analytics/tests/identity/*.test.mjs` → existing contracts tests remain 6/6 or higher; new browser account-flow test has a fixed reported subtest count and no skips.
+- `TMPDIR=.scratch/p13 GOMAXPROCS=3 GOMEMLIMIT=8GiB go test -p=3 ./internal/serve -run 'TestSiteBuiltMode|TestOAuthCallbackRouteIsShellLocallyAndJSONRemotely' -count=1` → 2/2 named tests pass; assertions cover local shell paths `/device`, `/oauth/callback`, `/login`, `/profile`, `/settings` and remote callback JSON.
 - Browser evidence → Pages/API host-mapped rig; account operations and signed-out return settle; max 4 requests in flight; zero unexpected console/page/CSP errors; no live service or credential accessed.
 - `git diff --check` → clean.
 
