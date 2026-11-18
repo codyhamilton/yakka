@@ -23,9 +23,13 @@ export const COST_SPECS = {
   'trend-columns': { grain: 'time', measures: ['cost_usd'], split: 'model', chart: 'columns' },
   rank: { grain: 'time', measures: ['cost_usd'], split: 'model', chart: 'rank' },
   treemap: { grain: 'time', measures: ['cost_usd'], split: 'model', chart: 'treemap', scope: { parent: 'harness' } },
-  'dist-ranges': { grain: 'session', measures: ['cost_usd'], split: 'model', chart: 'ranges' },
-  'dist-hist': { grain: 'session', measures: ['cost_usd'], split: 'model', chart: 'histogram' },
-  'dist-ecdf': { grain: 'session', measures: ['cost_usd'], split: 'model', chart: 'ecdf' }
+  // Model, harness and repo are three real cost investigations: the model view
+  // stays on trend-columns/rank, while the three distribution panels mount the
+  // conversation repo lens, the call harness lens and the conversation model
+  // lens. No repo total is formed from /query.
+  'dist-ranges': { grain: 'session', measures: ['cost_usd'], split: 'session_repo', chart: 'ranges', scope: { grain: 'conversation', dim: 'session_repo' } },
+  'dist-hist': { grain: 'session', measures: ['cost_usd'], split: 'harness', chart: 'histogram', scope: { grain: 'call', dim: 'harness' } },
+  'dist-ecdf': { grain: 'session', measures: ['cost_usd'], split: 'model', chart: 'ecdf', scope: { grain: 'conversation', dim: 'model' } }
 };
 
 export function registerCostPanels() {

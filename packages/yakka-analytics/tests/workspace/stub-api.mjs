@@ -70,6 +70,11 @@ export function createStubApi() {
       return true;
     }
     if (path === '/v1/analytics/schema') { json(response, 200, schema()); return true; }
+    if (path === '/v1/baselines') {
+      state.requests.push({ path, search: url.search || '' });
+      json(response, 200, state.p10 ? p10Baselines() : { kind: query.get('kind') || 'design', checks: {} });
+      return true;
+    }
 
     if (path.startsWith('/v1/analytics/')) state.requests.push({ path, search: url.search || '' });
 
@@ -77,22 +82,39 @@ export function createStubApi() {
       const from = query.get('from') || '';
       const to = query.get('to') || '';
       const dims = query.getAll('dim').filter(Boolean);
+      const withCohort = body => {
+        const cohort = query.get('cohort');
+        if (!cohort) return body;
+        let op = 'include';
+        try { op = JSON.parse(cohort).op || 'include'; } catch { op = 'include'; }
+        const pop = body.population || {};
+        return {
+          ...body,
+          population: {
+            ...pop,
+            relation: {
+              source_grain: 'session', target_grain: pop.grain || 'session', mapping: 'session',
+              op, resolved_n: 42, resolved_unit: 'session', associations: []
+            }
+          }
+        };
+      };
       if (path === '/v1/analytics/summary') { json(response, 200, p10Summary()); return true; }
       if (path === '/v1/analytics/query') {
-        json(response, 200, p10Query({ measure: query.get('measure') || 'cost_usd', dims, bucket: query.get('bucket') || 'auto', from, to }));
+        json(response, 200, withCohort(p10Query({ measure: query.get('measure') || 'cost_usd', dims, bucket: query.get('bucket') || 'auto', from, to })));
         return true;
       }
       if (path === '/v1/analytics/distribution') {
-        json(response, 200, p10Distribution({ measure: query.get('measure') || 'cost_usd', grain: query.get('grain') || 'call', dim: query.get('dim') || '', from, to }));
+        json(response, 200, withCohort(p10Distribution({ measure: query.get('measure') || 'cost_usd', grain: query.get('grain') || 'call', dim: query.get('dim') || '', from, to })));
         return true;
       }
       if (path === '/v1/analytics/entities') {
         const grain = query.get('grain') || 'session';
-        json(response, 200, p10Entities(grain));
+        json(response, 200, withCohort(p10Entities(grain)));
         return true;
       }
-      if (path === '/v1/analytics/scores') { json(response, 200, p10Scores()); return true; }
-      if (path === '/v1/analytics/score-series') { json(response, 200, p10ScoreSeries()); return true; }
+      if (path === '/v1/analytics/scores') { json(response, 200, withCohort(p10Scores())); return true; }
+      if (path === '/v1/analytics/score-series') { json(response, 200, withCohort(p10ScoreSeries())); return true; }
       if (path === '/v1/analytics/baselines') { json(response, 200, p10Baselines()); return true; }
     }
 

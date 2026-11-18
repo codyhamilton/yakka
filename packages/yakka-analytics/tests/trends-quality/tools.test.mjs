@@ -155,7 +155,7 @@ test('tools settles four panels, matches the fixture and names unsupported tool 
     assert.equal(phase >= 0, true);
 
     const treemapRows = p10Query({ measure: 'hook_events', dims: ['harness', 'tool'], bucket: 'none', to: new Date().toISOString() })
-      .rows.map(row => [String(row.k[0]), String(row.k[0]), String(row.v)]);
+      .rows.map(row => [String(row.k[0]), String(row.k[1]), String(row.v)]);
     const rankRows = p10Query({ measure: 'hook_events', dims: ['tool'], bucket: 'none', to: new Date().toISOString() })
       .rows.map(row => [String(row.k[0]), String(row.v)]);
     const mixQuery = p10Query({ measure: 'hook_events', dims: ['tool_kind', 'harness'], bucket: 'none', to: new Date().toISOString() });

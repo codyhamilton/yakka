@@ -7,24 +7,58 @@ import '../charts/yk-ranges.js';
 import { cancelledState, emptyState, errorState, unsupportedState } from '../core/panel-state.js';
 import { currentWindow, previousWindow, table } from './pulse-strips.js';
 import {
-  coverageFacts, ensureP10Styles, measureMeta, populationLine, requestParams, whenPanelBody,
-  whenPanelSlot, renderChooser, windowParams
+  comparisonPlan, comparisonSummary, coverageFacts, ensureP10Styles, measureMeta, populationLine,
+  requestParams, whenPanelBody, whenPanelSlot, renderChooser, windowParams
 } from './p10-shared.js';
 
 export const PERIOD_UNSUPPORTED = 'Choose a finite period to compare periods.';
 
 export const DIST_MEASURES = ['cost_usd', 'tokens_in', 'tokens_out', 'tokens_cache_read', 'tokens_cache_write', 'tokens_reasoning'];
-export const DIST_DIMS = ['model'];
+export const DIST_DIMS = ['model', 'harness', 'session_model', 'session_repo'];
 export const DIST_GRAINS = ['call', 'conversation'];
 
-export function distributionParams({ scope = {}, measure, grain = 'call', dim = '' }) {
-  return requestParams({ scope, measure, split: dim, extra: { grain } });
+// CONTRACTS.md 17.3: call rows use the call harness/model; session_model and
+// session_repo are declared session attributes, so they exist only at the
+// conversation grain. A call-grain session lens is unsupported with the
+// conversation alternative, never a fabricated empty group.
+const DIM_GRAINS = {
+  model: ['call', 'conversation'],
+  harness: ['call', 'conversation'],
+  session_model: ['conversation'],
+  session_repo: ['conversation']
+};
+
+export function distributionGuard({ grain = 'call', dim = '' } = {}) {
+  const chosenGrain = DIST_GRAINS.includes(grain) ? grain : 'call';
+  if (!dim) return { ok: true, grain: chosenGrain, dim: '' };
+  if (!DIST_DIMS.includes(dim)) {
+    return { ok: false, grain: chosenGrain, dim, reason: `${dim} is not a published distribution dimension`, try: 'model' };
+  }
+  const grains = DIM_GRAINS[dim] || DIST_GRAINS;
+  if (!grains.includes(chosenGrain)) {
+    return {
+      ok: false, grain: chosenGrain, dim,
+      reason: `${dim} is a declared session attribute, not a ${chosenGrain} attribute`,
+      try: 'conversation'
+    };
+  }
+  return { ok: true, grain: chosenGrain, dim };
 }
 
-export function previousDistributionParams({ scope = {}, measure, grain = 'call', dim = '' }) {
+export function distributionSpec(spec = {}) {
+  const grain = spec?.scope?.grain === 'conversation' ? 'conversation' : 'call';
+  const requested = spec?.scope?.dim || spec?.split || 'model';
+  return distributionGuard({ grain, dim: requested });
+}
+
+export function distributionParams({ scope = {}, measure, grain = 'call', dim = '', cohort = undefined }) {
+  return requestParams({ scope, measure, split: dim, extra: { grain }, ...(cohort !== undefined ? { cohort } : {}) });
+}
+
+export function previousDistributionParams({ scope = {}, measure, grain = 'call', dim = '', cohort = undefined }) {
   const previous = previousWindow(scope);
   if (!previous) return null;
-  const params = distributionParams({ scope, measure, grain, dim });
+  const params = distributionParams({ scope, measure, grain, dim, cohort });
   const window = windowParams(previous);
   params.set('from', window.get('from'));
   params.set('to', window.get('to'));
@@ -77,24 +111,46 @@ export async function load(context = {}) {
   const { scope = {}, spec = {}, transport, tenant = '', signal } = context;
   const doc = context.doc || globalThis.document;
   ensureP10Styles('/css/trends.css', doc);
-  const compare = scope.cmp === 'period';
+  const plan = comparisonPlan(scope);
+  const compare = plan.mode === 'period';
+  const cohortCompare = plan.mode === 'cohorts';
+  if (plan.unsupported) return unsupportedState({ missing: 'comparison', reason: plan.unsupported, source: 'scope' });
   try {
     const schema = context.schema || (await transport.schema(tenant)).body;
     const panel = context.panel || DIST_RANGES_PANEL;
     const measure = (spec.measures || [])[0] && DIST_MEASURES.includes((spec.measures || [])[0]) ? spec.measures[0] : 'cost_usd';
-    const dim = (spec.split && DIST_DIMS.includes(spec.split)) ? spec.split : 'model';
-    const grain = spec.scope?.grain === 'conversation' ? 'conversation' : 'call';
+    const distributed = distributionSpec(spec);
+    if (!distributed.ok) {
+      return unsupportedState({
+        missing: `${measure} by ${distributed.dim} at ${distributed.grain} grain`,
+        reason: distributed.reason,
+        source: 'contract 17.3',
+        nearest: `${distributed.try} grain`
+      });
+    }
+    const { grain, dim } = distributed;
     if (compare && !currentWindow(scope)) return unsupportedState({ missing: 'period comparison', reason: PERIOD_UNSUPPORTED, source: 'scope' });
     const meta = measureMeta(schema, measure);
     const unit = unitKindFor(meta);
-    const body = await fetchDistribution(transport, distributionParams({ scope, measure, grain, dim }), { tenant, signal, stateKey: 'dist-ranges' });
+    let body;
     let previous = null;
-    if (compare) {
-      previous = await fetchDistribution(transport, previousDistributionParams({ scope, measure, grain, dim }), { tenant, signal, stateKey: 'dist-ranges-previous' });
+    let labels = { current: compare ? 'current' : '', previous: 'previous' };
+    if (cohortCompare) {
+      body = await fetchDistribution(transport, distributionParams({ scope, measure, grain, dim, cohort: plan.a }), { tenant, signal, stateKey: 'dist-ranges' });
+      previous = plan.b
+        ? await fetchDistribution(transport, distributionParams({ scope, measure, grain, dim, cohort: plan.b }), { tenant, signal, stateKey: 'dist-ranges-b' })
+        : await fetchDistribution(transport, distributionParams({ scope, measure, grain, dim, cohort: null }), { tenant, signal, stateKey: 'dist-ranges-b' });
+      labels = { current: plan.aLabel, previous: plan.bLabel };
+    } else {
+      body = await fetchDistribution(transport, distributionParams({ scope, measure, grain, dim }), { tenant, signal, stateKey: 'dist-ranges' });
+      if (compare) {
+        previous = await fetchDistribution(transport, previousDistributionParams({ scope, measure, grain, dim }), { tenant, signal, stateKey: 'dist-ranges-previous' });
+      }
     }
+    const compared = compare || cohortCompare;
     const rows = [
-      ...(body.rows || []).map(row => boxRow(row, { dim, period: compare ? 'current' : '', measure, ...unit })),
-      ...((previous?.rows || []).map(row => boxRow(row, { dim, period: 'previous', measure, ...unit })))
+      ...(body.rows || []).map(row => boxRow(row, { dim, period: labels.current, measure, ...unit })),
+      ...((previous?.rows || []).map(row => boxRow(row, { dim, period: labels.previous, measure, ...unit })))
     ];
     if (!rows.length) {
       whenPanelBody(panel.id, doc, host => host.replaceChildren());
@@ -107,14 +163,17 @@ export async function load(context = {}) {
       wrapper.className = 'p10-dist';
       const basis = doc.createElement('p');
       basis.className = 'p10-basis';
-      basis.textContent = `Basis: ${measure} over ${grain} grain by ${dim}. ${populationLine(body)}. Unpriced ${body.unpriced ?? 0}${previous ? `; previous period unpriced ${previous.unpriced ?? 0}` : ''}.`;
+      const comparisonText = compared
+        ? comparisonSummary({ plan, sides: cohortCompare ? { a: body, b: previous } : { current: body, previous }, unit: meta.unit }).text
+        : '';
+      basis.textContent = `Basis: ${measure} over ${grain} grain by ${dim}. ${populationLine(body)}. Unpriced ${body.unpriced ?? 0}${previous ? `; ${cohortCompare ? labels.previous : 'previous period'} unpriced ${previous.unpriced ?? 0}` : ''}. ${comparisonText}`;
       const node = doc.createElement('yk-ranges');
       node.className = 'p10-dist-chart';
       node.spec = {
         chart: 'ranges',
         type: 'box',
         legend: 'entities',
-        title: `${measure} by ${dim}${compare ? ' (current and previous period)' : ''}`,
+        title: `${measure} by ${dim}${cohortCompare ? ` (${plan.aLabel} and ${plan.bLabel})` : compare ? ' (current and previous period)' : ''}`,
         timeBasis: 'priced calls only; the current scope window',
         units: meta.unit,
         series: [{ key: measure, label: meta.label, unit: meta.unit, kind: meta.kind }],
@@ -138,7 +197,7 @@ export async function load(context = {}) {
       slot.replaceChildren(rendered.element);
     });
     return {
-      state: 'ready', measure, split: dim, grain, compare,
+      state: 'ready', measure, split: dim, grain, compare: compared, cohortCompare,
       population: body.population || null,
       previousPopulation: previous?.population || null,
       omittedGroups, omittedN,

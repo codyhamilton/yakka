@@ -7,8 +7,8 @@ import '../charts/yk-bars.js';
 import { cancelledState, emptyState, errorState, unsupportedState } from '../core/panel-state.js';
 import { currentWindow, previousWindow, table } from './pulse-strips.js';
 import {
-  ensureP10Styles, measureMeta, populationLine, rankRows, requestParams, whenPanelBody,
-  whenPanelSlot, renderChooser, windowParams
+  ensureP10Styles, honestJoinGuard, measureMeta, populationLine, rankRows, requestParams,
+  whenPanelBody, whenPanelSlot, renderChooser, windowParams
 } from './p10-shared.js';
 
 const PERIOD_UNSUPPORTED = 'Choose a finite period to compare periods.';
@@ -65,6 +65,8 @@ export async function load(context = {}) {
     }
     const validSplits = ['model', 'harness', 'session_model', 'session_repo', 'repo_id', 'tool', 'tool_kind', 'kind', 'plan'];
     const split = spec.split && validSplits.includes(spec.split) ? spec.split : 'model';
+    const guard = honestJoinGuard(measure, [split]);
+    if (guard) return unsupportedState({ missing: guard.missing, reason: guard.reason, source: 'contract 17.3', nearest: guard.try });
     if (compare && !currentWindow(scope)) return unsupportedState({ missing: 'period comparison', reason: PERIOD_UNSUPPORTED, source: 'scope' });
     const topMax = Number(schema?.budgets?.top_max) || 0;
     const extra = topMax ? { top: String(Math.min(100, topMax)) } : null;

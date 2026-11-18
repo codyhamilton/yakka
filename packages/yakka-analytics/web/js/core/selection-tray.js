@@ -21,8 +21,26 @@ export function absoluteScope(state = {}, now = Date.now()) {
   return { from, to, tz: state.tz || null };
 }
 
-function splitExclude(value) {
+const SHARED_FILTERS = ['repo_id', 'harness', 'kind', 'plan', 'norm_event', 'event', 'tool', 'model', 'source', 'conversation_id'];
+
+// Known lens names for this grain, longest first, so a multi-colon lens such as
+// `band:quality` is resolved before the legacy first-colon cut. Never parse a
+// `band:<check>` chip back through a delimiter that loses the check.
+export function knownLenses({ schema = null, grain = '' } = {}) {
+  const names = new Set(SHARED_FILTERS);
+  const fromGrain = schema?.grains?.[grain];
+  for (const key of ['filters', 'lenses']) {
+    for (const name of fromGrain?.[key] || []) if (typeof name === 'string' && name) names.add(name);
+  }
+  return [...names].sort((a, b) => b.length - a.length);
+}
+
+export function splitExclude(value, { schema = null, grain = '' } = {}) {
   const text = String(value || '');
+  for (const lens of knownLenses({ schema, grain })) {
+    if (text === lens) return { lens, value: '' };
+    if (text.startsWith(`${lens}:`)) return { lens, value: text.slice(lens.length + 1) };
+  }
   const at = text.indexOf(':');
   return at === -1 ? { lens: 'exclude', value: text } : { lens: text.slice(0, at), value: text.slice(at + 1) };
 }
@@ -41,7 +59,7 @@ export function scopeElements(state = {}, { schema = null, grain = '' } = {}) {
   }
   const exclude = [];
   for (const raw of state.exclude || []) {
-    const { lens, value } = splitExclude(raw);
+    const { lens, value } = splitExclude(raw, { schema, grain });
     if (applies(lens, { schema, grain })) exclude.push({ lens, values: [value] });
   }
   return { include, exclude };

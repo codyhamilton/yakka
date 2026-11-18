@@ -281,11 +281,7 @@ export function p10Schema() {
       execution: grain(['ts', 'session_cost_usd'], ['shape', 'plan', 'repo_id', 'harness', 'session_model', 'id']),
       plan: grain(['artifacts', 'versions', 'associated_cost_usd'], ['repo_id', 'harness', 'session_model', 'id']),
       content: grain(['score'], ['harness', 'session_model', 'repo_id', 'plan', 'scorer', 'band', 'id']),
-      time: grain(
-        P10_MEASURES.map(item => item.name),
-        ['model', 'harness', 'session_model', 'session_repo', 'repo_id', 'tool', 'tool_kind', 'kind', 'plan', 'source'],
-        ['model', 'harness', 'session_model', 'session_repo', 'repo_id', 'tool', 'kind', 'plan', 'source']
-      )
+      time: grain(P10_MEASURES.map(item => item.name), ['id'])
     },
     lenses: {
       harness: { grains: ['session', 'plan', 'execution', 'time'] },
@@ -362,6 +358,20 @@ export function p10Query({ measure = 'cost_usd', dims = [], bucket = 'auto', fro
       dims: lenses, rows, population: population('time', 'bucket', rows.length)
     };
   }
+  if (lenses.length >= 2) {
+    const parents = groupsFor(lenses[0]);
+    const children = groupsFor(lenses[1]);
+    const rows = [];
+    parents.forEach((parent, parentIndex) => {
+      children.forEach((child, childIndex) => {
+        rows.push({ k: [parent, child], v: groupValue(measure, parentIndex, childIndex, phase) });
+      });
+    });
+    return {
+      measure, bucket: 'none', requested_bucket: requested, coarsened: false,
+      dims: lenses, rows, population: population('time', 'group', rows.length)
+    };
+  }
   if (effective === 'none') {
     if (!lenses.length) {
       const rows = [{ k: [], v: lenses.length ? 0 : 20 + phase * 5 }];
@@ -435,14 +445,29 @@ export function p10Scores() {
   return {
     kind: 'design',
     checks: [
-      { name: 'clarity', n: 12, min: 0.2, p25: 0.5, median: 0.7, p75: 0.85, max: 1, scorer: 'jev-1', groups: [] },
-      { name: 'structure', n: 9, min: 0.1, p25: 0.4, median: 0.6, p75: 0.8, max: 0.95, scorer: 'jev-1', groups: [] }
+      { name: 'clarity', n: 12, min: 0.2, p25: 0.5, median: 0.7, p75: 0.85, max: 1, scorer: 'jev-1', groups: [
+        { k: 'harness:orca', n: 7, min: 0.3, p25: 0.5, median: 0.72, p75: 0.86, max: 1 },
+        { k: 'harness:claude-code', n: 5, min: 0.2, p25: 0.45, median: 0.66, p75: 0.8, max: 0.94 }
+      ] },
+      { name: 'structure', n: 9, min: 0.1, p25: 0.4, median: 0.6, p75: 0.8, max: 0.95, scorer: 'jev-1', groups: [
+        { k: 'harness:orca', n: 5, min: 0.2, p25: 0.42, median: 0.62, p75: 0.82, max: 0.95 },
+        { k: 'harness:claude-code', n: 4, min: 0.1, p25: 0.35, median: 0.58, p75: 0.78, max: 0.9 }
+      ] }
     ]
   };
 }
 
 export function p10ScoreSeries() {
-  const points = [{ t: '2026-09-01T00:00:00Z', n: 6, p25: 0.4, median: 0.6, p75: 0.8 }];
+  const points = [
+    { t: '2026-09-01T00:00:00Z', n: 6, p25: 0.4, median: 0.6, p75: 0.8, groups: [
+      { k: 'session_model:claude', n: 4, p25: 0.45, median: 0.64, p75: 0.82 },
+      { k: 'session_model:(mixed)', n: 2, p25: 0.35, median: 0.55, p75: 0.76 }
+    ] },
+    { t: '2026-09-02T00:00:00Z', n: 5, p25: 0.42, median: 0.62, p75: 0.81, groups: [
+      { k: 'session_model:claude', n: 3, p25: 0.48, median: 0.67, p75: 0.84 },
+      { k: 'session_model:(mixed)', n: 2, p25: 0.38, median: 0.57, p75: 0.77 }
+    ] }
+  ];
   return { kind: 'design', bucket: 'day', checks: [{ name: 'clarity', points }] };
 }
 
@@ -451,6 +476,14 @@ export function p10Baselines() {
 }
 
 export function p10Entities(grain = 'session') {
+  if (grain === 'artifact') {
+    const rows = [
+      { l: { path: 'docs/a.md', repo_id: 'repo-a', content_hash: 'hash-a', kind: 'design', 'band:clarity': 'top' }, m: { 'score:clarity': 0.82, 'score:structure': 0.7 } },
+      { l: { path: 'docs/b.md', repo_id: 'repo-b', content_hash: 'hash-b', kind: 'brief', 'band:clarity': 'mid' }, m: { 'score:clarity': 0.6, 'score:structure': 0.55 } },
+      { l: { path: 'docs/c.md', repo_id: 'repo-a', content_hash: 'hash-c', kind: 'design', 'band:clarity': 'bottom' }, m: { 'score:clarity': 0.3, 'score:structure': 0.4 } }
+    ];
+    return { rows, population: { ...population('artifact', 'file', rows.length) } };
+  }
   return { rows: [], population: population(grain, grain, 0) };
 }
 

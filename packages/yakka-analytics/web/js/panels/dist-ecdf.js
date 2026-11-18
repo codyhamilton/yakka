@@ -9,7 +9,7 @@ import {
   ensureP10Styles, measureMeta, populationLine, whenPanelBody, whenPanelSlot, renderChooser, wireChartScope
 } from './p10-shared.js';
 import {
-  DIST_DIMS, DIST_MEASURES, PERIOD_UNSUPPORTED, distributionParams, fetchDistribution, previousDistributionParams
+  DIST_DIMS, DIST_MEASURES, PERIOD_UNSUPPORTED, distributionParams, distributionSpec, fetchDistribution, previousDistributionParams
 } from './dist-ranges.js';
 
 function edgeOf(bin) {
@@ -45,8 +45,16 @@ export async function load(context = {}) {
     const schema = context.schema || (await transport.schema(tenant)).body;
     const panel = context.panel || DIST_ECDF_PANEL;
     const measure = (spec.measures || [])[0] && DIST_MEASURES.includes((spec.measures || [])[0]) ? spec.measures[0] : 'cost_usd';
-    const dim = (spec.split && DIST_DIMS.includes(spec.split)) ? spec.split : 'model';
-    const grain = spec.scope?.grain === 'conversation' ? 'conversation' : 'call';
+    const distributed = distributionSpec(spec);
+    if (!distributed.ok) {
+      return unsupportedState({
+        missing: `${measure} by ${distributed.dim} at ${distributed.grain} grain`,
+        reason: distributed.reason,
+        source: 'contract 17.3',
+        nearest: `${distributed.try} grain`
+      });
+    }
+    const { grain, dim } = distributed;
     if (compare && !currentWindow(scope)) return unsupportedState({ missing: 'period comparison', reason: PERIOD_UNSUPPORTED, source: 'scope' });
     const meta = measureMeta(schema, measure);
     const body = await fetchDistribution(transport, distributionParams({ scope, measure, grain, dim }), { tenant, signal, stateKey: 'dist-ecdf' });

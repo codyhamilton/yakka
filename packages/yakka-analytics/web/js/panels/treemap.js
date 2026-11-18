@@ -11,8 +11,8 @@ import '../charts/yk-treemap.js';
 import { cancelledState, emptyState, errorState, unsupportedState } from '../core/panel-state.js';
 import { table } from './pulse-strips.js';
 import {
-  ensureP10Styles, measureMeta, offeredMeasures, offeredSplit, populationLine, requestParams,
-  whenPanelBody, whenPanelSlot
+  ensureP10Styles, honestJoinGuard, measureMeta, offeredMeasures, offeredSplit, populationLine,
+  requestParams, whenPanelBody, whenPanelSlot
 } from './p10-shared.js';
 import { canonicalPanelSpec } from '../core/view-spec.js';
 import { formatCount, formatMoney } from '../charts/formatters.js';
@@ -30,23 +30,7 @@ export const TREEMAP_LENSES = [
 // publishes `session_repo` on /distribution, and it publishes no cost-by-tool
 // join at all. The panel names the missing combination instead of querying it.
 export function costJoinGuard(measure, dims = []) {
-  if (measure !== 'cost_usd') return null;
-  const picked = dims.filter(Boolean);
-  if (picked.includes('repo_id') || picked.includes('session_repo')) {
-    return {
-      missing: `cost by ${picked.join(' × ')}`,
-      reason: 'direct repo_id on usage rows is empty and session_repo is not served on /query for cost',
-      try: '/distribution?dim=session_repo (counts, medians, unpriced)'
-    };
-  }
-  if (picked.includes('tool') || picked.includes('tool_kind')) {
-    return {
-      missing: `cost by ${picked.join(' × ')}`,
-      reason: 'cost is not derived from hook events or tool counts',
-      try: 'hook_events by tool'
-    };
-  }
-  return null;
+  return honestJoinGuard(measure, dims);
 }
 
 export function treemapDims(panel, measure, schema) {
@@ -197,10 +181,14 @@ export async function load(context = {}) {
     if (!measures.includes(measure)) {
       return unsupportedState({ missing: measure, reason: 'not published for the time grain', source: 'server /schema' });
     }
-    const { parent, child } = treemapDimsFromSpec(spec);
+    const { parent, child: requestedChild } = treemapDimsFromSpec(spec);
+    const dims = treemapDims(panel, measure, schema);
+    // Fall back to the next published child rather than requesting an
+    // unpublished dim; the basis text labels the fallback.
+    const child = !dims.includes(requestedChild) && requestedChild === 'tool' && dims.includes('tool_kind')
+      ? 'tool_kind' : requestedChild;
     const guard = costJoinGuard(measure, [parent, child]);
     if (guard) return unsupportedState({ missing: guard.missing, reason: guard.reason, source: 'contract 17.3', nearest: guard.try });
-    const dims = treemapDims(panel, measure, schema);
     for (const dim of [parent, child]) {
       if (!dims.includes(dim)) {
         return unsupportedState({

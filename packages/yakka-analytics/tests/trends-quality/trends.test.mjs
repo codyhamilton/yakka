@@ -181,16 +181,16 @@ test('trends settles five panels, offers only schema measures, writes a panel sp
 
     await page.evaluate(() => {
       const select = document.querySelector('[data-panel="trend-columns"] select');
-      select.value = 'commits';
+      select.value = 'model_calls';
       select.dispatchEvent(new Event('change', { bubbles: true }));
     });
     await page.waitForFunction(() => {
       const raw = new URLSearchParams(location.search).get('p1');
-      return raw && JSON.parse(raw).measures.includes('commits');
+      return raw && JSON.parse(raw).measures.includes('model_calls');
     });
     await openBoard(page, harness.origin, page.url().replace(harness.origin, ''));
     const spec = await page.evaluate(() => JSON.parse(new URLSearchParams(location.search).get('p1')));
-    assert.deepEqual(spec.measures, ['commits']);
+    assert.deepEqual(spec.measures, ['model_calls']);
 
     const before = await page.evaluate(() => ({ from: Date.now() - 2 * 86400e3, to: Date.now() - 86400e3 }));
     await page.evaluate(({ from, to }) => {

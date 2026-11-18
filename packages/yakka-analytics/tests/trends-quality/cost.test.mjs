@@ -187,8 +187,8 @@ test('cost settles six panels, matches the fixture and names unsupported cost jo
     for (const id of ids) assert.equal(states[id], 'ready', `${id} is ready`);
 
     const phase = p10Phase({ to: new Date().toISOString() });
-    const expectedTreemap = p10Query({ measure: 'cost_usd', dims: ['harness'], bucket: 'none', to: new Date().toISOString() })
-      .rows.map(row => [String(row.k[0]), String(row.k[0]), String(row.v)]);
+    const expectedTreemap = p10Query({ measure: 'cost_usd', dims: ['harness', 'model'], bucket: 'none', to: new Date().toISOString() })
+      .rows.map(row => [String(row.k[0]), String(row.k[1]), String(row.v)]);
     const expectedRank = p10Query({ measure: 'cost_usd', dims: ['model'], bucket: 'none', to: new Date().toISOString() })
       .rows.map(row => [String(row.k[0]), String(row.v)]);
     assert.deepEqual(await rowsOf(page, 'treemap'), expectedTreemap);
@@ -209,7 +209,7 @@ test('cost settles six panels, matches the fixture and names unsupported cost jo
     assert.match(trendText, /bucket/);
     assert.match(rankText, /group/);
 
-    const dist = p10Distribution({ measure: 'cost_usd', dim: 'model', to: new Date().toISOString() });
+    const dist = p10Distribution({ measure: 'cost_usd', grain: 'conversation', dim: 'session_repo', to: new Date().toISOString() });
     const ranges = await rowsOf(page, 'dist-ranges');
     assert.deepEqual(ranges, dist.rows.map(row => [
       String(row.k), String(row.min), String(row.p25), String(row.median), String(row.p75), String(row.max), String(row.p95), String(row.n), String(row.unpriced)
@@ -217,13 +217,15 @@ test('cost settles six panels, matches the fixture and names unsupported cost jo
     assert.ok(ranges.some(row => row.at(-1) === '2'), 'the partially priced group keeps its unpriced count');
     const rangesText = await page.evaluate(() => document.querySelector('[data-panel="dist-ranges"]').textContent);
     assert.match(rangesText, /unpriced/i);
-    assert.match(rangesText, /call/);
+    assert.match(rangesText, /conversation/);
 
+    const histDist = p10Distribution({ measure: 'cost_usd', grain: 'call', dim: 'harness', to: new Date().toISOString() });
     const hist = await rowsOf(page, 'dist-hist');
-    const expectedCounts = dist.rows.flatMap(row => row.bins.map(bin => String(bin.n)));
+    const expectedCounts = histDist.rows.flatMap(row => row.bins.map(bin => String(bin.n)));
     assert.deepEqual(hist.map(row => row[3]), expectedCounts);
+    const ecdfDist = p10Distribution({ measure: 'cost_usd', grain: 'conversation', dim: 'model', to: new Date().toISOString() });
     const ecdf = await rowsOf(page, 'dist-ecdf');
-    assert.deepEqual(ecdf, dist.rows.map(row => [String(row.k), String(row.n)]));
+    assert.deepEqual(ecdf, ecdfDist.rows.map(row => [String(row.k), String(row.n)]));
 
     // A measure change regroups the treemap; the surviving parent keys keep
     // their entity style (the registry colours by key, so the key is the style).
@@ -237,9 +239,14 @@ test('cost settles six panels, matches the fixture and names unsupported cost jo
       return raw && JSON.parse(raw).measures.includes('model_calls');
     });
     await openBoard(page, harness.origin, page.url().replace(harness.origin, ''));
+    await page.waitForFunction(() => {
+      const chart = document.querySelector('[data-panel="treemap"] yk-treemap');
+      return chart && chart.inspect().series.length > 0;
+    });
     const regrouped = await page.evaluate(() => {
       const root = document.querySelector('[data-panel="treemap"]');
-      return { state: root.dataset.state, series: root.querySelector('yk-treemap').inspect().series.map(series => series.key) };
+      const chart = root.querySelector('yk-treemap');
+      return { state: root.dataset.state, series: chart ? chart.inspect().series.map(series => series.key) : [] };
     });
     assert.equal(regrouped.state, 'ready');
     assert.deepEqual(regrouped.series, treemap.series, 'surviving parent keys keep their styles');
