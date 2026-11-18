@@ -22,7 +22,7 @@ func (s *Server) RegisterReviewMCPTool() error {
 		InputSchema: reviewMCPInputSchema(),
 		Annotations: map[string]any{"readOnlyHint": false, "destructiveHint": false, "idempotentHint": false, "openWorldHint": false},
 		Scope:       TokenScopeReadWrite,
-		TimeoutS:    150,
+		TimeoutS:    reviewMCPTimeoutS,
 		Instruction: reviewMCPInstruction,
 		Context: []MCPReader{
 			{Reader: "project_dir", Version: 1, Required: mcpRequired(false)},

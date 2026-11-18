@@ -77,7 +77,7 @@ func TestBuildReappliesLockfileAndPlanArtifactExclusions(t *testing.T) {
 }
 
 func TestBuildTruncatesWholeFilesInPolicyOrder(t *testing.T) {
-	large := strings.Repeat("x", 50000)
+	large := strings.Repeat("x", 40000)
 	diff := fileDiff("pkg/a.go", large) + fileDiff("pkg/b.go", large) +
 		fileDiff("pkg/a_test.go", large) + fileDiff("pkg/b_test.go", large) +
 		fileDiff("config.yaml", large) + fileDiff("settings.json", large) +
@@ -94,10 +94,60 @@ func TestBuildTruncatesWholeFilesInPolicyOrder(t *testing.T) {
 	}
 }
 
+func TestBuildStaysUnderTokenBudgetAndRecordsEstimate(t *testing.T) {
+	diff := fileDiff("pkg/a.go", strings.Repeat("x", 20000)) + fileDiff("pkg/a_test.go", strings.Repeat("y", 20000))
+	p := mustBuild(t, Input{Capture: capture(diff)})
+	if p.InputTokenEstimate <= 0 || p.InputTokenEstimate > maxInputTokens {
+		t.Fatalf("estimate = %d", p.InputTokenEstimate)
+	}
+	if p.InputTrimmed {
+		t.Fatal("context was trimmed though the packet fits")
+	}
+	if estimateInputTokens(p.Prompt) != p.InputTokenEstimate {
+		t.Fatalf("estimate does not match prompt: %d", p.InputTokenEstimate)
+	}
+}
+
+func TestBuildDynamicTrimUsesPolicyOrder(t *testing.T) {
+	body := strings.Repeat("x", 40000)
+	var diff strings.Builder
+	for _, name := range []string{"pkg/a.go", "pkg/b.go", "pkg/c.go"} {
+		diff.WriteString(fileDiff(name, body))
+	}
+	for _, name := range []string{"pkg/a_test.go", "pkg/b_test.go", "pkg/c_test.go"} {
+		diff.WriteString(fileDiff(name, body))
+	}
+	for _, name := range []string{"a.yaml", "b.yaml", "c.yaml"} {
+		diff.WriteString(fileDiff(name, body))
+	}
+	for _, name := range []string{"docs/a.md", "docs/b.md", "docs/c.md"} {
+		diff.WriteString(fileDiff(name, body))
+	}
+	p := mustBuild(t, Input{Capture: capture(diff.String())})
+	if p.InputTokenEstimate > maxInputTokens || !p.InputTrimmed || p.Coverage.State != "partial" {
+		t.Fatalf("packet = estimate=%d trimmed=%v coverage=%#v", p.InputTokenEstimate, p.InputTrimmed, p.Coverage)
+	}
+	prompt := string(p.Prompt)
+	for _, name := range []string{"docs/a.md", "docs/b.md", "docs/c.md", "b.yaml", "c.yaml"} {
+		if strings.Contains(prompt, "FILE "+name) {
+			t.Fatalf("lower-priority file survived trim: %s", name)
+		}
+	}
+	for _, name := range []string{"pkg/a.go", "pkg/b.go", "pkg/c.go", "pkg/a_test.go", "pkg/b_test.go", "pkg/c_test.go", "a.yaml"} {
+		if !strings.Contains(prompt, "FILE "+name) {
+			t.Fatalf("higher-priority file was trimmed: %s", name)
+		}
+	}
+}
+
+func TestBuildRefusesIrreduciblePromptOverTokenBudget(t *testing.T) {
+	_, err := Build(Input{Capture: capture(fileDiff("a.go", "safe")), CriteriaText: strings.Repeat("x", 3*maxInputTokens+1)})
+	assertCode(t, err, "input_too_large")
+}
+
 func TestBuildRefusesOversizeCriteriaAndDelimiterNamespace(t *testing.T) {
-	p, _ := Values()
-	_, err := Build(Input{Capture: capture(fileDiff("a.go", "safe")), CriteriaText: strings.Repeat("x", p.PacketCharacterBudget+1)})
-	assertCode(t, err, "refused_capture")
+	_, err := Build(Input{Capture: capture(fileDiff("a.go", "safe")), CriteriaText: strings.Repeat("x", 3*maxInputTokens+1)})
+	assertCode(t, err, "input_too_large")
 	_, err = Build(Input{Capture: capture(fileDiff("a.go", "contains <<<YAKKA_UNTRUSTED_reserved>>> data"))})
 	assertCode(t, err, "refused_capture")
 }

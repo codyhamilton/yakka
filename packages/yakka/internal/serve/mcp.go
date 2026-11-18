@@ -19,13 +19,16 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"github.com/codyhamilton/yakka/packages/yakka/internal/review"
 )
 
 const (
 	mcpDefaultBody    = 256 << 10
 	mcpMaxBody        = 8 << 20
 	mcpDefaultTimeout = 20
-	mcpMaxTimeout     = 300
+	reviewMCPTimeoutS = int((review.AttemptTimeout + review.AttemptTimeoutHeadroom) / time.Second)
+	mcpMaxTimeout     = reviewMCPTimeoutS
 )
 
 // The only local action the v2 declaration may name. It is a fixed shape, not

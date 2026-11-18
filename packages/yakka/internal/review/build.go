@@ -22,8 +22,10 @@ var policyFS embed.FS
 // Policy is the single versioned set of values shared with later declarations
 // and trial tooling. The embedded bytes, not caller input, are authoritative.
 type Policy struct {
-	PromptPolicyVersion    string   `json:"prompt_policy_version"`
-	ExclusionPolicyVersion string   `json:"exclusion_policy_version"`
+	PromptPolicyVersion    string `json:"prompt_policy_version"`
+	ExclusionPolicyVersion string `json:"exclusion_policy_version"`
+	// PacketCharacterBudget is retained for policy compatibility; the active
+	// packet budget is maxInputTokens, a conservative token estimate.
 	PacketCharacterBudget  int      `json:"packet_character_budget"`
 	PerFileCharacterBudget int      `json:"per_file_character_budget"`
 	ChangeMaxFileBytes     int      `json:"change_max_file_bytes"`
@@ -167,8 +169,12 @@ type Packet struct {
 	PolicyHash             string
 	PromptPolicyVersion    string
 	ExclusionPolicyVersion string
-	Coverage               Coverage
-	Manifest               []ManifestEntry
+	// InputTokenEstimate is the conservative token estimate for Prompt and
+	// InputTrimmed records whether any context was dropped to stay under budget.
+	InputTokenEstimate int
+	InputTrimmed       bool
+	Coverage           Coverage
+	Manifest           []ManifestEntry
 }
 
 // Error reports a safe refusal or a malformed transport capture. It contains
@@ -189,7 +195,24 @@ var errBadCapture = &Error{Code: "bad_capture"}
 
 const outputContract = `JSON object with exactly these top-level fields:
 {"outcomes":[{"criterion_id":"I1","assessment":"met|partial|not met|unassessable","evidence":"..."}],"findings":[{"id":"F1","severity":"blocker|high|medium|low","lens":"outcome|intent-assumptions|correctness|security|contract|tests|other","title":"...","path":"...","line_start":1,"line_end":1,"evidence":"verbatim excerpt of at least 20 characters","criterion_ids":["I1"],"confidence":0.0,"rationale":"..."}],"limitations":["..."],"coverage":"complete|partial"}.
+Emit only that JSON object. Do not use markdown fences, do not add a preamble, and do not add text before or after the object.
 Include exactly one outcome for every supplied criterion id, including an empty outcomes array when there are no criteria. Cite only supplied criterion ids. Findings must cite an included diff path and line range, or use path "unsupported" when evidence cannot be located. Do not invent evidence.`
+
+// maxInputTokens is the hard ceiling on estimated input tokens for the one-shot
+// Messages request. Anthropic has no offline tokenizer here, so Build uses a
+// deliberately conservative estimate of one token per three UTF-8 bytes
+// (English prose averages about four bytes per token and code fewer), which
+// over-counts rather than under-counts. The policy-ordered trim loop keeps the
+// whole assembled prompt under this value; only an irreducible prompt that
+// still exceeds it is refused.
+const maxInputTokens = 100000
+
+func estimateInputTokens(b []byte) int {
+	if len(b) == 0 {
+		return 0
+	}
+	return (len(b) + 2) / 3
+}
 
 // Build creates a deterministic packet and role-first prompt from received
 // capture and already-resolved criteria. It never accesses the network or env.
@@ -244,8 +267,8 @@ func Build(in Input) (Packet, error) {
 		}
 	}
 	criteria := normalizeCriteria(in)
-	if runeLen(criteria) > p.PacketCharacterBudget {
-		return Packet{}, &Error{Code: "refused_capture"}
+	if estimateInputTokens([]byte(criteria)) > maxInputTokens {
+		return Packet{}, &Error{Code: "input_too_large"}
 	}
 	kept := make([]File, 0, len(files))
 	for _, f := range files {
@@ -281,9 +304,11 @@ func Build(in Input) (Packet, error) {
 		selected = append(selected, f)
 	}
 	manifest = append(manifest, truncated...)
+	trimmed := len(truncated) > 0
 	var coverage Coverage
 	var context string
 	var prompt []byte
+	var inputTokens int
 	for {
 		sort.SliceStable(manifest, func(i, j int) bool {
 			if manifest[i].Path != manifest[j].Path {
@@ -308,15 +333,17 @@ func Build(in Input) (Packet, error) {
 			"UNTRUSTED CONTEXT\n" + delim + "\n" + context + "\n" + delim,
 		}
 		prompt = []byte(strings.Join(sections, "\n"))
-		if runeLen(string(prompt)) <= p.PacketCharacterBudget {
+		inputTokens = estimateInputTokens(prompt)
+		if inputTokens <= maxInputTokens {
 			break
 		}
 		if len(selected) == 0 {
-			return Packet{}, &Error{Code: "refused_capture"}
+			return Packet{}, &Error{Code: "input_too_large"}
 		}
 		dropped := selected[len(selected)-1]
 		selected = selected[:len(selected)-1]
 		manifest = append(manifest, entryFor(dropped, "truncated: budget"))
+		trimmed = true
 	}
 	if h := firstSecret(string(prompt)); h != "" {
 		return Packet{}, &Error{Code: "refused_disclosure", Pattern: h}
@@ -331,7 +358,7 @@ func Build(in Input) (Packet, error) {
 		PolicyHash                                   string
 		Files                                        []File
 	}{in.Capture.RepoID, in.Capture.Mode, in.Capture.View, in.Capture.Base, in.Capture.Head, in.Capture.MergeBaseSHA, in.Capture.MergeBase, policyHash, canonicalFiles})
-	return Packet{Prompt: prompt, CaptureID: hash(idBytes), DiffSHA256: in.Capture.DiffSHA256, PolicyHash: policyHash, PromptPolicyVersion: p.PromptPolicyVersion, ExclusionPolicyVersion: p.ExclusionPolicyVersion, Coverage: coverage, Manifest: manifest}, nil
+	return Packet{Prompt: prompt, CaptureID: hash(idBytes), DiffSHA256: in.Capture.DiffSHA256, PolicyHash: policyHash, PromptPolicyVersion: p.PromptPolicyVersion, ExclusionPolicyVersion: p.ExclusionPolicyVersion, InputTokenEstimate: inputTokens, InputTrimmed: trimmed, Coverage: coverage, Manifest: manifest}, nil
 }
 
 func normalizeCriteria(in Input) string {

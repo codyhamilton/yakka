@@ -90,7 +90,7 @@ func TestMCPRegistrationValidation(t *testing.T) {
 	if err := s.RegisterMCPTool(MCPTool{Name: "dependent", Handler: handler, Context: []MCPReader{{Reader: "file", Version: 1}}}); err == nil {
 		t.Fatal("reader without dependency accepted")
 	}
-	if err := s.RegisterMCPTool(MCPTool{Name: "slow", Handler: handler, TimeoutS: 301}); err == nil {
+	if err := s.RegisterMCPTool(MCPTool{Name: "slow", Handler: handler, TimeoutS: mcpMaxTimeout + 1}); err == nil {
 		t.Fatal("timeout above cap accepted")
 	}
 	if err := s.RegisterMCPTool(MCPTool{Name: "effect", Handler: handler, LocalActions: []MCPLocalAction{{Action: "write", Version: 1, PathFrom: "resolved_path"}}}); err == nil {

@@ -295,11 +295,11 @@ func New(cfg Config, opts Options) *Server {
 		panic("serve: registry: " + err.Error())
 	}
 	s := &Server{cfg: cfg, opts: opts, registry: reg, mcpTools: mcpTools, mcpDiscovery: newMCPDiscoveryLimits(), grants: newDeviceGrants(), tenants: map[string]*tenantState{}, gates: map[string]*sync.RWMutex{}, stop: make(chan struct{}), screen: opts.ScreenStep}
-	// A review tool is advertised only when its declared 150-second contract
+	// A review tool is advertised only when its declared attempt-sized contract
 	// fits this server's configured MCP call ceiling, a token is configured and
 	// the server is authenticated remote mode. Registration does not depend on
 	// YAKKA_REVIEW_MODEL; an unset model uses review.LiveModel.
-	if cfg.ReviewToken != "" && !cfg.Local() && mcpTools.maxCall >= 150 {
+	if cfg.ReviewToken != "" && !cfg.Local() && mcpTools.maxCall >= reviewMCPTimeoutS {
 		if err := s.RegisterReviewMCPTool(); err != nil {
 			panic("serve: review MCP tool: " + err.Error())
 		}
