@@ -800,6 +800,24 @@ Refinement verdict: **Proceed**, six units. 9-01 runs first and establishes the 
 - Approach: known.
 - Depends on: Phases 1 to 12.
 
+**Units**
+
+| Unit | Brief | Depends on | Runs alongside |
+|---|---|---|---|
+| Browser release matrix and request-shape recorder | [13-01-browser-matrix-recorder](briefs/13-01-browser-matrix-recorder.md) | Nothing | 13-03 identity and route proof; 13-04 release docs and checks |
+| Server pageset smoke and p95 alignment | [13-02-pageset-smoke-benchmark](briefs/13-02-pageset-smoke-benchmark.md) | 13-01 | 13-03 identity and route proof; 13-04 release docs and checks |
+| Pages-faithful account and route proof | [13-03-identity-and-routes](briefs/13-03-identity-and-routes.md) | Nothing | 13-01 browser matrix; 13-02 server pageset; 13-04 release docs and checks |
+| Release checks and stable documentation | [13-04-release-docs](briefs/13-04-release-docs.md) | Nothing | 13-01, 13-02 and 13-03 |
+| Phase 13 integrated acceptance | [13-05-acceptance](briefs/13-05-acceptance.md) | 13-01, 13-02, 13-03, 13-04 | Nothing; run last |
+
+**Refinement verdict — Proceed.** Five units: 13-01 produces the deterministic browser request record; 13-02 consumes it, so those run sequentially. The account/route proof and release/docs unit have disjoint owned paths and can run alongside 13-01/13-02. 13-05 runs after all four and records integrated evidence. The orchestrator independently verifies the finished phase. Phase 12 carried items are placed as follows:
+
+- Absorbed by 13-04/13-05 as gates: external Pages automation acceptance of `./web`; ready implementation PR body must carry `Yakka-Plan: docs/plans/20-analytics-reset`. Neither can be verified or changed from this repository; both remain `gate:` lines, not phase outcomes.
+- Carried to a follow-up design owned by the Plan 20 orchestrator: artifact `id` lens grammar remains unconfirmed; the P10/P11 short fixture hashes still reach `identity-required`; `shape-bars` harness/repo grouping still lacks a served execution aggregate and would need a server/contract decision; Plans scatter still omits `session_model` in `FILTER_KEYS`; `plan-timeline` load-more still collides if multiple copies are mounted; an artifact-version deep link beyond `page_max` still needs Load more before it resolves. None is required by release readiness, and none is changed here.
+- The 12-04 report feedback gap is carried as a process note into 13-05's report: the report was not delivered to `artifact_feedback` (no version was queued); no product or contract repair follows from that service state.
+
+Only the Pages/deploy gates and docs/release checks are absorbed because Phase 13 names them. No other carried item changes this phase's boundary.
+
 ## Provenance Notes
 
 - **What changed from the earlier draft of this plan.** The earlier draft (local only, never pushed) specified eight pages derived from twenty questions, each a view of an endpoint, a 399-day maximum, no server change, and a client-side workaround for every gap. This design replaces it: the unit is a lens-and-grain workspace, the server gap list became owned scope, the window cap is gone, and the earlier open questions on directory, minification, window length and the priced flag are closed. What survives is the evidence and the parts that were right: CONTRACTS.md (corrected), the uPlot research, the brush-versus-zoom distinction, the gesture and settled-state test discipline, the Pages-faithful identity rig and the no-secret check.
