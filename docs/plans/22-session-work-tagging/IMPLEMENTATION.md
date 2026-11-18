@@ -1,3 +1,5 @@
+Run: OpenCode execute skill (`deepseek-v4.1-flash`); run ID 22-p5-2026-11-19-rebuild; started 2026-11-19 00:42 UTC; branch `feat/22-session-work-tagging`. The amended Phase 5 rebuild is recorded at the end of the Phase 5 sections; the pre-amendment `Workflow-Phase: 22-session-work-tagging:5` trailer (`3f131c6`) does not close it.
+
 # Amendment — simple back-fill (19 Nov 2026)
 
 Docs-only amendment, landed on this branch and draft PR #184 (Solution Designer, 19 Nov 2026). No application code was touched; every change below is for a later build. DESIGN.md Decisions (5) and Assumptions 40-49 are the authority; this section is the build-side record.
@@ -219,6 +221,45 @@ Not measured or not met:
 - Claude discovery includes its subagent transcripts (about 361) while Cursor excludes its own (619). Open design question.
 
 Phase 5 stays open. Carried: Cody to choose the queue-log-to-session join and the Flash rule, decide the subagent treatment, and separately authorise the real enqueue and drain check. The unrelated layout-test failure was not run in this step and was not chased.
+
+## Phase 5 rebuild — simple skill and brief-path pass (19 Nov 2026)
+
+Closes the amended Phase 5 (Decisions (5), Assumptions 40-49). The pre-amendment trailer `3f131c6` does not close the amended phase; this rebuild does.
+
+Refine commit `c0c0707` decomposed the phase into two sequential units after read-only recon of the Codex and OpenCode stores (shapes and counts only, no content): no recoverable skill-load form was found in either, so both label by brief path only. Assumption 47 and the phase Approach record that. Both briefs passed `artifact_feedback` (delivered, screen pass).
+
+### Unit outcome — `5-04-signal-rule-rebuild.md`
+
+Rebuilt `tools/session_backfill/backfill.py` to the DESIGN signal rule: per-store Claude (`Skill` tool call, `<command-name>`) and Cursor (`<manually_attached_skills>` `Skill name <id>`) recognisers in one table matched after the last `:`; the brief path read from the real first user prompt; class counting (planning/refining/executing/brief) with `labelled`, `multi_signal`, `no_signal`, `no_subject`, `unreadable`; subject at confidence 1.0 from skill args or brief path and 0.65 from fallback only; the per-store and total count report with `skipped_subagent`, `skipped_child`, `duplicate_ids`, `duplicate_transcripts` and `transcripts_discovered`; Claude and Cursor `subagents/` skipped and counted; one enqueue per conversation id for `labelled` only. Removed queue-log parsing and truth, gold scoring, the Flash predicate/gate, the `excluded` status and the 0.55 tier. Deleted `typesafe_kind.py`, `kind_pass.py`, `tests/test_kind_pass.py` and the README Pass 2 section; rewrote the README Pass 1 section. Enqueue writer and `Build` unchanged; dry run stays the default. Commit `70cc6f7`; report `reports/5-04-signal-rule-rebuild.md`.
+
+Evidence: new fixture tests first failed against the old tool (24 tests, 31 failures/9 errors); after the rebuild `python3 -m unittest discover -s tools/session_backfill/tests` passed 24, `test_facts` passed 15, `py_compile` and `git diff --check` clean, removed-symbol grep empty, synthetic four-store dry run exit 0 with brief/build/phase-5 labels and no enqueue.
+
+### Unit outcome — `5-05-four-store-dry-run.md`
+
+Ran the rebuilt tool dry over the four real stores on codyh-ubuntu (2026-11-19T01:20:04-01:21:38+10:00), exit 0, empty stderr, no `--enqueue`/`--queue-dir`, no drain, no network. Commit `7552218`; report `reports/5-05-four-store-dry-run.md`.
+
+| Store | Sessions | Labelled | multi_signal | no_signal | no_subject | unreadable | planning | refining | executing | brief |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| claude | 1,098 | 369 | 13 | 715 | 0 | 1 | 127 | 21 | 61 | 160 |
+| codex | 2,870 | 0 | 0 | 2,869 | 0 | 1 | 0 | 0 | 0 | 0 |
+| cursor | 568 | 70 | 0 | 498 | 0 | 0 | 0 | 0 | 0 | 70 |
+| opencode | 13 | 0 | 0 | 13 | 0 | 0 | 0 | 0 | 0 | 0 |
+| **total** | **4,549** | **439** | **13** | **4,095** | **0** | **2** | **127** | **21** | **61** | **230** |
+
+Beside the rows (total): `transcripts_discovered` 5,566, `skipped_subagent` 376, `skipped_child` 631, `duplicate_ids` 10, `duplicate_transcripts` 10. All three reconciliation identities held per store and in total. Codex and OpenCode have no skill-load form, so their skill-based remainder appears as `no_signal`; the report says so. The inventory is larger than the 8 Nov run (3,623) because the stores have grown since; it is recorded as drift, not a contradiction.
+
+### Phase verification
+
+Independent orchestrator rerun after both units: `python3 -m unittest discover -s tools/session_backfill/tests` passed 24; `cd plugins/yakka/client && python3 -m unittest test_facts` passed 15; `py_compile` exit 0; `git diff --check` clean; removed-symbol grep empty. A fresh four-store dry run exited 0 with empty stderr, no `emitted` key, and total 4,550 sessions (one more than the recorded 4,549; the Claude and Codex stores are still being written), and every reconciliation identity held per store and in total. `~/.local/share/yakka/queue` held 0 `session-action-*.evt` files before and after. The phase closes on the fixtures and the dry-run count report.
+
+`artifact_feedback`: both briefs and both reports are `delivered`; screen `pass` by jev-1.13.0; no flagged checks.
+
+### Carried
+
+- gate: Cody to authorise the real back-fill enqueue and drain; not run here.
+- gate: the advisory `review_change` boundary call was not made (no live API calls are authorised for this rebuild).
+- Phase 7 (follow-up review with Cody) reads `reports/5-05-four-store-dry-run.md`.
+- The unrelated layout-test failure remains unreproduced and uninvestigated; not chased.
 
 ## Phase 6 — Back-fill pass 2: TypeSafe kind classification
 
