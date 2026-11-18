@@ -32,7 +32,7 @@ func TestReviewerRequestAndReply(t *testing.T) {
 		if err := json.Unmarshal(body, &got); err != nil {
 			t.Fatal(err)
 		}
-		if got["model"] != "claude-haiku-5-5" || got["max_tokens"] != float64(8000) || got["stream"] != nil || got["tools"] != nil {
+		if got["model"] != "claude-haiku-5-5" || got["max_tokens"] != float64(100000) || got["stream"] != nil || got["tools"] != nil {
 			t.Errorf("request body = %s", body)
 		}
 		outCfg := got["output_config"].(map[string]any)
@@ -45,7 +45,7 @@ func TestReviewerRequestAndReply(t *testing.T) {
 			t.Errorf("messages = %#v", msgs)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		io.WriteString(w, `{"model":"claude-haiku-5-5-20261101","content":[{"type":"text","text":`+mustJSON(t, validReplyJSON())+`}],"usage":{"input_tokens":12,"output_tokens":34}}`)
+		io.WriteString(w, `{"model":"claude-haiku-5-5-20261101","stop_reason":"end_turn","content":[{"type":"text","text":`+mustJSON(t, validReplyJSON())+`}],"usage":{"input_tokens":12,"output_tokens":34}}`)
 	}))
 	defer server.Close()
 	reviewer := NewReviewer("credential-secret-value", "claude-haiku-5-5", "high", server.URL+"/v1/messages")
@@ -97,6 +97,43 @@ func TestReviewerInvalidOutputReportsUsageOnlyWhenPresent(t *testing.T) {
 	var reported *ProviderError
 	if !errors.As(present, &reported) || !reported.UsageReported || reported.InputTokens != 1000 || reported.OutputTokens != 500 {
 		t.Fatalf("reported usage = %v", present)
+	}
+}
+
+func TestReviewerClassifiesTruncatedStopReason(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		io.WriteString(w, `{"model":"claude-haiku-5-5","stop_reason":"max_tokens","content":[{"type":"text","text":"partial"}],"usage":{"input_tokens":1000,"output_tokens":100000}}`)
+	}))
+	defer server.Close()
+	_, err := NewReviewer("token", "claude-haiku-5-5", "max", server.URL).Review(context.Background(), testPacket(), nil)
+	var pe *ProviderError
+	if !errors.As(err, &pe) || pe.Status != ProviderTruncated || strings.Contains(err.Error(), string(ProviderInvalid)) {
+		t.Fatalf("error = %v", err)
+	}
+	if !pe.UsageReported || pe.InputTokens != 1000 || pe.OutputTokens != 100000 {
+		t.Fatalf("usage = %+v", pe)
+	}
+}
+
+func TestRunTruncatedPersistsStatusAndUsage(t *testing.T) {
+	tenant := reviewTenant(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		io.WriteString(w, `{"model":"claude-haiku-5-5","stop_reason":"max_tokens","content":[{"type":"text","text":"partial"}],"usage":{"input_tokens":1000,"output_tokens":100000}}`)
+	}))
+	defer srv.Close()
+	out, err := Run(context.Background(), tenant, "tenant", reviewRequest(true), availableConfig(srv.URL))
+	if err != nil || out.Status != "truncated" {
+		t.Fatalf("%+v %v", out, err)
+	}
+	rec := readReviewRecord(t, tenant)
+	if rec["status"] != "truncated" || rec["output_tokens"] != float64(100000) {
+		t.Fatalf("record status=%v output_tokens=%v", rec["status"], rec["output_tokens"])
+	}
+	attempts := recordAttempts(t, tenant)
+	if len(attempts) != 1 || attempts[0]["status"] != "truncated" {
+		t.Fatalf("attempts=%v", attempts)
 	}
 }
 
