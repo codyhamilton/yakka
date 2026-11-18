@@ -71,6 +71,10 @@ $ ... node --test --test-concurrency=1 plans-artifacts/*.test.mjs
 # tests 60  # pass 60  # fail 0
 $ ... node --test --test-concurrency=1 tests/*.test.mjs tests/e2e/*.test.mjs tests/workspace/*.test.mjs
 # tests 87  # pass 87  # fail 0
+$ ... node --test --test-concurrency=1 tests/scatter-sessions/*.test.mjs
+# tests 42  # pass 42  # fail 0
+$ ... node --test --test-concurrency=1 tests/trends-quality/*.test.mjs
+# tests 54  # pass 54  # fail 0
 $ git diff --check
 (diff-check 0; no /tmp, no fixed sleeps, no animation assertions)
 ```
@@ -117,6 +121,11 @@ and say "latest version".
   asks for a note in `IMPLEMENTATION.md`, which is outside this unit's owned
   paths. I did not edit it; this report is the committed handoff and records the
   overrun.
+- **Problem — flaky parallel browser run:** the first `trends-quality` run,
+  started in parallel with the `scatter-sessions` suite, reported 2 of 54
+  failures; the suite passed 54/54 when rerun serially. The failing subtests
+  were not captured. The two suites each own a Chromium instance, so the run
+  was resource-contended; every serial invocation passed.
 - **Unfinished:** none. The design's stored path convention
   `docs/plans/<plan>/DESIGN.md` required detail fixture plan ids that are folder
   slugs (`20-analytics-reset`); the list plans keep their own ids. No design or
