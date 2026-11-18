@@ -305,7 +305,7 @@ class RelayTests(unittest.TestCase):
         self.assertEqual(section.count("subprocess.run("), 2)
         self.assertNotIn("shell=True", section)
         self.assertIn('[git, "-C", os.path.dirname(path), *args]', section)
-        self.assertIn('"--harness", "codex", "--event", "PostToolUse"', section)
+        self.assertIn('"--harness", "codex", "--event", "artifact_snapshot"', section)
 
     def test_reader_withholds_external_symlink_and_content(self) -> None:
         repo = os.path.join(self.temp.name, "repo")
@@ -510,7 +510,7 @@ class RelayTests(unittest.TestCase):
         def spool(argv, *args, **kwargs):
             nonlocal spool_calls
             if argv[0] == os.path.realpath(os.path.join(os.path.dirname(yakka.__file__), "..", "script", "spool.sh")):
-                self.assertEqual(argv, [os.path.realpath(os.path.join(os.path.dirname(yakka.__file__), "..", "script", "spool.sh")), "--harness", "codex", "--event", "PostToolUse"])
+                self.assertEqual(argv, [os.path.realpath(os.path.join(os.path.dirname(yakka.__file__), "..", "script", "spool.sh")), "--harness", "codex", "--event", "artifact_snapshot"])
                 spool_calls += 1
                 return subprocess.CompletedProcess(argv, 0, b"entry.evt\n", b"")
             return real_run(argv, *args, **kwargs)
@@ -519,7 +519,7 @@ class RelayTests(unittest.TestCase):
         outcomes = []
         def run() -> None:
             gate.wait()
-            outcomes.append(yakka._mcp_enqueue(guards, target, self.queue, "call", threading.Event(), time.monotonic() + 3, "action"))
+            outcomes.append(yakka._mcp_enqueue(guards, target, self.queue, threading.Event(), time.monotonic() + 3, "action"))
         with mock.patch.object(yakka, "_mcp_queue_entries", side_effect=coverage), mock.patch.object(yakka.subprocess, "run", side_effect=spool):
             threads = [threading.Thread(target=run) for _ in range(2)]
             for thread in threads: thread.start()
@@ -654,12 +654,14 @@ class LocalActionDirectiveTests(unittest.TestCase):
             "name": "fixture", "arguments": {"path": str(self.path)}}}
         self.relay.writer = io.BytesIO()
         spool_calls = 0
+        spool_packets: list[tuple[list[str], bytes]] = []
         real_run = subprocess.run
 
         def spool(argv, *args, **kwargs):
             nonlocal spool_calls
             if argv[0] == os.path.realpath(os.path.join(os.path.dirname(yakka.__file__), "..", "script", "spool.sh")):
                 spool_calls += 1
+                spool_packets.append((argv, kwargs["input"]))
                 return subprocess.CompletedProcess(argv, spool_returncode, spool_stdout, b"")
             return real_run(argv, *args, **kwargs)
 
@@ -673,6 +675,7 @@ class LocalActionDirectiveTests(unittest.TestCase):
         finally:
             for patch in reversed(patches):
                 patch.stop()
+        self.spool_packets = spool_packets
         return json.loads(self.relay.writer.getvalue()), spool_calls
 
     def continuation_effects(self, reply: dict) -> list:
@@ -683,6 +686,13 @@ class LocalActionDirectiveTests(unittest.TestCase):
     def test_directive_and_continuation_round_trip_once(self) -> None:
         reply, spool_calls = self.run_call()
         self.assertEqual(spool_calls, 1)
+        self.assertEqual(len(self.spool_packets), 1)
+        argv, packet = self.spool_packets[0]
+        self.assertEqual(argv[-2:], ["--event", "artifact_snapshot"])
+        pointer = json.loads(packet)
+        _, repo_id, _ = yakka._mcp_real_repo(str(self.path), time.monotonic() + 3)
+        self.assertEqual(pointer, {"session_id": "feedback-" + repo_id, "cwd": str(self.repo), "path": str(self.path)})
+        self.assertNotIn("reviewed", packet.decode())
         self.assertEqual(reply["result"]["result"], "final")
         effects = self.continuation_effects(reply)
         self.assertEqual(effects, [{"action": "enqueue_file_snapshot", "v": 1, "action_id": "action-1", "ok": True, "outcome": "enqueued", "error": None}])

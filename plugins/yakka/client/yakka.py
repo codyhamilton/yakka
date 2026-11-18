@@ -3096,7 +3096,7 @@ def _mcp_action_error(code: str, ident: Any, host: str) -> bytes:
     return json.dumps({"jsonrpc": "2.0", "id": ident, "error": {"code": -32000, "message": "bad directive: the server returned an unbound local action. Retry the call.", "data": {"code": code, "host": host}}}, separators=(",", ":")).encode() + b"\n"
 
 
-def _mcp_enqueue(guards: dict[str, Any], resolved: Any, queue_dir: str, call: str, cancelled: threading.Event, deadline: float, action_id: Any = None) -> dict[str, Any]:
+def _mcp_enqueue(guards: dict[str, Any], resolved: Any, queue_dir: str, cancelled: threading.Event, deadline: float, action_id: Any = None) -> dict[str, Any]:
     def failed(code: str, outcome: str = "failed") -> dict[str, Any]:
         return _mcp_effect(action_id, False, outcome, code)
     if os.environ.get("YAKKA_HOOKLOG", "").lower() in ("0", "off", "false"):
@@ -3144,8 +3144,8 @@ def _mcp_enqueue(guards: dict[str, Any], resolved: Any, queue_dir: str, call: st
         if coverage["pending_covering"]:
             return _mcp_effect(action_id, True, "covered", None)
         script = os.path.realpath(os.path.join(os.path.dirname(__file__), "..", "script", "spool.sh"))
-        # The fixed hook payload contains pointer metadata only; it never includes file bytes.
-        payload = {"hook_event_name": "PostToolUse", "conversation_id": call, "session_id": call, "cwd": top, "tool_name": "Write", "tool_input": {"file_path": resolved}}
+        # The fixed snapshot payload contains repository/conversation metadata and a path only.
+        payload = {"session_id": "feedback-" + rid, "cwd": top, "path": resolved}
         packet = json.dumps(payload, separators=(",", ":")).encode()
         env = os.environ.copy()
         env["YAKKA_QUEUE"] = queue_dir
@@ -3154,7 +3154,7 @@ def _mcp_enqueue(guards: dict[str, Any], resolved: Any, queue_dir: str, call: st
         if cancelled.is_set() or time.monotonic() >= deadline:
             return failed("effect_unknown", "unknown")
         try:
-            out = subprocess.run([script, "--harness", "codex", "--event", "PostToolUse"], input=packet, capture_output=True, timeout=timeout, env=env, check=False)
+            out = subprocess.run([script, "--harness", "codex", "--event", "artifact_snapshot"], input=packet, capture_output=True, timeout=timeout, env=env, check=False)
         except subprocess.TimeoutExpired:
             return failed("effect_unknown", "unknown")
         if out.returncode != 0:
@@ -3398,7 +3398,7 @@ class _McpRelay:
             elif cancelled.is_set():
                 return
             else:
-                effect = _mcp_enqueue(guards, resolved_path, self.opts.QueueDir, call_token, cancelled, call_deadline, directive["action_id"])
+                effect = _mcp_enqueue(guards, resolved_path, self.opts.QueueDir, cancelled, call_deadline, directive["action_id"])
             effect_outcome = effect["outcome"]
             continuation, _, _, same_call = _mcp_context_call(body, method, request or {}, declaration, self.opts.QueueDir, call_token, [effect], self.opts.Getwd)
             if same_call != call_token:
