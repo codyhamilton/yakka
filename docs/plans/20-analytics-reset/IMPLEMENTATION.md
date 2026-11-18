@@ -26,13 +26,12 @@ Refinement commit `acd114f` (`docs: refine Plan 20 Phase 11 into five units`) re
 - Deviations / unfinished: worker reported **done**. `planAxes` takes an optional catalogue and the plan panel passes `null` because the panel requires only `entities_plan`; `session_model` is the colour lens while `model` is never numeric or a colour; `artifactMissing` prefers row flags and falls back to `population.missing_by_reason`. Browser proof of the delivered board stays 11-03. `gate: none`.
 - Verification: `node --test tests/scatter-sessions/artifact-plan.test.mjs` → 9/9; `scatter.test.mjs` 10/10; `tests/workspace/*.test.mjs` 72/72; `tests/trends-quality/*.test.mjs` sequentially 54/54; `git diff --check` clean. `artifact_feedback` unreachable (`invalid_context`).
 
-### `11-03-time-scatter.md` — over budget handoff
+### `11-03-time-scatter.md`
 
-- Done: `/b/scatter` now delivers the four-panel `scatter` preset; `scatter-day` plots two time measures on the response bucket grid, freezes `{fields,bucket,bucket_step}` and the absolute window into the cohort source, and reports contributing sessions plus source/target rejection associations in their own units. The P11 time fixture/stub scene, Phase 9 Start/acceptance expectations and the report are written. Report: `reports/11-03-time-scatter.md`.
-- Not done: none for the unit. 11-04 and 11-05 remain.
-- Learned: time selection needs the aggregate response's `population.relation`, not the scatter body's bucket population; `auto` must not be reported as coarsened when the server chose the effective unit; leap-free fixed bucket seconds are enough for half-open interval checks against the frozen window.
-- Deviation: `tests/scatter-sessions/artifact-plan.test.mjs` was outside the owned paths but asserted the preset stayed undelivered; only that final assertion was updated, with no product change to satisfy it. `gate: none` (Chromium 1243 resolved).
-- Budget: more than 40 tool turns and more than 20 files read, against 40 turns and 20 files. The overrun is the Chromium proof and its first-run fixes; no scope was added.
+- Outcome: committed as `a58481d` (`Add time scatter and the Scatter preset`). Added `scatter-day.js` plotting two published time measures on the response bucket grid with half-open bucket/window checks, frozen `source:{fields,bucket,bucket_step}` and absolute window, contributing-session counts from `population.relation.target_sessions`, source/target rejection associations in their own units, valid empty all-rejection selection and named unsupported pairings; registered the four-panel `scatter` preset; extended `selection-model.js`/`selection-tray.js`, `css/scatter.css`, the additive P11 fixture/stub, and the Phase 9 Start/acceptance expectations.
+- Surfaces: the brief's owned paths plus one final assertion in `tests/scatter-sessions/artifact-plan.test.mjs` (it asserted the preset stayed undelivered); `app.js`, the chart kit and Go were untouched.
+- Deviations / unfinished: worker reported **over budget** with the unit complete and green; the overrun was tool turns and files read while adding the Chromium proof, with no added scope. `auto` is not reported as coarsened when the server chose the effective unit. No brief/contract contradiction. `gate: none` (Chromium 1243 resolved, no skip).
+- Verification: `NODE_PATH=… PUBLIC_CANVAS_TEST_MODE=true node --test tests/scatter-sessions/scatter.test.mjs` → 16/16 with the delivered `/b/scatter` board and no skip; `tests/workspace/*.test.mjs` + scatter + root 111/111; charts 68/68; trends-quality sequentially 54/54; engine 9/9, start 2/2, acceptance 5/5; `git diff --check` clean. `artifact_feedback` unreachable (`invalid_context`).
 
 ## Phase 10 — Trends, Compare, Quality, Cost and Tools
 
