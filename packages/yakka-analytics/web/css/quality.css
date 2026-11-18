@@ -1,0 +1,26 @@
+/* P10 Quality panels. Labels and notes only: population and baseline text.
+   Colours stay in the committed chart tokens, so a theme change is a re-read. */
+
+.p10-quality {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.p10-quality .p10-basis,
+.p10-quality .p10-note {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--yk-chart-muted, #586579);
+}
+
+.p10-quality .p10-note {
+  border-left: 3px solid var(--yk-chart-border, #d6dde7);
+  padding-left: 0.5rem;
+}
+
+.p10-quality-chart {
+  display: block;
+  min-width: 0;
+}
