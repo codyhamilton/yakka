@@ -1,3 +1,68 @@
+# Amendment — simple back-fill (19 Nov 2026)
+
+Docs-only amendment, landed on this branch and draft PR #184 (Solution Designer, 19 Nov 2026). No application code was touched; every change below is for a later build. DESIGN.md Decisions (5) and Assumptions 40-49 are the authority; this section is the build-side record.
+
+Cody, 19 Nov 12:09-12:11 AM AEST (the first two messages verbatim in DESIGN.md Decisions (5); the 12:11 scope tightening is the amendment brief's paraphrase): back-fill is a one-off and stays simple. A plan agent loads the plan skill, a phase agent loads the execute skill, a build agent is given a brief path; a single signal labels the session; sessions that loaded several are left for a follow-up review with Cody after the counts are reported.
+
+## Phases: kept, changed, obsolete
+
+| Phase | Status | What it means for the build |
+|---|---|---|
+| 1 Action record path | Kept, built | Unchanged. The `typesafe` and `human` method values and the `review` source and precedence stay as built and are unused by the back-fill. |
+| 2 Session-start capture | Kept, built (documented-limit close) | Unchanged. |
+| 3 Cost by work | Kept, built | Unchanged. Its real-data items (subagent `conversation_id`, message vs import time) are still Cody's. |
+| 4 MCP tools | Kept as designed, not built | Unchanged; still held on Plan 24 (#177). The amendment does not touch it. |
+| 5 Back-fill | Kept in part; method and outcome change | Rebuild to the simple skill and brief-path pass with the count report (below). |
+| 6 TypeSafe kind pass | Obsolete | Drop its code (below). Nothing depends on it. |
+| 7 Human review (accuracy import and export) | Obsolete as a gate | Replaced by a follow-up review with Cody after Phase 5 reports counts. Not a build phase; no code. |
+
+## Phase 5: what is kept, what changes on rebuild
+
+Kept from the built tool (`tools/session_backfill/backfill.py`, `plugins/yakka/client/yakka.py`, units `5-01`, `5-02` and fixes `44a743a`):
+
+- Discovery of the four stores (claude, codex, cursor, opencode) from explicit roots.
+- The Codex session identity rule (id only from `session_meta`; absent or invalid stays unresolved and cannot enqueue).
+- Unreadable transcripts as unresolved rows; at most one enqueue per conversation id; secret scrubbing of evidence; the local label file; dry run as the default.
+- The enqueue writer and `Build` (tag-only `yakka.session_action` event; method, confidence and evidence carried into the fact).
+- Fallback subject and phase extraction (`PLAN_RE`, `PHASE_RE`, issue and PR numbers), now only at confidence 0.65.
+
+Changes on rebuild:
+
+1. **Kind from the signal.** Add per-store recognisers: Claude `Skill` tool call and `<command-name>` slash command; Cursor `<manually_attached_skills>`; Codex and OpenCode shapes found by a read-only look at real transcripts (shapes and counts only). Skill id table in one place: `design`, `plan`, `planning` mean planning (kind `design`); `refine` (kind `refine`); `execute`, `plan-execution` (kind `build`); matched on the part after the last `:`. Brief path `docs/plans/<plan>/briefs/<file>.md` in the **first user prompt** gives kind `build` and the phase from the file name. The built tool's "prompt" is the first non-empty line of all concatenated transcript strings (a recon finding), so it is not the first user prompt and must be replaced.
+2. **Single signal labels.** Count by kind class; repeats of one skill collapse. More than one signal is `multi_signal`, none is `no_signal`, one signal with no subject is `no_subject`; none of these enqueues. No rule for several signals.
+3. **Remove** queue-log parsing (`QUEUE_FILE_RE`, `parse_queue_logs`, `--queue-logs`), queue truth in `label_session`, gold collection and `score_gold`, the gold fields of the result, the Flash predicate (`FLASH_RE`) and the OpenCode-only gate, and the 0.55 confidence tier. "Complete" no longer needs queue truth: a label is `labelled` when it has a single signal and a subject.
+4. **Skip Claude subagent transcripts** (`subagents/` path part, as Cursor already does). Add the missing test for the Cursor skip, which the fixtures never exercised (a recon finding).
+5. **Report.** Print the count report of DESIGN.md Domain "Back-fill" per store and in total, with the skipped-subagent, skipped-child and duplicate-id counts beside the rows, and record it under `reports/` for the follow-up review. The phase closes on the fixtures and this dry-run report; the real enqueue is a separate step gated on Cody. These counts do not exist yet.
+6. README Pass 1 section rewritten to the simple rule; the Pass 2 section removed. Tests: the synthetic fixtures listed in DESIGN.md Phase 5's outcome replace the gold and Flash tests.
+
+Still gated on Cody, unchanged: authorising a real enqueue and drain check. Resolved by the amendment, no longer carried: the queue-log join, the Flash rule and count, the subagent treatment, the 95% gold agreement.
+
+## Phase 6: obsolete, what to do with its code
+
+Drop on rebuild (delete; they are Phase 6's alone): `tools/session_backfill/typesafe_kind.py`, `tools/session_backfill/kind_pass.py`, `tools/session_backfill/tests/test_kind_pass.py`, the README Pass 2 section. This removes the live-egress path (`--live --confirm-egress`, the `TYPESAFE_API_KEY` check) and the private `_scrub_evidence` import from `backfill`. Leave unused, untouched: `tools/transcript/lib/jev_client.py` (another tool's), and the server's `typesafe` method value. The brief `briefs/6-01-typesafe-kind-pass.md`, report `reports/6-01-typesafe-kind-pass.md` and the Phase 6 section below stay as history, marked obsolete. The Phase 6 carried gates (live TypeSafe authorisation, accuracy bars, gold join) are withdrawn.
+
+## Phase 7: replaced
+
+The formal human-review accuracy import and export is not built. After Phase 5 reports its counts, Cody and the Solution Designer review the counts and decide what to do with the unlabelled and multi-signal remainder, and whether `execute` should be its own kind. Record the outcome here.
+
+## Phase 5 live dry run: evidence behind the amendment
+
+From `reports/5-03-live-dry-run.md` (codyh-ubuntu, 8 Nov 2026, 1:04-1:06 AM AEST). This is the cheapest existing evidence; the raw label file is gone and no new store scan was run for the amendment. Under the old rules 0 of 3,623 sessions were complete (kind never filled), so every session would have waited on TypeSafe or review.
+
+| Store | Sessions | Complete | Partial | Unresolved |
+|---|---|---|---|---|
+| claude | 1,239 | 0 | 1,156 | 83 |
+| codex | 1,962 | 0 | 1,409 | 553 |
+| cursor | 409 | 0 | 78 | 331 |
+| opencode | 13 | 0 | 0 | 13 |
+| total | 3,623 | 0 | 2,643 | 980 |
+
+Also: 2,321 plan subjects, 322 GitHub-issue subjects, 2,236 rows with a phase, 893 with a PR; 1,058 sessions match a Flash-analysis predicate (224 Claude, 824 Codex, 10 Cursor) but were labelled as ordinary work because exclusion was OpenCode-only; Claude discovery included about 361 subagent transcripts and Cursor discovery excluded 619; queue logs cannot join to sessions (1,158 `par-*.log` files, 9 with session-id-like text, 0 usable joins); inventory 3,623 against the design's ~6,463. These explain why the queue-log gold set, the accuracy bars and the Flash gate failed. They are not skill-load counts: skill-load and multi-signal counts are an outcome of the rebuilt simple pass.
+
+Landing: committed on `feat/22-session-work-tagging` and pushed to PR #184. No rebase onto master was done (the branch is 25 ahead and 24 behind `origin/master`; the PR was dirty before this amendment and is not repaired by it).
+
+---
+
 Run: Claude Code execute skill (Haiku 5.5), run ID 22-p6-2026-11-08
 Started: 2026-11-07 15:12 UTC
 Branch: feat/22-session-work-tagging
@@ -96,6 +161,8 @@ Branch: feat/22-session-work-tagging
 
 ## Phase 5 — Back-fill pass 1: deterministic extraction
 
+**Amended 19 Nov 2026:** the method and outcome change to the simple skill and brief-path pass; this section records the first build. See the amendment above for what is kept and what changes on rebuild.
+
 ### Unit outcome — `5-01-deterministic-backfill.md`
 
 Implemented an explicit-root, offline back-fill tool for Claude JSONL, Codex rollout JSONL, OpenCode session/message/part JSON, and Cursor agent transcript JSONL. It emits complete, partial, unresolved, and excluded labels; extracts plan/phase/issue/PR evidence; joins nested queue logs; writes scrubbed local label files; reports coverage and masked gold-set agreement; and optionally writes complete labels through the client queue writer. The Yakka writer creates tag-only events with an empty payload and a conversation id at the envelope level; its stable content-derived event id makes repeated writes idempotent. `Build` emits source, method, confidence and scrubbed evidence in the resulting `session_action` fact. No network call is present in the tool.
@@ -122,7 +189,7 @@ Known problem and carried work:
 
 The command-line dry-run entry point was exercised on the local four-store roots and produced an observable per-store report without touching the queue or network. Its result did not meet the design's intended inventory or gold-coverage outcome: all 3,582 observed sessions were partial or unresolved, no gold session was linked, and the expected Flash exclusions were absent. Synthetic end-to-end CLI and queue tests prove the designed behavior against fixtures, including idempotent action creation and parse/build into a single `session_action` fact. The real enqueue/drain check is held for Cody as it entails network egress.
 
-### Carried
+### Carried *(superseded where it names gold agreement, the queue-log join, Flash, TypeSafe or accuracy bars: see the 19 Nov 2026 amendment above)*
 
 - Cody: confirm the codyh-ubuntu data roots and add/approve a deterministic queue-log-to-session association supported by those logs; rerun the dry run and verify the Phase 5 95% gold agreement and planned Flash exclusions.
 - Cody: authorize a later real enqueue/drain verification; compare projected rows to emitted actions and itemize secret-scan refusals.
@@ -155,6 +222,8 @@ Phase 5 stays open. Carried: Cody to choose the queue-log-to-session join and th
 
 ## Phase 6 — Back-fill pass 2: TypeSafe kind classification
 
+**Obsolete (19 Nov 2026 amendment, above).** Kept as history; its code is to be dropped on rebuild and its carried gates are withdrawn.
+
 ### Unit outcome — `6-01-typesafe-kind-pass.md`
 
 Built the TypeSafe kind schema and client (`tools/session_backfill/typesafe_kind.py`) and the pass that computes the gold threshold, routes results and enqueues `method=typesafe` facts (`tools/session_backfill/kind_pass.py`). Surfaces: `tools/session_backfill/` (both modules, the fake-only test file, the README Pass 2 section), and the brief and report under this plan. Brief commit: `36ba83a`. Closing commit: this phase's commit.
@@ -172,7 +241,7 @@ Evidence (synthetic fixtures and fake transports only):
 
 The phase outcome's entry points were exercised by the tests above: `kind_pass.main` for the dry run and the CLI refusals, and `run_pass` with a fake transport for the live routing. The live path reaches TypeSafe only through `--live --confirm-egress`, and no live call was made. The real behaviour checks (a raw TypeSafe response, a gold threshold, the drain and analytics check) are not verified; each is gated below. `artifact_feedback` was not called because it sends the report to a remote screen.
 
-### Carried
+### Carried *(superseded where it names gold agreement, the queue-log join, Flash, TypeSafe or accuracy bars: see the 19 Nov 2026 amendment above)*
 
 - gate: Cody to authorise the live TypeSafe run and prompt egress (scrubbed 1000-character prefixes of partial and gold sessions), per Assumption 19 and Open Questions.
 - gate: Cody to choose the queue-log-to-session join so the gold set is non-empty; until then the threshold is unset and no label completes.
