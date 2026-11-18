@@ -88,6 +88,9 @@ func TestRunSuccessPartialDryRunAndPersistedInput(t *testing.T) {
 	if err != nil || receipt.Status != "ok" || calls.Load() != 1 {
 		t.Fatalf("success=%+v calls=%d err=%v", receipt, calls.Load(), err)
 	}
+	if receipt.InputTokenEstimate <= 0 || receipt.InputTokenEstimate > maxInputTokens || receipt.InputTrimmed {
+		t.Fatalf("input estimate=%d trimmed=%v", receipt.InputTokenEstimate, receipt.InputTrimmed)
+	}
 	if _, err = tenant.ReadReviewInput(receiptInputHash(t, tenant)); err != nil {
 		t.Fatalf("captured input not readable: %v", err)
 	}
@@ -102,6 +105,12 @@ func TestRunSuccessPartialDryRunAndPersistedInput(t *testing.T) {
 	h, ok := rec["input_hash"].(string)
 	if !ok {
 		t.Fatal("record has no captured-input hash")
+	}
+	if est, _ := rec["input_token_estimate"].(float64); est <= 0 || est > maxInputTokens {
+		t.Fatalf("record input estimate=%v", rec["input_token_estimate"])
+	}
+	if rec["input_trimmed"] != false {
+		t.Fatalf("record input trimmed=%v", rec["input_trimmed"])
 	}
 	input, err := tenant.ReadReviewInput(h)
 	if err != nil || strings.Contains(string(input), "ROLE\n") || !strings.Contains(string(input), "safe changed implementation") {
@@ -446,10 +455,13 @@ func TestRunStatusFixturesAndPreflightResume(t *testing.T) {
 		}))
 		defer srv.Close()
 		out, err := Run(context.Background(), tenant, "tenant", reviewRequest(true), availableConfig(srv.URL))
-		if err != nil || out.Status != "invalid_output" {
+		if err != nil || out.Status != "invalid_output" || out.Reason != "json_parse" {
 			t.Fatalf("%+v %v", out, err)
 		}
 		rec := readReviewRecord(t, tenant)
+		if rec["reason"] != "json_parse" {
+			t.Fatalf("record reason=%v", rec["reason"])
+		}
 		if cost, _ := rec["cost_usd"].(float64); cost <= 0 || rec["cost_known"] != true {
 			t.Fatalf("invalid output cost=%v known=%v", rec["cost_usd"], rec["cost_known"])
 		}
@@ -1515,6 +1527,41 @@ func TestRunRecordsOnlyActualCost(t *testing.T) {
 			t.Fatalf("total=%v want success cost=%v", cost, success)
 		}
 	})
+}
+
+func TestReviewTimeoutBudgetRelationship(t *testing.T) {
+	if defaultAttemptTimeout != 10*time.Minute {
+		t.Fatalf("attempt timeout = %v", defaultAttemptTimeout)
+	}
+	if reviewWallTime < 2*defaultAttemptTimeout {
+		t.Fatalf("wall time %v cannot cover two %v attempts", reviewWallTime, defaultAttemptTimeout)
+	}
+	if reviewHTTPClientTimeout < defaultAttemptTimeout {
+		t.Fatalf("HTTP client timeout %v is shorter than an attempt %v", reviewHTTPClientTimeout, defaultAttemptTimeout)
+	}
+	if got := reviewHTTPClient().Timeout; got != reviewHTTPClientTimeout {
+		t.Fatalf("client timeout = %v", got)
+	}
+}
+
+func TestRunRefusesInputTooLargeWithoutProviderCall(t *testing.T) {
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { calls.Add(1) }))
+	defer srv.Close()
+	tenant := reviewTenant(t)
+	req := reviewRequest(true)
+	req.CriteriaText = []string{strings.Repeat("x", overBudgetBytes())}
+	out, err := Run(context.Background(), tenant, "tenant", req, availableConfig(srv.URL))
+	if err != nil || out.Status != "input_too_large" {
+		t.Fatalf("%+v %v", out, err)
+	}
+	if calls.Load() != 0 {
+		t.Fatalf("provider calls=%d", calls.Load())
+	}
+	rec := readReviewRecord(t, tenant)
+	if rec["status"] != "input_too_large" {
+		t.Fatalf("record status=%v", rec["status"])
+	}
 }
 
 func TestRunRejectsMissingBuildModelsBeforeProvider(t *testing.T) {

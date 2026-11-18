@@ -44,7 +44,7 @@ or delete queue entries. The separate `change` reader below scans and transmits 
 | `list_reviews(filters…)` | a tenant's stored reviews as a complete, cursor-paged listing with the same filters as `GET /v1/reviews` | whether earlier reviews exist and what they found, without spending on a new call |
 
 The review tool is exposed only when `CLAUDE_API_TOKEN` is non-empty in authenticated remote mode and
-the MCP timeout ceiling of at least 150 seconds permits registration, and only to `read_write`
+the MCP timeout ceiling of at least 630 seconds permits registration, and only to `read_write`
 callers. The model is fixed in code (`claude-haiku-5-5`), any authenticated tenant's repo is
 reviewable, and `skipped_busy` reports the two-call per-tenant in-flight limit. `list_reviews` is a
 `read` tool with no local readers or actions. Maintainer operations (defining checks, rescoring, rating) are CLI or REST

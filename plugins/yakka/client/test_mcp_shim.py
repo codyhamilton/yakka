@@ -207,6 +207,18 @@ class DiscoveryRelayTests(unittest.TestCase):
             self.assertEqual(reply["error"]["data"]["code"], "unauthorized")
 
 
+class MCPTimeoutTests(unittest.TestCase):
+    def test_call_timeout_ceiling_and_transport_headroom(self) -> None:
+        relay = yakka._McpRelay(yakka.McpOptions(Version="test"))
+
+        self.assertEqual(relay._timeout("tools/call", {"timeout_s": 630}), 635.0)
+        self.assertEqual(relay._timeout("tools/call", {"timeout_s": 900}), 635.0)
+        self.assertEqual(relay._timeout("tools/call", {"timeout_s": 4}), 9.0)
+        self.assertEqual(relay._timeout("tools/call", {"timeout_s": "invalid"}), 10.0)
+        self.assertEqual(relay._timeout("tools/call", {}), 10.0)
+        self.assertEqual(relay._timeout("tools/list", {"timeout_s": 630}), 10.0)
+
+
 class RelayTests(unittest.TestCase):
     def setUp(self) -> None:
         self.old_env = {name: os.environ.get(name) for name in ("YAKKA_ENDPOINT", "YAKKA_KEY", "YAKKA_CLIENT_CONFIG", "YAKKA_QUEUE", "YAKKA_HOOKLOG", "YAKKA_BIN")}
