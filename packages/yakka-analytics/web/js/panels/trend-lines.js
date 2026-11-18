@@ -8,8 +8,8 @@ import { cancelledState, emptyState, errorState, unsupportedState } from '../cor
 import { currentWindow, previousWindow } from './pulse-strips.js';
 import { table } from './pulse-strips.js';
 import {
-  bucketInfo, chooserModel, coarsenedText, ensureP10Styles, measureMeta, populationLine,
-  queryRows, requestParams, whenPanelBody, whenPanelSlot, renderChooser, windowParams, wireChartScope
+  bucketInfo, chooserModel, coarsenedText, comparisonPlan, comparisonSummary, ensureP10Styles, measureMeta,
+  populationLine, queryRows, requestParams, whenPanelBody, whenPanelSlot, renderChooser, windowParams, wireChartScope
 } from './p10-shared.js';
 import { chartShape, TREND_LENSES, TREND_MEASURES, trendTableRows } from './trend-columns.js';
 
@@ -80,7 +80,10 @@ export async function load(context = {}) {
   const { scope = {}, spec = {}, transport, tenant = '', signal } = context;
   const doc = context.doc || globalThis.document;
   ensureP10Styles('/css/trends.css', doc);
-  const compare = scope.cmp === 'period';
+  const plan = comparisonPlan(scope);
+  if (plan.unsupported) return unsupportedState({ missing: 'comparison', reason: plan.unsupported, source: 'scope' });
+  const compare = plan.mode === 'period';
+  const cohortCompare = plan.mode === 'cohorts';
   try {
     const schema = context.schema || (await transport.schema(tenant)).body;
     const panel = context.panel || TREND_LINES_PANEL;
@@ -96,10 +99,11 @@ export async function load(context = {}) {
     const split = chooser.split;
     const chart = chooser.chart === 'area' ? 'area' : 'lines';
     const shape = chartShape(chart);
+    const meta = measureMeta(schema, measure);
     const topMax = Number(schema?.budgets?.top_max) || 0;
     const extra = topMax ? { top: String(Math.min(100, topMax)) } : null;
     const params = requestParams({ scope, measure, split, bucket: 'auto', extra });
-    const response = await transport.get('query', params, { tenant, signal, stateKey: 'trend-lines' });
+    const response = await transport.get('query', params, { tenant, signal, stateKey: cohortCompare ? 'trend-lines-a' : 'trend-lines' });
     if (!response.response.ok) {
       if (response.response.status === 400 && /unsupported|not available|range too wide/i.test(response.body?.error || '')) {
         return unsupportedState({ missing: `${measure}${split ? ` by ${split}` : ''}`, reason: response.body.error, source: 'server /schema', nearest: chooser.splits[0] || 'no split' });
@@ -108,8 +112,50 @@ export async function load(context = {}) {
     }
     let series;
     let rows;
+    let charts = null;
     let previousBody = null;
-    if (compare) {
+    let summary = '';
+    if (cohortCompare) {
+      const bParams = plan.b
+        ? requestParams({ scope, measure, split, bucket: 'auto', extra, cohort: plan.b })
+        : requestParams({ scope, measure, split, bucket: 'auto', extra, cohort: null });
+      const other = await transport.get('query', bParams, { tenant, signal, stateKey: 'trend-lines-b' });
+      if (!other.response.ok) {
+        return errorState({ message: other.body?.error || `The server returned ${other.response.status}.`, code: other.body?.code || '' });
+      }
+      previousBody = other.body;
+      const mappedA = queryRows(response.body, measure, split, meta);
+      const mappedB = queryRows(previousBody, measure, split, meta);
+      const groups = split
+        ? [...new Set([...mappedA.keys, ...mappedB.keys])].filter(key => key !== '__other__' && key !== '')
+        : [''];
+      charts = groups.map(group => {
+        const key = split ? `${split}:${group}` : measure;
+        const byX = new Map();
+        for (const row of mappedA.rows) {
+          const value = row.values[key];
+          if (value === undefined) continue;
+          byX.set(row.x, { key: row.key, x: row.x, values: { a: value } });
+        }
+        for (const row of mappedB.rows) {
+          const value = row.values[key];
+          if (value === undefined) continue;
+          if (!byX.has(row.x)) byX.set(row.x, { key: row.key, x: row.x, values: {} });
+          byX.get(row.x).values.b = value;
+        }
+        return {
+          group,
+          series: [
+            { key: 'a', label: plan.aLabel, unit: meta.unit, kind: meta.kind },
+            { key: 'b', label: plan.bLabel, unit: meta.unit, kind: meta.kind }
+          ],
+          rows: [...byX.values()].sort((a, b) => a.x - b.x)
+        };
+      });
+      series = charts[0]?.series || [];
+      rows = charts.flatMap(item => item.rows);
+      summary = comparisonSummary({ plan, sides: { a: response.body, b: previousBody }, unit: meta.unit }).text;
+    } else if (compare) {
       const previousRequest = previousParams({ scope, measure, split, extra });
       const previous = await transport.get('query', previousRequest.params, { tenant, signal, stateKey: 'trend-lines-previous' });
       if (!previous.response.ok) {
@@ -120,7 +166,7 @@ export async function load(context = {}) {
       series = compared.series;
       rows = compared.rows;
     } else {
-      const mapped = queryRows(response.body, measure, split, measureMeta(schema, measure));
+      const mapped = queryRows(response.body, measure, split, meta);
       series = mapped.series;
       rows = mapped.rows;
     }
@@ -129,33 +175,66 @@ export async function load(context = {}) {
       return emptyState([{ kind: 'scope', label: `no ${measure} buckets in window ${scope.win || 'all'}`, clear: null }]);
     }
     const info = bucketInfo(response.body);
-    const meta = measureMeta(schema, measure);
+    const painted = [];
     whenPanelBody(panel.id, doc, host => {
       const wrapper = doc.createElement('div');
       wrapper.className = 'p10-trend';
       const basis = doc.createElement('p');
       basis.className = 'p10-basis';
-      basis.textContent = `Basis: ${coarsenedText(response.body)} Measure ${meta.label} (${meta.unit}). ${populationLine(response.body)}.${compare ? ` ${previousLabel(scope)} aligned by offset.` : ''}`;
-      const node = doc.createElement('yk-chart');
-      node.className = 'p10-trend-chart';
-      node.spec = {
-        chart: shape.chart,
-        type: shape.type,
-        mode: 'absolute',
-        title: `${meta.label}${split ? ` by ${split}` : ''}`,
-        units: meta.unit,
-        timeBasis: 'artifact/event facts.ts bucket start; previous period aligned by offset',
-        series,
-        x: { label: compare ? 'Current time (previous aligned)' : 'Time', kind: 'time' },
-        empty: 'no buckets in the current window'
-      };
-      node.data = rows;
-      wireChartScope(node, panel.id, doc);
+      basis.textContent = `Basis: ${coarsenedText(response.body)} Measure ${meta.label} (${meta.unit}). ${populationLine(response.body)}.${compare ? ` ${previousLabel(scope)} aligned by offset.` : ''}${cohortCompare ? ` ${summary}` : ''}`;
+      if (charts) {
+        for (const item of charts) {
+          const section = doc.createElement('div');
+          section.className = 'p10-split-group';
+          section.dataset.split = item.group || 'all';
+          const node = doc.createElement('yk-chart');
+          node.className = 'p10-trend-chart';
+          node.dataset.split = item.group || 'all';
+          node.spec = {
+            chart: shape.chart,
+            type: shape.type,
+            mode: 'absolute',
+            title: `${meta.label}${split ? ` by ${split} · ${item.group}` : ''} (${plan.aLabel} and ${plan.bLabel})`,
+            units: meta.unit,
+            timeBasis: 'artifact/event facts.ts bucket start',
+            series: item.series,
+            x: { label: 'Time', kind: 'time' },
+            empty: 'no buckets in the current window'
+          };
+          node.data = item.rows;
+          wireChartScope(node, panel.id, doc);
+          section.append(node);
+          wrapper.append(section);
+          painted.push(node);
+        }
+      } else {
+        const node = doc.createElement('yk-chart');
+        node.className = 'p10-trend-chart';
+        node.spec = {
+          chart: shape.chart,
+          type: shape.type,
+          mode: 'absolute',
+          title: `${meta.label}${split ? ` by ${split}` : ''}`,
+          units: meta.unit,
+          timeBasis: 'artifact/event facts.ts bucket start; previous period aligned by offset',
+          series,
+          x: { label: compare ? 'Current time (previous aligned)' : 'Time', kind: 'time' },
+          empty: 'no buckets in the current window'
+        };
+        node.data = rows;
+        wireChartScope(node, panel.id, doc);
+        wrapper.append(node);
+        painted.push(node);
+      }
       const columns = [{ label: 'Bucket' }, ...series.map(item => ({ label: item.label, numeric: true }))];
-      const tableRows = rows.map(row => [new Date(row.x).toISOString(), ...series.map(item => row.values[item.key] === null || row.values[item.key] === undefined ? '—' : String(row.values[item.key]))]);
-      wrapper.append(basis, node, table(doc, { caption: `${measure} per bucket`, columns, rows: tableRows }));
+      const tableRows = (charts ? charts[0]?.rows || [] : rows).map(row => [
+        new Date(row.x).toISOString(),
+        ...(charts ? charts[0].series : series).map(item => row.values[item.key] === null || row.values[item.key] === undefined ? '—' : String(row.values[item.key]))
+      ]);
+      wrapper.append(basis, table(doc, { caption: `${measure} per bucket`, columns, rows: tableRows }));
       host.replaceChildren(wrapper);
     });
+    await Promise.all(painted.map(node => node?.whenSettled?.()).filter(Boolean));
     whenPanelSlot(panel.id, 'chooser', doc, slot => {
       const rendered = renderChooser({ panelId: panel.id, panel, spec: { ...spec, measures: [measure], split, chart }, schema, doc });
       slot.replaceChildren(rendered.element);
@@ -163,11 +242,12 @@ export async function load(context = {}) {
     return {
       state: 'ready', measure, split, chart,
       bucket: info.effective, coarsened: info.coarsened,
-      compare,
+      compare, cohortCompare,
+      groups: charts ? charts.length : (split ? queryRows(response.body, measure, split, meta).keys.length : 1),
       population: response.body.population || null,
       previousPopulation: previousBody?.population || null,
-      basis: `query ${info.effective || 'auto'} buckets${compare ? '; previous equal-length window aligned by offset' : ''}`,
-      tableRows: trendTableRows({ rows, series })
+      basis: `query ${info.effective || 'auto'} buckets${compare ? '; previous equal-length window aligned by offset' : cohortCompare ? `; ${plan.aLabel} and ${plan.bLabel}` : ''}`,
+      tableRows: trendTableRows({ rows: charts ? charts[0]?.rows || [] : rows, series: charts ? charts[0]?.series || [] : series })
     };
   } catch (error) {
     if (error?.name === 'AbortError') return cancelledState();

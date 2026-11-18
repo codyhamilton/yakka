@@ -103,6 +103,7 @@ export async function load(context = {}) {
     }
     const info = bucketInfo(body);
     const contextForPaint = { model, body, measure, split, schema, chart };
+    let paintedChart = null;
     whenPanelBody(panel.id, doc, host => {
       const wrapper = doc.createElement('div');
       wrapper.className = 'p10-trend';
@@ -117,7 +118,9 @@ export async function load(context = {}) {
       const columns = [{ label: 'Bucket' }, ...model.series.map(series => ({ label: series.label, numeric: true }))];
       wrapper.append(basis, node, table(doc, { caption: `${measure} per ${info.effective || 'bucket'}`, columns, rows: trendTableRows(model) }));
       host.replaceChildren(wrapper);
+      paintedChart = node;
     });
+    await paintedChart?.whenSettled?.();
     whenPanelSlot(panel.id, 'chooser', doc, slot => {
       const rendered = renderChooser({ panelId: panel.id, panel, spec: { ...spec, measures: [measure], split, chart }, schema, doc });
       slot.replaceChildren(rendered.element);

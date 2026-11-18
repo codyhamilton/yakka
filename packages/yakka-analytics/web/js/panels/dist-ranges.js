@@ -167,9 +167,7 @@ export async function load(context = {}) {
         ? comparisonSummary({ plan, sides: cohortCompare ? { a: body, b: previous } : { current: body, previous }, unit: meta.unit }).text
         : '';
       basis.textContent = `Basis: ${measure} over ${grain} grain by ${dim}. ${populationLine(body)}. Unpriced ${body.unpriced ?? 0}${previous ? `; ${cohortCompare ? labels.previous : 'previous period'} unpriced ${previous.unpriced ?? 0}` : ''}. ${comparisonText}`;
-      const node = doc.createElement('yk-ranges');
-      node.className = 'p10-dist-chart';
-      node.spec = {
+      const chartSpec = {
         chart: 'ranges',
         type: 'box',
         legend: 'entities',
@@ -179,7 +177,27 @@ export async function load(context = {}) {
         series: [{ key: measure, label: meta.label, unit: meta.unit, kind: meta.kind }],
         ...(spec.baseline ? { baseline: spec.baseline } : {})
       };
-      node.data = rows;
+      if (cohortCompare) {
+        const groups = [...new Set(rows.map(row => row.group))];
+        for (const group of groups) {
+          const section = doc.createElement('div');
+          section.className = 'p10-split-group';
+          section.dataset.split = group;
+          const node = doc.createElement('yk-ranges');
+          node.className = 'p10-dist-chart';
+          node.dataset.group = group;
+          node.spec = { ...chartSpec, title: `${measure} by ${dim} · ${group} (${plan.aLabel} and ${plan.bLabel})` };
+          node.data = rows.filter(row => row.group === group);
+          section.append(node);
+          wrapper.append(section);
+        }
+      } else {
+        const node = doc.createElement('yk-ranges');
+        node.className = 'p10-dist-chart';
+        node.spec = chartSpec;
+        node.data = rows;
+        wrapper.append(node);
+      }
       const columns = [{ label: 'Group' }, ...['Min', 'Q1', 'Median', 'Q3', 'Max', 'p95', 'n', 'Unpriced'].map(label => ({ label, numeric: true }))];
       const facts = coverageFacts({ ...body, omitted_groups: omittedGroups, omitted_n: omittedN });
       const note = doc.createElement('p');
@@ -189,7 +207,7 @@ export async function load(context = {}) {
         omittedGroups ? `${omittedGroups} groups omitted (${omittedN} rows).` : '',
         ...facts
       ].filter(Boolean).join(' ');
-      wrapper.append(basis, node, note, table(doc, { caption: `${measure} distribution by ${dim}`, columns, rows: boxTableRows(rows) }));
+      wrapper.append(...[basis, note, table(doc, { caption: `${measure} distribution by ${dim}`, columns, rows: boxTableRows(rows) })]);
       host.replaceChildren(wrapper);
     });
     whenPanelSlot(panel.id, 'chooser', doc, slot => {

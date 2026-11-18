@@ -7,8 +7,9 @@ import assert from 'node:assert/strict';
 
 import { cohortDefinition, encodeCohort } from '../../web/js/core/selection-model.js';
 import {
-  cohortParams, comparisonPlan, comparisonSummary, honestJoinGuard, requestParams
+  cohortParams, comparisonPlan, comparisonSummary, honestJoinGuard, requestParams, scopeWithCohorts
 } from '../../web/js/panels/p10-shared.js';
+import { effectiveScope } from '../../web/js/core/view-spec.js';
 import { splitExclude } from '../../web/js/core/selection-tray.js';
 import { distributionGuard, distributionParams } from '../../web/js/panels/dist-ranges.js';
 
@@ -59,6 +60,31 @@ test('comparisonPlan covers none, single, period, cohorts and the named refusals
 
   const three = comparisonPlan({ cmp: 'cohorts', cohorts: { ca: a, cb: b, cc: a } });
   assert.match(three.unsupported, /compare shows cohorts A and B; clear unused cohorts/);
+});
+
+test('the panel scope retains cohorts and the request seam never reads global location', () => {
+  const a = cohort('session', 'orca');
+  const b = cohort('session', 'claude-code');
+  const effective = effectiveScope(
+    { ...FINITE, cmp: 'cohorts', cohorts: { ca: a, cb: b } },
+    { cmp: 'period' }
+  );
+  assert.deepEqual(effective.cohorts, { ca: a, cb: b }, 'the ca–cd slots survive cleanPanelScope');
+  assert.equal(effective.cmp, 'cohorts', 'an explicit board compare mode beats the preset default');
+  const params = requestParams({ scope: effective, measure: 'cost_usd' });
+  assert.equal(params.get('cohort'), a);
+
+  const had = Object.prototype.hasOwnProperty.call(globalThis, 'location');
+  const prior = globalThis.location;
+  try {
+    globalThis.location = { search: `?ca=${encodeURIComponent(cohort('session', 'decoy'))}` };
+    const bare = scopeWithCohorts({ ...FINITE });
+    assert.equal(bare.cohorts, undefined, 'no cohort is recovered from location');
+    assert.equal(requestParams({ scope: { ...FINITE } }).get('cohort'), null);
+  } finally {
+    if (had) globalThis.location = prior;
+    else delete globalThis.location;
+  }
 });
 
 test('cohortParams sends the first valid slot, canonical, and names a malformed one', () => {
@@ -213,6 +239,55 @@ test('a cohort drives the panel requests, both populations render and baselines 
     const baselines = harness.api.state.requests.filter(item => /baselines/.test(item.path));
     assert.ok(baselines.length > 0, 'the quality panels read the contract baselines route');
     assert.equal(baselines.some(item => /[?&]cohort=/.test(item.search)), false);
+    await diagnostics.assertClean();
+  } finally {
+    if (browser) await browser.close();
+    await harness.close();
+  }
+});
+
+test('a second compare panel issues both cohort requests and compare plus split is small multiples', async t => {
+  const environment = loadBrowserEnvironment();
+  if (!environment.ok) { t.skip(environment.reason || SKIP_REASON); return; }
+  const harness = await startWorkspaceHarness();
+  harness.api.set({ p10: true });
+  let browser;
+  try {
+    browser = await launchBrowser(environment);
+    const page = await browser.newPage({ viewport: { width: 1280, height: 2600 } });
+    const diagnostics = await watchPage(page);
+
+    const a = cohort('session', 'orca');
+    const b = cohort('session', 'claude-code');
+    const query = new URLSearchParams({ win: '30d', cmp: 'cohorts', ca: a, cb: b });
+    harness.resetStats();
+    harness.api.state.requests.length = 0;
+    await page.goto(`${harness.origin}/b/compare?${query}`);
+    await settle(page);
+
+    const states = await page.evaluate(() => Object.fromEntries([...document.querySelectorAll('.workspace-panel')].map(panel => [panel.dataset.panel, panel.dataset.state])));
+    for (const id of ['dist-ranges', 'dist-hist', 'dist-ecdf', 'trend-lines', 'rank']) assert.equal(states[id], 'ready', `${id} is ready`);
+
+    const requests = harness.api.state.requests;
+    const callDistributions = requests.filter(item => /distribution/.test(item.path) && /grain=call/.test(item.search) && /dim=model/.test(item.search));
+    assert.ok(callDistributions.length >= 4, 'both distribution panels issued both sides: ' + JSON.stringify(callDistributions.map(r => r.search)));
+    const values = callDistributions.map(item => new URLSearchParams(item.search.slice(1)).get('cohort'));
+    assert.ok(values.includes(a), 'Cohort A is requested for a second panel');
+    assert.ok(values.includes(b), 'Cohort B is requested for a second panel');
+
+    const hist = await page.evaluate(() => document.querySelector('[data-panel="dist-hist"]').textContent);
+    assert.match(hist, /Cohort A/, 'the histogram names the first population');
+    assert.match(hist, /Cohort B/, 'the histogram names the second population');
+    assert.match(hist, /call in scope/, 'the histogram carries the typed population');
+
+    const splits = await page.evaluate(() => Object.fromEntries(
+      ['dist-ranges', 'dist-hist', 'dist-ecdf', 'trend-lines', 'rank'].map(id => [
+        id, document.querySelectorAll(`[data-panel="${id}"] [data-split]`).length
+      ])
+    ));
+    for (const [id, count] of Object.entries(splits)) assert.ok(count > 1, `${id} renders one small multiple per split value, saw ${count}`);
+
+    assert.ok(harness.stats.maxInFlight <= 4, `in-flight peaked at ${harness.stats.maxInFlight}`);
     await diagnostics.assertClean();
   } finally {
     if (browser) await browser.close();

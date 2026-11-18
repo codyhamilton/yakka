@@ -28,6 +28,16 @@ export function cleanPanelScope(value) {
   for (const key of Object.keys(value).sort()) {
     if (['win', 'from', 'to', 'tz'].includes(key)) continue;
     const raw = value[key];
+    if (key === 'cohorts') {
+      if (!isPlainObject(raw)) continue;
+      const cohorts = {};
+      for (const slot of ['ca', 'cb', 'cc', 'cd']) {
+        const text = cleanString(raw[slot]);
+        if (text) cohorts[slot] = text;
+      }
+      if (Object.keys(cohorts).length) out.cohorts = cohorts;
+      continue;
+    }
     if (Array.isArray(raw)) {
       const values = [...new Set(raw.map(cleanString).filter(Boolean))];
       if (values.length) out[key] = values;
@@ -99,14 +109,18 @@ export function mergePanelSpec(base, override) {
   });
 }
 
-// The scope a panel actually queries: panel overrides win over the board scope.
-// Filters from the board and the panel merge per key; the panel's values for a
-// key replace the board's values for that key.
+// The scope a panel actually queries: a panel override beats the board scope
+// field by field. A board-level `cmp` (an explicit URL compare mode) wins over a
+// preset's default compare so /b/compare?cmp=cohorts still compares cohorts;
+// without a board `cmp` the panel/preset default applies.
 export function effectiveScope(boardScope = {}, panelScope = {}) {
   const board = cleanPanelScope(boardScope);
   const panel = cleanPanelScope(panelScope);
   const out = { ...board };
-  for (const [key, value] of Object.entries(panel)) out[key] = value;
+  for (const [key, value] of Object.entries(panel)) {
+    if (key === 'cmp' && board.cmp) continue;
+    out[key] = value;
+  }
   return out;
 }
 

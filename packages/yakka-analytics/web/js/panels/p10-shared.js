@@ -113,31 +113,11 @@ export function chooserModel(panel, spec = {}, schema = null) {
 const COHORT_KEYS = ['ca', 'cb', 'cc', 'cd'];
 const COHORT_LABELS = { ca: 'A', cb: 'B', cc: 'C', cd: 'D' };
 
-// The board scope reaches a panel through the view-spec cleaner, which keeps
-// scalar/array overrides but drops the `cohorts` object. Recover the URL slots
-// at the request seam so a deep link still requeries; a scope that already
-// carries cohorts is untouched. Pure node checks have no `location`.
-function locationScope() {
-  const search = globalThis.location?.search || '';
-  if (!search) return null;
-  const params = new URLSearchParams(search);
-  const cohorts = {};
-  for (const key of COHORT_KEYS) {
-    const value = params.get(key);
-    if (value) cohorts[key] = value;
-  }
-  const cmp = ['off', 'cohorts', 'period'].includes(params.get('cmp')) ? params.get('cmp') : '';
-  return { cohorts, cmp };
-}
-
+// The panel already receives `cohorts` (and `cmp`) from its effective scope via
+// view-spec `cleanPanelScope`; no request seam reads global location state. The
+// helper stays as the single normalisation point for pure callers.
 export function scopeWithCohorts(scope = {}) {
-  if (scope.cohorts && Object.values(scope.cohorts).some(Boolean)) return scope;
-  const state = locationScope();
-  if (!state) return scope;
-  const merged = { ...scope };
-  if (Object.keys(state.cohorts).length) merged.cohorts = state.cohorts;
-  if (!scope.cmp && state.cmp) merged.cmp = state.cmp;
-  return merged;
+  return scope;
 }
 
 // Decode the four URL slots in A–D order. A slot that does not decode is named
