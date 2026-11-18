@@ -53,6 +53,29 @@ Wiring fixer for the 9-03/9-04 gates: committed as `5632a70` (`Wire Pulse panels
 
 Stub fixer for the 9-04 `/explore` gate: committed as `ff58a31` (`Add explore rows and cursor paging to the workspace stub`). `fixture.mjs` now provides 20,050 deterministic event rows with the CONTRACTS.md 7.2 fields and opaque offset cursors; `stub-api.mjs` serves `/v1/analytics/explore` with cursor/limit, `truncated`/`next`, unpriced rows and the existing empty/legacy scenes. No product code or assertion was changed.
 
+### `9-06-workspace-acceptance.md`
+
+- Outcome: the first run was **blocked**: it wrote and committed `d79ffac` (`Add the Phase 9 acceptance proof, blocked on five product defects`) with `tests/workspace/{acceptance,deep-links,degradation}.test.mjs` and the report, then refused to pass. It found five genuine product defects: the frame never gated on `panel.requires`; returned `errorState`s carried no Retry; the scheduler shared one `Response` so a duplicate query parsed `{}` and the legacy coverage message became `The server returned 400. (400)`; `coarsened` from the calendar was dropped by the badge model; and `<yk-lanes>` discarded the river row's `conversation_id`/`path`/`repo_id` values. The 9-06b fixer committed as `2e38ccd` (`Fix the five Phase 9 workspace acceptance defects`) gated board panels in `app.js`, attached the frame retry to returned error/cancelled states, cloned the resolved `Response` per scheduler waiter, folded result badge flags into the existing coverage model, and preserved `item.values` in `buildLanesModel`. The fresh 9-06 re-run then passed and rewrote the report with the verified verdict.
+- Surfaces: `tests/workspace/{acceptance,deep-links,degradation}.test.mjs`, `reports/9-06-workspace-acceptance.md`; the fixer also touched `web/js/{app,charts/yk-lanes,core/request-scheduler,panels/panel-frame}.js`, `tests/request-scheduler.test.mjs`, `tests/charts-cat/lanes.test.mjs`, `tests/workspace/{acceptance,capability}.test.mjs` and wrote `reports/9-06b-fixer.md`.
+- Deviations / unfinished: the fixer corrected one unowned expectation — `capability.test.mjs` asserted the pre-gating `ready` state for a panel with a missing feature; the correct state is now `unsupported`, with the drawer's missing-feature/source checks unchanged. The acceptance diagnostic check now permits only the deliberate 500/403 console entries. No product assertion was removed or weakened. `gate: none`.
+- Verification: the three proof specs → 7/7 tests and 70/70 named acceptance cases; workspace + codec suite 86/86; both chart kits 68/68; scheduler included in a 72/72 run; `git diff --check` clean. `artifact_feedback` on the brief and report returned delivered / screen pass (`jev-1.13.0`), no flags.
+
+### Phase 9 integrated verification — closed
+
+- Entry point → action → result, run independently on the closing tree over the committed fixture/stub:
+  - Start lists all 15 question paths; each opens its destination or names the missing capability, and the legacy `/schema` disables 10 with the feature-and-source reason. `/b/pulse` settles its five frames; river inspect opens session/artifact/execution provenance; the calendar brush previews without a push and zoom commits `from`/`to`; Follow off/probe/ack/failed-500 behaves and the watermark only advances on acknowledgement; chips, tray and typed populations render; an unsupported join and an ignored filter are named; unpriced values are never `$0`; the capability inspector explains provenance and the movers chooser follows `/schema`; a saved board round-trips; `/ledger` pages past 20,000; `/ops` distinguishes admin from member; every frame state and the coarsened badge are reached.
+  - All-history and a ten-year finite window survive reload, Back and Forward with tz, filter, panel override and cohort; unknown paths stay in the shell; `maxInFlight <= 4`. The `legacy` scene renders the gated panel `unsupported` while the rest show `range too wide` verbatim with retry and no window rewrite or page/CSP error.
+  - `PUBLIC_CANVAS_TEST_MODE=true NODE_OPTIONS=--max-old-space-size=8192 NODE_PATH=…/yakka/packages/yakka-analytics/node_modules node --test tests/workspace/*.test.mjs tests/*.test.mjs` → 86/86 pass; `node --test tests/charts-cat/*.test.mjs tests/charts-time/*.test.mjs` → 68/68 pass; `git diff --check` clean. Browser specs drive Chromium with real mouse/keyboard at `inspect()` coordinates and wait on `data-idle`/`data-state`; no fixed sleeps, no `/tmp`, no animation/timing assertion, and no test branch in product code.
+  - `artifact_feedback` on all six Phase 9 briefs and all six reports returned delivered / screen pass by `jev-1.13.0`, no flagged checks.
+
+Carried:
+
+- `gate: the exact artifact id lens grammar is unconfirmed; the tray uses repo_id+path (9-04).`
+- Cohort forwarding to panel requests is not wired; the cohort chip and `ca`–`cd` state stay visible and deep-link-restorable, and cohort-driven requery belongs to Phase 10's compare wiring.
+- Movers sparklines are labelled daily block text inside the table rather than a second chart element.
+- The 8-02 box-legend seam, `[data-shape]` selector scoping and the browser-shown diverging ramp remain Phase 10 or later.
+- `/schema` may publish the activity feature as `analytics_activity` while CONTRACTS.md 17.2 names `activity`; the client accepts both as an alias rather than silently resolving the contradiction.
+
 ## Phase 8 — Distribution and categorical chart kit
 
 The phase outcome is approach-known (SVG with the shared tooltip, legend and registry). This run uses the signed outcome and CONTRACTS.md 17.5 and 17.7 as the fixed yardstick. No new grain, join, route, dependency, gesture or contract is authorized. Phase 8 has no Units list in DESIGN.md and is more than one worker's work, so `refine` is dispatched as its own context; its verdict decides the units.
