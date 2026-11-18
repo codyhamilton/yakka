@@ -1,0 +1,58 @@
+/* Phase 12 workflow panels: process-shape bars and the plan timeline. Layout
+   only; every colour comes from the chart kit's CSS custom properties. */
+
+.p12-shape,
+.p12-timeline,
+.p12-timeline-missing {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.p12-shape-chart,
+.p12-timeline-chart {
+  width: 100%;
+  min-height: 240px;
+}
+
+.p12-shape-label,
+.p12-shape-basis,
+.p12-timeline-basis,
+.p12-timeline-note {
+  margin: 0;
+  font-size: 0.86rem;
+  color: var(--yk-ink-muted, #5b6470);
+}
+
+.p12-shape-label {
+  color: var(--yk-ink, inherit);
+  font-weight: 600;
+}
+
+.p12-chooser-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.86rem;
+}
+
+.p12-timeline-more {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.p12-timeline-more button {
+  font: inherit;
+  padding: 2px 10px;
+  border: 1px solid var(--yk-line, #cbd5e1);
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.p12-timeline-more button[disabled] {
+  cursor: progress;
+  opacity: 0.6;
+}

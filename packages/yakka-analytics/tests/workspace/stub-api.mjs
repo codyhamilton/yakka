@@ -1,7 +1,7 @@
 // Deterministic same-origin stub of the analytics API, generated from the
 // committed fixture manifest. Test-only: product code never imports this.
 
-import { makeSchema, activityProbe, activityList, summary, population, adminStatus, explorePage, COUNTS, p10Schema, p10Summary, p10Query, p10Distribution, p10Entities, p10Scores, p10ScoreSeries, p10Baselines, p11Schema, p11Scatter, p11ArtifactScatter, p11PlanScatter, p11TimeScatter, p11TimeAggregate, p11Scores, p11Entities, p11Aggregate, p11SessionList, p11Conversation, p11Entity } from './fixture.mjs';
+import { makeSchema, activityProbe, activityList, summary, population, adminStatus, explorePage, COUNTS, p10Schema, p10Summary, p10Query, p10Distribution, p10Entities, p10Scores, p10ScoreSeries, p10Baselines, p11Schema, p11Scatter, p11ArtifactScatter, p11PlanScatter, p11TimeScatter, p11TimeAggregate, p11Scores, p11Entities, p11Aggregate, p11SessionList, p11Conversation, p11Entity, p12Schema, p12PlanEntities, p12ExecutionEntities, p12PlanEvents } from './fixture.mjs';
 
 const json = (response, status, body) => {
   response.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
@@ -23,11 +23,13 @@ export function createStubApi() {
     sessionError: false,
     p10: false,
     p11: false,
+    p12: false,
     requests: []
   };
   let probes = 0;
 
   function schema() {
+    if (state.p12) return p12Schema();
     if (state.p11) return p11Schema();
     if (state.p10) return p10Schema();
     if (state.scenario === 'legacy') return makeSchema({ legacy: true });
@@ -80,6 +82,51 @@ export function createStubApi() {
     }
 
     if (path.startsWith('/v1/analytics/')) state.requests.push({ path, search: url.search || '' });
+
+    if (state.p12 && path.startsWith('/v1/analytics/')) {
+      if (path === '/v1/analytics/entities') {
+        const grain = query.get('grain') || 'plan';
+        if (grain === 'plan') {
+          json(response, 200, p12PlanEntities({
+            sort: query.get('sort') || 'last_ts:desc',
+            limit: Number(query.get('limit')) || 12,
+            cursor: query.get('cursor') || '',
+            filters: {
+              repo_id: query.getAll('repo_id'),
+              harness: query.getAll('harness'),
+              session_model: query.getAll('session_model')
+            }
+          }));
+          return true;
+        }
+        if (grain === 'execution') {
+          json(response, 200, p12ExecutionEntities({
+            plan: query.get('plan') || '',
+            repo_id: query.get('repo_id') || '',
+            limit: Number(query.get('limit')) || 12,
+            cursor: query.get('cursor') || ''
+          }));
+          return true;
+        }
+        json(response, 200, { grain, rows: [], population: population(grain, grain, 0) });
+        return true;
+      }
+      if (path === '/v1/analytics/entity') {
+        const grain = query.get('grain') || '';
+        const collection = query.get('collection') || 'events';
+        if (grain === 'plan' && collection === 'events') {
+          json(response, 200, p12PlanEvents({
+            repo_id: query.get('repo_id') || '',
+            plan: query.get('plan') || '',
+            limit: Number(query.get('limit')) || 500,
+            cursor: query.get('cursor') || ''
+          }));
+          return true;
+        }
+        json(response, 400, { error: 'unsupported plan collection', code: 'unsupported' });
+        return true;
+      }
+    }
 
     if (state.p11 && path.startsWith('/v1/analytics/')) {
       if (path === '/v1/analytics/entities') {

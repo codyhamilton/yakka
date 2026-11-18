@@ -27,12 +27,14 @@ import { registerQualityPanels } from './p10-quality.js';
 import { registerCostPanels } from './p10-cost.js';
 import { registerToolsPanels } from './p10-tools.js';
 import { registerScatterPanels } from './p11-scatter.js';
+import { registerP12WorkflowPanels } from './p12-workflow.js';
 
 export { RIVER_PANEL } from './river.js';
 export { PULSE_STRIPS_PANEL } from './pulse-strips.js';
 export { MOVERS_PANEL } from './movers.js';
 export { CALENDAR_PANEL } from './calendar.js';
 export { COVERAGE_PANEL } from './coverage.js';
+export { P12_WORKFLOW_PANEL_IDS, SHAPE_BARS_PANEL, PLAN_TIMELINE_PANEL } from './p12-workflow.js';
 
 // The Pulse preset is exactly the five ids in the design's preset table, one
 // shared scope. Registration is idempotent so a module reload never duplicates
@@ -59,3 +61,4 @@ registerQualityPanels();
 registerCostPanels();
 registerToolsPanels();
 registerScatterPanels();
+registerP12WorkflowPanels();

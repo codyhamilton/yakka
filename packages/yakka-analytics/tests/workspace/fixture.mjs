@@ -1184,3 +1184,297 @@ export function p11Fixture() {
     entity: p11Entity
   };
 }
+
+// ---------------------------------------------------------------------------
+// P12 scene: the workflow panels' plan, execution and event bodies. Opt-in
+// through the stub's `p12` flag; every default, P10 and P11 body stays
+// byte-identical. Plans are deterministic, page on an opaque cursor and keep
+// one plan with no executions and one all-unpriced associated cost.
+// ---------------------------------------------------------------------------
+
+export const P12 = {
+  start: Math.floor(Date.parse('2026-09-01T00:00:00Z') / 1000),
+  repos: ['repo-a', 'repo-b'],
+  planCount: 10
+};
+
+const P12_PLAN_MEASURES = [
+  'artifacts', 'versions', 'sessions', 'shared_sessions', 'associated_cost_usd', 'unpriced_calls',
+  'executions_complete', 'executions_unreported', 'executions_started', 'complete_share',
+  'design_score:clarity', 'design_score:structure', 'span_days', 'first_ts', 'last_ts'
+];
+
+const P12_PLAN_LENSES = ['repo_id', 'harness', 'session_model', 'id'];
+
+const P12_EXECUTION_MEASURES = [
+  'ts', 'session_cost_usd', 'brief_score:preview', 'brief_score:clean',
+  'report_score:preview', 'report_score:clean'
+];
+
+const P12_EXECUTION_LENSES = ['shape', 'plan', 'repo_id', 'harness', 'session_model', 'id'];
+
+const P12_ARTIFACT_MEASURES = [
+  'versions', 'distinct_writing_sessions', 'first_ts', 'last_ts', 'content_bytes',
+  'score:clarity', 'score:structure'
+];
+
+const P12_ARTIFACT_LENSES = ['kind', 'plan', 'repo_id', 'harness', 'session_model', 'source', 'id'];
+
+function p12PlanUnit(name) {
+  if (name === 'associated_cost_usd') return 'USD';
+  if (name === 'complete_share') return 'ratio';
+  if (name === 'first_ts' || name === 'last_ts') return 'epoch seconds';
+  if (name === 'span_days') return 'days';
+  if (name === 'artifacts') return 'artifacts';
+  if (name === 'versions') return 'versions';
+  if (name === 'sessions' || name === 'shared_sessions') return 'sessions';
+  if (name === 'unpriced_calls') return 'calls';
+  if (name.startsWith('executions_')) return 'executions';
+  return 'score';
+}
+
+export function p12Schema() {
+  const grain = (measures, lenses, { modes = ['list'], filters = lenses } = {}) => ({
+    measures: measures.slice(), lenses: lenses.slice(), modes: modes.slice(), filters: filters.slice(),
+    predicate: { measures: measures.slice(), lenses: lenses.slice(), undefined: [] }
+  });
+  return {
+    measures: P12_PLAN_MEASURES.map(name => ({ name, unit: p12PlanUnit(name), dims: [] })),
+    buckets: ['none', 'hour', 'day', 'week', 'month', 'year'],
+    resolutions: { auto: true, year: true, multi_year_steps: [2, 5, 10, 20, 50, 100] },
+    // A small page_max lets the suite exercise both collections' second page
+    // without loading a thousand rows, and keeps the process-shape top honest.
+    budgets: {
+      max_cells: 20000, deadline_s: 30, top_max: 100, page_max: 4, scatter_points: 5000,
+      content_bytes: 16777216, explore_page_max: 500, heavy_read_concurrency: 4,
+      scope_elements: 64, scope_values: 64, value_bytes: { default: 256, id: 1024 }
+    },
+    grains: {
+      plan: grain(P12_PLAN_MEASURES, P12_PLAN_LENSES),
+      execution: grain(P12_EXECUTION_MEASURES, P12_EXECUTION_LENSES, { filters: ['plan', 'repo_id'] }),
+      artifact: grain(P12_ARTIFACT_MEASURES, P12_ARTIFACT_LENSES),
+      content: grain(['score'], ['harness', 'session_model', 'repo_id', 'plan', 'scorer', 'band', 'id'])
+    },
+    lenses: {
+      harness: { grains: ['plan', 'execution', 'artifact'] },
+      session_model: { grains: ['plan', 'execution', 'artifact'] },
+      id: { identity: true }
+    },
+    coverage: {
+      first_ts: '2026-09-01T00:00:00Z',
+      last_ts: '2026-11-01T00:00:00Z',
+      last_received_at: '2026-11-01T00:00:00Z',
+      scorer_configured: true,
+      pending: 0,
+      compaction: 'none'
+    },
+    features: { ...FEATURES }
+  };
+}
+
+const P12_PLAN_SPECS = [
+  ['repo-a', '20', { complete: 3, unreported: 1, started: 1, cost: 5.5, unpriced: 2, shared: 1, flags: { shared_session: true } }],
+  ['repo-a', '21', { complete: 0, unreported: 0, started: 0, cost: 0, unpriced: 0, shared: 0, flags: { no_executions: true } }],
+  ['repo-b', '22', { complete: 1, unreported: 0, started: 0, cost: null, unpriced: 5, shared: 0, flags: { associated_cost_lower_bound: true, associated_cost_null_reason: 'all_unpriced' } }],
+  ['repo-a', '23', { complete: 0, unreported: 2, started: 0, cost: 1.25, unpriced: 0, shared: 1, flags: { shared_session: true } }],
+  ['repo-b', '24', { complete: 2, unreported: 0, started: 1, cost: 3, unpriced: 0, shared: 0, flags: {} }],
+  ['repo-a', '25', { complete: 1, unreported: 1, started: 1, cost: 0, unpriced: 0, shared: 0, flags: {} }],
+  ['repo-b', '26', { complete: 4, unreported: 0, started: 0, cost: 9.5, unpriced: 0, shared: 0, flags: {} }],
+  ['repo-a', '27', { complete: 0, unreported: 0, started: 2, cost: 2, unpriced: 1, shared: 0, flags: { associated_cost_lower_bound: true } }],
+  ['repo-b', '28', { complete: 2, unreported: 1, started: 0, cost: 4.25, unpriced: 0, shared: 0, flags: {} }],
+  ['repo-a', '29', { complete: 1, unreported: 0, started: 0, cost: 1, unpriced: 0, shared: 0, flags: {} }]
+];
+
+export function p12PlanRows() {
+  return P12_PLAN_SPECS.map(([repo, plan, spec], index) => {
+    const total = spec.complete + spec.unreported + spec.started;
+    const last = P12.start + (12 - index) * 86400;
+    const first = last - (index + 2) * 3600;
+    const flags = { ...spec.flags };
+    if (total === 0) flags.complete_share_null_reason = 'no_executions';
+    return {
+      id: { repo_id: repo, plan },
+      m: {
+        artifacts: 3 + (index % 3),
+        versions: 5 + index,
+        sessions: 3 + (index % 4),
+        shared_sessions: spec.shared,
+        associated_cost_usd: spec.cost,
+        unpriced_calls: spec.unpriced,
+        executions_complete: spec.complete,
+        executions_unreported: spec.unreported,
+        executions_started: spec.started,
+        complete_share: total ? spec.complete / total : null,
+        'design_score:clarity': total ? 0.8 - index * 0.01 : null,
+        'design_score:structure': total ? 0.7 - index * 0.01 : null,
+        span_days: (last - first) / 86400,
+        first_ts: first,
+        last_ts: last
+      },
+      l: {
+        repo_id: repo,
+        harness: index % 2 === 0 ? 'orca' : 'claude-code',
+        session_model: index % 2 === 0 ? 'claude' : 'gpt'
+      },
+      flags
+    };
+  });
+}
+
+function p12Encode(payload) {
+  return Buffer.from(JSON.stringify(payload), 'utf8').toString('base64url');
+}
+
+function p12Decode(text) {
+  if (!text) return {};
+  try { return JSON.parse(Buffer.from(String(text), 'base64url').toString('utf8')); } catch { return {}; }
+}
+
+function p12Page(rows, limit, cursor) {
+  const offset = Math.max(0, Number(p12Decode(cursor).offset) || 0);
+  const size = Math.max(1, Math.floor(Number(limit) || 12));
+  const page = rows.slice(offset, offset + size);
+  const next = offset + size < rows.length ? p12Encode({ offset: offset + size }) : null;
+  return { page, next };
+}
+
+function p12Sort(rows, field, direction) {
+  const sign = direction === 'asc' ? 1 : -1;
+  return rows.slice().sort((a, b) => {
+    const av = a.m?.[field];
+    const bv = b.m?.[field];
+    const an = av === null || av === undefined;
+    const bn = bv === null || bv === undefined;
+    if (an && bn) return String(a.id.repo_id).localeCompare(b.id.repo_id) || String(a.id.plan).localeCompare(b.id.plan);
+    if (an) return 1;
+    if (bn) return -1;
+    if (av !== bv) return sign * (av - bv);
+    return String(a.id.repo_id).localeCompare(b.id.repo_id) || String(a.id.plan).localeCompare(b.id.plan);
+  });
+}
+
+export function p12PlanEntities({ sort = 'executions_unreported:desc', limit = 12, cursor = '', filters = {} } = {}) {
+  let rows = p12PlanRows();
+  const lens = name => Array.isArray(filters[name]) ? filters[name] : (filters[name] ? [filters[name]] : []);
+  const repos = lens('repo_id');
+  const harnesses = lens('harness');
+  const models = lens('session_model');
+  if (repos.length) rows = rows.filter(row => repos.includes(row.id.repo_id));
+  if (harnesses.length) rows = rows.filter(row => harnesses.includes(row.l.harness));
+  if (models.length) rows = rows.filter(row => models.includes(row.l.session_model));
+  const at = String(sort).lastIndexOf(':');
+  const field = at >= 0 ? sort.slice(0, at) : 'last_ts';
+  const direction = at >= 0 ? sort.slice(at + 1) : 'desc';
+  rows = p12Sort(rows, field, direction);
+  const scopeN = rows.length;
+  const { page, next } = p12Page(rows, limit, cursor);
+  const noExecutions = rows.filter(row => row.flags?.no_executions).length;
+  return {
+    grain: 'plan', sort, rows: page, next,
+    population: {
+      grain: 'plan', unit: 'plan', scope_n: scopeN, cohort_n: scopeN, eligible_n: scopeN,
+      returned_n: page.length, missing_by_reason: noExecutions ? { no_executions: noExecutions } : {}, relation: null
+    }
+  };
+}
+
+function p12ExecutionBase() {
+  const start = P12.start;
+  return [
+    { repo: 'repo-a', plan: '20', conv: 'conv-shared', brief: 'docs/plans/20-analytics-reset/briefs/12-01.md', shape: 'complete', at: start + 9000, cost: 0.25, flags: {} },
+    { repo: 'repo-a', plan: '20', conv: 'conv-20b', brief: 'docs/plans/20-analytics-reset/briefs/12-02.md', shape: 'complete', at: start + 8000, cost: 4, flags: { session_cost_lower_bound: true } },
+    { repo: 'repo-a', plan: '20', conv: 'conv-20c', brief: 'docs/plans/20-analytics-reset/briefs/12-03.md', shape: 'complete', at: start + 7000, cost: null, flags: { session_cost_null_reason: 'all_unpriced' } },
+    { repo: 'repo-a', plan: '20', conv: 'conv-20d', brief: 'docs/plans/20-analytics-reset/briefs/12-04.md', shape: 'unreported', at: start + 6000, cost: 1.5, flags: {} },
+    { repo: 'repo-a', plan: '20', conv: 'conv-20e', brief: 'docs/plans/20-analytics-reset/briefs/12-05.md', shape: 'started', at: start + 5000, cost: 2, flags: {} },
+    { repo: 'repo-a', plan: '23', conv: 'conv-shared', brief: 'docs/plans/20-analytics-reset/briefs/23-01.md', shape: 'complete', at: start + 4000, cost: 0.75, flags: {} }
+  ];
+}
+
+export function p12ExecutionRows() {
+  return p12ExecutionBase().map((row, index) => ({
+    id: { repo_id: row.repo, conversation_id: row.conv, brief_path: row.brief },
+    m: {
+      ts: row.at,
+      session_cost_usd: row.cost,
+      'brief_score:preview': 0.6 + index * 0.02,
+      'brief_score:clean': 0.7 + index * 0.02,
+      'report_score:preview': 0.5 + index * 0.02,
+      'report_score:clean': 0.75
+    },
+    l: {
+      shape: row.shape, plan: row.plan, repo_id: row.repo,
+      harness: row.repo === 'repo-a' ? 'orca' : 'claude-code',
+      session_model: row.repo === 'repo-a' ? 'claude' : 'gpt'
+    },
+    flags: { ...row.flags }
+  }));
+}
+
+export function p12ExecutionEntities({ plan = '', repo_id = '', limit = 12, cursor = '' } = {}) {
+  let rows = p12ExecutionRows();
+  if (plan) rows = rows.filter(row => row.l.plan === plan);
+  if (repo_id) rows = rows.filter(row => row.l.repo_id === repo_id);
+  rows = rows.slice().sort((a, b) => (b.m.ts - a.m.ts)
+    || String(a.id.conversation_id).localeCompare(b.id.conversation_id)
+    || String(a.id.brief_path).localeCompare(b.id.brief_path));
+  const scopeN = rows.length;
+  const { page, next } = p12Page(rows, limit, cursor);
+  return {
+    grain: 'execution', rows: page, next,
+    population: {
+      grain: 'execution', unit: 'repo_id,conversation_id,brief_path', scope_n: scopeN,
+      cohort_n: scopeN, eligible_n: scopeN, returned_n: page.length, missing_by_reason: {}, relation: null
+    }
+  };
+}
+
+function p12EventBase() {
+  const s = P12.start;
+  const plan20 = [
+    { path: 'docs/plans/20-analytics-reset/DESIGN.md', conv: 'conv-shared', event: 'write', type: 'artifact_version', at: s + 9800 },
+    { path: 'docs/plans/20-analytics-reset/DESIGN.md', conv: 'conv-shared', event: 'write', type: 'artifact_version', at: s + 9400 },
+    { path: 'docs/plans/20-analytics-reset/briefs/12-01.md', conv: 'conv-shared', event: 'write', type: 'artifact_version', at: s + 8800 },
+    { path: 'docs/plans/20-analytics-reset/briefs/12-02.md', conv: 'conv-20b', event: 'write', type: 'artifact_version', at: s + 8200 },
+    { path: 'docs/plans/20-analytics-reset/reports/12-01.md', conv: 'conv-20b', event: 'write', type: 'artifact_version', at: s + 7600 },
+    { path: 'docs/plans/20-analytics-reset/reports/12-02.md', conv: 'conv-20c', event: 'write', type: 'artifact_version', at: s + 7000 },
+    { path: '', conv: 'conv-shared', event: 'commit', type: 'commit', at: s + 9100 },
+    { path: 'docs/plans/20-analytics-reset/briefs/12-03.md', conv: 'conv-20c', event: 'write', type: 'artifact_version', at: s + 6400 },
+    { path: 'docs/plans/20-analytics-reset/reports/12-03.md', conv: 'conv-20d', event: 'write', type: 'artifact_version', at: s + 5800 }
+  ];
+  const plan23 = [
+    { path: 'docs/plans/20-analytics-reset/briefs/23-01.md', conv: 'conv-shared', event: 'write', type: 'artifact_version', at: s + 4200 },
+    { path: 'docs/plans/20-analytics-reset/reports/23-01.md', conv: 'conv-shared', event: 'write', type: 'artifact_version', at: s + 3800 }
+  ];
+  return { 'repo-a|20': plan20, 'repo-a|23': plan23 };
+}
+
+export function p12PlanEvents({ repo_id = '', plan = '', limit = 500, cursor = '' } = {}) {
+  const all = p12EventBase()[`${repo_id}|${plan}`] || [];
+  const rows = all
+    .map((row, index) => ({ row, index }))
+    .sort((a, b) => (b.row.at - a.row.at) || String(a.row.type).localeCompare(b.row.type) || (a.index - b.index))
+    .map(({ row, index }) => ({
+      repo_id, plan, path: row.path, conversation_id: row.conv,
+      event: row.event, event_type: row.type, ts: row.at, rowid: index
+    }));
+  const scopeN = rows.length;
+  const { page, next } = p12Page(rows, limit, cursor);
+  return {
+    grain: 'plan', id: { repo_id, plan }, collection: 'events', rows: page, next,
+    population: {
+      grain: 'plan_events', unit: 'events', scope_n: scopeN, cohort_n: scopeN,
+      eligible_n: scopeN, returned_n: page.length, missing_by_reason: {}
+    }
+  };
+}
+
+export function p12Fixture() {
+  return {
+    schema: p12Schema(),
+    planRows: p12PlanRows,
+    planEntities: p12PlanEntities,
+    executionRows: p12ExecutionRows,
+    executionEntities: p12ExecutionEntities,
+    planEvents: p12PlanEvents
+  };
+}
