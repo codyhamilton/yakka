@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/codyhamilton/yakka/packages/yakka/internal/review"
 )
@@ -249,9 +250,68 @@ func (s *Server) mcpReviewChange(ctx context.Context, tenant string, ts *tenantS
 	if req.Capture.Diff == "" {
 		return nil, errors.New("capture_unsupported")
 	}
-	receipt, err := review.Run(ctx, ts.t, tenant, req, review.RunConfig{Availability: s.reviewAvailability(), Reservations: s.reviewReservations, Endpoint: s.opts.ReviewEndpoint})
+	finish, ok := s.beginDetachedReview(nil)
+	if !ok {
+		return nil, errors.New("shutting down")
+	}
+	owned := false
+	defer func() {
+		if !owned {
+			finish()
+		}
+	}()
+	callCtx, stopCall := context.WithCancel(ctx)
+	defer stopCall()
+	go func() {
+		select {
+		case <-s.ctx.Done():
+			stopCall()
+		case <-callCtx.Done():
+		}
+	}()
+	job, receipt, err := review.Start(callCtx, ts.t, tenant, req, review.RunConfig{
+		Availability: s.reviewAvailability(),
+		Reservations: s.reviewReservations,
+		Endpoint:     s.opts.ReviewEndpoint,
+		Lifetime:     s.ctx,
+		OnFinish:     finish,
+	})
+	owned = job != nil
 	if err != nil {
 		return nil, err
 	}
-	return receipt, nil
+	if job == nil {
+		return receipt, nil
+	}
+	// Existing MCP callers expect a finished receipt. Wait in-process for the
+	// detached attempt, but never cancel it: if the budget runs out we return the
+	// review id and its current status and the work keeps running.
+	wait := s.reviewWait(ctx)
+	timer := time.NewTimer(wait)
+	defer timer.Stop()
+	select {
+	case <-job.Done():
+	case <-ctx.Done():
+	case <-timer.C:
+	}
+	return job.Snapshot(), nil
+}
+
+// reviewWait is the in-process MCP wait budget. It stops slightly before the tool
+// call deadline so the receipt can still be returned instead of a framework
+// timeout, and it never shortens or lengthens the declared 630s ceiling.
+func (s *Server) reviewWait(ctx context.Context) time.Duration {
+	wait := s.opts.ReviewWait
+	if wait <= 0 {
+		wait = time.Duration(reviewMCPTimeoutS) * time.Second
+	}
+	if deadline, ok := ctx.Deadline(); ok {
+		if remaining := time.Until(deadline) - time.Second; remaining < wait {
+			wait = remaining
+		}
+	}
+	if wait < 0 {
+		wait = 0
+	}
+	return wait
 }

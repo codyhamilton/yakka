@@ -154,6 +154,9 @@ func (t *Tenant) ReviewPage(ctx context.Context, f ReviewRecordFilter, highWater
 // JSON rows out of the index (evaluating json_extract on them would fail the write).
 const reviewExecutionIndex = `CREATE INDEX IF NOT EXISTS review_runs_execution_key ON review_runs(repo_id, json_extract(raw,'$.key')) WHERE json_valid(raw)`
 
+// reviewIDIndex supports direct polling lookup of one review by its public id.
+const reviewIDIndex = `CREATE INDEX IF NOT EXISTS review_runs_review_id ON review_runs(json_extract(raw,'$.review_id')) WHERE json_valid(raw)`
+
 // ensureReviewExecutionIndex creates the lookup index for tables that predate it. The writer owns
 // schema changes; a lookup only submits work when the index is actually missing.
 func (t *Tenant) ensureReviewExecutionIndex(ctx context.Context) error {
@@ -166,6 +169,21 @@ func (t *Tenant) ensureReviewExecutionIndex(ctx context.Context) error {
 	}
 	return t.submit(ctx, func(tx *sql.Tx) error {
 		_, err := tx.Exec(reviewExecutionIndex)
+		return err
+	})
+}
+
+// ensureReviewIDIndex creates the polling lookup index for tables that predate it.
+func (t *Tenant) ensureReviewIDIndex(ctx context.Context) error {
+	var n int
+	if err := t.rdb.QueryRowContext(ctx, `SELECT count(*) FROM sqlite_master WHERE type='index' AND name='review_runs_review_id'`).Scan(&n); err != nil {
+		return err
+	}
+	if n > 0 {
+		return nil
+	}
+	return t.submit(ctx, func(tx *sql.Tx) error {
+		_, err := tx.Exec(reviewIDIndex)
 		return err
 	})
 }
@@ -229,7 +247,11 @@ func (t *Tenant) ReviewByExecutionKey(ctx context.Context, repo, key string) (Re
 				continue
 			}
 			// Preflight and budget refusals are persisted for audit, but no review
-			// call ran. They must not turn a later eligible request into a cache hit.
+			// call ran. An in-flight row, by contrast, must block a second start:
+			// return it so the caller resolves to the existing id without spending.
+			if m.Status == "pending" || m.Status == "running" {
+				return row, true, nil
+			}
 			if len(m.Attempts) == 0 {
 				continue
 			}
@@ -249,6 +271,105 @@ func (t *Tenant) ReviewByExecutionKey(ctx context.Context, repo, key string) (Re
 		return *audit, true, nil
 	}
 	return ReviewRecord{}, false, nil
+}
+
+// ReviewByID returns the tenant-local review_run with the given public review id. It is the
+// polling surface for an asynchronous POST. In-flight rows are returned unchanged so their
+// pending/running status is visible. Another tenant's row is invisible because each tenant owns
+// its own database.
+func (t *Tenant) ReviewByID(ctx context.Context, reviewID string) (ReviewRecord, bool, error) {
+	if reviewID == "" {
+		return ReviewRecord{}, false, nil
+	}
+	exists, err := t.reviewRunsExist(ctx)
+	if err != nil {
+		return ReviewRecord{}, false, err
+	}
+	if !exists {
+		return ReviewRecord{}, false, nil
+	}
+	if err := t.ensureReviewIDIndex(ctx); err != nil {
+		return ReviewRecord{}, false, err
+	}
+	for _, field := range []string{"review_id", "id"} {
+		q := `SELECT conversation_id,repo_id,ts,raw,rowid FROM review_runs WHERE json_valid(raw) AND json_extract(raw,'$.` + field + `')=? ORDER BY ts DESC,rowid DESC LIMIT 1`
+		rows, err := t.rdb.QueryContext(ctx, q, reviewID)
+		if err != nil {
+			return ReviewRecord{}, false, err
+		}
+		found := false
+		var out ReviewRecord
+		if rows.Next() {
+			if err := rows.Scan(&out.ConversationID, &out.RepoID, &out.TS, &out.Raw, &out.InsertionID); err != nil {
+				rows.Close()
+				return ReviewRecord{}, false, err
+			}
+			found = true
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return ReviewRecord{}, false, err
+		}
+		rows.Close()
+		if found {
+			return out, true, nil
+		}
+	}
+	return ReviewRecord{}, false, nil
+}
+
+// FinalizeReviewRun replaces the in-flight review_run row for reviewID in place, preserving its
+// insertion slot so list and GET-by-id never show two rows for one review. The canonical row hash
+// changes with the final status, so this is an update keyed by the public review id rather than an
+// insert-or-ignore append. It reports whether a matching in-flight row existed.
+func (t *Tenant) FinalizeReviewRun(ctx context.Context, reviewID string, raw []byte) (bool, error) {
+	if reviewID == "" || len(raw) == 0 {
+		return false, fmt.Errorf("store: review finalize needs review id and raw fact")
+	}
+	canon, err := keys.Canonical(raw)
+	if err != nil {
+		return false, fmt.Errorf("store: review finalize canonical: %w", err)
+	}
+	rowHash := keys.ContentHash(canon)
+	var meta struct {
+		ConversationID string  `json:"conversation_id"`
+		RepoID         string  `json:"repo_id"`
+		TS             float64 `json:"ts"`
+	}
+	if err := json.Unmarshal(canon, &meta); err != nil {
+		return false, fmt.Errorf("store: review finalize metadata: %w", err)
+	}
+	if meta.ConversationID == "" || meta.RepoID == "" {
+		return false, fmt.Errorf("store: review finalize needs conversation_id and repo_id")
+	}
+	updated := false
+	err = t.submit(ctx, func(tx *sql.Tx) error {
+		if _, err := tx.Exec(`CREATE TABLE IF NOT EXISTS review_runs (
+			row_hash TEXT PRIMARY KEY, conversation_id TEXT NOT NULL, repo_id TEXT NOT NULL,
+			ts REAL NOT NULL, raw BLOB NOT NULL)`); err != nil {
+			return err
+		}
+		for _, idx := range []string{reviewExecutionIndex, reviewIDIndex} {
+			if _, err := tx.Exec(idx); err != nil {
+				return err
+			}
+		}
+		res, err := tx.Exec(`UPDATE review_runs SET row_hash=?,conversation_id=?,repo_id=?,ts=?,raw=? WHERE json_valid(raw) AND json_extract(raw,'$.review_id')=?`,
+			rowHash, meta.ConversationID, meta.RepoID, meta.TS, canon, reviewID)
+		if err != nil {
+			return err
+		}
+		n, err := res.RowsAffected()
+		if err != nil {
+			return err
+		}
+		updated = n > 0
+		return nil
+	})
+	if err != nil {
+		return false, err
+	}
+	return updated, nil
 }
 
 // reviewRowsByJSONField returns every row for repo whose JSON field equals value, newest first.
@@ -291,6 +412,9 @@ func (t *Tenant) AppendReviewRuns(ctx context.Context, rows []FactRow) ([]bool, 
 			return err
 		}
 		if _, err := tx.Exec(reviewExecutionIndex); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(reviewIDIndex); err != nil {
 			return err
 		}
 		st, err := tx.Prepare(`INSERT OR IGNORE INTO review_runs(row_hash,conversation_id,repo_id,ts,raw) VALUES(?,?,?,?,?)`)

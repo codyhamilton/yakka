@@ -60,7 +60,9 @@ The Go server owns the definition, prompt/policy, criteria resolution, provider 
 actual-cost recording and tenant-local records, through the same orchestrator as `POST /v1/reviews`. The
 Python shim alone captures a bounded diff and omission manifest, scans before egress and forwards
 declared local context; the server rescans. Machines use their existing Yakka login and need no
-provider key. `read_write` scope and `readOnlyHint:false` disclose the server-side provider
+provider key. For stored work the HTTP POST detaches the provider attempt, returns `202` with the
+review id, and clients poll `GET /v1/reviews/{id}`; `review_change` waits in-process up to its
+630-second budget and still returns the finished receipt. `read_write` scope and `readOnlyHint:false` disclose the server-side provider
 call-and-record boundary; the tool declares 630 seconds (one 10-minute provider attempt plus 30 seconds of
 headroom) and no local actions. The default MCP call timeout remains 20 seconds, with `YAKKA_MCP_MAX_CALL`
 configurable from 20 through 630 seconds. Receipts omit captured diff content;

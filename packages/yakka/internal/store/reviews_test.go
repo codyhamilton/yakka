@@ -250,6 +250,53 @@ func TestReviewByExecutionKeyFindsOldRowAndCreatesIndex(t *testing.T) {
 	}
 }
 
+func TestFinalizeReviewRunReplacesInFlightRowAndReviewByIDIsTenantScoped(t *testing.T) {
+	root := t.TempDir()
+	a := openReviewTenant(t, filepath.Join(root, "a"))
+	b := openReviewTenant(t, filepath.Join(root, "b"))
+	ctx := context.Background()
+	running := map[string]any{
+		"id": "rid", "review_id": "rid", "key": "key-rid", "type": "review_run", "repo_id": "r",
+		"kind": "adhoc", "capture_id": "cap-rid", "status": "running", "attempts": []any{},
+		"ts": float64(10), "conversation_id": "review:rid",
+	}
+	raw, _ := json.Marshal(running)
+	if _, err := a.AppendReviewRuns(ctx, []FactRow{{RowHash: keys.ContentHash(raw), Type: "review_run", ConversationID: "review:rid", RepoID: "r", TS: 10, Raw: raw}}); err != nil {
+		t.Fatal(err)
+	}
+	row, found, err := a.ReviewByID(ctx, "rid")
+	if err != nil || !found || !strings.Contains(string(row.Raw), `"status":"running"`) {
+		t.Fatalf("in-flight lookup found=%v raw=%s err=%v", found, row.Raw, err)
+	}
+	if _, found, err := b.ReviewByID(ctx, "rid"); err != nil || found {
+		t.Fatalf("foreign tenant lookup found=%v err=%v", found, err)
+	}
+	final := map[string]any{
+		"id": "rid", "review_id": "rid", "key": "key-rid", "type": "review_run", "repo_id": "r",
+		"kind": "adhoc", "capture_id": "cap-rid", "status": "ok",
+		"attempts": []any{map[string]any{"number": 1, "status": "ok", "input_tokens": 7, "output_tokens": 3}},
+		"ts":       float64(20), "conversation_id": "review:rid", "input_tokens": 7, "output_tokens": 3,
+	}
+	finalRaw, _ := json.Marshal(final)
+	updated, err := a.FinalizeReviewRun(ctx, "rid", finalRaw)
+	if err != nil || !updated {
+		t.Fatalf("finalize updated=%v err=%v", updated, err)
+	}
+	rows, err := a.ReviewRecords(ctx, ReviewRecordFilter{RepoID: "r", Limit: 10})
+	if err != nil || len(rows) != 1 || !strings.Contains(string(rows[0].Raw), `"status":"ok"`) {
+		t.Fatalf("rows=%d err=%v", len(rows), err)
+	}
+	if row, found, err := a.ReviewByID(ctx, "rid"); err != nil || !found || !strings.Contains(string(row.Raw), `"input_tokens":7`) {
+		t.Fatalf("terminal lookup found=%v raw=%s err=%v", found, row.Raw, err)
+	}
+	if _, found, err := a.ReviewByExecutionKey(ctx, "r", "key-rid"); err != nil || !found {
+		t.Fatalf("finalized execution lookup found=%v err=%v", found, err)
+	}
+	if updated, err := a.FinalizeReviewRun(ctx, "missing", finalRaw); err != nil || updated {
+		t.Fatalf("missing finalize updated=%v err=%v", updated, err)
+	}
+}
+
 func TestReviewPageTagFiltersAreConjunctive(t *testing.T) {
 	tn := openReviewTenant(t, filepath.Join(t.TempDir(), "a"))
 	ctx := context.Background()
