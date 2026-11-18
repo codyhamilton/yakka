@@ -3,14 +3,16 @@
 
 .p12-shape,
 .p12-timeline,
-.p12-timeline-missing {
+.p12-timeline-missing,
+.p12-rank {
   display: flex;
   flex-direction: column;
   gap: 8px;
 }
 
 .p12-shape-chart,
-.p12-timeline-chart {
+.p12-timeline-chart,
+.p12-rank-chart {
   width: 100%;
   min-height: 240px;
 }
@@ -18,10 +20,27 @@
 .p12-shape-label,
 .p12-shape-basis,
 .p12-timeline-basis,
-.p12-timeline-note {
+.p12-timeline-note,
+.p12-rank-basis,
+.p12-rank-note {
   margin: 0;
   font-size: 0.86rem;
   color: var(--yk-ink-muted, #5b6470);
+}
+
+.p12-rank-banner {
+  margin: 0;
+  padding: 6px 10px;
+  border-left: 3px solid var(--yk-warn, #b45309);
+  background: var(--yk-warn-bg, rgba(180, 83, 9, 0.08));
+  font-size: 0.86rem;
+}
+
+.p12-rank-chooser-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.86rem;
 }
 
 .p12-shape-label {

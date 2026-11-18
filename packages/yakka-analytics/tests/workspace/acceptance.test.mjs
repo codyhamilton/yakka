@@ -168,9 +168,13 @@ test('every Start question path opens its destination or names the missing capab
     '/b/quality': ['score-ranges', 'score-trend', 'score-strips', 'band-mix'],
     '/b/tools': ['mix', 'treemap', 'rank', 'rhythm']
   };
+  const p12Panels = {
+    '/b/workflow': ['shape-bars', 'plan-timeline', 'rank', 'scatter-plan', 'river']
+  };
   for (const link of links) {
     const target = new URL(`${harness.origin}${link.href}`).pathname;
     if (p10Panels[target]) await control(harness.origin, { p10: true });
+    if (p12Panels[target]) await control(harness.origin, { p12: true });
     await page.goto(`${harness.origin}${link.href}`);
     await settleShell(page);
     const path = new URL(page.url()).pathname;
@@ -183,15 +187,18 @@ test('every Start question path opens its destination or names the missing capab
     } else if (p10Panels[path]) {
       await settlePanels(page, p10Panels[path]);
       await control(harness.origin, { p10: false });
+    } else if (p12Panels[path]) {
+      await settlePanels(page, p12Panels[path]);
+      await control(harness.origin, { p12: false });
     }
     const heading = await page.evaluate(() => document.querySelector('#app h1')?.textContent || '');
     assert.notEqual(heading, 'Not found', `${link.text} (${link.href}) is not a dead link`);
-    if (path === '/b/workflow' || path === '/plans') {
+    if (path === '/plans') {
       assert.match(heading.length ? await page.locator('main').innerText() : '', /Delivered in Phase 12/, `${path} names its delivering phase`);
       named.push(path);
     }
   }
-  record('every named later destination resolves through the shell', named.length, 2);
+  record('every named later destination resolves through the shell', named.length, 1);
 
   await control(harness.origin, { scenario: 'legacy' });
   await page.goto(`${harness.origin}/`);

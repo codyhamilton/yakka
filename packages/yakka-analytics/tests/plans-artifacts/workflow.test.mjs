@@ -29,7 +29,7 @@ function shapePanelTotal(rows, plan) {
   return stacked.find(item => item.key === plan);
 }
 
-test('both panels register idempotently and the workflow preset stays named', () => {
+test('both panels register idempotently and 12-02 delivers the workflow board', () => {
   assert.deepEqual(P12_WORKFLOW_PANEL_IDS, ['shape-bars', 'plan-timeline']);
   assert.equal(registerP12WorkflowPanels(), true);
   assert.equal(registerP12WorkflowPanels(), true);
@@ -45,7 +45,7 @@ test('both panels register idempotently and the workflow preset stays named', ()
   assert.deepEqual(PLAN_TIMELINE_PANEL.charts, ['lanes']);
   assert.equal(PLAN_TIMELINE_PANEL.table, true);
   const workflow = listPresets().find(preset => preset.id === 'workflow');
-  assert.ok(workflow && workflow.panels.length === 0, 'the workflow preset is 12-02 work');
+  assert.deepEqual(workflow.panels, ['shape-bars', 'plan-timeline', 'rank', 'scatter-plan', 'river']);
 });
 
 test('plan measures map to one stacked row with complete_share null on no_executions', () => {

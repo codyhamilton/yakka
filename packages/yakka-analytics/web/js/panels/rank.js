@@ -5,10 +5,14 @@
 
 import '../charts/yk-bars.js';
 import { cancelledState, emptyState, errorState, unsupportedState } from '../core/panel-state.js';
+import { canonicalPanelSpec } from '../core/view-spec.js';
+import { formatCount, formatMoney } from '../charts/formatters.js';
 import { currentWindow, previousWindow, table } from './pulse-strips.js';
+import { canonicalRowKey } from './scatter-shared.js';
+import { planDestination, planIdentity } from './scatter-plan.js';
 import {
-  comparisonPlan, comparisonSummary, ensureP10Styles, honestJoinGuard, measureMeta, populationLine, rankRows,
-  requestParams, whenPanelBody, whenPanelSlot, renderChooser, windowParams
+  cohortParams, comparisonPlan, comparisonSummary, ensureP10Styles, honestJoinGuard, measureMeta,
+  populationLine, rankRows, requestParams, schemaGrain, whenPanelBody, whenPanelSlot, renderChooser, windowParams
 } from './p10-shared.js';
 
 const PERIOD_UNSUPPORTED = 'Choose a finite period to compare periods.';
@@ -50,7 +54,352 @@ export function slopeRows(currentBody, previousBody, measure, split) {
   };
 }
 
+// --- Plan-grain mode ------------------------------------------------------
+// Plan mode is explicit in the view spec (`grain: 'plan'`) so a measure name
+// never switches the panel by inference. The time-grain path below is left
+// byte-compatible; every plan helper stays pure for the node checks.
+
+const PLAN_FILTER_KEYS = ['repo_id', 'harness', 'session_model'];
+
+export const PLAN_RANK_MEASURES = [
+  'artifacts', 'versions', 'sessions', 'shared_sessions', 'associated_cost_usd', 'unpriced_calls',
+  'executions_complete', 'executions_unreported', 'executions_started', 'complete_share',
+  'design_score:clarity', 'design_score:structure', 'span_days', 'first_ts', 'last_ts'
+];
+
+function planNumber(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+export function isPlanRank(spec = {}) {
+  return spec?.grain === 'plan' || spec?.scope?.grain === 'plan';
+}
+
+// Only measures the plan grain publishes are offered; `id` and the grain's
+// lenses are identities, never ranking measures.
+export function publishedPlanMeasures(schema) {
+  const grain = schemaGrain(schema, 'plan');
+  if (!grain) return [];
+  const lenses = new Set(grain.lenses || []);
+  return (grain.measures || []).filter(name => name && name !== 'id' && !lenses.has(name));
+}
+
+export function planRankMeasure(schema, spec = {}) {
+  const offered = publishedPlanMeasures(schema);
+  const requested = Array.isArray(spec?.measures) ? String(spec.measures[0] || '') : '';
+  if (requested) {
+    return { measure: offered.includes(requested) ? requested : '', offered, requested, unsupported: !offered.includes(requested) };
+  }
+  const fallback = offered.includes('associated_cost_usd') ? 'associated_cost_usd' : (offered[0] || '');
+  return { measure: fallback, offered, requested: '', unsupported: false };
+}
+
+// Period and cohort comparison are time-grain only; a single cohort is a filter
+// and stays allowed on the plan route.
+export function planComparisonUnsupported(scope = {}) {
+  const plan = comparisonPlan(scope);
+  if (plan.mode === 'period' || plan.mode === 'cohorts') return 'period comparison is time-grain only';
+  return null;
+}
+
+function iso(value) {
+  return new Date(Number(value)).toISOString();
+}
+
+// `/entities?grain=plan` takes the shared window, the three plan lenses, the
+// exclude list, the first valid cohort and a plan-measure sort. No time-only
+// parameter (`bucket`, `measure`, `dim`) is ever sent.
+export function planRankParams({ scope = {}, measure = 'associated_cost_usd', limit = 12 } = {}) {
+  const params = new URLSearchParams();
+  const win = currentWindow(scope);
+  if (win) {
+    params.set('from', iso(win.from));
+    params.set('to', iso(win.to));
+  } else {
+    params.set('all', '1');
+  }
+  if (scope.tz) params.set('tz', scope.tz);
+  for (const key of PLAN_FILTER_KEYS) {
+    const value = scope[key];
+    if (Array.isArray(value)) { for (const item of value) if (item) params.append(key, item); }
+    else if (typeof value === 'string' && value) params.set(key, value);
+  }
+  if (Array.isArray(scope.exclude)) for (const item of scope.exclude) if (item) params.append('exclude', item);
+  const cohort = cohortParams(scope).cohort;
+  if (cohort) params.set('cohort', cohort);
+  params.set('grain', 'plan');
+  params.set('sort', `${measure}:desc`);
+  params.set('limit', String(limit));
+  return params;
+}
+
+// The page is the top page the server publishes; `top_max` capped by `page_max`.
+export function planRankLimit(schema) {
+  const bounds = [Number(schema?.budgets?.top_max), Number(schema?.budgets?.page_max)]
+    .filter(value => Number.isFinite(value) && value > 0);
+  return bounds.length ? Math.max(1, Math.floor(Math.min(...bounds))) : 12;
+}
+
+function planCostNote(row = {}) {
+  const measures = row?.m || {};
+  const flags = row?.flags || {};
+  if (measures.associated_cost_usd === null || measures.associated_cost_usd === undefined) {
+    return flags.associated_cost_null_reason === 'all_unpriced' ? 'all unpriced' : 'unpriced';
+  }
+  return flags.associated_cost_lower_bound === true ? 'lower bound' : '';
+}
+
+function executionsText(measures = {}) {
+  const part = (label, value) => `${value === null || value === undefined ? '—' : value} ${label}`;
+  return [
+    part('complete', measures.executions_complete),
+    part('unreported', measures.executions_unreported),
+    part('started', measures.executions_started)
+  ].join(' · ');
+}
+
+// One row per returned plan. A null ranking measure stays in the table and the
+// counts, never in the marks and never as zero. Values carry the extra facts the
+// inspector names (identity, overlap/lower bound, executions).
+export function planRankRows(body = {}, measure = 'associated_cost_usd') {
+  const rows = [];
+  for (const row of Array.isArray(body.rows) ? body.rows : []) {
+    const identity = planIdentity(row);
+    const measures = row?.m || {};
+    const value = planNumber(measures[measure]);
+    const label = `${identity.repo_id}/${identity.plan}`;
+    const lowerBound = row?.flags?.associated_cost_lower_bound === true;
+    const allUnpriced = row?.flags?.associated_cost_null_reason === 'all_unpriced';
+    rows.push({
+      key: canonicalRowKey(row?.id, 'plan'),
+      label,
+      identity,
+      nullValue: value === null,
+      lowerBound,
+      allUnpriced,
+      costNote: planCostNote(row),
+      values: {
+        [measure]: value,
+        'plan identity': label,
+        'cost note': planCostNote(row),
+        associated_cost_usd: planNumber(measures.associated_cost_usd),
+        shared_sessions: planNumber(measures.shared_sessions),
+        unpriced_calls: planNumber(measures.unpriced_calls),
+        sessions: planNumber(measures.sessions),
+        executions: executionsText(measures),
+        last_ts: planNumber(measures.last_ts)
+      },
+      lenses: row?.l || {},
+      flags: row?.flags || {}
+    });
+  }
+  return {
+    rows,
+    drawn: rows.filter(row => !row.nullValue),
+    nulls: rows.filter(row => row.nullValue),
+    sharedReports: rows.reduce((sum, row) => sum + (row.values.shared_sessions ?? 0), 0),
+    lowerBoundCount: rows.filter(row => row.lowerBound).length,
+    allUnpricedCount: rows.filter(row => row.allUnpriced).length
+  };
+}
+
+// Associated cost is a sum of associated sessions, non-additive across plans.
+// The page never becomes a plan-exact total; the shared-session figure is a
+// report count because one session can appear under more than one plan.
+export function planRankOverlap(rows = []) {
+  const plans = rows.length;
+  const shared = rows.reduce((sum, row) => sum + (planNumber(row?.values?.shared_sessions ?? row?.m?.shared_sessions) ?? 0), 0);
+  const isLower = row => (row?.lowerBound ?? row?.flags?.associated_cost_lower_bound === true) === true;
+  const isUnpriced = row => (row?.allUnpriced ?? row?.flags?.associated_cost_null_reason === 'all_unpriced') === true;
+  const lower = rows.filter(row => isLower(row) && !isUnpriced(row)).length;
+  const unpriced = rows.filter(row => isUnpriced(row)).length;
+  return {
+    plans,
+    shared,
+    lower,
+    unpriced,
+    text: `Associated cost sums sessions and overlaps across plans; ${shared} shared-session ${shared === 1 ? 'report' : 'reports'} across ${plans} plans touch more than one plan (a session may be shared by more than one plan), so no total here is plan-exact spend.`,
+    lowerText: lower ? `${lower} plan rows are lower bounds: the priced subset only, never a complete cost.` : '',
+    unpricedText: unpriced ? `${unpriced} plan rows are all unpriced: their associated cost is null, not $0.` : ''
+  };
+}
+
+export function planRankCostText(value, { lowerBound = false, allUnpriced = false } = {}) {
+  if (value === null || value === undefined) return allUnpriced ? 'all unpriced' : 'unpriced';
+  return formatMoney(Number(value), { lowerBound });
+}
+
+function planLastSeen(value) {
+  const seconds = planNumber(value);
+  return seconds === null ? '—' : new Date(seconds * 1000).toISOString().slice(0, 10);
+}
+
+export function planRankEntities(rows = []) {
+  const entities = {};
+  for (const row of rows) {
+    entities[row.key] = {
+      grain: 'plan',
+      key: row.key,
+      identity: row.identity,
+      destination: planDestination(row.identity),
+      entity: { grain: 'plan', repo_id: row.identity.repo_id, plan: row.identity.plan }
+    };
+  }
+  return entities;
+}
+
+function renderPlanChooser({ panelId, measure, offered, schema, spec, doc }) {
+  const label = doc.createElement('label');
+  label.className = 'p12-rank-chooser-field';
+  label.append(doc.createTextNode('Rank by '));
+  const select = doc.createElement('select');
+  select.className = 'p12-rank-measure';
+  select.setAttribute('aria-label', 'Rank by');
+  for (const name of offered) {
+    const option = doc.createElement('option');
+    option.value = name;
+    option.textContent = measureMeta(schema, name).label;
+    option.selected = name === measure;
+    select.append(option);
+  }
+  select.addEventListener('change', () => {
+    const host = doc.querySelector(`[data-panel="${panelId}"]`) || doc;
+    const next = canonicalPanelSpec({ grain: 'plan', measures: [select.value], chart: 'rank', scope: spec?.scope || {} });
+    host.dispatchEvent(new CustomEvent('spec', { bubbles: true, composed: true, detail: { spec: next } }));
+  });
+  label.append(select);
+  return label;
+}
+
+async function loadPlanRank(context = {}) {
+  const { scope = {}, spec = {}, transport, tenant = '', signal } = context;
+  const doc = context.doc || globalThis.document;
+  const panel = context.panel || RANK_PANEL;
+  ensureP10Styles('/css/trends.css', doc);
+  ensureP10Styles('/css/workflow.css', doc);
+  const comparison = planComparisonUnsupported(scope);
+  if (comparison) return unsupportedState({ missing: 'period comparison', reason: comparison, source: 'scope' });
+  try {
+    const schema = context.schema || (await transport.schema(tenant)).body;
+    if (!schemaGrain(schema, 'plan')) {
+      return unsupportedState({ grain: 'plan', reason: 'the server publishes no plan grain', source: 'server /schema' });
+    }
+    const chosen = planRankMeasure(schema, spec);
+    if (chosen.unsupported) {
+      return unsupportedState({ missing: `${chosen.requested} ranking`, reason: 'not published for the plan grain', source: 'server /schema' });
+    }
+    if (!chosen.measure) {
+      return unsupportedState({ grain: 'plan', reason: 'the server publishes no numeric plan measure', source: 'server /schema' });
+    }
+    const measure = chosen.measure;
+    const meta = measureMeta(schema, measure);
+    const limit = planRankLimit(schema);
+    const params = planRankParams({ scope, measure, limit });
+    const { response, body } = await transport.get('entities', params, { tenant, signal, stateKey: 'rank-plan' });
+    if (!response.ok) {
+      if (response.status === 400) return unsupportedState({ missing: `${measure} by plan`, reason: body?.error, source: 'server /schema' });
+      return errorState({ message: body?.error || `The server returned ${response.status}.`, code: body?.code || String(response.status || '') });
+    }
+    const mapped = planRankRows(body, measure);
+    if (!mapped.rows.length) {
+      whenPanelBody(panel.id, doc, host => host.replaceChildren());
+      return emptyState([{ kind: 'scope', label: `no plans in window ${scope.win || 'all'}`, clear: null }]);
+    }
+    const population = body.population || null;
+    const overlap = measure === 'associated_cost_usd' ? planRankOverlap(mapped.rows) : null;
+    const entities = planRankEntities(mapped.drawn);
+    let painted = null;
+    whenPanelBody(panel.id, doc, host => {
+      const wrapper = doc.createElement('div');
+      wrapper.className = 'p12-rank';
+      const basis = doc.createElement('p');
+      basis.className = 'p12-rank-basis';
+      basis.textContent = `Basis: ${meta.label} (${meta.unit || 'count'}) per plan identity, sorted by ${meta.label} from the server; ${populationLine(body)}.`;
+      wrapper.append(basis);
+      if (overlap) {
+        const banner = doc.createElement('p');
+        banner.className = 'p12-rank-banner';
+        banner.textContent = overlap.text;
+        wrapper.append(banner);
+        for (const text of [overlap.lowerText, overlap.unpricedText].filter(Boolean)) {
+          const note = doc.createElement('p');
+          note.className = 'p12-rank-note';
+          note.textContent = text;
+          wrapper.append(note);
+        }
+      }
+      if (mapped.nulls.length && !overlap?.unpriced) {
+        const note = doc.createElement('p');
+        note.className = 'p12-rank-note';
+        note.textContent = `${mapped.nulls.length} plan rows have a null ${meta.label} and are counted but not drawn.`;
+        wrapper.append(note);
+      }
+      if (mapped.drawn.length) {
+        const node = doc.createElement('yk-bars');
+        node.className = 'p12-rank-chart';
+        node.spec = {
+          chart: 'bars',
+          type: 'ranked',
+          title: `${meta.label} per plan`,
+          timeBasis: 'the scope window; associated cost sums in-window session costs',
+          units: meta.unit,
+          series: [{ key: measure, label: meta.label, unit: meta.unit, kind: meta.kind }],
+          entities,
+          empty: `no plan has a non-null ${measure} in this window`
+        };
+        node.data = mapped.drawn.map(row => ({ key: row.key, label: row.label, values: row.values }));
+        painted = node;
+        wrapper.append(node);
+      } else {
+        const note = doc.createElement('p');
+        note.className = 'p12-rank-note';
+        note.textContent = `All ${mapped.rows.length} plan rows have a null ${meta.label}; no bar is drawn and no $0 is shown.`;
+        wrapper.append(note);
+      }
+      const columns = [{ label: 'Repo' }, { label: 'Plan' }];
+      if (measure !== 'associated_cost_usd') columns.push({ label: meta.label, numeric: true });
+      columns.push(
+        { label: 'Associated cost', numeric: true }, { label: 'Shared sessions', numeric: true },
+        { label: 'Unpriced calls', numeric: true }, { label: 'Sessions', numeric: true },
+        { label: 'Executions' }, { label: 'Last seen' }
+      );
+      const tableRows = mapped.rows.map(row => {
+        const cells = [row.identity.repo_id || '—', row.identity.plan || '—'];
+        if (measure !== 'associated_cost_usd') {
+          cells.push(row.nullValue ? '—' : formatCount(row.values[measure], { unit: meta.unit || '' }));
+        }
+        const count = value => value === null || value === undefined ? '—' : formatCount(value);
+        cells.push(
+          planRankCostText(row.values.associated_cost_usd, { lowerBound: row.lowerBound, allUnpriced: row.allUnpriced }),
+          count(row.values.shared_sessions), count(row.values.unpriced_calls), count(row.values.sessions),
+          row.values.executions, planLastSeen(row.values.last_ts)
+        );
+        return cells;
+      });
+      wrapper.append(table(doc, { caption: `${meta.label} per plan`, columns, rows: tableRows }));
+      host.replaceChildren(wrapper);
+    });
+    await painted?.whenSettled?.();
+    whenPanelSlot(panel.id, 'chooser', doc, slot => {
+      slot.replaceChildren(renderPlanChooser({ panelId: panel.id, measure, offered: chosen.offered, schema, spec, doc }));
+    });
+    return {
+      state: 'ready', grain: 'plan', measure, limit,
+      rows: mapped.rows.length, drawn: mapped.drawn.length, nulls: mapped.nulls.length,
+      population, overlap, entities,
+      basis: `${measure} per plan identity; top ${mapped.rows.length} of ${population?.scope_n ?? mapped.rows.length} plans`
+    };
+  } catch (error) {
+    if (error?.name === 'AbortError') return cancelledState();
+    if (error?.status === 400) return unsupportedState({ missing: `${spec.measures?.[0] || 'plan'} ranking`, reason: error.message, source: 'server /schema' });
+    return errorState({ message: error?.message || 'The plan ranking query failed.' });
+  }
+}
+
 export async function load(context = {}) {
+  if (isPlanRank(context.spec || {})) return loadPlanRank(context);
   const { scope = {}, spec = {}, transport, tenant = '', signal } = context;
   const doc = context.doc || globalThis.document;
   ensureP10Styles('/css/trends.css', doc);
