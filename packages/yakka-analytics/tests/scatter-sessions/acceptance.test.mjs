@@ -427,8 +427,8 @@ test('a session detail reconciles returned markers and the capped whole run', { 
   const artifact = await page.locator('.session-artifact-link').first().getAttribute('href');
   assert.match(artifact, /^\/artifact\?repo_id=repo-a&path=.*&hash=hash-design/);
   const written = await page.locator('.session-written').innerText();
-  assert.match(written, /artifact reader is Phase 12/);
-  assert.match(written, /plan detail is Phase 12/);
+  assert.match(written, /opens the artifact reader/);
+  assert.match(written, /opens the plan detail/);
   const plan = await page.locator('.session-plan-link').first().getAttribute('href');
   assert.equal(plan, '/plans/repo-a/20-analytics-reset');
 

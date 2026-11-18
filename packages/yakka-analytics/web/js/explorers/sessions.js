@@ -727,7 +727,7 @@ function renderLinks(host, conversation, doc) {
       const item = doc.createElement('li');
       const anchor = el(doc, 'a', 'session-artifact-link', link.path);
       anchor.href = artifactHref(link);
-      item.append(anchor, doc.createTextNode(' — artifact reader is Phase 12'));
+      item.append(anchor, doc.createTextNode(' — opens the artifact reader'));
       list.append(item);
     }
     section.append(list);
@@ -738,7 +738,7 @@ function renderLinks(host, conversation, doc) {
       const item = doc.createElement('li');
       const anchor = el(doc, 'a', 'session-plan-link', `${link.repo_id}/${link.plan}`);
       anchor.href = planHref(link);
-      item.append(anchor, doc.createTextNode(' — plan detail is Phase 12'));
+      item.append(anchor, doc.createTextNode(' — opens the plan detail'));
       list.append(item);
     }
     section.append(list);

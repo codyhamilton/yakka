@@ -3,7 +3,7 @@
 // the sum of associated sessions and is non-additive across plans, so the panel
 // shows the overlap banner and never calls a total plan-exact spend. It reuses
 // the Phase 11 request, marginal and rectangle-to-predicate seam and adds no
-// chart type, route, grain, join or gesture. The plan explorer is Phase 12.
+// chart type, route, grain, join or gesture. The plan explorer is delivered.
 
 import { cancelledState, emptyState, errorState, unsupportedState } from '../core/panel-state.js';
 import { formatMoney, formatNumber, formatPercent } from '../charts/formatters.js';
@@ -22,7 +22,7 @@ const PLAN_FIXED = [
   'span_days', 'first_ts', 'last_ts'
 ];
 const PLAN_COLOUR_NAMES = ['repo_id', 'harness', 'session_model'];
-export const PLAN_EXPLORER_NOTICE = 'The plan explorer arrives in Phase 12; Open names the plan destination but the explorer is not served yet.';
+export const PLAN_EXPLORER_NOTICE = 'Open the selected identity in the plan detail.';
 
 // Numeric axes are the plan grain's published measures of 17.3. A dynamic
 // `design_score:<check>` must be in the catalogue when one is supplied; a plan
@@ -71,7 +71,7 @@ export function planColours(schema) {
   return { colours, unsupported };
 }
 
-// The plan identity and `/plans/<repo>/<plan>` destination Phase 12 will serve.
+// The plan identity and `/plans/<repo>/<plan>` destination.
 export function planIdentity(row = {}) {
   const id = row && typeof row.id === 'object' && row.id ? row.id : {};
   const lens = row.l || {};
@@ -216,7 +216,7 @@ export async function load(context = {}) {
         grain: 'plan', key: point.key, identity: point.identity,
         destination: planDestination(point.identity),
         entity: { grain: 'plan', repo_id: point.identity.repo_id, plan: point.identity.plan },
-        reader: 'Phase 12'
+        reader: 'plan detail'
       };
     }
     const chartSpec = {

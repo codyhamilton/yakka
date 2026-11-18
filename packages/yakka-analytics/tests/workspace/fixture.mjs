@@ -1129,8 +1129,8 @@ export function p11ConversationEvents(index = 0) {
 
 export function p11Conversation(id = '') {
   const match = /^conv-(\d{3})$/.exec(String(id));
-  if (!match) return null;
-  const index = Number(match[1]);
+  if (!match && id !== 'conv-20b') return null;
+  const index = match ? Number(match[1]) : 0;
   if (index < 0 || index >= 40) return null;
   const events = p11ConversationEvents(index);
   const base = Math.floor(P11.start / 1000) + index * 60;
@@ -1238,8 +1238,37 @@ export function p12Schema() {
     measures: measures.slice(), lenses: lenses.slice(), modes: modes.slice(), filters: filters.slice(),
     predicate: { measures: measures.slice(), lenses: lenses.slice(), undefined: [] }
   });
+  const p10 = p10Schema();
+  const p11 = p11Schema();
+  const mergeGrain = (base = {}, additions = {}) => {
+    const measures = [...new Set([...(base.measures || []), ...(additions.measures || [])])];
+    const lenses = [...new Set([...(base.lenses || []), ...(additions.lenses || [])])];
+    const filters = [...new Set([...(base.filters || []), ...(additions.filters || [])])];
+    const modes = [...new Set([...(base.modes || []), ...(additions.modes || [])])];
+    return { ...base, ...additions, measures, lenses, filters, modes,
+      predicate: { measures, lenses, undefined: [] } };
+  };
+  const p12Plan = grain(P12_PLAN_MEASURES, P12_PLAN_LENSES, { modes: ['list', 'scatter', 'aggregate'] });
+  const p12Artifact = grain(P12_ARTIFACT_MEASURES, P12_ARTIFACT_LENSES, { modes: ['list', 'scatter', 'aggregate'] });
+  const p12Execution = grain(P12_EXECUTION_MEASURES, P12_EXECUTION_LENSES, { modes: ['list', 'scatter', 'aggregate'], filters: ['plan', 'repo_id'] });
+  const lenses = {};
+  for (const source of [p10.lenses, p11.lenses]) for (const [name, lens] of Object.entries(source || {})) {
+    lenses[name] = { ...lenses[name], ...lens,
+      grains: [...new Set([...(lenses[name]?.grains || []), ...(lens.grains || [])])] };
+  }
+  lenses.harness = { ...lenses.harness, grains: [...new Set([...(lenses.harness?.grains || []), 'plan', 'execution', 'artifact'])] };
+  lenses.session_model = { ...lenses.session_model, grains: [...new Set([...(lenses.session_model?.grains || []), 'plan', 'execution', 'artifact'])] };
+  lenses.id = { identity: true };
+  const grains = { ...p11.grains,
+    plan: mergeGrain(p11.grains.plan, p12Plan),
+    artifact: mergeGrain(mergeGrain(p10.grains.artifact, p11.grains.artifact), p12Artifact),
+    execution: mergeGrain(p11.grains.execution, p12Execution)
+  };
+  const measuresByName = new Map();
+  for (const measure of [...(p10.measures || []), ...(p11.measures || []),
+    ...P12_PLAN_MEASURES.map(name => ({ name, unit: p12PlanUnit(name), dims: [] }))]) measuresByName.set(measure.name, measure);
   return {
-    measures: P12_PLAN_MEASURES.map(name => ({ name, unit: p12PlanUnit(name), dims: [] })),
+    measures: [...measuresByName.values()],
     buckets: ['none', 'hour', 'day', 'week', 'month', 'year'],
     resolutions: { auto: true, year: true, multi_year_steps: [2, 5, 10, 20, 50, 100] },
     // A small page_max lets the suite exercise both collections' second page
@@ -1250,16 +1279,10 @@ export function p12Schema() {
       scope_elements: 64, scope_values: 64, value_bytes: { default: 256, id: 1024 }
     },
     grains: {
-      plan: grain(P12_PLAN_MEASURES, P12_PLAN_LENSES),
-      execution: grain(P12_EXECUTION_MEASURES, P12_EXECUTION_LENSES, { filters: ['plan', 'repo_id'] }),
-      artifact: grain(P12_ARTIFACT_MEASURES, P12_ARTIFACT_LENSES),
+      ...grains,
       content: grain(['score'], ['harness', 'session_model', 'repo_id', 'plan', 'scorer', 'band', 'id'])
     },
-    lenses: {
-      harness: { grains: ['plan', 'execution', 'artifact'] },
-      session_model: { grains: ['plan', 'execution', 'artifact'] },
-      id: { identity: true }
-    },
+    lenses,
     coverage: {
       first_ts: '2026-09-01T00:00:00Z',
       last_ts: '2026-11-01T00:00:00Z',
@@ -1548,6 +1571,7 @@ export function p12PlanEvents({ repo_id = '', plan = '', limit = 500, cursor = '
 
 const P12_DETAIL_PLAN_SPECS = [
   ['acme/widgets', '20-analytics-reset', { complete: 2, unreported: 1, started: 1, cost: 3.5, unpriced: 1, shared: 1, artifacts: 6, versions: 12, sessions: 2, flags: { shared_session: true } }],
+  ['repo-a', '20-analytics-reset', { complete: 2, unreported: 1, started: 1, cost: 2.5, unpriced: 1, shared: 1, artifacts: 1, versions: 2, sessions: 1, flags: { shared_session: true } }],
   ['repo-a', '21-empty', { complete: 0, unreported: 0, started: 0, cost: 0, unpriced: 0, shared: 0, artifacts: 1, versions: 1, sessions: 0, flags: { no_executions: true } }],
   ['repo-a', '22-empty', { complete: 0, unreported: 0, started: 0, cost: 0, unpriced: 0, shared: 0, artifacts: 0, versions: 0, sessions: 0, flags: { no_executions: true } }]
 ];
@@ -1865,6 +1889,12 @@ const P12_ARTIFACT_SPECS = [
     ]
   },
   {
+    repo_id: 'repo-a', path: 'docs/a.md',
+    versions: [{ hash: 'hash-a', received: 50000, ts: 49000, session: 'conv-000', harness: 'orca', model: 'claude', source: 'worktree', sha: 'sha-p10-quality', scores: { clarity: { score: 0.82, scorer: 'jev-1.13.0' }, structure: { score: 0.7, scorer: 'jev-1.13.0' } } }]
+  },
+  { repo_id: 'repo-b', path: 'docs/b.md', versions: [{ hash: 'hash-b', received: 50000, ts: 49000, session: 'conv-001', harness: 'orca', model: 'claude', source: 'worktree', sha: 'sha-p10-quality-b', scores: { clarity: { score: 0.6, scorer: 'jev-1.13.0' } } }] },
+  { repo_id: 'repo-a', path: 'docs/c.md', versions: [{ hash: 'hash-c', received: 50000, ts: 49000, session: 'conv-002', harness: 'orca', model: 'claude', source: 'worktree', sha: 'sha-p10-quality-c', scores: { clarity: { score: 0.3, scorer: 'jev-1.13.0' } } }] },
+  {
     repo_id: 'acme/widgets',
     path: 'docs/plans/20-analytics-reset/DESIGN.md',
     versions: [
@@ -1885,6 +1915,9 @@ const P12_ARTIFACT_SPECS = [
 ].map(spec => ({ ...spec, versions: spec.versions.map(version => p12VersionSpec(spec.repo_id, spec.path, version)) }));
 
 const P12_CONTENT = new Map([
+  ['hash-a', { repo_id: 'repo-a', paths: ['docs/a.md', 'docs/plans/20-analytics-reset/DESIGN.md'], text: '# Quality fixture\n\nP10 artifact destination resolves.', verdict: 'pass' }],
+  ['hash-b', { repo_id: 'repo-b', path: 'docs/b.md', text: '# Quality fixture B', verdict: 'pass' }],
+  ['hash-c', { repo_id: 'repo-a', path: 'docs/c.md', text: '# Quality fixture C', verdict: 'pass' }],
   [P12_HASH.designV6, { repo_id: 'repo-a', path: 'docs/plans/20-analytics-reset/DESIGN.md', text: P12_DESIGN_A, verdict: 'unscreened' }],
   [P12_HASH.designV5, { repo_id: 'repo-a', path: 'docs/plans/20-analytics-reset/DESIGN.md', text: P12_DESIGN_B, verdict: 'pass' }],
   [P12_HASH.briefLong, { repo_id: 'repo-a', path: 'docs/plans/20-analytics-reset/briefs/12-03.md', text: P12_LONG_BRIEF, verdict: 'pass' }],
@@ -1961,7 +1994,7 @@ export function p12Content(repo_id = '', path = '', hash = '') {
   if (hash === P12_HASH.oversize) return { status: 413, body: { error: 'content exceeds the advertised byte budget', code: 'content_too_large', size_bytes: 20000000, limit_bytes: 16777216 } };
   if (hash === P12_HASH.integrity) return { status: 500, body: { error: 'stored content hash does not match its identity', code: 'content_integrity' } };
   const content = P12_CONTENT.get(hash);
-  if (!content || content.repo_id !== repo_id || content.path !== path) return { status: 404, body: { error: 'not found' } };
+  if (!content || content.repo_id !== repo_id || !(content.paths || [content.path]).includes(path)) return { status: 404, body: { error: 'not found' } };
   return {
     status: 200,
     text: content.text,

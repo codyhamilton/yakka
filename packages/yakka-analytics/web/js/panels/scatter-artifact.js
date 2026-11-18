@@ -2,8 +2,7 @@
 // writing-session cost, calls or tokens, another same-kind check, versions or
 // content bytes. `model` and `id` are never numeric axes. The panel reuses the
 // Phase 11 request, marginal and rectangle-to-predicate seam; it adds no chart
-// type, route, grain, join or gesture. The artifact reader is Phase 12, so the
-// inspector names that destination without claiming the reader exists.
+// type, route, grain, join or gesture. The inspector opens the artifact reader.
 
 import { cancelledState, emptyState, errorState, unsupportedState } from '../core/panel-state.js';
 import { formatMoney, formatNumber, formatPercent } from '../charts/formatters.js';
@@ -18,7 +17,7 @@ import { QUALITY_KINDS, catalogueChecks } from './score-ranges.js';
 
 const ARTIFACT_FIXED = new Set(['versions', 'distinct_writing_sessions', 'first_ts', 'last_ts', 'content_bytes']);
 const ARTIFACT_COLOUR_NAMES = ['kind', 'plan', 'repo_id', 'harness', 'session_model', 'source', 'screen_verdict', 'scorer'];
-export const ARTIFACT_READER_NOTICE = 'The artifact reader arrives in Phase 12; Open names the artifact destination but the reader is not served yet.';
+export const ARTIFACT_READER_NOTICE = 'Open the selected identity in the artifact reader.';
 
 function isArtifactMeasure(name) {
   return ARTIFACT_FIXED.has(name) || name.startsWith('score:') || name.startsWith('writing_session_');
@@ -77,7 +76,7 @@ export function artifactColours(schema) {
 }
 
 // The identity the inspector and `/artifact?...` destination use. The reader
-// itself is Phase 12; the identity is `repo_id` + `path` + `hash`.
+// itself uses the identity `repo_id` + `path` + `hash`.
 export function artifactIdentity(row = {}) {
   const id = row && typeof row.id === 'object' && row.id ? row.id : {};
   const lens = row.l || {};
@@ -265,7 +264,7 @@ export async function load(context = {}) {
         grain: 'artifact', key: point.key, identity: point.identity,
         destination: artifactDestination(point.identity),
         entity: { grain: 'artifact', repo_id: point.identity.repo_id, path: point.identity.path, content_hash: point.identity.hash },
-        reader: 'Phase 12'
+        reader: 'artifact reader'
       };
     }
     const chartSpec = {

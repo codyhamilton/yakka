@@ -152,6 +152,10 @@ export function createStubApi() {
           }));
           return true;
         }
+        if (grain === 'artifact' && mode === 'scatter') {
+          json(response, 200, p11ArtifactScatter({ fields: (query.get('fields') || '').split(',').filter(Boolean) }));
+          return true;
+        }
         if (grain === 'artifact' && (query.get('plan') || query.get('repo_id'))) {
           json(response, 200, p12PlanArtifactEntities({
             repo_id: query.get('repo_id') || '',
@@ -159,6 +163,18 @@ export function createStubApi() {
             limit: Number(query.get('limit')) || 4,
             cursor: query.get('cursor') || ''
           }));
+          return true;
+        }
+        if (grain === 'artifact') {
+          const base = p10Entities('artifact');
+          json(response, 200, {
+            ...base,
+            rows: base.rows.map(row => ({
+              ...row,
+              id: { repo_id: row.l.repo_id, path: row.l.path, content_hash: row.l.content_hash },
+              l: { ...row.l, plan: '20-analytics-reset' }, flags: {}
+            }))
+          });
           return true;
         }
         if (grain === 'session' && query.has('id')) {

@@ -1,7 +1,6 @@
 // `score-strips`: file-weighted artifact observations. One mark per returned
 // artifact file, keyed by its canonical (repo_id, path) identity so the shared
-// inspector opens the artifact destination. The artifact reader itself is
-// Phase 12; this panel names that gap instead of faking a reader.
+// inspector opens the artifact reader.
 
 import '../charts/yk-ranges.js';
 import { cancelledState, emptyState, errorState, unsupportedState } from '../core/panel-state.js';
@@ -12,7 +11,7 @@ import {
 import { QUALITY_KINDS, catalogueChecks, qualityScope, renderQualityChooser } from './score-ranges.js';
 
 export const ARTIFACT_LENSES = ['kind', 'plan', 'repo_id', 'harness', 'session_model', 'source', 'screen_verdict'];
-export const READER_NOTICE = 'The artifact reader arrives in Phase 12; Open names the artifact destination but the reader is not served yet.';
+export const READER_NOTICE = 'Open this identity in the artifact reader.';
 
 export function artifactSplits(schema) {
   const grain = schemaGrain(schema, 'artifact');
@@ -183,7 +182,7 @@ export const SCORE_STRIPS_PANEL = {
   lenses: ARTIFACT_LENSES,
   charts: ['strip'],
   requires: ['entities_artifact', 'scores_by_lens'],
-  caveats: 'File-weighted; one mark per returned artifact file. The identity (repo_id, path) opens the Phase 12 artifact destination. Files are never counted as content hashes.',
+  caveats: 'File-weighted; one mark per returned artifact file. The identity (repo_id, path) opens the artifact reader. Files are never counted as content hashes.',
   measureBasis: 'the selected artifact version’s latest score',
   requests: () => [{ route: '/v1/analytics/entities', method: 'GET', params: { grain: 'artifact', check: 'clarity', fields: ['score:clarity', 'kind'] } }],
   load

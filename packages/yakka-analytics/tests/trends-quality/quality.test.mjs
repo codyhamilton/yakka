@@ -228,7 +228,7 @@ test('quality settles four frames, separates populations, draws the baseline and
     assert.match(strips.text, /file-weighted/);
     assert.match(strips.text, /3 of 3 files/);
     assert.match(strips.text, /1 missing: unscored/);
-    assert.match(strips.text, /Phase 12/);
+    assert.match(strips.text, /Open this identity in the artifact reader/);
     const stripKey = JSON.stringify({ path: 'docs/a.md', repo_id: 'repo-a' });
     assert.ok(strips.marks.includes(stripKey));
     assert.match(strips.entities[stripKey].destination, /^\/artifact\?repo_id=/);

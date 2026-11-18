@@ -351,7 +351,7 @@ test('quality separates hash and file units, draws the scorer baseline and opens
     assert.match(strips, /file-weighted/);
     assert.match(strips, /3 of 3 files/);
     assert.match(strips, /1 missing: unscored/);
-    assert.match(strips, /Phase 12/);
+    assert.match(strips, /Open this identity in the artifact reader/);
 
     const bands = await textOf(page, 'band-mix');
     for (const label of ['below p25', 'mid (p25–p75 inclusive)', 'above p75', 'unscored', 'baseline_unavailable']) {
@@ -372,7 +372,7 @@ test('quality separates hash and file units, draws the scorer baseline and opens
     await choose(page, harness.origin, { panel: 'score-ranges', key: 'p1', index: 2, value: 'jev-0', settled: { kind: 'scorer', name: 'jev-0' } });
     assert.match(await textOf(page, 'score-ranges'), /baseline_unavailable/);
 
-    // A strip mark opens the correct artifact destination and names P12.
+    // A strip mark opens the delivered artifact reader.
     const key = JSON.stringify({ path: 'docs/a.md', repo_id: 'repo-a' });
     await page.evaluate(stripKey => {
       document.querySelector('[data-panel="score-strips"] yk-ranges')

@@ -130,7 +130,7 @@ test('the conversation cap, returned markers and omitted unpriced calls reconcil
   assert.equal(classifyConversationEvent(conversation.events[0]).lane, 'tool:shell');
 });
 
-test('detail links name observed artifacts and plans with their Phase 12 destinations', () => {
+test('detail links name observed artifacts and delivered plan and artifact destinations', () => {
   const artifacts = sessionArtifactLinks(conversation);
   assert.ok(artifacts.some(link => link.path.endsWith('DESIGN.md') && link.hash === 'hash-design'));
   const plans = sessionPlanLinks(conversation);
@@ -284,8 +284,8 @@ test('the detail draws returned markers, states the cap and links artifacts, pla
   assert.match(ledger, /\/ledger\?conversation_id=conv-000/);
   const artifact = await page.locator('.session-artifact-link').first().getAttribute('href');
   assert.match(artifact, /^\/artifact\?repo_id=repo-a&path=.*&hash=hash-design/);
-  assert.match(await page.locator('.session-written').innerText(), /artifact reader is Phase 12/);
-  assert.match(await page.locator('.session-written').innerText(), /plan detail is Phase 12/);
+  assert.match(await page.locator('.session-written').innerText(), /opens the artifact reader/);
+  assert.match(await page.locator('.session-written').innerText(), /opens the plan detail/);
   const plan = await page.locator('.session-plan-link').first().getAttribute('href');
   assert.match(plan, /^\/plans\/repo-a\/20-analytics-reset$/);
   const conversations = harness.api.state.requests.filter(item => /\/conversation$/.test(item.path));
