@@ -103,6 +103,7 @@ Stage layout: `<stage>/queue/` (the staged `.evt` files), `<stage>/manifest.json
   - `source` block from the stage step, `rejected_dir` counts (present, not staged).
 - Add a module constant `_POLICY_REMOVE` in `yakka.py` holding exactly the pairs at `policy.go:27-43`, with a comment naming that file as the source. It is the one server contract the client must mirror to produce the manifest's policy-dropped count; it is not a new registry. Do not guess: read the table.
 - Refuse `upload` when the manifest is missing or its `files`/`bytes` no longer match `<stage>/queue/` (stale manifest → re-run `manifest`).
+- Resolution of the fixture/acceptance tension, settled here: the strict `stored == manifest.expected_stored` rule stands for `verified: true` on a first run. If the server rejects a distinct kept fact, the command writes `verified: false`, `run_kind: "unverified"`, the itemised `difference` block (`stored`, `rejected`, `manifest_expected_stored`) and exits 2; that report is the design's "or the report explains the difference" path for operator review, and the code must not claim `verified` over an unexplained difference. The unit's fixture therefore makes its designated rejection a within-copy duplicate so the clean-run arithmetic and the rejected-status reporting are both covered; a distinct rejection remains a reported, non-verified result until a later decision changes the rule.
 
 **Upload**
 

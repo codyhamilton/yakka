@@ -199,3 +199,90 @@ The phase's entry points are the real `artifact_feedback` handler with the produ
 - The sweep's `_Runner.swept` guard means a retried Stop/SessionEnd event does not sweep again; files missed in that window are recovered by a later turn or commit catch-up.
 - The pre-existing `tools/release/test_layout.py::test_repo_passes_layout_check` failure on ignored `packages/yakka-analytics/node_modules/**` was not run or chased. `gofmt -l internal/serve` still lists pre-existing `mcp_discovery_limits.go`, which this phase did not own.
 - Gates for Cody (egress, deployment or live observation): a live scratch-repo turn showing the drain deliver a heredoc-written file's current hash; a live `artifact_feedback` `queued` then `delivered` call through the E1 enqueue after deploying the v2 declaration (ledger 28); the issue's budget-repo case; `artifact_feedback` checks on these briefs and reports.
+
+## Phase 6 — Upload the legacy backlog once
+
+Run (phase 6): tool opencode, model deepseek-v4.1-flash for refine and build, started
+2026-11-19T03:38:29+10:00; independent verification by codex gpt-6-luna at 03:55 and 04:02.
+Logs: `/home/codyh/workspace/.briefs/q/21-p6-refine.log`, `21-p6-u1.log`, `21-p6-verify.log`,
+`21-p6-reverify.log`. Run for Plan 21 phase 6 only; no review, terminal review or close-out.
+
+Approach: the design marks this phase `open`. Refine ran first against the code as it stood and
+committed `804dffc2`, splitting the phase into one unit. The build worker left changes
+uncommitted; the orchestrator amended the brief for the no-`/tmp` and gated-upload constraints
+(`850020aa`), verified, fixed one defect and committed the phase.
+
+### Brief `phase6-01-backlog-upload.md`
+
+Status: closed.
+
+- `Options` gained `EventsOnly` and `OnResult`, both default off/None. `Build(ctx, files,
+  hook_events_only=False)` emits exactly one `hook_event` per parsed file in events-only mode:
+  no ref-collection, no `_read_file`, no `_write_paths`, no `_build_commits`, and (after the fix
+  below) no `_snapshot_fact`; the live path is unchanged when `EventsOnly` is false.
+  `_Runner.batch` skips the Stop/SessionEnd sweep in that mode and `_Runner.apply` reports each
+  result through `OnResult`.
+- A one-time `backlog stage|manifest|upload` command was added to `yakka.py` (`bin/yakka` and the
+  hooks untouched). `stage` copies only top-level non-dot `.evt` files out of a source, refuses a
+  stage inside the source or a non-empty stage queue, and proves the source count/bytes did not
+  move. `manifest` computes files, bytes, facts, facts by type, local rejections, distinct row
+  hashes, policy-dropped and expected-stored counts. `upload` runs the existing `Run` over the
+  staged queue with `EventsOnly=True` and the phase-1 `ConfigSink`, writes a counts-only
+  `report.json`, and verifies first-run or rerun arithmetic.
+- `_POLICY_REMOVE` mirrors `packages/yakka/internal/ingest/policy.go:27-43`; a test parses that
+  table and asserts parity.
+- New `plugins/yakka/client/test_backlog.py` (10 tests after the fix) uses only in-process fake
+  HTTP, a workspace scratch root, and no `/tmp`.
+- Report: `reports/phase6-01-backlog-upload.md`.
+
+### Runner fix
+
+The first independent verification (`21-p6-verify.log`) found one high defect: an
+`artifact_snapshot` entry was handled by `_snapshot_fact` before the events-only branch, so
+events-only mode could read the file and emit an `artifact_version`. The orchestrator fixed
+`Build` to answer `not_hook_event: artifact_snapshot` with no read and no fact in that mode, and
+added `test_events_only_skips_snapshot_without_reading`. Re-verification (`21-p6-reverify.log`)
+reported RESOLVED with no remaining high or medium defect. The worker report's "never takes the
+snapshot read path" claim was made true by this fix; its test count (9) predates the added test.
+
+### Verification
+
+The outcome's entry point is `python3 yakka.py backlog stage|manifest`, then the upload code with
+a fake sink. Independent read-only runs reproduced:
+
+- Real staged copy at `~/workspace/yakka-backlog-stage/plan21-recon` (outside the repo and outside
+  the original): 37,931 files, 167,853,844 bytes; manifest `facts=37931`,
+  `facts_by_type={"hook_event":37931}`, `policy_dropped=18306`, `expected_stored=19625`,
+  `distinct_row_hashes=37931`, `duplicate_facts=0`, `rejected_dir={evt:19, reason:19}`.
+- Original `~/.local/share/workflow/queue`: 37,931 top-level `.evt`, 167,853,844 bytes, max mtime
+  `1793399032.5220295980`, unchanged before and after staging; no file newer than the stage.
+- `python3 -m unittest test_backlog -v`: 10 tests OK. Regression suite `test_clientconfig
+  test_status test_keys test_facts test_drain test_http test_mcp test_mcp_guard test_mcp_shim
+  test_secrets`: 149 tests OK. `python3 -m py_compile yakka.py` and `git diff --check` clean.
+- The upload path was exercised only against the in-process fake: run 1 verified with
+  `stored=expected`, run 2 on a fresh stage exited 0 with `stored=0`, `zero_new_rows=true`, and
+  the fake's stored set unchanged. No live endpoint or egress was used.
+
+The live upload, the independent server-side stored-row count, and a second live run remain
+unrun, as the invoker prohibits egress in this run; the phase's live acceptance is therefore
+gated, not claimed.
+
+### Carried
+
+- Gate: the live upload of the staged copy to the configured remote (phase-1 config, tenant of the
+  configured key) and the resulting `report.json` with `run_kind: "first"` and `verified: true`.
+- Gate: an independent server-side count of the tenant's stored hook events before and after the
+  upload, risen by the report's `stored` (19,625 for the measured queue); the tool writes
+  `server_side_count: "gate"` and never queries it.
+- Gate: a second live run on a fresh staged copy of the same original, exiting 0 with every
+  storable fact `duplicate` and zero new rows.
+- Gate: `artifact_feedback` checks on the Phase 6 brief and report (egress; not run).
+- The design's "38 rejected entries" is 19 `.evt` + 19 `.reason`; none is staged or uploaded.
+- A distinct server rejection of a kept fact produces `verified: false`, `run_kind: "unverified"`,
+  exit 2 with an itemised difference; the brief now records this as the "report explains the
+  difference" operator path rather than relaxing the rule. The test fixture exercises rejection
+  reporting with a within-copy duplicate so the clean-run arithmetic stays covered.
+- Archiving or deleting the original queue is not authorised and was not done; the staged copy at
+  `~/workspace/yakka-backlog-stage/plan21-recon` is left for the gated upload.
+- The pre-existing `tools/release/test_layout.py::test_repo_passes_layout_check` failure on
+  ignored `packages/yakka-analytics/node_modules/**` was not run or chased.

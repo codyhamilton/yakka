@@ -1017,29 +1017,32 @@ def _fact_json(v: dict[str, Any]) -> bytes:
     return _serialize_json_value(v).encode("utf-8")
 
 
-def Build(ctx: Any, files: List[File]) -> List[Output]:
+def Build(
+    ctx: Any, files: List[File], hook_events_only: bool = False
+) -> List[Output]:
     ps = [_parse_file(f) for f in files]
     reads: dict[str, _ReadResult] = {}
     last: dict[str, int] = {}
-    for i, p in enumerate(ps):
-        if p.bad or p.event == "artifact_snapshot":
-            continue
-        for abs_path in _write_paths(p):
-            r = reads.get(abs_path)
-            if r is None:
-                r = _read_file(abs_path)
-                reads[abs_path] = r
-            if not r.ok:
+    if not hook_events_only:
+        for i, p in enumerate(ps):
+            if p.bad or p.event == "artifact_snapshot":
                 continue
-            top, rel, in_repo, err = RepoPath(abs_path)
-            if err is not None or not in_repo or Kind(rel) == "":
-                continue
-            repo_id, err = RepoID(top)
-            if err is not None:
-                continue
-            k = p.conv + "\x00" + repo_id + "\x00" + rel
-            p.refs.append(_Ref(key=k, abs=abs_path, rel=rel, repo=repo_id))
-            last[k] = i
+            for abs_path in _write_paths(p):
+                r = reads.get(abs_path)
+                if r is None:
+                    r = _read_file(abs_path)
+                    reads[abs_path] = r
+                if not r.ok:
+                    continue
+                top, rel, in_repo, err = RepoPath(abs_path)
+                if err is not None or not in_repo or Kind(rel) == "":
+                    continue
+                repo_id, err = RepoID(top)
+                if err is not None:
+                    continue
+                k = p.conv + "\x00" + repo_id + "\x00" + rel
+                p.refs.append(_Ref(key=k, abs=abs_path, rel=rel, repo=repo_id))
+                last[k] = i
     out: List[Output] = []
     commits: set[str] = set()
     for i, p in enumerate(ps):
@@ -1054,10 +1057,13 @@ def Build(ctx: Any, files: List[File]) -> List[Output]:
             o.Facts.append(_fact_json(v))
 
         if p.event == "artifact_snapshot":
-            v, reasons = _snapshot_fact(p)
-            o.Reasons.extend(reasons)
-            if v is not None:
-                add(v)
+            if hook_events_only:
+                o.Reasons.append("not_hook_event: artifact_snapshot")
+            else:
+                v, reasons = _snapshot_fact(p)
+                o.Reasons.extend(reasons)
+                if v is not None:
+                    add(v)
             out.append(o)
             continue
 
@@ -1069,6 +1075,13 @@ def Build(ctx: Any, files: List[File]) -> List[Output]:
                 "event": p.event,
                 "ts": p.ts,
             }
+
+        if hook_events_only:
+            hv = common("hook_event")
+            hv["payload"] = _redact_payload(p.payload)
+            add(hv)
+            out.append(o)
+            continue
 
         hv = common("hook_event")
         hv["payload"] = _redact_payload(p.payload)
@@ -1588,6 +1601,29 @@ ReasonStopped = "stopped"
 _MAX_DRAIN_FILES = 500
 _MAX_DRAIN_BYTES = 8 << 20
 
+# Mirrors the Remove pairs in packages/yakka/internal/ingest/policy.go:27-43.
+# The manifest uses it only to count facts the server answers accepted and does
+# not store; it is not a second policy registry.
+_POLICY_REMOVE = frozenset(
+    {
+        ("opencode", "experimental.chat.system.transform"),
+        ("opencode", "chat.params"),
+        ("opencode", "chat.headers"),
+        ("opencode", "shell.env"),
+        ("opencode", "message.part.delta"),
+        ("opencode", "message.part.updated"),
+        ("opencode", "session.status"),
+        ("opencode", "session.updated"),
+        ("opencode", "session.diff"),
+        ("opencode", "message.updated"),
+        ("opencode", "tool.execute.before"),
+        ("opencode", "PostToolBatch"),
+        ("claude", "PreToolUse"),
+        ("claude", "PostToolBatch"),
+        ("codex", "PreToolUse"),
+    }
+)
+
 
 class _NetErr(Exception):
     pass
@@ -1856,6 +1892,8 @@ class Options:
     Hosted: bool = False
     Log: Any = None
     afterRelease: Optional[Callable[[], None]] = None
+    EventsOnly: bool = False
+    OnResult: Optional[Callable[[str, str, str, str], None]] = None
 
     def defaults(self) -> None:
         if not self.Dir:
@@ -2196,6 +2234,18 @@ def _prefix(name: str, reasons: List[str]) -> List[str]:
     return [name + ": " + s for s in reasons]
 
 
+def _fact_meta(raw: bytes) -> Tuple[str, str]:
+    try:
+        obj = json.loads(raw)
+    except (json.JSONDecodeError, TypeError, UnicodeDecodeError):
+        return "", ""
+    if not isinstance(obj, dict):
+        return "", ""
+    fid = obj.get("id", "")
+    ftype = obj.get("type", "")
+    return (fid if isinstance(fid, str) else "", ftype if isinstance(ftype, str) else "")
+
+
 class _Runner:
     def __init__(self, o: Options) -> None:
         self.o = o
@@ -2247,27 +2297,28 @@ class _Runner:
                 continue
             in_files.append(File(Name=e.name, Data=data))
         swept: List[File] = []
-        for f in in_files:
-            if f.Name in self.swept:
-                continue
-            try:
-                p = _parse_file(f)
-                if p.bad or p.event not in ("Stop", "SessionEnd"):
+        if not self.o.EventsOnly:
+            for f in in_files:
+                if f.Name in self.swept:
                     continue
-                self.swept.add(f.Name)
-                names = _sweep_snapshots(p, self.o.Dir)
-            except Exception as err:
-                self.logf("sweep failed: %s", err)
-                continue
-            for name in names:
                 try:
-                    with open(os.path.join(self.o.Dir, name), "rb") as sf:
-                        swept.append(File(Name=name, Data=sf.read()))
-                except OSError:
+                    p = _parse_file(f)
+                    if p.bad or p.event not in ("Stop", "SessionEnd"):
+                        continue
+                    self.swept.add(f.Name)
+                    names = _sweep_snapshots(p, self.o.Dir)
+                except Exception as err:
+                    self.logf("sweep failed: %s", err)
                     continue
+                for name in names:
+                    try:
+                        with open(os.path.join(self.o.Dir, name), "rb") as sf:
+                            swept.append(File(Name=name, Data=sf.read()))
+                    except OSError:
+                        continue
         in_files.extend(swept)
         items: List[_BatchItem] = []
-        for out in Build(None, in_files):
+        for out in Build(None, in_files, hook_events_only=self.o.EventsOnly):
             if not out.Facts:
                 if out.Reasons:
                     self.reject(out.Name, _prefix(out.Name, out.Reasons))
@@ -2316,6 +2367,10 @@ class _Runner:
             if len(items) == 1:
                 self.logf("file rejected: status=%d", resp.Status)
                 it = items[0]
+                if self.o.OnResult is not None:
+                    for f in it.facts:
+                        fid, ftype = _fact_meta(f)
+                        self.o.OnResult(fid, ftype, "rejected", f"http_{resp.Status}")
                 self.reject(
                     it.name,
                     _prefix(
@@ -2362,7 +2417,16 @@ class _Runner:
             rej: List[str] = []
             for _ in it.facts:
                 res = resp.Results[i]
+                fact = all_facts[i]
                 i += 1
+                if self.o.OnResult is not None:
+                    fid, ftype = _fact_meta(fact)
+                    self.o.OnResult(
+                        fid,
+                        ftype,
+                        res.get("status", ""),
+                        res.get("reason") or "",
+                    )
                 if res.get("status") == "rejected":
                     reason = res.get("reason") or "rejected"
                     rej.append(res.get("id", "") + ": " + reason)
@@ -2545,6 +2609,392 @@ def RunStandalone(ctx: DrainContext, stderr: Any) -> int:
         return 1
     print(f"drain: exit: {reason}", file=stderr)
     return 0
+
+
+# --- backlog (one-time staged upload) ---
+
+
+def _backlog_names(dir_path: str) -> List[str]:
+    try:
+        names = os.listdir(dir_path)
+    except OSError:
+        return []
+    out: List[str] = []
+    for n in names:
+        if n.startswith(".") or not n.endswith(".evt"):
+            continue
+        if os.path.isfile(os.path.join(dir_path, n)):
+            out.append(n)
+    out.sort()
+    return out
+
+
+def _backlog_totals(dir_path: str) -> Tuple[List[str], int]:
+    names = _backlog_names(dir_path)
+    total = 0
+    for n in names:
+        try:
+            total += os.path.getsize(os.path.join(dir_path, n))
+        except OSError:
+            pass
+    return names, total
+
+
+def _backlog_count(dir_path: str, suffix: str) -> int:
+    try:
+        names = os.listdir(dir_path)
+    except OSError:
+        return 0
+    return sum(
+        1
+        for n in names
+        if n.endswith(suffix) and os.path.isfile(os.path.join(dir_path, n))
+    )
+
+
+def _backlog_load(stage: str) -> dict[str, Any]:
+    try:
+        with open(os.path.join(stage, "manifest.json"), encoding="utf-8") as f:
+            v = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return v if isinstance(v, dict) else {}
+
+
+def _backlog_write(stage: str, name: str, obj: dict[str, Any]) -> None:
+    with open(os.path.join(stage, name), "w", encoding="utf-8") as f:
+        json.dump(obj, f, indent=2, sort_keys=True)
+        f.write("\n")
+
+
+def _backlog_stage(source: str, stage: str) -> int:
+    src = os.path.realpath(source)
+    dst = os.path.realpath(stage)
+    if not os.path.isdir(src):
+        print(f"yakka backlog stage: source is not a directory: {source}", file=sys.stderr)
+        return 2
+    if dst == src or dst.startswith(src + os.sep):
+        print(
+            "yakka backlog stage: stage must be outside the source",
+            file=sys.stderr,
+        )
+        return 2
+    queue = os.path.join(stage, "queue")
+    if os.path.isdir(queue) and os.listdir(queue):
+        print(
+            "yakka backlog stage: stage queue is not empty; each run needs a fresh copy",
+            file=sys.stderr,
+        )
+        return 2
+    names, src_bytes = _backlog_totals(src)
+    rej_evt = _backlog_count(os.path.join(src, "rejected"), ".evt")
+    rej_reason = _backlog_count(os.path.join(src, "rejected"), ".reason")
+    try:
+        os.makedirs(queue, exist_ok=True)
+        for n in names:
+            shutil.copyfile(os.path.join(src, n), os.path.join(queue, n))
+    except OSError as err:
+        print(f"yakka backlog stage: {err}", file=sys.stderr)
+        return 2
+    after_names, after_bytes = _backlog_totals(src)
+    if len(after_names) != len(names) or after_bytes != src_bytes:
+        print(
+            "yakka backlog stage: source changed while staging",
+            file=sys.stderr,
+        )
+        return 2
+    st_names, st_bytes = _backlog_totals(queue)
+    if len(st_names) != len(names) or st_bytes != src_bytes:
+        print(
+            "yakka backlog stage: staged copy does not match the source",
+            file=sys.stderr,
+        )
+        return 2
+    manifest = {
+        "source": {
+            "file_count": len(names),
+            "bytes": src_bytes,
+            "rejected_evt": rej_evt,
+            "rejected_reason": rej_reason,
+            "after_file_count": len(after_names),
+            "after_bytes": after_bytes,
+        },
+        "staged": {"file_count": len(st_names), "bytes": st_bytes},
+    }
+    _backlog_write(stage, "manifest.json", manifest)
+    print(
+        json.dumps(
+            {
+                "staged_files": len(st_names),
+                "staged_bytes": st_bytes,
+                "source_file_count": len(names),
+                "source_bytes": src_bytes,
+                "source_after_file_count": len(after_names),
+                "source_after_bytes": after_bytes,
+            },
+            indent=2,
+            sort_keys=True,
+        )
+    )
+    return 0
+
+
+def _backlog_manifest(stage: str) -> int:
+    queue = os.path.join(stage, "queue")
+    if not os.path.isdir(queue):
+        print(
+            f"yakka backlog manifest: no staged queue: {queue}", file=sys.stderr
+        )
+        return 2
+    names, nbytes = _backlog_totals(queue)
+    files: List[File] = []
+    for n in names:
+        try:
+            with open(os.path.join(queue, n), "rb") as f:
+                files.append(File(Name=n, Data=f.read()))
+        except OSError:
+            continue
+    facts: List[bytes] = []
+    local_rejected: dict[str, int] = {}
+    for out in Build(None, files, hook_events_only=True):
+        if not out.Facts:
+            if out.Reasons:
+                key = out.Reasons[0].split(":", 1)[0]
+            else:
+                key = "unknown"
+            local_rejected[key] = local_rejected.get(key, 0) + 1
+            continue
+        facts.extend(out.Facts)
+    facts_by_type: dict[str, int] = {}
+    all_hashes: set[str] = set()
+    kept_hashes: set[str] = set()
+    policy_dropped = 0
+    for raw in facts:
+        try:
+            obj = json.loads(raw)
+        except (json.JSONDecodeError, TypeError, UnicodeDecodeError):
+            continue
+        if not isinstance(obj, dict):
+            continue
+        typ = obj.get("type", "")
+        facts_by_type[typ] = facts_by_type.get(typ, 0) + 1
+        h, err = RowHash(raw)
+        if err is not None:
+            continue
+        all_hashes.add(h)
+        pair = (obj.get("harness", ""), obj.get("event", ""))
+        if pair in _POLICY_REMOVE:
+            policy_dropped += 1
+        else:
+            kept_hashes.add(h)
+    if facts_by_type.get("artifact_version", 0) or facts_by_type.get("commit", 0):
+        print(
+            "yakka backlog manifest: non hook_event fact produced",
+            file=sys.stderr,
+        )
+        return 2
+    manifest = _backlog_load(stage)
+    src = manifest.get("source") if isinstance(manifest.get("source"), dict) else {}
+    manifest.update(
+        {
+            "files": len(names),
+            "bytes": nbytes,
+            "facts": len(facts),
+            "facts_by_type": facts_by_type,
+            "local_rejected_files": local_rejected,
+            "local_rejected_total": sum(local_rejected.values()),
+            "distinct_row_hashes": len(all_hashes),
+            "duplicate_facts": len(facts) - len(all_hashes),
+            "policy_dropped": policy_dropped,
+            "expected_stored": len(kept_hashes),
+            "rejected_dir": {
+                "evt": src.get("rejected_evt", 0),
+                "reason": src.get("rejected_reason", 0),
+            },
+        }
+    )
+    _backlog_write(stage, "manifest.json", manifest)
+    print(
+        json.dumps(
+            {
+                "files": len(names),
+                "bytes": nbytes,
+                "facts": len(facts),
+                "facts_by_type": facts_by_type,
+                "local_rejected_files": local_rejected,
+                "distinct_row_hashes": len(all_hashes),
+                "duplicate_facts": len(facts) - len(all_hashes),
+                "policy_dropped": policy_dropped,
+                "expected_stored": len(kept_hashes),
+                "rejected_dir": manifest["rejected_dir"],
+            },
+            indent=2,
+            sort_keys=True,
+        )
+    )
+    return 0
+
+
+class _BacklogRecorder:
+    def __init__(self) -> None:
+        self.facts_sent = 0
+        self.accepted = 0
+        self.duplicate = 0
+        self.rejected = 0
+        self.facts_by_type: dict[str, int] = {}
+        self.rejected_by_reason: dict[str, int] = {}
+        self.files_seen: set[str] = set()
+        self.files_sent: set[str] = set()
+
+    def __call__(self, fid: str, ftype: str, status: str, reason: str) -> None:
+        self.facts_sent += 1
+        self.facts_by_type[ftype] = self.facts_by_type.get(ftype, 0) + 1
+        name = fid.rsplit("#", 1)[0] if "#" in fid else fid
+        if name:
+            self.files_seen.add(name)
+        if status == "accepted":
+            self.accepted += 1
+            if name:
+                self.files_sent.add(name)
+        elif status == "duplicate":
+            self.duplicate += 1
+            if name:
+                self.files_sent.add(name)
+        elif status == "rejected":
+            self.rejected += 1
+            key = (reason or "rejected")[:120]
+            self.rejected_by_reason[key] = (
+                self.rejected_by_reason.get(key, 0) + 1
+            )
+
+
+def _backlog_upload(stage: str, sink: Any = None) -> int:
+    queue = os.path.join(stage, "queue")
+    report_path = os.path.join(stage, "report.json")
+    manifest_path = os.path.join(stage, "manifest.json")
+    if not os.path.isdir(queue):
+        print(f"yakka backlog upload: no staged queue: {queue}", file=sys.stderr)
+        return 2
+    if os.path.exists(report_path):
+        print(
+            "yakka backlog upload: report already exists; stage a fresh copy",
+            file=sys.stderr,
+        )
+        return 2
+    if not os.path.isfile(manifest_path):
+        print(
+            "yakka backlog upload: manifest is missing; run manifest first",
+            file=sys.stderr,
+        )
+        return 2
+    manifest = _backlog_load(stage)
+    names, nbytes = _backlog_totals(queue)
+    if manifest.get("files") != len(names) or manifest.get("bytes") != nbytes:
+        print(
+            "yakka backlog upload: stale manifest; re-run manifest",
+            file=sys.stderr,
+        )
+        return 2
+    rec = _BacklogRecorder()
+    o = Options(
+        Dir=queue,
+        EventsOnly=True,
+        OnResult=rec,
+        Sink=sink if sink is not None else ConfigSink,
+        Log=sys.stderr,
+        Window=0.03,
+        Linger=0.5,
+        Poll=0.05,
+        GiveUp=60.0,
+    )
+    reason, err = Run(DrainContext(), o)
+    initial = set(names)
+    remaining = set(_backlog_names(queue))
+    local_rejected = len(initial - rec.files_seen - remaining)
+    policy_dropped = manifest.get("policy_dropped", 0)
+    expected_stored = manifest.get("expected_stored", 0)
+    manifest_facts = manifest.get("facts", 0)
+    stored = rec.accepted - policy_dropped
+    total_results = rec.accepted + rec.duplicate + rec.rejected
+    arithmetic = rec.facts_sent == manifest_facts and total_results == manifest_facts
+    first_ok = arithmetic and stored == expected_stored
+    rerun_ok = (
+        arithmetic
+        and stored == 0
+        and rec.duplicate == expected_stored
+        and rec.accepted == policy_dropped
+    )
+    run_kind = "first" if first_ok else "rerun" if rerun_ok else "unverified"
+    verified = bool((first_ok or rerun_ok) and reason == ReasonIdle and err is None)
+    src = manifest.get("source") if isinstance(manifest.get("source"), dict) else {}
+    report: dict[str, Any] = {
+        "run_kind": run_kind,
+        "verified": verified,
+        "zero_new_rows": bool(rerun_ok),
+        "staged_files": len(names),
+        "staged_bytes": nbytes,
+        "files_sent": len(rec.files_sent),
+        "files_local_rejected": local_rejected,
+        "facts_sent": rec.facts_sent,
+        "facts_by_type": rec.facts_by_type,
+        "accepted": rec.accepted,
+        "duplicate": rec.duplicate,
+        "rejected": rec.rejected,
+        "rejected_by_reason": rec.rejected_by_reason,
+        "policy_dropped": policy_dropped,
+        "stored": stored,
+        "manifest_expected_stored": expected_stored,
+        "manifest_facts": manifest_facts,
+        "manifest_files": manifest.get("files"),
+        "manifest_bytes": manifest.get("bytes"),
+        "source_signature_before": {
+            "file_count": src.get("file_count"),
+            "bytes": src.get("bytes"),
+        },
+        "source_signature_after": {
+            "file_count": src.get("after_file_count"),
+            "bytes": src.get("after_bytes"),
+        },
+        "server_side_count": "gate",
+        "run_reason": reason,
+    }
+    if not verified:
+        report["difference"] = {
+            "facts_sent": rec.facts_sent,
+            "manifest_facts": manifest_facts,
+            "accepted_plus_duplicate_plus_rejected": total_results,
+            "stored": stored,
+            "manifest_expected_stored": expected_stored,
+            "accepted": rec.accepted,
+            "policy_dropped": policy_dropped,
+            "duplicate": rec.duplicate,
+            "run_reason": reason,
+            "error": None if err is None else str(err),
+        }
+    _backlog_write(stage, "report.json", report)
+    print(json.dumps(report, indent=2, sort_keys=True))
+    return 0 if verified else 2
+
+
+def cmd_backlog(argv: List[str]) -> int:
+    p = argparse.ArgumentParser(prog="yakka backlog")
+    sub = p.add_subparsers(dest="sub")
+    ps = sub.add_parser("stage")
+    ps.add_argument("--source", required=True)
+    ps.add_argument("--stage", required=True)
+    pm = sub.add_parser("manifest")
+    pm.add_argument("--stage", required=True)
+    pu = sub.add_parser("upload")
+    pu.add_argument("--stage", required=True)
+    args = p.parse_args(argv[2:])
+    if args.sub == "stage":
+        return _backlog_stage(args.source, args.stage)
+    if args.sub == "manifest":
+        return _backlog_manifest(args.stage)
+    if args.sub == "upload":
+        return _backlog_upload(args.stage)
+    p.print_usage(sys.stderr)
+    return 2
 
 
 # --- mcp ---
@@ -4005,6 +4455,8 @@ def main(argv: List[str]) -> int:
         return cmd_login(argv)
     if cmd == "status":
         return cmd_status(argv)
+    if cmd == "backlog":
+        return cmd_backlog(argv)
     print("yakka: unknown command", file=sys.stderr)
     return 2
 
