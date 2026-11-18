@@ -198,8 +198,11 @@ export async function load(context = {}) {
     const top = shapeTop(schema, 12);
     const params = requestParams({ scope, extra: { grain: 'plan', sort: 'executions_unreported:desc', limit: String(top) } });
     const sessionModel = scope.session_model;
-    if (Array.isArray(sessionModel)) for (const value of sessionModel) if (value) params.append('session_model', value);
-    else if (typeof sessionModel === 'string' && sessionModel) params.set('session_model', sessionModel);
+    if (Array.isArray(sessionModel)) {
+      for (const value of sessionModel) if (value) params.append('session_model', value);
+    } else if (typeof sessionModel === 'string' && sessionModel) {
+      params.set('session_model', sessionModel);
+    }
     const { response, body } = await transport.get('entities', params, { tenant, signal, stateKey: 'shape-bars' });
     if (!response.ok) {
       if (response.status === 400) return unsupportedState({ missing: 'plan process shape', reason: body?.error || 'the server refused the request', source: 'server /schema' });
