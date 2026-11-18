@@ -1,0 +1,47 @@
+/* Workspace shell: scope bar, coverage strip, panel grid, panel states and
+   badges. Native elements first, visible focus, no animation or transition. */
+
+.scope-bar,.coverage-strip,.follow-bar{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem 1rem;padding:.6rem .9rem;margin:.75rem 0;font-size:.95rem}
+.scope-bar strong,.coverage-strip strong,.follow-bar strong{font-size:.85rem;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)}
+.scope-window{font-weight:600}
+.scope-item,.coverage-item{color:var(--muted)}
+.scope-warning{color:var(--danger);font-weight:600}
+
+.question-group{padding:1rem 1.25rem;margin:1rem 0}
+.question-group h2{font-size:1rem;margin:.2rem 0 .6rem}
+.question-paths{list-style:none;padding:0;margin:0;display:grid;gap:.45rem}
+.question-paths li{display:flex;flex-wrap:wrap;gap:.25rem .75rem;align-items:baseline}
+.disabled-path{color:var(--muted);text-decoration:line-through}
+.disabled-reason{color:var(--danger);font-size:.85rem}
+
+.panel-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:1rem;margin:1rem 0}
+.workspace-panel{display:flex;flex-direction:column;gap:.5rem;padding:.9rem 1rem;min-height:8rem}
+.workspace-panel-header{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem;justify-content:space-between}
+.workspace-panel-title{font-size:1rem;margin:0}
+.workspace-panel-status,.workspace-panel-population,.workspace-panel-basis{margin:0;font-size:.9rem;color:var(--muted)}
+.workspace-panel-body{flex:1;min-height:2rem}
+.workspace-panel-chips,.workspace-panel-chooser,.workspace-panel-inspector{display:flex;flex-wrap:wrap;gap:.35rem}
+
+/* State presentation is a text/border cue as well as a colour, and never a
+   colour alone. Loading is the only non-settled state. */
+.workspace-panel[data-state="error"]{border-color:var(--danger)}
+.workspace-panel[data-state="unsupported"]{border-style:dashed}
+.workspace-panel[data-state="empty"]{border-style:dotted}
+.workspace-panel[data-state="cancelled"]{border-style:dashed}
+.workspace-panel[data-state="loading"]{border-style:dashed}
+
+.yk-badges{list-style:none;display:flex;flex-wrap:wrap;gap:.25rem;padding:0;margin:0}
+.yk-badge{font-size:.75rem;padding:.1rem .4rem;border:1px solid var(--border);border-radius:1rem;color:var(--muted)}
+
+.saved-boards{padding:1rem 1.25rem;margin:1.25rem 0}
+.saved-boards h2{font-size:1rem;margin:.2rem 0 .6rem}
+.save-board{display:flex;flex-wrap:wrap;gap:.5rem;margin-bottom:.5rem}
+.save-board input{font:inherit;padding:.4rem .6rem;border:1px solid var(--border);border-radius:.4rem;background:var(--bg);color:var(--text)}
+.saved-board-list{list-style:none;padding:0;margin:0;display:grid;gap:.4rem}
+.saved-board-list li{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem}
+
+.follow-status{color:var(--muted);font-size:.9rem}
+
+@media(max-width:900px){
+  .panel-grid{grid-template-columns:1fr}
+}

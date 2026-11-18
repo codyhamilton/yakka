@@ -1,3 +1,5 @@
+import { decodePanelSpec, encodePanelSpec } from '../js/core/view-spec.js';
+
 const RESERVED = new Set(['win', 'from', 'to', 'tz', 'exclude', 'ca', 'cb', 'cc', 'cd', 'pick', 'sel', 'hide', 'cmp', 'v']);
 const PANEL = /^p\d+$/;
 const VALID_WINDOW = /^(?:all|\d+[hdwmy])$/;
@@ -12,7 +14,7 @@ export function decodeUrlState(search = '') {
     exclude: params.getAll('exclude'), cohorts: Object.fromEntries(['ca', 'cb', 'cc', 'cd'].map(k => [k, params.get(k) || ''])),
     pick: params.get('pick') || '', sel: params.get('sel') || '', hide: params.getAll('hide'),
     cmp: ['off', 'cohorts', 'period'].includes(params.get('cmp')) ? params.get('cmp') : 'off',
-    view: params.get('v') || '', panels: {}, filters: {}, unknown: {}
+    view: params.get('v') || '', panels: {}, panelSpecs: {}, filters: {}, unknown: {}
   };
   if (state.from || state.to) state.win = '';
   for (const [key, value] of params) {
@@ -20,7 +22,11 @@ export function decodeUrlState(search = '') {
     if (FILTERS.has(key)) (state.filters[key] ??= []).push(value);
     else (state.unknown[key] ??= []).push(value);
   }
-  for (const [key, value] of params) if (PANEL.test(key)) state.panels[key] = value;
+  for (const [key, value] of params) {
+    if (!PANEL.test(key)) continue;
+    state.panels[key] = value;
+    state.panelSpecs[key] = decodePanelSpec(value);
+  }
   return state;
 }
 
@@ -42,6 +48,12 @@ export function encodeUrlState(state, current = '') {
   for (const value of state.hide || []) out.append('hide', value);
   if (state.cmp && state.cmp !== 'off') out.set('cmp', state.cmp);
   if (state.view) out.set('v', state.view);
-  for (const [key, value] of Object.entries(state.panels || {})) if (PANEL.test(key)) out.set(key, value);
+  const panelKeys = new Set([...Object.keys(state.panels || {}), ...Object.keys(state.panelSpecs || {})]);
+  for (const key of panelKeys) {
+    if (!PANEL.test(key)) continue;
+    const raw = state.panels?.[key];
+    if (typeof raw === 'string' && raw) out.set(key, raw);
+    else if (state.panelSpecs?.[key]) out.set(key, encodePanelSpec(state.panelSpecs[key]));
+  }
   return out;
 }
