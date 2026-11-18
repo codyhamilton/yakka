@@ -1,7 +1,7 @@
 // Deterministic same-origin stub of the analytics API, generated from the
 // committed fixture manifest. Test-only: product code never imports this.
 
-import { makeSchema, activityProbe, activityList, summary, population, adminStatus, explorePage, COUNTS, p10Schema, p10Summary, p10Query, p10Distribution, p10Entities, p10Scores, p10ScoreSeries, p10Baselines, p11Schema, p11Scatter, p11ArtifactScatter, p11PlanScatter, p11TimeScatter, p11TimeAggregate, p11Scores, p11Entities, p11Aggregate, p11SessionList, p11Conversation, p11Entity, p12Schema, p12PlanEntities, p12ExecutionEntities, p12PlanEvents, p12ArtifactEntities, p12Content, p12Baselines } from './fixture.mjs';
+import { makeSchema, activityProbe, activityList, summary, population, adminStatus, explorePage, COUNTS, p10Schema, p10Summary, p10Query, p10Distribution, p10Entities, p10Scores, p10ScoreSeries, p10Baselines, p11Schema, p11Scatter, p11ArtifactScatter, p11PlanScatter, p11TimeScatter, p11TimeAggregate, p11Scores, p11Entities, p11Aggregate, p11SessionList, p11Conversation, p11Entity, p12Schema, p12PlanEntities, p12PlanScatter, p12PlanAggregate, p12ExecutionEntities, p12PlanEvents, p12ArtifactEntities, p12Content, p12Baselines } from './fixture.mjs';
 
 const json = (response, status, body) => {
   response.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
@@ -26,6 +26,8 @@ export function createStubApi() {
     statusRequests: 0,
     statusAborted: 0,
     sessionError: false,
+    planSampled: false,
+    planError: false,
     p10: false,
     p11: false,
     p12: false,
@@ -95,11 +97,33 @@ export function createStubApi() {
     if (state.p12 && path.startsWith('/v1/analytics/')) {
       if (path === '/v1/analytics/entities') {
         const grain = query.get('grain') || 'plan';
+        const mode = query.get('mode') || 'list';
+        if (grain === 'plan' && mode === 'scatter') {
+          const fields = (query.get('fields') || '').split(',').filter(Boolean);
+          json(response, 200, p12PlanScatter({ fields, sampled: state.planSampled === true }));
+          return true;
+        }
+        if (grain === 'plan' && mode === 'aggregate') {
+          json(response, 200, p12PlanAggregate({ stat: query.get('stat') || 'count', predicate: query.get('predicate') || '' }));
+          return true;
+        }
+        if (grain === 'plan' && state.planError) {
+          json(response, 500, { error: 'plans read failed', code: 'read failed' });
+          return true;
+        }
+        if (grain === 'plan' && state.empty) {
+          json(response, 200, {
+            grain, rows: [],
+            population: { grain, unit: 'plan', scope_n: 0, cohort_n: 0, eligible_n: 0, returned_n: 0, missing_by_reason: {}, relation: null }
+          });
+          return true;
+        }
         if (grain === 'plan') {
           json(response, 200, p12PlanEntities({
             sort: query.get('sort') || 'last_ts:desc',
             limit: Number(query.get('limit')) || 12,
             cursor: query.get('cursor') || '',
+            cohort: query.has('cohort'),
             filters: {
               repo_id: query.getAll('repo_id'),
               harness: query.getAll('harness'),

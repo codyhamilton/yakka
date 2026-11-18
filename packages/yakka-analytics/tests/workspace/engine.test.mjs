@@ -178,5 +178,10 @@ test('router names later destinations and keeps unknown paths in the not-found v
   assert.equal(parseRoute('/sessions/abc').sessionId, 'abc');
   assert.equal(parseRoute('/artifact').kind, 'explorer');
   assert.equal(parseRoute('/artifact').explorer, 'artifact');
+  assert.equal(parseRoute('/plans').kind, 'explorer');
+  assert.equal(parseRoute('/plans').explorer, 'plans');
+  assert.equal(parseRoute('/plans/acme/20-analytics-reset').kind, 'named');
+  assert.equal(parseRoute('/plans/acme/20-analytics-reset').phase, 12);
+  assert.equal(parseRoute('/plans/one-segment').kind, 'not-found');
   assert.equal(parseRoute('/nope').kind, 'not-found');
 });

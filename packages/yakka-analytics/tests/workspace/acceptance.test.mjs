@@ -174,11 +174,14 @@ test('every Start question path opens its destination or names the missing capab
   for (const link of links) {
     const target = new URL(`${harness.origin}${link.href}`).pathname;
     if (p10Panels[target]) await control(harness.origin, { p10: true });
-    if (p12Panels[target]) await control(harness.origin, { p12: true });
+    if (p12Panels[target] || target === '/plans') await control(harness.origin, { p12: true });
     await page.goto(`${harness.origin}${link.href}`);
     await settleShell(page);
     const path = new URL(page.url()).pathname;
-    if (path === '/b/pulse') {
+    if (path === '/plans') {
+      await settlePanels(page, ['plans-list', 'scatter-plan']);
+      await control(harness.origin, { p12: false });
+    } else if (path === '/b/pulse') {
       await settlePanels(page, ['river', 'pulse-strips', 'movers', 'calendar', 'coverage']);
     } else if (path === '/ops') {
       await settlePanels(page, ['ops-footprint']);
@@ -193,12 +196,12 @@ test('every Start question path opens its destination or names the missing capab
     }
     const heading = await page.evaluate(() => document.querySelector('#app h1')?.textContent || '');
     assert.notEqual(heading, 'Not found', `${link.text} (${link.href}) is not a dead link`);
-    if (path === '/plans') {
-      assert.match(heading.length ? await page.locator('main').innerText() : '', /Delivered in Phase 12/, `${path} names its delivering phase`);
+    if (path === '/plans' || path === '/b/workflow') {
+      assert.doesNotMatch(await page.locator('main').innerText(), /Delivered in Phase/, `${path} is delivered, not named`);
       named.push(path);
     }
   }
-  record('every named later destination resolves through the shell', named.length, 1);
+  record('both formerly named Start destinations are delivered', named.length, 2);
 
   await control(harness.origin, { scenario: 'legacy' });
   await page.goto(`${harness.origin}/`);

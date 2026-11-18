@@ -1353,7 +1353,7 @@ function p12Sort(rows, field, direction) {
   });
 }
 
-export function p12PlanEntities({ sort = 'executions_unreported:desc', limit = 12, cursor = '', filters = {} } = {}) {
+export function p12PlanEntities({ sort = 'executions_unreported:desc', limit = 12, cursor = '', filters = {}, cohort = false } = {}) {
   let rows = p12PlanRows();
   const lens = name => Array.isArray(filters[name]) ? filters[name] : (filters[name] ? [filters[name]] : []);
   const repos = lens('repo_id');
@@ -1373,7 +1373,61 @@ export function p12PlanEntities({ sort = 'executions_unreported:desc', limit = 1
     grain: 'plan', sort, rows: page, next,
     population: {
       grain: 'plan', unit: 'plan', scope_n: scopeN, cohort_n: scopeN, eligible_n: scopeN,
-      returned_n: page.length, missing_by_reason: noExecutions ? { no_executions: noExecutions } : {}, relation: null
+      returned_n: page.length, missing_by_reason: noExecutions ? { no_executions: noExecutions } : {},
+      relation: cohort
+        ? {
+          source_grain: 'plan', target_grain: 'plan', mapping: 'associated_sessions', op: 'include',
+          resolved_n: 6, resolved_unit: 'session', associations: []
+        }
+        : null
+    }
+  };
+}
+
+// Plan scatter over the whole ten-plan population. The sampled variant uses the
+// same deterministic rule as the server, keeps the whole-population marginals,
+// and a null axis stays in the population but out of the marks (never zero).
+export function p12PlanScatter({ fields = [], sampled = false } = {}) {
+  const names = fields.length ? fields : ['associated_cost_usd', 'artifacts'];
+  const all = p12PlanRows().map(row => ({
+    id: row.id,
+    m: Object.fromEntries(names.map(name => [name, row.m?.[name] ?? null])),
+    l: { repo_id: row.l.repo_id, harness: row.l.harness, session_model: row.l.session_model },
+    flags: row.flags
+  }));
+  const points = sampled ? all.slice(0, 5) : all;
+  return {
+    grain: 'plan', mode: 'scatter', fields: names,
+    sampled, sample_rule: sampled ? 'lowest SHA-256 of repo_id and plan' : '',
+    population_n: all.length, returned_n: points.length,
+    rows: points,
+    marginals: {
+      associated_cost_usd: {
+        unit: 'USD',
+        bins: [{ lo: 0, hi: 2, n: 4 }, { lo: 2, hi: 6, n: 5 }, { lo: 6, hi: null, n: 1 }]
+      },
+      artifacts: {
+        unit: 'artifacts',
+        bins: [{ lo: 0, hi: 2, n: 0 }, { lo: 2, hi: 4, n: 7 }, { lo: 4, hi: null, n: 3 }]
+      }
+    },
+    population: {
+      grain: 'plan', unit: 'plan', scope_n: all.length, cohort_n: all.length, eligible_n: all.length,
+      returned_n: points.length, missing_by_reason: { no_executions: 1, missing_axis: 1 }, relation: null
+    },
+    sample_limit: 5000
+  };
+}
+
+// A bounded count for a scatter rectangle. The count is the server's typed
+// population, never a browser sum of the drawn marks.
+export function p12PlanAggregate({ stat = 'count', predicate = '' } = {}) {
+  const selected = predicate ? 3 : P12_PLAN_SPECS.length;
+  return {
+    grain: 'plan', mode: 'aggregate', stat,
+    population: {
+      grain: 'plan', unit: 'plan', scope_n: P12_PLAN_SPECS.length, cohort_n: selected,
+      eligible_n: selected, returned_n: 1, missing_by_reason: {}, relation: null
     }
   };
 }
@@ -1784,6 +1838,8 @@ export function p12Fixture() {
     schema: p12Schema(),
     planRows: p12PlanRows,
     planEntities: p12PlanEntities,
+    planScatter: p12PlanScatter,
+    planAggregate: p12PlanAggregate,
     executionRows: p12ExecutionRows,
     executionEntities: p12ExecutionEntities,
     planEvents: p12PlanEvents,
