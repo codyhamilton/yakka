@@ -1,7 +1,7 @@
 // Deterministic same-origin stub of the analytics API, generated from the
 // committed fixture manifest. Test-only: product code never imports this.
 
-import { makeSchema, activityProbe, activityList, summary, population, adminStatus, COUNTS } from './fixture.mjs';
+import { makeSchema, activityProbe, activityList, summary, population, adminStatus, explorePage, COUNTS } from './fixture.mjs';
 
 const json = (response, status, body) => {
   response.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
@@ -70,6 +70,18 @@ export function createStubApi() {
 
     if (state.scenario === 'legacy' && path !== '/v1/analytics/schema') {
       json(response, 400, { error: 'range too wide', code: 'range too wide', retry: { narrow: 'choose a narrower window' } });
+      return true;
+    }
+
+    if (path === '/v1/analytics/explore') {
+      if (state.empty) { json(response, 200, { rows: [], truncated: false }); return true; }
+      const budgets = schema().budgets || {};
+      const candidates = [budgets.explore_page_max, budgets.page_max]
+        .map(Number).filter(value => Number.isFinite(value) && value > 0);
+      const fallback = candidates.length ? Math.min(...candidates) : 500;
+      const rawLimit = query.get('limit');
+      const limit = rawLimit === null || rawLimit === '' ? fallback : Number(rawLimit);
+      json(response, 200, explorePage({ cursor: query.get('cursor') || '', limit }));
       return true;
     }
 

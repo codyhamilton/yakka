@@ -101,6 +101,92 @@ export function population(grain, unit, n) {
   return { grain, unit, scope_n: n, cohort_n: n, eligible_n: n, returned_n: n, missing_by_reason: {}, relation: null };
 }
 
+// Deterministic `/v1/analytics/explore` ledger: one row per event, newest first,
+// carrying the CONTRACTS.md 7.2 row fields. Every row has a distinct `ts`, so
+// the row identity (which includes `ts`) is unique and order is non-increasing.
+export const EXPLORE_TOTAL = 20050;
+
+const pad = (value, width) => String(value).padStart(width, '0');
+
+let exploreCache = null;
+
+export function exploreRows() {
+  if (exploreCache) return exploreCache;
+  const base = Date.parse('2026-10-01T00:00:00Z');
+  const rows = [];
+  for (let index = 0; index < EXPLORE_TOTAL; index += 1) {
+    const ts = new Date(base - index * 1000).toISOString();
+    if (index % 1000 === 500) {
+      rows.push({
+        type: 'rejection', ts, harness: '', repo_id: '', plan: '', kind: '', event: '', tool: '',
+        norm_event: '', model: '', path: '', conversation_id: '', source: '', sha: '',
+        screen_verdict: 'pass', rejection_stage: 'screen', cost_usd: 0, priced: false
+      });
+      continue;
+    }
+    if (index % 997 === 300) {
+      rows.push({
+        type: 'artifact_version', ts, harness: 'orca', repo_id: 'repo-a', plan: '20', kind: 'design',
+        event: '', tool: '', norm_event: '', model: '', path: 'docs/plans/20-analytics-reset/DESIGN.md',
+        conversation_id: '', source: 'commit', sha: '', screen_verdict: '', rejection_stage: '',
+        cost_usd: undefined, priced: false
+      });
+      continue;
+    }
+    if (index % 991 === 200) {
+      rows.push({
+        type: 'commit', ts, harness: 'orca', repo_id: 'repo-a', plan: '20', kind: '', event: '', tool: '',
+        norm_event: '', model: '', path: '', conversation_id: `conv-${pad(index % 97, 3)}`, source: 'commit',
+        sha: `sha-${pad(index, 6)}`, screen_verdict: '', rejection_stage: '', cost_usd: undefined, priced: false
+      });
+      continue;
+    }
+    const unpriced = index % 250 === 7;
+    rows.push({
+      type: 'hook_event', ts, harness: 'orca',
+      repo_id: index % 3 === 0 ? 'repo-a' : 'repo-b', plan: '20',
+      kind: index % 2 === 0 ? 'design' : 'brief',
+      event: ['PreToolUse', 'PostToolUse', 'UserPromptSubmit'][index % 3],
+      tool: ['Bash', 'Read', 'Edit'][index % 3],
+      norm_event: ['tool', 'prompt', 'stop'][index % 3],
+      model: index % 4 === 0 ? 'claude' : '',
+      path: index % 5 === 0 ? `docs/plans/20-analytics-reset/reports/${index}.md` : '',
+      conversation_id: `conv-${pad(index % 97, 3)}`,
+      source: index % 2 === 0 ? 'worktree' : 'commit', sha: '',
+      screen_verdict: '', rejection_stage: '',
+      cost_usd: unpriced ? 0 : 0.01 + (index % 50) / 100, priced: !unpriced
+    });
+  }
+  exploreCache = rows;
+  return rows;
+}
+
+// Opaque, deterministic keyset cursor over the fixed row array.
+export function encodeExploreCursor(offset) {
+  return Buffer.from(`explore:${offset}`, 'utf8').toString('base64url');
+}
+
+export function decodeExploreCursor(cursor) {
+  if (!cursor) return 0;
+  let text = '';
+  try { text = Buffer.from(String(cursor), 'base64url').toString('utf8'); } catch { return 0; }
+  const match = /^explore:(\d+)$/.exec(text);
+  return match ? Number(match[1]) : 0;
+}
+
+export function explorePage({ cursor = '', limit = 0 } = {}) {
+  const rows = exploreRows();
+  const start = Math.min(Math.max(0, decodeExploreCursor(cursor)), rows.length);
+  const size = Number.isFinite(Number(limit)) && Number(limit) > 0 ? Math.floor(Number(limit)) : rows.length;
+  const end = Math.min(start + size, rows.length);
+  const more = end < rows.length;
+  return {
+    rows: rows.slice(start, end),
+    truncated: more,
+    ...(more ? { next: encodeExploreCursor(end) } : {})
+  };
+}
+
 // The full `/v1/admin/status` shape (CONTRACTS.md 6): server summary, optional
 // volume, and two tenants so cross-tenant separation is visible. Times are Unix
 // seconds and sizes are bytes.
