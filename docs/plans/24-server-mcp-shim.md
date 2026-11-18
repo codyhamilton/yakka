@@ -7,9 +7,9 @@ server declares for a call, then relays replies unchanged. The three shipped too
 `search_artifacts`, `artifact_feedback`) are served from the server's tool registry. For the read-only v1
 contract, a 23-request corpus matched byte for byte against the live product server, and the terminal
 review passed. The bounded `enqueue_file_snapshot` action was approved on 7 Nov 2026 and is specified in
-the design, but its server side is not built, so Plan 21's P3 cannot close until it is. The
-harness-behaviour observations (`_meta` visibility, behaviour after a failed `initialize`) were not
-collected.
+the design, but its server side was not built when Plan 24 closed (issue #265 later built it), so Plan
+21's P3 cannot close until it is verified at an exact SHA. The harness-behaviour observations (`_meta`
+visibility, behaviour after a failed `initialize`) were not collected.
 
 ## Intent
 
@@ -101,10 +101,11 @@ call byte for byte. Ten Python relay and guard tests passed, the Go MCP conforma
 
 ## Deviations
 
-- **The approved v2 action is not in the product server.** The shim side is built and smoke-tested
-  against a compatible fake server. The live server is v1: it advertises no `local_actions`, emits no
-  `-32011` directive, and refuses a non-empty `local_actions` at registration. Plan 21's P3 needs this
-  extension verified at a new exact SHA before it can close.
+- **The approved v2 action was not in the product server when Plan 24 closed.** The shim side is built
+  and smoke-tested against a compatible fake server. At close the live server was v1: it advertised no
+  `local_actions`, emitted no `-32011` directive, and refused a non-empty `local_actions` at
+  registration. Issue #265 later built the v2 registry, advertisement and directive/continuation; Plan
+  21's P3 needs that side verified at a new exact SHA before it can close.
 - **The spool acknowledgment surface was added.** The design referenced a spool path that is not the
   installed one, so the brief was amended before the unit ran. The installed script is
   `plugins/yakka/script/spool.sh`, and the acknowledgment is opt-in, so hook stdout is unchanged by default.
@@ -132,8 +133,10 @@ No separate QA stage ran. The verification is the phase checks above and the ter
 
 ## Residual Risks
 
-- **The v2 server side is unbuilt.** Plan 21's P3, and P6 and P7 through it, cannot close until the server
-  implements the declaration, the capability advertisement, the `-32011` directive and its continuation.
+- **The v2 server side is now built.** Issue #265 implemented the declaration, capability advertisement,
+  `-32011` directive and continuation in the product server. The product `artifact_feedback` tool still
+  declares no action; Plan 21's P3 owns that declaration and its wording. Plan 21's P3, and P6 and P7
+  through it, still need that built side verified at an exact SHA.
 - **Open questions 2–5** are unresolved, and each is recorded with its location in design 8:
   harness tolerance of `_meta` and failed `initialize` (2); whether an edge timeout cuts calls longer than
   about a minute (3); whether a harness exposes the project directory (4); and where the https-only bearer
@@ -149,9 +152,10 @@ No separate QA stage ran. The verification is the phase checks above and the ter
 ## Follow-ups
 
 - [#196](https://github.com/codyhamilton/yakka/issues/196): cover the v2 directive and continuation
-  failures in shim integration tests against the product server.
-- The v2 server side of `enqueue_file_snapshot`. Recorded in design 8 under Bounded enqueue. No GitHub issue
-  was filed for it. Verify it at a new exact SHA before Plan 21 P3.
+  failures in shim integration tests against the product server. Issue #265 added the in-process server
+  directive/continuation tests and the shim's failure-outcome coverage.
+- The v2 server side of `enqueue_file_snapshot`. Recorded in design 8 under Bounded enqueue. Issue #265
+  built it; verify it at a new exact SHA before Plan 21 P3.
 - Open questions 2–5 are recorded in design 8 under Open questions.
 - Plan 22's `DESIGN.md` (lines 37 and 148) still describes the endpoint and shim as not built. Its link
   path has been updated, and the wording is left for Plan 22's own refine.

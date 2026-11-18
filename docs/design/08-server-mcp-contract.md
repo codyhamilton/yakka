@@ -394,9 +394,11 @@ without implementing any later plan's reader.
 **Status.** Approved on 7 Nov 2026 for one server-declared, call-bound `enqueue_file_snapshot`, in the
 approval's words: "Allow the bounded queue action". The approval is design authorization and is not
 evidence of implementation, verification or deployment. The shim side is built and was exercised against
-a compatible fake server. The server side is not built. The v1 registry still refuses `local_actions`,
-the server advertises no action, and it emits no directive. [Plan 21](../plans/21-feedback-delivery/DESIGN.md)'s
-P3 depends on the server side. Verify it at a new exact SHA before that phase relies on it.
+a compatible fake server. The server side is now built: the v2 registry accepts only this declaration,
+advertises the action under `initialize`, and returns the one `-32011` directive and accepts its single
+continuation. The product `artifact_feedback` tool still declares no action;
+[Plan 21](../plans/21-feedback-delivery/DESIGN.md)'s P3 decides when it does. Verify the built side at a
+new exact SHA before that phase relies on it.
 
 This is a separately versioned extension of the v1 contract. It adds no general local effect. The
 declaration cannot name a command, an executable, a queue directory, a payload template, a destination URL
