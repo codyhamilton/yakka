@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 )
 
 func reviewHTTPClient() *http.Client {
@@ -210,27 +211,27 @@ func (r *Reviewer) Review(ctx context.Context, packet Packet, criteria []Criteri
 	if envelope.StopReason == "max_tokens" {
 		return Result{}, failure(ProviderTruncated)
 	}
-	if len(envelope.Content) != 1 {
-		if len(envelope.Content) == 0 {
-			return Result{}, invalid("empty_text")
-		}
-		return Result{}, invalid("multiple_text_blocks")
-	}
+	// The raw content blocks from the review that reported multiple_text_blocks
+	// were never stored, so the reply shape is not recoverable. It may have been
+	// one object split across blocks, several objects, or prose plus JSON.
+	// Concatenate text blocks in order, then fall back to the last valid object.
 	var texts []string
 	for _, block := range envelope.Content {
 		if block.Type == "text" {
 			texts = append(texts, block.Text)
 		}
 	}
-	if len(texts) != 1 {
-		if len(texts) == 0 {
-			return Result{}, invalid("empty_text")
-		}
-		return Result{}, invalid("multiple_text_blocks")
+	if len(texts) == 0 {
+		return Result{}, invalid("empty_text")
 	}
-	result, err := ValidateReply([]byte(texts[0]), packet, criteria)
+	joined := []byte(strings.Join(texts, ""))
+	result, err := ValidateReply(joined, packet, criteria)
 	if err != nil {
-		return Result{}, invalid(InvalidReason(err))
+		selected, ok := lastValidReply(joined, packet, criteria)
+		if !ok {
+			return Result{}, invalid(InvalidReason(err))
+		}
+		result = selected
 	}
 	result.Model = envelope.Model
 	if envelope.Usage != nil {
@@ -238,4 +239,30 @@ func (r *Reviewer) Review(ctx context.Context, packet Packet, criteria []Criteri
 		result.OutputTokens = envelope.Usage.OutputTokens
 	}
 	return result, nil
+}
+
+// lastValidReply selects the last JSON object in text that satisfies the reply
+// contract. Joined text may hold several objects, or prose followed by JSON, so
+// every decodable object start is a candidate and validation walks them from the
+// end: the last valid object wins. Candidates that fail the strict schema are
+// skipped, never relaxed.
+func lastValidReply(text []byte, packet Packet, criteria []Criterion) (Result, bool) {
+	var candidates [][]byte
+	for i := 0; i < len(text); i++ {
+		if text[i] != '{' {
+			continue
+		}
+		dec := json.NewDecoder(bytes.NewReader(text[i:]))
+		var raw json.RawMessage
+		if err := dec.Decode(&raw); err != nil {
+			continue
+		}
+		candidates = append(candidates, append([]byte(nil), raw...))
+	}
+	for i := len(candidates) - 1; i >= 0; i-- {
+		if result, err := ValidateReply(candidates[i], packet, criteria); err == nil {
+			return result, true
+		}
+	}
+	return Result{}, false
 }
