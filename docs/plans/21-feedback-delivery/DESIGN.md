@@ -460,6 +460,14 @@ Owned by Plan 24 (issue #177), merged to master as a design (PR #180, `f5a9f9e`;
 - Surfaces: Part 1: the server's `artifact_feedback` handler (the differences listed in the Feedback tool domain, no `ingest.Ingest`, no scope check, no worker wake), the Stop and SessionEnd sweep in `yakka.py` and the hook config, the Python drain and `_write_paths` and the queue matchers (`artifact_snapshot`, the scan on its path), the remote `/v1/artifacts` result, design docs 01 and 04. Part 2 A: the Plan 24 extension (declaration v2, the shim's action table and directive handling, `spool.sh`'s `YAKKA_SPOOL_PRINT`) and the handler's directive/final wording. Compatibility retains visible `not delivered`/`stale`; Assumption 29's optional sweep is not added.
 - Approach: open (how the drain handles the snapshot kind, how the Stop hook finds the working repo, and the `harness` and payload keys of the entry are the build's to refine against the code)
 - Depends on: 1, and Plan 24 phases 1, 3 and 4 (the endpoint and registry, `artifact_feedback` on the server, the shim with its readers). The sweep and drain half has no dependency on Plan 24, but the phase does not close until the server half is proved. Part 2 A is authorized; it still requires Plan 24 P1/P4 v2 extension verification and Plan 21 P3 implementation/integration evidence. No decision hold remains.
+- Units:
+
+| Unit | Brief | Depends on | Runs alongside |
+|---|---|---|---|
+| 1 — Server `artifact_feedback` declaration v2 and handler | `briefs/phase3-01-server-feedback-v2.md` | nothing (Plan 24 E1 registry/advertisement/directive is built at `7be8aa3`) | 2 |
+| 2 — Stop/SessionEnd sweep, `artifact_snapshot` drain and queue matching, designs 01 and 04 | `briefs/phase3-02-snapshot-sweep-drain.md` | nothing | 1 |
+
+Carried placement: the previous phase's carried items stay carried, not absorbed. The `tools/release/test_layout.py::test_repo_passes_layout_check` failure on ignored `packages/yakka-analytics/node_modules/**` and the `packages/hooklog/README.md` no-config-default wording are outside Phase 3's named surfaces (the briefs name the Python capture/drain surface and designs 01 and 04), so they are not fixed here; no contract, boundary or phase outcome moves because of them. The gated `artifact_feedback` checks on the Phase 2 brief and report remain a Cody egress gate.
 
 ### Phase 4 — Delivered means screened and scored
 
