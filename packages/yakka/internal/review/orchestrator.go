@@ -558,10 +558,30 @@ func (p *prepared) finish(ctx context.Context, cfg RunConfig) (Receipt, error) {
 	return persistRecord(ctx, p.tenant, p.tenantID, p.req, p.repo, p.id, status, reason, result, attempts, p.packet, p.criteriaRec, p.inputHash, cfg, p.controls, p.key, p.controls.store)
 }
 
-func (p *prepared) finishDetached(ctx context.Context, cfg RunConfig) (Receipt, error) {
+func (p *prepared) finishDetached(ctx context.Context, cfg RunConfig) (receipt Receipt, err error) {
 	defer p.releaseReservation()
-	result, attempts, status, reason := p.attempt(ctx, cfg)
-	receipt, err := finalizeRecord(ctx, p.tenant, p.tenantID, p.req, p.repo, p.id, status, reason, result, attempts, p.packet, p.criteriaRec, p.inputHash, cfg, p.controls, p.key)
+	var (
+		result   Result
+		attempts []Attempt
+		status   string
+		reason   string
+	)
+	func() {
+		// A provider or parsing panic on this detached goroutine would otherwise
+		// take down the whole server (net/http only recovers request goroutines)
+		// and strand the row in running.
+		defer func() {
+			if recover() != nil {
+				result, attempts, status, reason = Result{}, nil, "api_error", "internal error"
+			}
+		}()
+		result, attempts, status, reason = p.attempt(ctx, cfg)
+	}()
+	// Finalizing must survive server shutdown cancelling ctx, otherwise the
+	// running row is never replaced.
+	fctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	defer cancel()
+	receipt, err = finalizeRecord(fctx, p.tenant, p.tenantID, p.req, p.repo, p.id, status, reason, result, attempts, p.packet, p.criteriaRec, p.inputHash, cfg, p.controls, p.key)
 	if err != nil {
 		// Keep the in-flight identity visible rather than a zero receipt; the
 		// persisted running row remains the polling answer.
