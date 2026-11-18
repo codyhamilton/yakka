@@ -200,18 +200,27 @@ Include exactly one outcome for every supplied criterion id, including an empty 
 
 // maxInputTokens is the hard ceiling on estimated input tokens for the one-shot
 // Messages request. Anthropic has no offline tokenizer here, so Build uses a
-// deliberately conservative estimate of one token per three UTF-8 bytes
-// (English prose averages about four bytes per token and code fewer), which
-// over-counts rather than under-counts. The policy-ordered trim loop keeps the
-// whole assembled prompt under this value; only an irreducible prompt that
-// still exceeds it is refused.
+// calibrated, deliberately conservative estimate. The smoke case review
+// 8ae31155 measured 39615 actual input tokens for a packet the old one-token-
+// per-three-bytes formula estimated at 32490, i.e. about 2.46 bytes per real
+// token. Estimating at about 2.4 bytes per token over-counts that case rather
+// than under-counting it, keeping the packet below the real ceiling.
+// The policy-ordered trim loop keeps the whole assembled prompt under this
+// value; only an irreducible prompt that still exceeds it is refused.
 const maxInputTokens = 100000
+
+// Estimate ratio in twelfths: 12 bytes per 5 estimated tokens is about 2.4
+// bytes per token. Integer-only, rounding up so the estimate over-counts.
+const (
+	estimateBytesPerTokenNum = 12
+	estimateBytesPerTokenDen = 5
+)
 
 func estimateInputTokens(b []byte) int {
 	if len(b) == 0 {
 		return 0
 	}
-	return (len(b) + 2) / 3
+	return (len(b)*estimateBytesPerTokenDen + estimateBytesPerTokenNum - 1) / estimateBytesPerTokenNum
 }
 
 // Build creates a deterministic packet and role-first prompt from received

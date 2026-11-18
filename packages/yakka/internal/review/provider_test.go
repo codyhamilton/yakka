@@ -199,12 +199,97 @@ func TestReviewerAcceptsSingleMarkdownFence(t *testing.T) {
 	}
 }
 
+func reviewTextBlocks(t *testing.T, blocks []map[string]string) (Result, error) {
+	t.Helper()
+	content, err := json.Marshal(blocks)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := `{"model":"claude-haiku-5-5","stop_reason":"end_turn","content":` + string(content) + `,"usage":{"input_tokens":12,"output_tokens":34}}`
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		io.WriteString(w, body)
+	}))
+	defer server.Close()
+	return NewReviewer("token", "claude-haiku-5-5", "high", server.URL).Review(context.Background(), testPacket(), []Criterion{{ID: "I1"}})
+}
+
+func TestReviewerJoinsTextBlocksIntoOneObject(t *testing.T) {
+	valid := validReplyJSON()
+	mid := len(valid) / 2
+	result, err := reviewTextBlocks(t, []map[string]string{
+		{"type": "text", "text": valid[:mid]},
+		{"type": "text", "text": valid[mid:]},
+	})
+	if err != nil || result.Coverage != "complete" {
+		t.Fatalf("split object = %+v, %v", result, err)
+	}
+}
+
+func TestReviewerIgnoresNonTextBlocks(t *testing.T) {
+	result, err := reviewTextBlocks(t, []map[string]string{
+		{"type": "thinking", "thinking": "internal"},
+		{"type": "text", "text": validReplyJSON()},
+		{"type": "tool_use", "id": "tool-1"},
+	})
+	if err != nil || result.Coverage != "complete" {
+		t.Fatalf("mixed blocks = %+v, %v", result, err)
+	}
+}
+
+func TestReviewerUsesLastValidObject(t *testing.T) {
+	partial := strings.Replace(validReplyJSON(), `"coverage":"complete"`, `"coverage":"partial"`, 1)
+	for name, text := range map[string]string{
+		// The later object wins whether the earlier content is prose, an invalid
+		// object, or another valid object.
+		"prose then valid":   "Here is the review:\n" + partial,
+		"invalid then valid": "{not json} " + partial,
+		"two valid objects":  validReplyJSON() + "\n" + partial,
+	} {
+		t.Run(name, func(t *testing.T) {
+			result, err := reviewTextBlocks(t, []map[string]string{{"type": "text", "text": text}})
+			if err != nil || result.Coverage != "partial" {
+				t.Fatalf("result = %+v, %v", result, err)
+			}
+		})
+	}
+}
+
+func TestReviewerAcceptsTrailingAndProseAroundObject(t *testing.T) {
+	// The whole-reply validate still rejects these shapes, but last-valid-object
+	// selection intentionally accepts the trailing or fenced object.
+	for name, text := range map[string]string{
+		"prose before fence":    "Here is the review:\n```json\n" + validReplyJSON() + "\n```",
+		"trailing after fence":  "```json\n" + validReplyJSON() + "\n```\nmore",
+		"trailing after object": validReplyJSON() + " trailing",
+	} {
+		t.Run(name, func(t *testing.T) {
+			result, err := reviewTextBlocks(t, []map[string]string{{"type": "text", "text": text}})
+			if err != nil || result.Coverage != "complete" {
+				t.Fatalf("result = %+v, %v", result, err)
+			}
+		})
+	}
+}
+
+func TestReviewerJoinedTextWithoutValidObjectIsInvalid(t *testing.T) {
+	_, err := reviewTextBlocks(t, []map[string]string{
+		{"type": "text", "text": "prose only "},
+		{"type": "text", "text": `{"not":"a contract"}`},
+	})
+	var pe *ProviderError
+	if !errors.As(err, &pe) || pe.Status != ProviderInvalid || pe.Reason == "" || pe.Reason == "multiple_text_blocks" {
+		t.Fatalf("error = %v", err)
+	}
+}
+
 func TestReviewerInvalidReasonIsBodyFree(t *testing.T) {
 	for name, body := range map[string]string{
-		"not json":           `{"model":"claude-haiku-5-5","content":[{"type":"text","text":"not json"}]}`,
-		"multiple text":      `{"model":"claude-haiku-5-5","content":[{"type":"text","text":"{}"},{"type":"text","text":"{}"}]}`,
-		"unknown field":      `{"model":"claude-haiku-5-5","content":[{"type":"text","text":` + mustJSON(t, strings.Replace(validReplyJSON(), `"coverage":"complete"`, `"coverage":"complete","extra":true`, 1)) + `}]}`,
-		"invalid assessment": `{"model":"claude-haiku-5-5","content":[{"type":"text","text":` + mustJSON(t, strings.Replace(validReplyJSON(), `"assessment":"met"`, `"assessment":"maybe"`, 1)) + `}]}`,
+		"not json": `{"model":"claude-haiku-5-5","content":[{"type":"text","text":"not json"}]}`,
+		// Two joined blocks that are each empty objects have no valid contract
+		// object; multiple_text_blocks is no longer an outcome of joining.
+		"joined empty objects": `{"model":"claude-haiku-5-5","content":[{"type":"text","text":"{}"},{"type":"text","text":"{}"}]}`,
+		"unknown field":        `{"model":"claude-haiku-5-5","content":[{"type":"text","text":` + mustJSON(t, strings.Replace(validReplyJSON(), `"coverage":"complete"`, `"coverage":"complete","extra":true`, 1)) + `}]}`,
+		"invalid assessment":   `{"model":"claude-haiku-5-5","content":[{"type":"text","text":` + mustJSON(t, strings.Replace(validReplyJSON(), `"assessment":"met"`, `"assessment":"maybe"`, 1)) + `}]}`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -231,7 +316,7 @@ func TestReviewerRefusesOverBudgetPacketWithoutCall(t *testing.T) {
 	}))
 	defer server.Close()
 	packet := testPacket()
-	packet.Prompt = []byte(strings.Repeat("x", 3*maxInputTokens+3))
+	packet.Prompt = []byte(strings.Repeat("x", overBudgetBytes()))
 	_, err := NewReviewer("token", "claude-haiku-5-5", "high", server.URL).Review(context.Background(), packet, nil)
 	var pe *ProviderError
 	if !errors.As(err, &pe) || pe.Status != ProviderInputTooLarge {

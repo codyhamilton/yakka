@@ -27,6 +27,24 @@ func mustBuild(t *testing.T, in Input) Packet {
 	return p
 }
 
+// overBudgetBytes is a byte count whose token estimate exceeds maxInputTokens
+// under the calibrated 2.4-bytes-per-token ratio, so fixtures do not bake in
+// the old three-bytes-per-token assumption.
+func overBudgetBytes() int {
+	return (estimateBytesPerTokenNum*maxInputTokens)/estimateBytesPerTokenDen + 1
+}
+
+func TestEstimateInputTokensCoversSmokeCase(t *testing.T) {
+	// Review 8ae31155 measured 39615 actual input tokens. The old formula
+	// estimated 32490 for 97468-97470 bytes, so those lengths must now estimate
+	// at least the observed count.
+	for _, n := range []int{97468, 97469, 97470} {
+		if got := estimateInputTokens(make([]byte, n)); got < 39615 {
+			t.Fatalf("estimate for %d bytes = %d; want >= 39615", n, got)
+		}
+	}
+}
+
 func TestBuildStableOrderIdentityAndPromptBoundary(t *testing.T) {
 	diff := fileDiff("pkg/a.go", "safe change") + fileDiff("pkg/b.go", "another safe change")
 	in := Input{Capture: capture(diff), Criteria: []Criterion{{ID: "O2", Text: "Second"}, {ID: "I1", Text: "First"}}}
@@ -77,7 +95,7 @@ func TestBuildReappliesLockfileAndPlanArtifactExclusions(t *testing.T) {
 }
 
 func TestBuildTruncatesWholeFilesInPolicyOrder(t *testing.T) {
-	large := strings.Repeat("x", 40000)
+	large := strings.Repeat("x", 30000)
 	diff := fileDiff("pkg/a.go", large) + fileDiff("pkg/b.go", large) +
 		fileDiff("pkg/a_test.go", large) + fileDiff("pkg/b_test.go", large) +
 		fileDiff("config.yaml", large) + fileDiff("settings.json", large) +
@@ -109,7 +127,7 @@ func TestBuildStaysUnderTokenBudgetAndRecordsEstimate(t *testing.T) {
 }
 
 func TestBuildDynamicTrimUsesPolicyOrder(t *testing.T) {
-	body := strings.Repeat("x", 40000)
+	body := strings.Repeat("x", 30000)
 	var diff strings.Builder
 	for _, name := range []string{"pkg/a.go", "pkg/b.go", "pkg/c.go"} {
 		diff.WriteString(fileDiff(name, body))
@@ -141,12 +159,12 @@ func TestBuildDynamicTrimUsesPolicyOrder(t *testing.T) {
 }
 
 func TestBuildRefusesIrreduciblePromptOverTokenBudget(t *testing.T) {
-	_, err := Build(Input{Capture: capture(fileDiff("a.go", "safe")), CriteriaText: strings.Repeat("x", 3*maxInputTokens+1)})
+	_, err := Build(Input{Capture: capture(fileDiff("a.go", "safe")), CriteriaText: strings.Repeat("x", overBudgetBytes())})
 	assertCode(t, err, "input_too_large")
 }
 
 func TestBuildRefusesOversizeCriteriaAndDelimiterNamespace(t *testing.T) {
-	_, err := Build(Input{Capture: capture(fileDiff("a.go", "safe")), CriteriaText: strings.Repeat("x", 3*maxInputTokens+1)})
+	_, err := Build(Input{Capture: capture(fileDiff("a.go", "safe")), CriteriaText: strings.Repeat("x", overBudgetBytes())})
 	assertCode(t, err, "input_too_large")
 	_, err = Build(Input{Capture: capture(fileDiff("a.go", "contains <<<YAKKA_UNTRUSTED_reserved>>> data"))})
 	assertCode(t, err, "refused_capture")

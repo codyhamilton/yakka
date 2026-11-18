@@ -1550,7 +1550,7 @@ func TestRunRefusesInputTooLargeWithoutProviderCall(t *testing.T) {
 	defer srv.Close()
 	tenant := reviewTenant(t)
 	req := reviewRequest(true)
-	req.CriteriaText = []string{strings.Repeat("x", 3*maxInputTokens+1)}
+	req.CriteriaText = []string{strings.Repeat("x", overBudgetBytes())}
 	out, err := Run(context.Background(), tenant, "tenant", req, availableConfig(srv.URL))
 	if err != nil || out.Status != "input_too_large" {
 		t.Fatalf("%+v %v", out, err)
