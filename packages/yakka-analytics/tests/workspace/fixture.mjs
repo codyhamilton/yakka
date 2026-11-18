@@ -1440,7 +1440,12 @@ function p12ExecutionBase() {
     { repo: 'repo-a', plan: '20', conv: 'conv-20c', brief: 'docs/plans/20-analytics-reset/briefs/12-03.md', shape: 'complete', at: start + 7000, cost: null, flags: { session_cost_null_reason: 'all_unpriced' } },
     { repo: 'repo-a', plan: '20', conv: 'conv-20d', brief: 'docs/plans/20-analytics-reset/briefs/12-04.md', shape: 'unreported', at: start + 6000, cost: 1.5, flags: {} },
     { repo: 'repo-a', plan: '20', conv: 'conv-20e', brief: 'docs/plans/20-analytics-reset/briefs/12-05.md', shape: 'started', at: start + 5000, cost: 2, flags: {} },
-    { repo: 'repo-a', plan: '23', conv: 'conv-shared', brief: 'docs/plans/20-analytics-reset/briefs/23-01.md', shape: 'complete', at: start + 4000, cost: 0.75, flags: {} }
+    { repo: 'repo-a', plan: '23', conv: 'conv-shared', brief: 'docs/plans/20-analytics-reset/briefs/23-01.md', shape: 'complete', at: start + 4000, cost: 0.75, flags: {} },
+    // Plan-detail scene executions: every shape, priced/unpriced/lower-bound.
+    { repo: 'acme/widgets', plan: '20-analytics-reset', conv: 'conv-detail-a', brief: 'docs/plans/20-analytics-reset/briefs/3-01-foundations.md', shape: 'complete', at: start + 1200, cost: 0.5, flags: {} },
+    { repo: 'acme/widgets', plan: '20-analytics-reset', conv: 'conv-detail-b', brief: 'docs/plans/20-analytics-reset/briefs/12-01-detail.md', shape: 'complete', at: start + 1100, cost: 4, flags: { session_cost_lower_bound: true } },
+    { repo: 'acme/widgets', plan: '20-analytics-reset', conv: 'conv-detail-b', brief: 'docs/plans/20-analytics-reset/briefs/99-01-orphan.md', shape: 'unreported', at: start + 1000, cost: null, flags: { session_cost_null_reason: 'all_unpriced' } },
+    { repo: 'acme/widgets', plan: '20-analytics-reset', conv: 'conv-detail-a', brief: 'docs/plans/20-analytics-reset/briefs/12-01-detail.md', shape: 'started', at: start + 900, cost: 2, flags: {} }
   ];
 }
 
@@ -1499,7 +1504,19 @@ function p12EventBase() {
     { path: 'docs/plans/20-analytics-reset/briefs/23-01.md', conv: 'conv-shared', event: 'write', type: 'artifact_version', at: s + 4200 },
     { path: 'docs/plans/20-analytics-reset/reports/23-01.md', conv: 'conv-shared', event: 'write', type: 'artifact_version', at: s + 3800 }
   ];
-  return { 'repo-a|20': plan20, 'repo-a|23': plan23 };
+  // Plan-detail scene: mixed artifact_version and non-artifact events for the
+  // sessions that wrote an artifact under the plan, including an unpaired brief.
+  const detail = [
+    { path: 'docs/plans/20-analytics-reset/DESIGN.md', conv: 'conv-detail-a', event: 'write', type: 'artifact_version', at: s + 12000 },
+    { path: 'docs/plans/20-analytics-reset/briefs/3-01-foundations.md', conv: 'conv-detail-b', event: 'write', type: 'artifact_version', at: s + 11900 },
+    { path: '', conv: 'conv-detail-a', event: 'commit', type: 'commit', at: s + 11800 },
+    { path: 'docs/plans/20-analytics-reset/briefs/12-01-detail.md', conv: 'conv-detail-a', event: 'write', type: 'artifact_version', at: s + 11700 },
+    { path: 'docs/plans/20-analytics-reset/reports/12-01-detail.md', conv: 'conv-detail-a', event: 'write', type: 'artifact_version', at: s + 11600 },
+    { path: 'docs/plans/20-analytics-reset/briefs/99-01-orphan.md', conv: 'conv-detail-b', event: 'write', type: 'artifact_version', at: s + 11500 },
+    { path: '', conv: 'conv-detail-b', event: 'run', type: 'hook', at: s + 11400 },
+    { path: 'docs/plans/20-analytics-reset/reports/12-01-detail.md', conv: 'conv-detail-b', event: 'write', type: 'artifact_version', at: s + 11300 }
+  ];
+  return { 'repo-a|20': plan20, 'repo-a|23': plan23, 'acme/widgets|20-analytics-reset': detail };
 }
 
 export function p12PlanEvents({ repo_id = '', plan = '', limit = 500, cursor = '' } = {}) {
@@ -1523,6 +1540,126 @@ export function p12PlanEvents({ repo_id = '', plan = '', limit = 500, cursor = '
 }
 
 // ---------------------------------------------------------------------------
+// P12 plan-detail scene (unit 12-06). Additive: one fully populated plan with a
+// percent-encoded repo id, one plan whose design content is unavailable, one
+// plan with no collections at all, and a plan absent from the served list. The
+// list itself (P12_PLAN_SPECS) and every P10/P11 body stay byte-identical.
+// ---------------------------------------------------------------------------
+
+const P12_DETAIL_PLAN_SPECS = [
+  ['acme/widgets', '20-analytics-reset', { complete: 2, unreported: 1, started: 1, cost: 3.5, unpriced: 1, shared: 1, artifacts: 6, versions: 12, sessions: 2, flags: { shared_session: true } }],
+  ['repo-a', '21-empty', { complete: 0, unreported: 0, started: 0, cost: 0, unpriced: 0, shared: 0, artifacts: 1, versions: 1, sessions: 0, flags: { no_executions: true } }],
+  ['repo-a', '22-empty', { complete: 0, unreported: 0, started: 0, cost: 0, unpriced: 0, shared: 0, artifacts: 0, versions: 0, sessions: 0, flags: { no_executions: true } }]
+];
+
+export function p12DetailPlanRows() {
+  return P12_DETAIL_PLAN_SPECS.map(([repo, plan, spec], index) => {
+    const total = spec.complete + spec.unreported + spec.started;
+    const last = P12.start + (30 - index) * 86400;
+    const first = last - (index + 2) * 3600;
+    const flags = { ...spec.flags };
+    if (total === 0) flags.complete_share_null_reason = 'no_executions';
+    if (spec.unpriced > 0 && spec.cost !== null) flags.associated_cost_lower_bound = true;
+    return {
+      id: { repo_id: repo, plan },
+      m: {
+        artifacts: spec.artifacts, versions: spec.versions, sessions: spec.sessions,
+        shared_sessions: spec.shared, associated_cost_usd: spec.cost, unpriced_calls: spec.unpriced,
+        executions_complete: spec.complete, executions_unreported: spec.unreported, executions_started: spec.started,
+        complete_share: total ? spec.complete / total : null,
+        'design_score:clarity': spec.artifacts ? 0.9 : null,
+        'design_score:structure': spec.artifacts ? 0.4 : null,
+        span_days: (last - first) / 86400, first_ts: first, last_ts: last
+      },
+      l: { repo_id: repo, harness: 'orca', session_model: 'claude' },
+      flags
+    };
+  });
+}
+
+// The plan row is named by (repo_id, plan); combined with the list population so
+// a list plan can still open its detail. An unknown plan returns no rows.
+export function p12PlanDetailPage({ repo_id = '', plan = '', limit = 4, cursor = '' } = {}) {
+  const all = [...p12PlanRows(), ...p12DetailPlanRows()];
+  const rows = all.filter(row => (!repo_id || row.id.repo_id === repo_id) && (!plan || row.id.plan === plan));
+  const scopeN = rows.length;
+  const { page, next } = p12Page(rows, limit, cursor);
+  return {
+    grain: 'plan', rows: page, next,
+    population: { grain: 'plan', unit: 'plan', scope_n: scopeN, cohort_n: scopeN, eligible_n: scopeN, returned_n: page.length, missing_by_reason: {}, relation: null }
+  };
+}
+
+function detailArtifactRow({ repo_id, plan, path, kind, versions, ts, content_bytes = 1024, content_unavailable = false, scores = {}, bands = {}, screen = 'pass', harness = 'orca', model = 'claude', writer = 'conv-detail-a', writerCost = 0.5, writerUnpriced = 0, writerLower = false }) {
+  const m = { versions, distinct_writing_sessions: 1, first_ts: ts - 3600, last_ts: ts, latest_version_ts: ts, writing_session_cost_usd: writerCost, writing_session_model_calls: 3, writing_session_hook_events: 5 };
+  const l = { repo_id, kind, plan, source: 'worktree', writing_session: writer, harness, session_model: model, screen_verdict: screen };
+  const flags = { writing_session_unpriced_calls: writerUnpriced, writing_session_cost_lower_bound: writerLower, writing_session_is_captured_provenance: true, latest_version_outside_window: false };
+  for (const [check, value] of Object.entries(scores)) {
+    m[`score:${check}`] = value.score;
+    m[`score_scorer:${check}`] = value.scorer;
+    l[`band:${check}`] = bands[check] || null;
+  }
+  if (content_unavailable) { m.content_bytes = null; flags.content_unavailable = true; }
+  else m.content_bytes = content_bytes;
+  if (writerUnpriced > 0 && writerLower) flags.writing_session_cost_lower_bound = true;
+  return { _ts: ts, id: { repo_id, path }, m, l, flags };
+}
+
+const P12_DETAIL_ARTIFACT_SPECS = {
+  'acme/widgets|20-analytics-reset': [
+    detailArtifactRow({ repo_id: 'acme/widgets', plan: '20-analytics-reset', path: 'docs/plans/20-analytics-reset/DESIGN.md', kind: 'design', versions: 4, ts: P12.start + 12000, scores: { clarity: { score: 0.9, scorer: 'jev-1.13.0' }, structure: { score: 0.4, scorer: 'jev-1.13.0' } }, bands: { clarity: 'high', structure: 'low' }, writer: 'conv-detail-a', writerCost: 1.25, writerUnpriced: 2, writerLower: true }),
+    detailArtifactRow({ repo_id: 'acme/widgets', plan: '20-analytics-reset', path: 'docs/plans/20-analytics-reset/briefs/3-01-foundations.md', kind: 'brief', versions: 2, ts: P12.start + 11900, scores: { clarity: { score: 0.55, scorer: 'jev-1.13.0' } }, bands: { clarity: 'mid' }, writer: 'conv-detail-b' }),
+    detailArtifactRow({ repo_id: 'acme/widgets', plan: '20-analytics-reset', path: 'docs/plans/20-analytics-reset/briefs/12-01-detail.md', kind: 'brief', versions: 3, ts: P12.start + 11800, scores: { clarity: { score: 0.7, scorer: 'jev-1.13.0' } }, bands: { clarity: 'high' }, writer: 'conv-detail-a' }),
+    detailArtifactRow({ repo_id: 'acme/widgets', plan: '20-analytics-reset', path: 'docs/plans/20-analytics-reset/briefs/99-01-orphan.md', kind: 'brief', versions: 1, ts: P12.start + 11700, scores: {}, screen: 'unscreened', writer: 'conv-detail-b' }),
+    detailArtifactRow({ repo_id: 'acme/widgets', plan: '20-analytics-reset', path: 'docs/plans/20-analytics-reset/reports/12-01-detail.md', kind: 'report', versions: 2, ts: P12.start + 11600, content_unavailable: true, scores: { structure: { score: 0.85, scorer: 'jev-1.13.0' } }, bands: { structure: 'high' }, writer: 'conv-detail-a' }),
+    detailArtifactRow({ repo_id: 'acme/widgets', plan: '20-analytics-reset', path: 'docs/plans/20-analytics-reset/reports/12-02-detail.md', kind: 'report', versions: 1, ts: P12.start + 11500, scores: {}, writer: 'conv-detail-b' })
+  ],
+  'repo-a|21-empty': [
+    detailArtifactRow({ repo_id: 'repo-a', plan: '21-empty', path: 'docs/plans/21-empty/DESIGN.md', kind: 'design', versions: 1, ts: P12.start + 20000, scores: {}, screen: 'unscreened', writer: 'conv-empty' })
+  ]
+};
+
+export function p12PlanArtifactEntities({ repo_id = '', plan = '', limit = 4, cursor = '' } = {}) {
+  const all = (P12_DETAIL_ARTIFACT_SPECS[`${repo_id}|${plan}`] || []).slice().sort((a, b) => b._ts - a._ts);
+  const { page, next } = p12Page(all, limit, cursor);
+  return {
+    grain: 'artifact', rows: page.map(({ _ts, ...row }) => row), next,
+    population: { grain: 'artifact', unit: 'artifact', scope_n: all.length, cohort_n: all.length, eligible_n: all.length, returned_n: page.length, missing_by_reason: {}, relation: null }
+  };
+}
+
+const P12_DETAIL_SESSIONS = {
+  'acme/widgets|20-analytics-reset': [
+    { conversation_id: 'conv-detail-a', ts: P12.start + 12000 },
+    { conversation_id: 'conv-detail-b', ts: P12.start + 11900 }
+  ]
+};
+
+export function p12PlanSessions({ repo_id = '', plan = '', limit = 4, cursor = '' } = {}) {
+  const all = (P12_DETAIL_SESSIONS[`${repo_id}|${plan}`] || []).slice()
+    .sort((a, b) => String(a.conversation_id).localeCompare(String(b.conversation_id)))
+    .map(row => ({ repo_id, plan, path: '', conversation_id: row.conversation_id, event: '', event_type: '', ts: row.ts }));
+  const { page, next } = p12Page(all, limit, cursor);
+  return {
+    grain: 'plan', id: { repo_id, plan }, collection: 'sessions', rows: page, next,
+    population: { grain: 'plan_sessions', unit: 'sessions', scope_n: all.length, cohort_n: all.length, eligible_n: all.length, returned_n: page.length, missing_by_reason: {} }
+  };
+}
+
+// Only conv-detail-a resolves; conv-detail-b stays listed as unavailable.
+const P12_DETAIL_SESSION_ROWS = {
+  'conv-detail-a': { id: { conversation_id: 'conv-detail-a' }, m: { cost_usd: 2.5, unpriced_calls: 1 }, l: { session_repo: 'acme/widgets', harness: 'orca', session_model: 'claude' }, flags: { cost_lower_bound: true } }
+};
+
+export function p12SessionEntities({ ids = [], limit = 4 } = {}) {
+  const rows = ids.map(id => P12_DETAIL_SESSION_ROWS[id]).filter(Boolean).slice(0, Math.max(1, Number(limit) || 4));
+  return {
+    grain: 'session', rows,
+    population: { grain: 'session', unit: 'session', scope_n: ids.length, cohort_n: ids.length, eligible_n: ids.length, returned_n: rows.length, missing_by_reason: {}, relation: null }
+  };
+}
+
+// ---------------------------------------------------------------------------
 // P12 artifact reader scene (unit 12-03). Additive to the workflow scene: one
 // design artifact with two known bodies and four unavailable/oversized states,
 // one long multi-chunk brief, one oversized report and one integrity failure.
@@ -1538,7 +1675,8 @@ const P12_HASH = {
   briefLong: 'b3'.repeat(32),
   oversize: 'c4'.repeat(32),
   integrity: 'c5'.repeat(32),
-  diffA: 'd1'.repeat(32), diffB: 'd2'.repeat(32), other: 'd3'.repeat(32), diffLarge: 'd4'.repeat(32)
+  diffA: 'd1'.repeat(32), diffB: 'd2'.repeat(32), other: 'd3'.repeat(32), diffLarge: 'd4'.repeat(32),
+  detailDesign: 'e6'.repeat(32)
 };
 
 function p12Iso(offset) {
@@ -1552,7 +1690,26 @@ const P12_DESIGN_A = [
   '',
   '## Phase 12',
   '',
-  'Body A complete. This is the latest known body.'
+  'Body A complete. This is the latest known body.',
+  '',
+  '### Phase 3 — Foundations',
+  '',
+  '- Outcome: Reader text renders as text nodes; the word complete is prose only.',
+  '',
+  '### Phase 7 — Unwritten',
+  '',
+  '- Outcome: This phase reads complete in prose but has no brief path.',
+  '',
+  'Text mentioning ### Phase 5 inside body prose is not a heading.',
+  '',
+  '```',
+  '### Phase 99 — Fenced decoy',
+  '- Outcome: this decoy must never appear',
+  '```',
+  '',
+  '### Phase 12 — Detail',
+  '',
+  '- Outcome: Plan detail parses stored phases for display only.'
 ].join('\n');
 
 const P12_DESIGN_B = [
@@ -1706,6 +1863,24 @@ const P12_ARTIFACT_SPECS = [
     versions: [
       { hash: P12_HASH.other, received: 83000, ts: 82000, session: 'conv-20e', harness: 'orca', model: 'claude', source: 'worktree', sha: 'sha-other', scores: {} }
     ]
+  },
+  {
+    repo_id: 'acme/widgets',
+    path: 'docs/plans/20-analytics-reset/DESIGN.md',
+    versions: [
+      {
+        hash: P12_HASH.detailDesign, received: 120000, ts: 119000, session: 'conv-detail-a', harness: 'orca', model: 'claude',
+        source: 'worktree', sha: 'sha-detail-design', screen: { verdict: 'pass', scorer: 'jev-1.13.0', at: p12Iso(120500) },
+        scores: { clarity: { score: 0.9, scorer: 'jev-1.13.0' }, structure: { score: 0.4, scorer: 'jev-1.13.0' } }
+      }
+    ]
+  },
+  {
+    repo_id: 'repo-a',
+    path: 'docs/plans/21-empty/DESIGN.md',
+    versions: [
+      { hash: P12_HASH.designV2, received: 21000, ts: 20000, session: 'conv-empty', harness: 'orca', model: 'claude', source: 'worktree', sha: 'sha-empty-design', scores: {} }
+    ]
   }
 ].map(spec => ({ ...spec, versions: spec.versions.map(version => p12VersionSpec(spec.repo_id, spec.path, version)) }));
 
@@ -1715,7 +1890,8 @@ const P12_CONTENT = new Map([
   [P12_HASH.briefLong, { repo_id: 'repo-a', path: 'docs/plans/20-analytics-reset/briefs/12-03.md', text: P12_LONG_BRIEF, verdict: 'pass' }],
   [P12_HASH.diffA, { repo_id: 'repo-a', path: 'docs/plans/20-analytics-reset/briefs/diff-fixture.md', text: P12_DIFF_BEFORE, verdict: 'pass' }],
   [P12_HASH.diffB, { repo_id: 'repo-a', path: 'docs/plans/20-analytics-reset/briefs/diff-fixture.md', text: P12_DIFF_AFTER, verdict: 'pass' }],
-  [P12_HASH.diffLarge, { repo_id: 'repo-a', path: 'docs/plans/20-analytics-reset/briefs/diff-fixture.md', text: Array.from({ length: 2001 }, (_, index) => `large fixture line ${index + 1}`).join('\n'), verdict: 'pass' }]
+  [P12_HASH.diffLarge, { repo_id: 'repo-a', path: 'docs/plans/20-analytics-reset/briefs/diff-fixture.md', text: Array.from({ length: 2001 }, (_, index) => `large fixture line ${index + 1}`).join('\n'), verdict: 'pass' }],
+  [P12_HASH.detailDesign, { repo_id: 'acme/widgets', path: 'docs/plans/20-analytics-reset/DESIGN.md', text: P12_DESIGN_A, verdict: 'pass' }]
 ]);
 
 function p12ArtifactSpec(repo_id, path) {
@@ -1843,6 +2019,11 @@ export function p12Fixture() {
     executionRows: p12ExecutionRows,
     executionEntities: p12ExecutionEntities,
     planEvents: p12PlanEvents,
+    detailPlanRows: p12DetailPlanRows,
+    planDetailPage: p12PlanDetailPage,
+    planArtifactEntities: p12PlanArtifactEntities,
+    planSessions: p12PlanSessions,
+    sessionEntities: p12SessionEntities,
     artifactRows: p12ArtifactRows,
     artifactEntities: p12ArtifactEntities,
     content: p12Content,

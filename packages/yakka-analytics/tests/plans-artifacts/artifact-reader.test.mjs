@@ -35,8 +35,8 @@ test('the router serves /artifact as an explorer and keeps /plans named', () => 
   assert.equal(parseRoute('/artifact').kind, 'explorer');
   assert.equal(parseRoute('/artifact').explorer, 'artifact');
   assert.equal(parseRoute('/artifact').path, '/artifact');
-  assert.equal(parseRoute('/plans/acme/20').kind, 'named');
-  assert.equal(parseRoute('/plans/acme/20').phase, 12);
+  assert.equal(parseRoute('/plans/acme/20').kind, 'explorer');
+  assert.deepEqual(parseRoute('/plans/acme/20').plan, { repo_id: 'acme', plan: '20' });
 });
 
 test('artifactKind matches the server path rule', () => {

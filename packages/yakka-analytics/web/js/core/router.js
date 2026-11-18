@@ -8,15 +8,21 @@ export const ACCOUNT_PATHS = ['/login', '/oauth/callback', '/device', '/profile'
 export const START_PATH = '/';
 export const EXPLORER_PATHS = new Map([['/ledger', 'ledger'], ['/ops', 'ops'], ['/sessions', 'sessions'], ['/artifact', 'artifact'], ['/plans', 'plans']]);
 
-// Later destinations and the phase that delivers them. Plan detail stays a
-// named Phase 12 destination until 12-06 converts it.
-const NAMED_ROUTES = [
-  { pattern: /^\/plans\/[^/]+\/[^/]+$/, title: 'Plans', phase: 12 }
-];
-
 export function normalizePath(pathname = '/') {
   const path = String(pathname || '/').replace(/\/+$/, '');
   return path || '/';
+}
+
+// Each path segment is percent-decoded exactly once, so a repo id containing a
+// slash round-trips (`/plans/acme%2Fwidgets/20-analytics-reset`). A malformed
+// escape or an empty segment is not-found, never guessed.
+function decodeSegment(raw = '') {
+  try {
+    const value = decodeURIComponent(raw);
+    return value && value !== '.' && value !== '..' ? value : '';
+  } catch {
+    return '';
+  }
 }
 
 export function parseRoute(pathname = '/', search = '') {
@@ -36,17 +42,19 @@ export function parseRoute(pathname = '/', search = '') {
   if (sessionDetail) {
     return { kind: 'explorer', path, search, explorer: 'sessions', sessionId: decodeURIComponent(sessionDetail[1]), title: 'Session' };
   }
+  const planDetail = /^\/plans\/([^/]+)\/([^/]+)$/.exec(path);
+  if (planDetail) {
+    const repo_id = decodeSegment(planDetail[1]);
+    const plan = decodeSegment(planDetail[2]);
+    if (!repo_id || !plan) return { kind: 'not-found', path, search, title: 'Not found' };
+    return { kind: 'explorer', path, search, explorer: 'plans', plan: { repo_id, plan }, title: 'Plan' };
+  }
   if (EXPLORER_PATHS.has(path)) {
     const explorer = EXPLORER_PATHS.get(path);
     const title = explorer === 'ledger' ? 'Ledger' : explorer === 'sessions' ? 'Sessions' : explorer === 'artifact' ? 'Artifact' : explorer === 'plans' ? 'Plans' : 'Operations';
     return { kind: 'explorer', path, search, explorer, title };
   }
   if (ACCOUNT_PATHS.includes(path)) return { kind: 'account', path, search, title: accountTitle(path) };
-  for (const route of NAMED_ROUTES) {
-    if (route.pattern.test(path)) {
-      return { kind: 'named', path, search, title: route.title, phase: route.phase, label: `Delivered in Phase ${route.phase}: ${route.title}` };
-    }
-  }
   return { kind: 'not-found', path, search, title: 'Not found' };
 }
 

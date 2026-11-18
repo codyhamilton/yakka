@@ -1,7 +1,7 @@
 // Deterministic same-origin stub of the analytics API, generated from the
 // committed fixture manifest. Test-only: product code never imports this.
 
-import { makeSchema, activityProbe, activityList, summary, population, adminStatus, explorePage, COUNTS, p10Schema, p10Summary, p10Query, p10Distribution, p10Entities, p10Scores, p10ScoreSeries, p10Baselines, p11Schema, p11Scatter, p11ArtifactScatter, p11PlanScatter, p11TimeScatter, p11TimeAggregate, p11Scores, p11Entities, p11Aggregate, p11SessionList, p11Conversation, p11Entity, p12Schema, p12PlanEntities, p12PlanScatter, p12PlanAggregate, p12ExecutionEntities, p12PlanEvents, p12ArtifactEntities, p12Content, p12Baselines } from './fixture.mjs';
+import { makeSchema, activityProbe, activityList, summary, population, adminStatus, explorePage, COUNTS, p10Schema, p10Summary, p10Query, p10Distribution, p10Entities, p10Scores, p10ScoreSeries, p10Baselines, p11Schema, p11Scatter, p11ArtifactScatter, p11PlanScatter, p11TimeScatter, p11TimeAggregate, p11Scores, p11Entities, p11Aggregate, p11SessionList, p11Conversation, p11Entity, p12Schema, p12PlanEntities, p12PlanDetailPage, p12PlanScatter, p12PlanAggregate, p12ExecutionEntities, p12PlanEvents, p12PlanArtifactEntities, p12PlanSessions, p12SessionEntities, p12ArtifactEntities, p12Content, p12Baselines } from './fixture.mjs';
 
 const json = (response, status, body) => {
   response.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
@@ -119,6 +119,17 @@ export function createStubApi() {
           return true;
         }
         if (grain === 'plan') {
+          // A detail row is named by (repo_id, plan); the list request carries
+          // no `plan` filter and keeps its exact ten-plan population.
+          if (query.get('plan')) {
+            json(response, 200, p12PlanDetailPage({
+              repo_id: query.get('repo_id') || '',
+              plan: query.get('plan') || '',
+              limit: Number(query.get('limit')) || 4,
+              cursor: query.get('cursor') || ''
+            }));
+            return true;
+          }
           json(response, 200, p12PlanEntities({
             sort: query.get('sort') || 'last_ts:desc',
             limit: Number(query.get('limit')) || 12,
@@ -138,6 +149,22 @@ export function createStubApi() {
             repo_id: query.get('repo_id') || '',
             limit: Number(query.get('limit')) || 12,
             cursor: query.get('cursor') || ''
+          }));
+          return true;
+        }
+        if (grain === 'artifact' && (query.get('plan') || query.get('repo_id'))) {
+          json(response, 200, p12PlanArtifactEntities({
+            repo_id: query.get('repo_id') || '',
+            plan: query.get('plan') || '',
+            limit: Number(query.get('limit')) || 4,
+            cursor: query.get('cursor') || ''
+          }));
+          return true;
+        }
+        if (grain === 'session' && query.has('id')) {
+          json(response, 200, p12SessionEntities({
+            ids: query.getAll('id'),
+            limit: Number(query.get('limit')) || 4
           }));
           return true;
         }
@@ -163,6 +190,15 @@ export function createStubApi() {
             repo_id: query.get('repo_id') || '',
             plan: query.get('plan') || '',
             limit: Number(query.get('limit')) || 500,
+            cursor: query.get('cursor') || ''
+          }));
+          return true;
+        }
+        if (grain === 'plan' && collection === 'sessions') {
+          json(response, 200, p12PlanSessions({
+            repo_id: query.get('repo_id') || '',
+            plan: query.get('plan') || '',
+            limit: Number(query.get('limit')) || 4,
             cursor: query.get('cursor') || ''
           }));
           return true;

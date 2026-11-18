@@ -83,3 +83,115 @@
   font-size: 0.9rem;
   color: var(--yk-muted, #55606a);
 }
+
+/* Plan detail: one fixed plan identity, its named collections and the stored
+   design context. Tables reuse the explorer chrome; no chart styling here. */
+
+.plans-detail-identity {
+  font-family: var(--yk-mono, ui-monospace, monospace);
+  font-size: 1.05rem;
+}
+
+.plans-detail-not-applied {
+  margin: 0.5rem 0;
+  padding: 0.5rem 0.75rem;
+  border-left: 3px solid var(--yk-warning, #b8860b);
+  background: var(--yk-warning-bg, rgba(184, 134, 11, 0.08));
+  font-size: 0.85rem;
+}
+
+.plans-detail-section {
+  margin-top: 1.25rem;
+  border-top: 1px solid var(--yk-border, #d7dde3);
+  padding-top: 0.75rem;
+}
+
+.plans-detail-status {
+  font-size: 0.85rem;
+  color: var(--yk-muted, #55606a);
+}
+
+.plans-detail-section[data-state="error"] .plans-detail-status {
+  color: var(--yk-error, #b00020);
+}
+
+.plans-detail-section[data-state="empty"] .plans-detail-status,
+.plans-detail-section[data-state="unsupported"] .plans-detail-status {
+  font-style: italic;
+}
+
+.plans-detail-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+
+.plans-detail-table caption {
+  caption-side: top;
+  text-align: left;
+  color: var(--yk-muted, #55606a);
+  padding-bottom: 0.4rem;
+  font-size: 0.8rem;
+}
+
+.plans-detail-table th,
+.plans-detail-table td {
+  padding: 0.3rem 0.45rem;
+  border-bottom: 1px solid var(--yk-border, #d7dde3);
+  text-align: left;
+  vertical-align: top;
+}
+
+.plans-detail-facts {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 0.2rem 0.75rem;
+  font-size: 0.9rem;
+}
+
+.plans-detail-facts dt {
+  color: var(--yk-muted, #55606a);
+}
+
+.plans-detail-facts dd {
+  margin: 0;
+}
+
+.plans-detail-population,
+.plans-detail-overlap,
+.plans-detail-events-scope,
+.plans-design-basis {
+  font-size: 0.82rem;
+  color: var(--yk-muted, #55606a);
+}
+
+.plans-phases {
+  padding-left: 1.25rem;
+}
+
+.plans-phase {
+  margin-bottom: 0.5rem;
+}
+
+.plans-phase-heading {
+  display: block;
+}
+
+.plans-phase-outcome,
+.plans-phase-briefs {
+  margin: 0.15rem 0;
+  font-size: 0.88rem;
+}
+
+.plans-unpaired-briefs {
+  font-size: 0.88rem;
+}
+
+.plans-detail-more {
+  margin-top: 0.5rem;
+}
+
+.plans-detail-back {
+  display: inline-block;
+  margin-top: 0.35rem;
+}

@@ -113,7 +113,7 @@ test('plan identity and detail destination encode slashes inside path segments',
   assert.deepEqual(identity, { repo_id: 'org/repo', plan: '20 analytics' });
   assert.equal(planDestination(identity), '/plans/org%2Frepo/20%20analytics');
   assert.equal(parseRoute('/plans').explorer, 'plans');
-  assert.equal(parseRoute('/plans/acme/20-analytics-reset').phase, 12);
+  assert.deepEqual(parseRoute('/plans/acme/20-analytics-reset').plan, { repo_id: 'acme', plan: '20-analytics-reset' });
 });
 
 test('the scatter spec and sampled caveat name what the response is', () => {

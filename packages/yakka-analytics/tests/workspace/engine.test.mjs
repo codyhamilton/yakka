@@ -170,7 +170,8 @@ test('router names later destinations and keeps unknown paths in the not-found v
   assert.equal(parseRoute('/b/pulse').kind, 'named');
   assert.equal(parseRoute('/ledger').kind, 'explorer');
   assert.equal(parseRoute('/ops').kind, 'explorer');
-  assert.equal(parseRoute('/plans/acme/20-analytics-reset').phase, 12);
+  assert.equal(parseRoute('/plans/acme/20-analytics-reset').kind, 'explorer');
+  assert.deepEqual(parseRoute('/plans/acme/20-analytics-reset').plan, { repo_id: 'acme', plan: '20-analytics-reset' });
   assert.equal(parseRoute('/sessions').kind, 'explorer');
   assert.equal(parseRoute('/sessions').explorer, 'sessions');
   assert.equal(parseRoute('/sessions/abc').kind, 'explorer');
@@ -180,8 +181,11 @@ test('router names later destinations and keeps unknown paths in the not-found v
   assert.equal(parseRoute('/artifact').explorer, 'artifact');
   assert.equal(parseRoute('/plans').kind, 'explorer');
   assert.equal(parseRoute('/plans').explorer, 'plans');
-  assert.equal(parseRoute('/plans/acme/20-analytics-reset').kind, 'named');
-  assert.equal(parseRoute('/plans/acme/20-analytics-reset').phase, 12);
+  assert.equal(parseRoute('/plans/acme/20-analytics-reset').kind, 'explorer');
+  assert.equal(parseRoute('/plans/acme/20-analytics-reset').explorer, 'plans');
+  assert.deepEqual(parseRoute('/plans/acme/20-analytics-reset').plan, { repo_id: 'acme', plan: '20-analytics-reset' });
+  assert.deepEqual(parseRoute('/plans/acme%2Fwidgets/20-analytics-reset').plan, { repo_id: 'acme/widgets', plan: '20-analytics-reset' });
   assert.equal(parseRoute('/plans/one-segment').kind, 'not-found');
+  assert.equal(parseRoute('/plans/%E0%A4%A/plan').kind, 'not-found');
   assert.equal(parseRoute('/nope').kind, 'not-found');
 });

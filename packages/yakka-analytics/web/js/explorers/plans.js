@@ -15,10 +15,13 @@ import { createSelectionTray } from '../core/selection-tray.js';
 import { createInspector } from '../core/inspector.js';
 import { decodeCohort, encodeCohort } from '../core/selection-model.js';
 import { cancelledState, emptyCauses, emptyState, errorState, unsupportedState } from '../core/panel-state.js';
-import { formatNumber, formatPercent } from '../charts/formatters.js';
+import { formatMoney, formatNumber, formatPercent } from '../charts/formatters.js';
 import { resolveWindow } from '../panels/ledger-table.js';
+import { parseRoute } from '../core/router.js';
 import { SCATTER_PLAN_PANEL, planDestination, planIdentity, planOverlap } from '../panels/scatter-plan.js';
 import { canonicalRowKey } from '../panels/scatter-shared.js';
+import { artifactKind, bandFor, createBaselineCache, fetchArtifactText } from './artifact-content.js';
+import { PLAN_TIMELINE_PANEL } from '../panels/plan-timeline.js';
 
 export const title = 'Plans';
 export const phase = 12;
@@ -444,7 +447,817 @@ function listCauses(scope, push) {
   return emptyCauses({ filters });
 }
 
+// --- Plan detail ---------------------------------------------------------
+//
+// `/plans/<repo>/<plan>` is one fixed plan identity. It never broadens to
+// another plan and never sends `cohort=`. The design's phases and brief paths
+// are parsed from stored content in the browser for display only; nothing here
+// counts a phase or a brief as a measure or infers completion/review.
+
+export function parsePlanDetailPath(pathname = '') {
+  const match = /^\/plans\/([^/]+)\/([^/]+)$/.exec(String(pathname || ''));
+  if (!match) return null;
+  try {
+    const repo_id = decodeURIComponent(match[1]);
+    const plan = decodeURIComponent(match[2]);
+    return repo_id && plan ? { repo_id, plan } : null;
+  } catch { return null; }
+}
+
+function windowParams(state = {}, now = Date.now()) {
+  const params = new URLSearchParams();
+  const window = resolveWindow(state, now);
+  if (window.all) params.set('all', '1');
+  if (window.from) params.set('from', window.from);
+  if (window.to) params.set('to', window.to);
+  params.set('tz', state.tz || Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC');
+  return params;
+}
+
+function identityParams(identity = {}) {
+  const params = new URLSearchParams();
+  params.set('repo_id', String(identity.repo_id || ''));
+  params.set('plan', String(identity.plan || ''));
+  return params;
+}
+
+function withPaging(params, { limit = null, cursor = '' } = {}) {
+  if (Number.isFinite(Number(limit)) && Number(limit) > 0) params.set('limit', String(Math.floor(Number(limit))));
+  if (cursor) params.set('cursor', cursor);
+  return params;
+}
+
+// The plan row is named by repo and plan, not by position; `plan` is a shared
+// filter the entities route applies even though the plan lens contract names
+// repo_id/harness/session_model/id.
+export function planRowParams(identity = {}, { state = {}, limit = 1 } = {}) {
+  const params = windowParams(state);
+  params.set('grain', 'plan');
+  for (const [key, value] of identityParams(identity)) params.set(key, value);
+  return withPaging(params, { limit });
+}
+
+export function planArtifactsParams(identity = {}, { state = {}, limit = null, cursor = '' } = {}) {
+  const params = windowParams(state);
+  params.set('grain', 'artifact');
+  for (const [key, value] of identityParams(identity)) params.set(key, value);
+  return withPaging(params, { limit, cursor });
+}
+
+export function planExecutionsParams(identity = {}, { state = {}, limit = null, cursor = '' } = {}) {
+  const params = windowParams(state);
+  params.set('grain', 'execution');
+  for (const [key, value] of identityParams(identity)) params.set(key, value);
+  return withPaging(params, { limit, cursor });
+}
+
+// `/entity?grain=plan` refuses `cohort=`; the builder never emits it.
+export function planCollectionParams(identity = {}, collection = '', { state = {}, limit = null, cursor = '' } = {}) {
+  const params = windowParams(state);
+  params.set('grain', 'plan');
+  params.set('collection', collection);
+  for (const [key, value] of identityParams(identity)) params.set(key, value);
+  return withPaging(params, { limit, cursor });
+}
+
+export function planSessionResolveParams(ids = [], { state = {}, limit = null } = {}) {
+  const params = windowParams(state);
+  params.set('grain', 'session');
+  const seen = new Set();
+  for (const raw of ids) {
+    const id = String(raw || '');
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    params.append('id', id);
+  }
+  return withPaging(params, { limit });
+}
+
+export function planDesignArtifactParams(identity = {}) {
+  const params = new URLSearchParams();
+  params.set('grain', 'artifact');
+  params.set('repo_id', String(identity.repo_id || ''));
+  params.set('path', `docs/plans/${identity.plan}/DESIGN.md`);
+  return params;
+}
+
+// A fixed plan page applies only the shared window. Every cohort or lens
+// filter in the URL is named rather than narrowing some sections silently.
+export function planDetailNotApplied(state = {}) {
+  const labels = [];
+  for (const [slot, text] of Object.entries(state.cohorts || {})) if (text) labels.push(`cohort ${String(slot).toUpperCase()}`);
+  for (const [key, values] of Object.entries(state.filters || {})) for (const value of values || []) labels.push(`${key}: ${value}`);
+  for (const [key, values] of Object.entries(state.unknown || {})) {
+    if (key === 'sort') continue;
+    for (const value of values || []) labels.push(`${key}: ${value}`);
+  }
+  for (const raw of state.exclude || []) labels.push(`exclude ${raw}`);
+  return labels;
+}
+
+export function detailPopulationText(population = null, rows = []) {
+  const unit = population?.unit || 'rows';
+  const scope = Number(population?.scope_n ?? rows.length);
+  const returned = Number(population?.returned_n ?? rows.length);
+  return `${formatNumber(rows.length)} loaded; ${formatNumber(returned)} on this page; ${formatNumber(scope)} ${unit} total`;
+}
+
+// Line-based, fence-aware. Headings are only ATX `### Phase <n>` at the start
+// of a line; the text after the heading must be joined by an em/en/hyphen dash
+// or a colon. The first `- Outcome:` line before the next heading is the
+// outcome, kept as one text line. Nothing is rendered as markdown.
+export function parseDesignPhases(text = '') {
+  const lines = String(text ?? '').split('\n');
+  const phases = [];
+  let fence = null;
+  let current = null;
+  let acceptingOutcome = false;
+  const push = () => { if (current) { phases.push(current); current = null; } };
+  for (const raw of lines) {
+    const stripped = raw.replace(/^ {0,3}/, '');
+    const open = /^(`{3,}|~{3,})/.exec(stripped);
+    if (open) {
+      const char = open[1][0];
+      const length = open[1].length;
+      if (!fence) fence = { char, length };
+      else if (fence.char === char && length >= fence.length) fence = null;
+      continue;
+    }
+    if (fence) continue;
+    const phase = /^###\s+Phase\s+(\d+)\s*(?:—|–|-|:)\s*(.+?)\s*$/.exec(raw);
+    if (phase) {
+      push();
+      current = { number: Number(phase[1]), heading: phase[2], outcome: null };
+      acceptingOutcome = true;
+      continue;
+    }
+    if (/^#{1,6}[ \t]+/.test(raw)) { acceptingOutcome = false; continue; }
+    if (!current || !acceptingOutcome) continue;
+    const outcome = /^\s*-\s+Outcome:\s*(.+)$/.exec(raw);
+    if (outcome) { current.outcome = outcome[1]; acceptingOutcome = false; }
+  }
+  push();
+  return phases;
+}
+
+export function parseBriefPaths(rows = []) {
+  const briefs = [];
+  for (const row of rows) {
+    const path = String(row?.id?.path || row?.path || '');
+    const match = /(?:^|\/)briefs\/(\d+)-(\d+)-(.+)\.md$/.exec(path);
+    if (!match) continue;
+    briefs.push({ phase: Number(match[1]), unit: Number(match[2]), unitText: match[2], slug: match[3], path });
+  }
+  return briefs.sort((a, b) => a.phase - b.phase || a.unit - b.unit || a.path.localeCompare(b.path));
+}
+
+// Pair by the leading phase number. A brief whose phase heading is absent is
+// unpaired, never assigned. A phase with no brief path is observed absence.
+export function pairBriefs(phases = [], briefs = []) {
+  const byPhase = new Map();
+  for (const brief of briefs) {
+    if (!byPhase.has(brief.phase)) byPhase.set(brief.phase, []);
+    byPhase.get(brief.phase).push(brief);
+  }
+  const known = new Set(phases.map(phase => Number(phase.number)));
+  const paired = phases.map(phase => ({ ...phase, briefs: byPhase.get(Number(phase.number)) || [] }));
+  const unpaired = briefs.filter(brief => !known.has(brief.phase));
+  return { phases: paired, unpaired };
+}
+
+export function briefObservationText(briefs = []) {
+  return briefs.length
+    ? `${formatNumber(briefs.length)} brief path${briefs.length === 1 ? '' : 's'} observed in the loaded artifact rows`
+    : 'no brief path observed in the loaded artifact rows';
+}
+
+export function detailExecutionCost(row = {}) {
+  const m = row.m || {};
+  const flags = row.flags || {};
+  return detailMoney(m.session_cost_usd, flags.session_cost_lower_bound === true, flags.session_cost_null_reason);
+}
+
+export function detailSessionCost(row = {}) {
+  const m = row.m || {};
+  const flags = row.flags || {};
+  const lower = flags.cost_lower_bound === true || flags.session_cost_lower_bound === true;
+  return detailMoney(m.cost_usd, lower, flags.cost_null_reason || flags.session_cost_null_reason);
+}
+
+export function detailWritingSessionCost(row = {}) {
+  const m = row.m || {};
+  const flags = row.flags || {};
+  const reason = flags.null_reasons?.writing_session_cost_usd || (flags.writing_session_unpriced_calls > 0 ? '' : '');
+  const lower = flags.writing_session_cost_lower_bound === true;
+  if (m.writing_session_cost_usd === null || m.writing_session_cost_usd === undefined) {
+    return reason === 'all_unpriced' || lower ? 'unpriced (all calls)' : 'unpriced';
+  }
+  return detailMoney(m.writing_session_cost_usd, lower, reason);
+}
+
+export function detailMoney(amount, lower = false, nullReason = '') {
+  if (nullReason === 'all_unpriced' || amount === null || amount === undefined) return 'unpriced (all calls)';
+  const number = Number(amount);
+  if (!Number.isFinite(number)) return 'unpriced';
+  return lower ? `$${number.toFixed(2)} (lower bound)` : `$${number.toFixed(2)}`;
+}
+
+// The artifact entity row does not expose a version content_hash; the reader is
+// linked at its latest version, labelled as such. No hash is invented.
+export function artifactLatestDestination(identity = {}, path = '') {
+  const params = new URLSearchParams();
+  if (identity.repo_id) params.set('repo_id', identity.repo_id);
+  if (path) params.set('path', path);
+  const query = params.toString();
+  return `/artifact${query ? `?${query}` : ''}`;
+}
+
+export function artifactScoreEntries(row = {}) {
+  const m = row.m || {};
+  const l = row.l || {};
+  return Object.keys(m)
+    .filter(name => name.startsWith('score:') && !name.startsWith('score_scorer:'))
+    .map(name => name.slice('score:'.length))
+    .sort()
+    .map(check => ({
+      check,
+      score: m[`score:${check}`] === undefined ? null : m[`score:${check}`],
+      scorer: m[`score_scorer:${check}`] || '',
+      band: l[`band:${check}`] || null
+    }));
+}
+
+export function designScoreTextWithScorer(row = {}) {
+  return designScoreText(row);
+}
+
+export function executionScores(row = {}) {
+  const m = row.m || {};
+  const pick = prefix => Object.keys(m)
+    .filter(name => name.startsWith(prefix))
+    .sort()
+    .map(name => ({ check: name.slice(prefix.length), score: m[name] }));
+  return { brief: pick('brief_score:'), report: pick('report_score:') };
+}
+
+function detailSection(doc, key, headingText) {
+  const section = doc.createElement('section');
+  section.className = `plans-detail-section plans-detail-${key}`;
+  section.dataset.section = key;
+  section.dataset.state = 'loading';
+  section.append(el(doc, 'h2', '', headingText));
+  const status = el(doc, 'p', 'plans-detail-status', 'Loading…');
+  status.setAttribute('aria-live', 'polite');
+  const body = el(doc, 'div', 'plans-detail-body');
+  section.append(status, body);
+  return {
+    section, status, body,
+    state(next, text) {
+      section.dataset.state = next;
+      status.textContent = text || '';
+      if (next !== 'loading' && next !== 'ready') body.replaceChildren();
+    }
+  };
+}
+
+function detailTable(doc, { caption, columns, rows }) {
+  const table = doc.createElement('table');
+  table.className = 'plans-detail-table';
+  const cap = el(doc, 'caption', '', caption);
+  table.append(cap);
+  const thead = doc.createElement('thead');
+  const head = doc.createElement('tr');
+  for (const label of columns) { const th = el(doc, 'th', '', label); th.scope = 'col'; head.append(th); }
+  thead.append(head);
+  const tbody = doc.createElement('tbody');
+  for (const cells of rows) {
+    const tr = doc.createElement('tr');
+    for (const cell of cells) {
+      const td = doc.createElement('td');
+      if (cell && typeof cell === 'object' && cell.node) td.append(cell.node);
+      else td.textContent = cell === null || cell === undefined || cell === '' ? '—' : String(cell);
+      tr.append(td);
+    }
+    tbody.append(tr);
+  }
+  table.append(thead, tbody);
+  return table;
+}
+
+function definitionList(doc, pairs) {
+  const dl = doc.createElement('dl');
+  dl.className = 'plans-detail-facts';
+  for (const [label, value] of pairs) {
+    dl.append(el(doc, 'dt', '', label), el(doc, 'dd', '', value === null || value === undefined || value === '' ? '—' : String(value)));
+  }
+  return dl;
+}
+
+async function fetchJson(route, params, { tenant, signal, stateKey }) {
+  return transport.get(route, params, { tenant, signal, stateKey });
+}
+
+function detailTimestamp(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return '—';
+  return new Date(number * 1000).toISOString().replace('T', ' ').replace('.000Z', ' UTC');
+}
+
+async function renderDetail(root, doc, { signal, identity } = {}) {
+  ensurePlansStyles(doc);
+  root.replaceChildren();
+  const state = readScope(decodeUrlState(globalThis.location?.search || ''));
+  root.append(el(doc, 'h1', '', 'Plan'));
+  root.append(el(doc, 'p', 'plans-detail-identity', `${identity.repo_id} / ${identity.plan}`));
+  const notApplied = planDetailNotApplied(state);
+  if (notApplied.length) {
+    const note = el(doc, 'p', 'plans-detail-not-applied', `Not applied here: ${notApplied.join(', ')}. This fixed plan page sends only the shared window; it never sends cohort= to /entity.`);
+    note.setAttribute('role', 'note');
+    root.append(note);
+  }
+
+  const header = detailSection(doc, 'summary', 'Plan measures');
+  const artifacts = detailSection(doc, 'artifacts', 'Artifacts by kind');
+  const executions = detailSection(doc, 'executions', 'Executions');
+  const sessions = detailSection(doc, 'sessions', 'Sessions');
+  const events = detailSection(doc, 'events', 'Events');
+  const timeline = detailSection(doc, 'timeline', 'Version and execution timeline');
+  const design = detailSection(doc, 'design', 'Stored design context');
+  for (const section of [header, artifacts, executions, sessions, events, timeline, design]) root.append(section.section);
+
+  const controller = new AbortController();
+  if (signal) {
+    if (signal.aborted) controller.abort();
+    else signal.addEventListener('abort', () => controller.abort(), { once: true });
+  }
+  let disposed = false;
+  let tenant = '';
+  let schema = null;
+  let timelineFrame = null;
+  const baselineCache = createBaselineCache({ transport, tenant: '', signal: controller.signal });
+  const artifactsState = { rows: [], next: '', population: null, bands: new Map() };
+  const executionsState = { rows: [], next: '', population: null };
+  const sessionsState = { rows: [], next: '', population: null, resolved: new Map() };
+  const eventsState = { rows: [], next: '', population: null };
+  let designState = { row: null, text: null, failure: '' };
+  let planRow = null;
+
+  const get = (route, params, stateKey) => fetchJson(route, params, { tenant, signal: controller.signal, stateKey });
+
+  function errorText(response, body, fallback) {
+    return body?.error || `${fallback} (${response?.status || 'no response'})`;
+  }
+
+  async function bandsFor(rows) {
+    const bands = new Map();
+    for (const row of rows) {
+      const path = String(row?.id?.path || '');
+      const kind = row?.l?.kind || artifactKind(path);
+      for (const entry of artifactScoreEntries(row)) {
+        const key = `${path}\u001f${entry.check}`;
+        if (entry.band) { bands.set(key, entry.band); continue; }
+        if (entry.score === null || entry.score === undefined) { bands.set(key, 'unscored'); continue; }
+        if (!entry.scorer) { bands.set(key, 'baseline_unavailable'); continue; }
+        const baseline = await baselineCache.get(kind, entry.check, entry.scorer).catch(() => null);
+        bands.set(key, bandFor(entry.score, baseline));
+      }
+    }
+    return bands;
+  }
+
+  function paintHeader() {
+    header.body.replaceChildren();
+    header.state('ready', '');
+    const m = planRow.m || {};
+    const shared = Number(m.shared_sessions) || 0;
+    const cost = formatPlanCost(planRow);
+    header.body.append(definitionList(doc, [
+      ['Repo', identity.repo_id],
+      ['Plan', identity.plan],
+      ['Associated cost', `${cost}${shared ? ` · ${formatNumber(shared)} session${shared === 1 ? '' : 's'} shared with another plan` : ''}`],
+      ['Associated cost note', 'sums associated sessions; non-additive and overlapping across plans'],
+      ['Sessions', m.sessions],
+      ['Shared sessions', m.shared_sessions],
+      ['Versions', m.versions],
+      ['Artifacts', m.artifacts],
+      ['Executions complete / unreported / started', executionShapeText(planRow)],
+      ['Complete share', completeShareText(planRow)],
+      ['Span days', m.span_days === null || m.span_days === undefined ? '—' : Number(m.span_days).toFixed(2)],
+      ['First observed', detailTimestamp(m.first_ts)],
+      ['Last observed', detailTimestamp(m.last_ts)],
+      ['Latest design score(s)', designScoreText(planRow)],
+      ['Execution shape', 'process completion, not success']
+    ]));
+  }
+
+  function paintArtifacts() {
+    artifacts.body.replaceChildren();
+    if (!artifactsState.rows.length) { artifacts.state('empty', 'No artifacts for this plan in the applied window.'); return; }
+    const rows = artifactsState.rows.map(row => {
+      const path = String(row.id?.path || '');
+      const scores = artifactScoreEntries(row).map(entry => {
+        const band = artifactsState.bands.get(`${path}\u001f${entry.check}`) || entry.band || 'baseline_unavailable';
+        const value = entry.score === null || entry.score === undefined ? 'unscored' : Number(entry.score).toFixed(2);
+        const scorer = entry.scorer || 'scorer not served';
+        return `${entry.check} ${value} · ${scorer} · ${band}`;
+      }).join('; ') || 'unscored';
+      const bytes = row.m?.content_bytes === null || row.m?.content_bytes === undefined
+        ? 'content_unavailable'
+        : `${formatNumber(Number(row.m.content_bytes))} bytes`;
+      const open = doc.createElement('a');
+      open.href = artifactLatestDestination(identity, path);
+      open.className = 'plans-artifact-open';
+      open.textContent = 'Open (latest version)';
+      return [
+        row.l?.kind || artifactKind(path),
+        path,
+        `${formatNumber(Number(row.m?.versions) || 0)} versions`,
+        scores,
+        bytes,
+        row.l?.screen_verdict || '—',
+        detailWritingSessionCost(row),
+        { node: open }
+      ];
+    });
+    artifacts.state('ready', '');
+    artifacts.body.append(detailTable(doc, {
+      caption: 'Artifacts by kind. Scores, scorers and bands are latest-version only; the reader opens the latest version, no hash is invented.',
+      columns: ['Kind', 'Path', 'Latest version', 'Score · scorer · band', 'Content', 'Screen verdict', 'Writing session cost', 'Open'],
+      rows
+    }));
+    artifacts.body.append(el(doc, 'p', 'plans-detail-population', detailPopulationText(artifactsState.population, artifactsState.rows)));
+    appendLoadMore(artifacts, 'artifacts', artifactsState, loadArtifacts);
+  }
+
+  function paintExecutions() {
+    executions.body.replaceChildren();
+    if (!executionsState.rows.length) { executions.state('empty', 'No executions for this plan in the applied window.'); return; }
+    const rows = executionsState.rows.map(row => {
+      const scores = executionScores(row);
+      const text = [...scores.brief.map(item => `brief ${item.check} ${item.score === null ? '—' : Number(item.score).toFixed(2)}`),
+        ...scores.report.map(item => `report ${item.check} ${item.score === null ? '—' : Number(item.score).toFixed(2)}`)].join('; ') || 'no scores';
+      const conv = String(row.id?.conversation_id || '');
+      const link = doc.createElement('a');
+      link.href = `/sessions/${encodeURIComponent(conv)}`;
+      link.className = 'plans-execution-session';
+      link.textContent = conv || '—';
+      return [
+        row.l?.shape || 'unknown',
+        row.id?.brief_path || '—',
+        detailTimestamp(row.m?.ts),
+        detailExecutionCost(row),
+        `${text} (scorers not served on execution rows)`,
+        { node: link }
+      ];
+    });
+    executions.state('ready', '');
+    executions.body.append(detailTable(doc, {
+      caption: 'Execution completion, not success.',
+      columns: ['Shape', 'Brief path', 'Time', 'Session cost', 'Brief / report scores', 'Session'],
+      rows
+    }));
+    executions.body.append(el(doc, 'p', 'plans-detail-population', detailPopulationText(executionsState.population, executionsState.rows)));
+    appendLoadMore(executions, 'executions', executionsState, loadExecutions);
+  }
+
+  function paintSessions() {
+    sessions.body.replaceChildren();
+    if (!sessionsState.rows.length) { sessions.state('empty', 'No sessions touched this plan in the applied window.'); return; }
+    const rows = sessionsState.rows.map(row => {
+      const conv = String(row.conversation_id || row.conversationId || '');
+      const resolved = sessionsState.resolved.get(conv) || null;
+      const link = doc.createElement('a');
+      link.href = `/sessions/${encodeURIComponent(conv)}`;
+      link.className = 'plans-session-link';
+      link.textContent = conv || '—';
+      return [
+        { node: link },
+        detailTimestamp(row.ts),
+        resolved ? detailSessionCost(resolved) : 'session detail unavailable',
+        resolved ? (resolved.m?.unpriced_calls ?? '—') : '—'
+      ];
+    });
+    sessions.state('ready', '');
+    const shared = Number(planRow?.m?.shared_sessions) || 0;
+    const note = el(doc, 'p', 'plans-detail-overlap', `${shared ? `${formatNumber(shared)} session${shared === 1 ? '' : 's'} touch more than one plan. ` : ''}Associated cost sums sessions and is non-additive across plans; overlap is expected, not spend.`);
+    sessions.body.append(note);
+    sessions.body.append(detailTable(doc, {
+      caption: 'Sessions with a lifetime artifact under this plan; last observed ts from the sessions collection.',
+      columns: ['Conversation', 'Last observed', 'Cost', 'Unpriced calls'],
+      rows
+    }));
+    sessions.body.append(el(doc, 'p', 'plans-detail-population', detailPopulationText(sessionsState.population, sessionsState.rows)));
+    appendLoadMore(sessions, 'sessions', sessionsState, loadSessions);
+  }
+
+  function paintEvents() {
+    events.body.replaceChildren();
+    const scope = el(doc, 'p', 'plans-detail-events-scope', 'All observed events in sessions that wrote an artifact under this plan, not only plan files.');
+    scope.setAttribute('role', 'note');
+    events.body.append(scope);
+    if (!eventsState.rows.length) { events.state('empty', 'No events in sessions that wrote an artifact under this plan.'); return; }
+    events.state('ready', '');
+    const rows = eventsState.rows.map(row => [
+      detailTimestamp(row.ts),
+      row.event_type || '—',
+      row.event || '—',
+      row.path || '—',
+      row.conversation_id || '—'
+    ]);
+    events.body.append(detailTable(doc, {
+      caption: 'Time-ordered events; paged independently of every other section.',
+      columns: ['Time', 'Event type', 'Event', 'Path', 'Conversation'],
+      rows
+    }));
+    events.body.append(el(doc, 'p', 'plans-detail-population', detailPopulationText(eventsState.population, eventsState.rows)));
+    appendLoadMore(events, 'events', eventsState, loadEvents);
+  }
+
+  function appendLoadMore(section, key, store, loader) {
+    if (!store.next) return;
+    const button = el(doc, 'button', `plans-detail-more plans-detail-more-${key}`, `Load more ${key}`);
+    button.type = 'button';
+    button.addEventListener('click', async () => {
+      button.disabled = true;
+      try { await loader(store.next); } finally { button.disabled = false; }
+    });
+    section.body.append(button);
+  }
+
+  function paintDesign() {
+    design.body.replaceChildren();
+    design.state('ready', '');
+    if (designState.row) {
+      const link = doc.createElement('a');
+      link.className = 'plans-design-open';
+      link.href = artifactLatestDestination(identity, designState.row.id?.path || `docs/plans/${identity.plan}/DESIGN.md`);
+      link.textContent = 'Open design content (latest version)';
+      design.body.append(link);
+    }
+    if (!designState.row) {
+      design.body.append(el(doc, 'p', 'plans-design-missing', 'no stored design content'));
+    } else if (designState.failure) {
+      design.body.append(el(doc, 'p', 'plans-design-failure', designState.failure));
+    } else if (designState.text !== null) {
+      const phases = parseDesignPhases(designState.text);
+      const briefs = parseBriefPaths(artifactsState.rows);
+      const { phases: paired, unpaired } = pairBriefs(phases, briefs);
+      if (!phases.length) design.body.append(el(doc, 'p', 'plans-design-no-phases', 'no `### Phase <n>` headings observed in the stored design content'));
+      const list = doc.createElement('ol');
+      list.className = 'plans-phases';
+      for (const phase of paired.slice(0, 100)) {
+        const item = doc.createElement('li');
+        item.className = 'plans-phase';
+        item.dataset.phase = String(phase.number);
+        item.append(el(doc, 'strong', 'plans-phase-heading', `Phase ${phase.number} — ${phase.heading}`));
+        item.append(el(doc, 'p', 'plans-phase-outcome', phase.outcome === null ? 'Outcome: not observed in the design body' : `Outcome: ${phase.outcome}`));
+        item.append(el(doc, 'p', 'plans-phase-briefs', phase.briefs.length
+          ? `Brief paths: ${phase.briefs.map(brief => `phase ${brief.phase}, unit ${brief.unitText}, ${brief.slug} (${brief.path})`).join('; ')}`
+          : 'no brief path observed in the loaded artifact rows'));
+        list.append(item);
+      }
+      if (paired.length) design.body.append(list);
+      if (phases.length > 100) design.body.append(el(doc, 'p', 'plans-design-more', 'more phases not shown'));
+      if (unpaired.length) {
+        design.body.append(el(doc, 'h3', '', 'Unpaired briefs'));
+        const ul = doc.createElement('ul');
+        ul.className = 'plans-unpaired-briefs';
+        for (const brief of unpaired) ul.append(el(doc, 'li', '', `${brief.path} (phase ${brief.phase}, unit ${brief.unitText}, slug ${brief.slug})`));
+        design.body.append(ul);
+      }
+      design.body.append(el(doc, 'p', 'plans-design-basis', 'Parsed in the browser for display only; phases and brief paths are never counted as measures.'));
+    }
+  }
+
+  function paintTimeline() {
+    timeline.body.replaceChildren();
+    timeline.state('ready', '');
+    timelineFrame = createPanelFrame({
+      panel: PLAN_TIMELINE_PANEL,
+      spec: { plan: { repo_id: identity.repo_id, plan: identity.plan } },
+      scope: { ...(state.win ? { win: state.win } : {}), ...(state.from ? { from: state.from } : {}), ...(state.to ? { to: state.to } : {}), ...(state.tz ? { tz: state.tz } : {}) },
+      transport, scheduler, tenant, schema, doc
+    });
+    timeline.body.append(timelineFrame.element);
+    timelineFrame.load().catch(() => {});
+  }
+
+  async function loadArtifacts(cursor = '') {
+    const { response, body } = await get('entities', planArtifactsParams(identity, { state, limit: pageLimit, cursor }), 'plan-detail-artifacts');
+    if (!response.ok) { artifacts.state('error', errorText(response, body, 'The artifacts request failed.')); return; }
+    const incoming = Array.isArray(body.rows) ? body.rows : [];
+    artifactsState.rows = cursor ? mergeByIdentity(artifactsState.rows, incoming) : incoming;
+    artifactsState.next = body.next || '';
+    artifactsState.population = body.population || artifactsState.population;
+    artifactsState.bands = await bandsFor(artifactsState.rows);
+    paintArtifacts();
+    if (designState.row || designState.text !== null || designState.failure) paintDesign();
+  }
+
+  async function loadExecutions(cursor = '') {
+    const { response, body } = await get('entities', planExecutionsParams(identity, { state, limit: pageLimit, cursor }), 'plan-detail-executions');
+    if (!response.ok) { executions.state('error', errorText(response, body, 'The executions request failed.')); return; }
+    const incoming = Array.isArray(body.rows) ? body.rows : [];
+    executionsState.rows = cursor ? mergeByIdentity(executionsState.rows, incoming, true) : incoming;
+    executionsState.next = body.next || '';
+    executionsState.population = body.population || executionsState.population;
+    paintExecutions();
+  }
+
+  async function loadSessions(cursor = '') {
+    const { response, body } = await get('entity', planCollectionParams(identity, 'sessions', { state, limit: pageLimit, cursor }), 'plan-detail-sessions');
+    if (!response.ok) { sessions.state('error', errorText(response, body, 'The sessions collection failed.')); return; }
+    const incoming = Array.isArray(body.rows) ? body.rows : [];
+    sessionsState.rows = cursor ? mergeConversationRows(sessionsState.rows, incoming) : incoming;
+    sessionsState.next = body.next || '';
+    sessionsState.population = body.population || sessionsState.population;
+    const ids = [...new Set(sessionsState.rows.map(row => String(row.conversation_id || '')).filter(Boolean))];
+    if (ids.length) {
+      const resolved = await get('entities', planSessionResolveParams(ids, { state, limit: pageLimit }), 'plan-detail-session-rows');
+      if (resolved.response.ok) {
+        for (const row of resolved.body.rows || []) {
+          const id = String(row.id?.conversation_id || row.id || '');
+          if (id) sessionsState.resolved.set(id, row);
+        }
+      }
+    }
+    paintSessions();
+  }
+
+  async function loadEvents(cursor = '') {
+    const { response, body } = await get('entity', planCollectionParams(identity, 'events', { state, limit: pageLimit, cursor }), 'plan-detail-events');
+    if (!response.ok) { events.state('error', errorText(response, body, 'The events collection failed.')); return; }
+    const incoming = Array.isArray(body.rows) ? body.rows : [];
+    eventsState.rows = cursor ? mergeEventRows(eventsState.rows, incoming) : incoming;
+    eventsState.next = body.next || '';
+    eventsState.population = body.population || eventsState.population;
+    paintEvents();
+  }
+
+  function mergeByIdentity(existing, incoming, execution = false) {
+    const seen = new Set(existing.map(row => execution
+      ? `${row.id?.repo_id}|${row.id?.conversation_id}|${row.id?.brief_path}`
+      : `${row.id?.repo_id}|${row.id?.path}`));
+    const rows = existing.slice();
+    for (const row of incoming) {
+      const key = execution
+        ? `${row.id?.repo_id}|${row.id?.conversation_id}|${row.id?.brief_path}`
+        : `${row.id?.repo_id}|${row.id?.path}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      rows.push(row);
+    }
+    return rows;
+  }
+
+  function mergeConversationRows(existing, incoming) {
+    const seen = new Set(existing.map(row => String(row.conversation_id || '')));
+    const rows = existing.slice();
+    for (const row of incoming) {
+      const key = String(row.conversation_id || '');
+      if (seen.has(key)) continue;
+      seen.add(key);
+      rows.push(row);
+    }
+    return rows;
+  }
+
+  function mergeEventRows(existing, incoming) {
+    const seen = new Set(existing.map(row => `${row.ts}|${row.event_type}|${row.rowid ?? ''}|${row.path}|${row.conversation_id}`));
+    const rows = existing.slice();
+    for (const row of incoming) {
+      const key = `${row.ts}|${row.event_type}|${row.rowid ?? ''}|${row.path}|${row.conversation_id}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      rows.push(row);
+    }
+    return rows;
+  }
+
+  let pageLimit = null;
+
+  async function start() {
+    try {
+      const me = await transport.request('me', { signal: controller.signal, stateKey: 'plans-detail-me' });
+      tenant = rememberedTenant(me?.body || {});
+    } catch (error) {
+      if (error?.name === 'AbortError') return;
+      tenant = '';
+    }
+    if (disposed) return;
+    try {
+      const result = await transport.schema(tenant);
+      if (result.response.ok) schema = result.body;
+    } catch { schema = null; }
+    if (disposed) return;
+    const max = Number(schema?.budgets?.page_max);
+    pageLimit = Number.isFinite(max) && max > 0 ? Math.floor(max) : null;
+    if (schema?.features && schema.features.entities_plan === false) {
+      for (const section of [header, artifacts, executions, sessions, events, timeline]) {
+        section.state('unsupported', 'entities_plan is not advertised by this server; supplied by Plan 20 Phase 6.');
+      }
+      design.state('unsupported', 'entities_plan is not advertised by this server; supplied by Plan 20 Phase 6.');
+      return;
+    }
+
+    let rowResult;
+    try {
+      rowResult = await get('entities', planRowParams(identity, { state, limit: 1 }), 'plan-detail-row');
+    } catch (error) {
+      if (error?.name === 'AbortError') return;
+      header.state('error', error?.message || 'The plan request failed.');
+      return;
+    }
+    if (!rowResult.response.ok) {
+      header.state(rowResult.response.status === 404 ? 'unsupported' : 'error', errorText(rowResult.response, rowResult.body, 'The plan request failed.'));
+      showAbsent(`No served plan (${identity.repo_id}, ${identity.plan}).`);
+      return;
+    }
+    const rows = Array.isArray(rowResult.body.rows) ? rowResult.body.rows : [];
+    planRow = rows.find(row => {
+      const name = planIdentity(row);
+      return name.repo_id === identity.repo_id && name.plan === identity.plan;
+    }) || null;
+    if (!planRow) {
+      header.state('empty', `No served plan (${identity.repo_id}, ${identity.plan}).`);
+      showAbsent(`No served plan (${identity.repo_id}, ${identity.plan}).`);
+      return;
+    }
+    paintHeader();
+
+    // Artifacts settle first: the design row is found among the artifact rows
+    // the page already loaded, and the phases/briefs pairing reads them.
+    await Promise.allSettled([loadArtifacts()]);
+    if (disposed) return;
+    await Promise.allSettled([loadDesign(), loadExecutions(), loadSessions(), loadEvents()]);
+    if (disposed) return;
+    paintTimeline();
+  }
+
+  function showAbsent(message) {
+    for (const section of [artifacts, executions, sessions, events, timeline, design]) {
+      section.state('empty', message);
+    }
+    const link = doc.createElement('a');
+    link.href = '/plans';
+    link.className = 'plans-detail-back';
+    link.textContent = 'Back to plans';
+    header.body.append(el(doc, 'p', 'plans-detail-absent', message), link);
+  }
+
+  async function loadDesign() {
+    design.state('loading', 'Loading stored design content…');
+    const designPath = `docs/plans/${identity.plan}/DESIGN.md`;
+    // The design row is found among the artifact rows the page already loads;
+    // its exact blob comes from the artifact entity route, then /content.
+    const artifactRows = artifactsState.rows;
+    const row = artifactRows.find(item => String(item.id?.path || '') === designPath) || null;
+    designState = { row, text: null, failure: '' };
+    if (!row) { paintDesign(); return; }
+    try {
+      const entity = await get('entity', planDesignArtifactParams(identity), 'plan-detail-design-entity');
+      if (!entity.response.ok) { designState.failure = errorText(entity.response, entity.body, 'The design artifact request failed.'); paintDesign(); return; }
+      const hash = entity.body?.latest?.content_hash || '';
+      if (!hash) { designState.failure = 'no stored design content'; paintDesign(); return; }
+      const content = await fetchArtifactText({ scheduler, repo: identity.repo_id, path: designPath, hash, tenant, signal: controller.signal, stateKey: 'plan-detail-design-content' });
+      if (content.ok) designState.text = content.text;
+      else designState.failure = detailContentFailure(content);
+    } catch (error) {
+      if (error?.name === 'AbortError') return;
+      designState.failure = error?.message || 'The design content request failed.';
+    }
+    paintDesign();
+  }
+
+  start().catch(error => {
+    if (disposed || error?.name === 'AbortError') return;
+    header.state('error', error?.message || 'The plan detail failed.');
+  });
+
+  return () => {
+    disposed = true;
+    controller.abort();
+    timelineFrame?.destroy();
+  };
+}
+
+function detailContentFailure(result = {}) {
+  if (result.code === 'content_unavailable') return `content unavailable: ${result.reason || 'no reason given'}`;
+  if (result.code === 'content_too_large') return `content too large: ${result.size_bytes ?? 'unknown'} bytes exceeds the ${result.limit_bytes ?? 'unknown'}-byte limit`;
+  if (result.code === 'content_integrity') return 'content integrity check failed';
+  if (result.status === 404) return 'not found';
+  return result.message || 'The content request failed.';
+}
+
 export function render(root, doc = globalThis.document, { signal } = {}) {
+  const route = parseRoute(globalThis.location?.pathname || '/', globalThis.location?.search || '');
+  if (route?.kind === 'explorer' && route.explorer === 'plans' && route.plan) {
+    return renderDetail(root, doc, { signal, identity: route.plan });
+  }
+  return renderList(root, doc, { signal });
+}
+
+export function renderList(root, doc = globalThis.document, { signal } = {}) {
   ensurePlansStyles(doc);
   register();
   root.replaceChildren();
