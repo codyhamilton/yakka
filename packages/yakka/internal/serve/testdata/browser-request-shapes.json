@@ -1,0 +1,2216 @@
+{
+  "version": 1,
+  "note": "Analytics request shapes the shipped workspace sends over the deterministic fixture. Method, path and query only; no bodies, tenant data or volatile timestamps.",
+  "scenarios": [
+    {
+      "label": "pulse:window",
+      "route": "/b/pulse?from=2026-09-01T00%3A00%3A00Z&to=2026-09-05T00%3A00%3A00Z&tz=UTC",
+      "requests": [
+        {
+          "method": "GET",
+          "path": "/v1/analytics/activity",
+          "query": [
+            [
+              "from",
+              "2026-09-01T00:00:00Z"
+            ],
+            [
+              "mode",
+              "list"
+            ],
+            [
+              "tenant",
+              "fixture-tenant"
+            ],
+            [
+              "to",
+              "2026-09-05T00:00:00Z"
+            ],
+            [
+              "tz",
+              "UTC"
+            ]
+          ]
+        },
+        {
+          "method": "GET",
+          "path": "/v1/analytics/query",
+          "query": [
+            [
+              "bucket",
+              "day"
+            ],
+            [
+              "dim",
+              "harness"
+            ],
+            [
+              "from",
+              "2026-09-01T00:00:00Z"
+            ],
+            [
+              "measure",
+              "cost_usd"
+            ],
+            [
+              "tenant",
+              "fixture-tenant"
+            ],
+            [
+              "to",
+              "2026-09-05T00:00:00Z"
+            ],
+            [
+              "tz",
+              "UTC"
+            ]
+          ]
+        },
+        {
+          "method": "GET",
+          "path": "/v1/analytics/query",
+          "query": [
+            [
+              "bucket",
+              "day"
+            ],
+            [
+              "dim",
+              "session_model"
+            ],
+            [
+              "from",
+              "2026-09-01T00:00:00Z"
+            ],
+            [
+              "measure",
+              "cost_usd"
+            ],
+            [
+              "tenant",
+              "fixture-tenant"
+            ],
+            [
+              "to",
+              "2026-09-05T00:00:00Z"
+            ],
+            [
+              "tz",
+              "UTC"
+            ]
+          ]
+        },
+        {
+          "method": "GET",
+          "path": "/v1/analytics/query",
+          "query": [
+            [
+              "bucket",
+              "day"
+            ],
+            [
+              "from",
+              "2026-09-01T00:00:00Z"
+            ],
+            [
+              "measure",
+              "cost_usd"
+            ],
+            [
+              "tenant",
+              "fixture-tenant"
+            ],
+            [
+              "to",
+              "2026-09-05T00:00:00Z"
+            ],
+            [
+              "tz",
+              "UTC"
+            ]
+          ]
+        },
+        {
+          "method": "GET",
+          "path": "/v1/analytics/query",
+          "query": [
+            [
+              "bucket",
+              "none"
+            ],
+            [
+              "dim",
+              "harness"
+            ],
+            [
+              "from",
+              "2026-08-28T00:00:00.000Z"
+            ],
+            [
+              "measure",
+              "cost_usd"
+            ],
+            [
+              "tenant",
+              "fixture-tenant"
+            ],
+            [
+              "to",
+              "2026-09-01T00:00:00.000Z"
+            ],
+            [
+              "tz",
+              "Australia/Brisbane"
+            ]
+          ]
+        },
+        {
+          "method": "GET",
+          "path": "/v1/analytics/query",
+          "query": [
+            [
+              "bucket",
+              "none"
+            ],
+            [
+              "dim",
+              "harness"
+            ],
+            [
+              "from",
+              "2026-09-01T00:00:00Z"
+            ],
+            [
+              "measure",
+              "cost_usd"
+            ],
+            [
+              "tenant",
+              "fixture-tenant"
+            ],
+            [
+              "to",
+              "2026-09-05T00:00:00Z"
+            ],
+            [
+              "tz",
+              "UTC"
+            ]
+          ]
+        },
+        {
+          "method": "GET",
+          "path": "/v1/analytics/query",
+          "query": [
+            [
+              "bucket",
+              "none"
+            ],
+            [
+              "dim",
+              "harness"
+            ],
+            [
+              "from",
+              "2026-09-01T00:00:00Z"
+            ],
+            [
+              "measure",
+              "unpriced_calls"
+            ],
+            [
+              "tenant",
+              "fixture-tenant"
+            ],
+            [
+              "to",
+              "2026-09-05T00:00:00Z"
+            ],
+            [
+              "tz",
+              "UTC"
+            ]
+          ]
+        },
+        {
+          "method": "GET",
+          "path": "/v1/analytics/query",
+          "query": [
+            [
+              "bucket",
+              "none"
+            ],
+            [
+              "dim",
+              "session_model"
+            ],
+            [
+              "from",
+              "2026-08-28T00:00:00.000Z"
+            ],
+            [
+              "measure",
+              "cost_usd"
+            ],
+            [
+              "tenant",
+              "fixture-tenant"
+            ],
+            [
+              "to",
+              "2026-09-01T00:00:00.000Z"
+            ],
+            [
+              "tz",
+              "Australia/Brisbane"
+            ]
+          ]
+        },
+        {
+          "method": "GET",
+          "path": "/v1/analytics/query",
+          "query": [
+            [
+              "bucket",
+              "none"
+            ],
+            [
+              "dim",
+              "session_model"
+            ],
+            [
+              "from",
+              "2026-09-01T00:00:00Z"
+            ],
+            [
+              "measure",
+              "cost_usd"
+            ],
+            [
+              "tenant",
+              "fixture-tenant"
+            ],
+            [
+              "to",
+              "2026-09-05T00:00:00Z"
+            ],
+            [
+              "tz",
+              "UTC"
+            ]
+          ]
+        },
+        {
+          "method": "GET",
+          "path": "/v1/analytics/query",
+          "query": [
+            [
+              "bucket",
+              "none"
+            ],
+            [
+              "dim",
+              "session_model"
+            ],
+            [
+              "from",
+              "2026-09-01T00:00:00Z"
+            ],
+            [
+              "measure",
+              "unpriced_calls"
+            ],
+            [
+              "tenant",
+              "fixture-tenant"
+            ],
+            [
+              "to",
+              "2026-09-05T00:00:00Z"
+            ],
+            [
+              "tz",
+              "UTC"
+            ]
+          ]
+        },
+        {
+          "method": "GET",
+          "path": "/v1/analytics/schema",
+          "query": [
+            [
+              "tenant",
+              "fixture-tenant"
+            ]
+          ]
+        },
+        {
+          "method": "GET",
+          "path": "/v1/analytics/scores",
+          "query": [
+            [
+              "kind",
+              "design"
+            ],
+            [
+              "tenant",
+              "fixture-tenant"
+            ],
+            [
+              "tz",
+              "Australia/Brisbane"
+            ]
+          ]
+        },
+        {
+          "method": "GET",
+          "path": "/v1/analytics/summary",
+          "query": [
+            [
+              "from",
+              "2026-08-28T00:00:00.000Z"
+            ],
+            [
+              "tenant",
+              "fixture-tenant"
+            ],
+            [
+              "to",
+              "2026-09-01T00:00:00.000Z"
+            ],
+            [
+              "tz",
+              "Australia/Brisbane"
+            ]
+          ]
+        },
+        {
+          "method": "GET",
+          "path": "/v1/analytics/summary",
+          "query": [
+            [
+              "from",
+              "2026-09-01T00:00:00Z"
+            ],
+            [
+              "tenant",
+              "fixture-tenant"
+            ],
+            [
+              "to",
+              "2026-09-05T00:00:00Z"
+            ],
+            [
+              "tz",
+              "UTC"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "label": "pulse:all-history",
+      "route": "/b/pulse?win=all&tz=UTC",
+      "requests": [
+        {
+          "method": "GET",
+          "path": "/v1/analytics/activity",
+          "query": [
+            [
+              "mode",
+              "list"
+            ],
+            [
+              "tenant",
+              "fixture-tenant"
+            ],
+            [
+              "tz",
+              "UTC"
+            ],
+            [
+              "win",
+              "all"
+            ]
+          ]
+        },
+        {
+          "method": "GET",
+          "path": "/v1/analytics/query",
+          "query": [
+            [
+              "bucket",
+              "day"
+            ],
+            [
+              "dim",
+              "harness"
+            ],
+            [
+              "measure",
+              "cost_usd"
+            ],
+            [
+              "tenant",
+              "fixture-tenant"
+            ],
+            [
+              "tz",
+              "UTC"
+            ],
+            [
+              "win",
+              "all"
+            ]
+          ]
+        },
+        {
+          "method": "GET",
+          "path": "/v1/analytics/query",
+          "query": [
+            [
+              "bucket",
+              "day"
+            ],
+            [
+              "dim",
+              "session_model"
+            ],
+            [
+              "measure",
+              "cost_usd"
+            ],
+            [
+              "tenant",
+              "fixture-tenant"
+            ],
+            [
+              "tz",
+              "UTC"
+            ],
+            [
+              "win",
+              "all"
+            ]
+          ]
+        },
+        {
+          "method": "GET",
+          "path": "/v1/analytics/query",
+          "query": [
+            [
+              "bucket",
+              "day"
+            ],
+            [
+              "measure",
+              "cost_usd"
+            ],
+            [
+              "tenant",
+              "fixture-tenant"
+            ],
+            [
+              "tz",
+              "UTC"
+            ],
+            [
+              "win",
+              "all"
+            ]
+          ]
+        },
+        {
+          "method": "GET",
+          "path": "/v1/analytics/query",
+          "query": [
+            [
+              "bucket",
+              "none"
+            ],
+            [
+              "dim",
+              "harness"
+            ],
+            [
+              "measure",
+              "cost_usd"
+            ],
+            [
+              "tenant",
+              "fixture-tenant"
+            ],
+            [
+              "tz",
+              "UTC"
+            ],
+            [
+              "win",
+              "all"
+            ]
+          ]
+        },
+        {
+          "method": "GET",
+          "path": "/v1/analytics/query",
+          "query": [
+            [
+              "bucket",
+              "none"
+            ],
+            [
+              "dim",
+              "harness"
+            ],
+            [
+              "measure",
+              "unpriced_calls"
+            ],
+            [
+              "tenant",
+              "fixture-tenant"
+            ],
+            [
+              "tz",
+              "UTC"
+            ],
+            [
+              "win",
+              "all"
+            ]
+          ]
+        },
+        {
+          "method": "GET",
+          "path": "/v1/analytics/query",
+          "query": [
+            [
+              "bucket",
+              "none"
+            ],
+            [
+              "dim",
+              "session_model"
+            ],
+            [
+              "measure",
+              "cost_usd"
+            ],
+            [
+              "tenant",
+              "fixture-tenant"
+            ],
+            [
+              "tz",
+              "UTC"
+            ],
+            [
+              "win",
+              "all"
+            ]
+          ]
+        },
+        {
+          "method": "GET",
+          "path": "/v1/analytics/query",
+          "query": [
+            [
+              "bucket",
+              "none"
+            ],
+            [
+              "dim",
+              "session_model"
+            ],
+            [
+              "measure",
+              "unpriced_calls"
+            ],
+            [
+              "tenant",
+              "fixture-tenant"
+            ],
+            [
+              "tz",
+              "UTC"
+            ],
+            [
+              "win",
+              "all"
+            ]
+          ]
+        },
+        {
+          "method": "GET",
+          "path": "/v1/analytics/schema",
+          "query": [
+            [
+              "tenant",
+              "fixture-tenant"
+            ]
+          ]
+        },
+        {
+          "method": "GET",
+          "path": "/v1/analytics/scores",
+          "query": [
+            [
+              "kind",
+              "design"
+            ],
+            [
+              "tenant",
+              "fixture-tenant"
+            ],
+            [
+              "tz",
+              "Australia/Brisbane"
+            ]
+          ]
+        },
+        {
+          "method": "GET",
+          "path": "/v1/analytics/summary",
+          "query": [
+            [
+              "tenant",
+              "fixture-tenant"
+            ],
+            [
+              "tz",
+              "UTC"
+            ],
+            [
+              "win",
+              "all"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "label": "trends:window",
+      "route": "/b/trends?from=2026-09-01T00%3A00%3A00Z&to=2026-09-05T00%3A00%3A00Z&tz=UTC",
+      "requests": [
+        {
+          "method": "GET",
+          "path": "/v1/analytics/query",
+          "query": [
+            [
+              "bucket",
+              "day"
+            ],
+            [
+              "from",
+              "2026-09-01T00:00:00Z"
+            ],
+            [
+              "measure",
+              "cost_usd"
+            ],
+            [
+              "tenant",
+              "fixture-tenant"
+            ],
+            [
+              "to",
+              "2026-09-05T00:00:00Z"
+            ],
+            [
+              "tz",
+              "UTC"
+            ]
+          ]
+        },
+        {
+          "method": "GET",
+          "path": "/v1/analytics/query",
+          "query": [
+            [
+              "bucket",
+              "none"
+            ],
+            [
+              "dim",
+              "hour_of_day"
+            ],
+            [
+              "dim",
+              "weekday"
+            ],
+            [
+              "from",
+              "2026-09-01T00:00:00.000Z"
+            ],
+            [
+              "measure",
+              "hook_events"
+            ],
+            [
+              "tenant",
+              "fixture-tenant"
+            ],
+            [
+              "to",
+              "2026-09-05T00:00:00.000Z"
+            ],
+            [
+              "tz",
+              "UTC"
+            ]
+          ]
+        },
+        {
+          "method": "GET",
+          "path": "/v1/analytics/schema",
+          "query": [
+            [
+              "tenant",
+              "fixture-tenant"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "label": "trends:all-history",
+      "route": "/b/trends?win=all&tz=UTC",
+      "requests": [
+        {
+          "method": "GET",
+          "path": "/v1/analytics/query",
+          "query": [
+            [
+              "all",
+              "1"
+            ],
+            [
+              "bucket",
+              "none"
+            ],
+            [
+              "dim",
+              "hour_of_day"
+            ],
+            [
+              "dim",
+              "weekday"
+            ],
+            [
+              "measure",
+              "hook_events"
+            ],
+            [
+              "tenant",
+              "fixture-tenant"
+            ],
+            [
+              "tz",
+              "UTC"
+            ]
+          ]
+        },
+        {
+          "method": "GET",
+          "path": "/v1/analytics/query",
+          "query": [
+            [
+              "bucket",
+              "day"
+            ],
+            [
+              "measure",
+              "cost_usd"
+            ],
+            [
+              "tenant",
+              "fixture-tenant"
+            ],
+            [
+              "tz",
+              "UTC"
+            ],
+            [
+              "win",
+              "all"
+            ]
+          ]
+        },
+        {
+          "method": "GET",
+          "path": "/v1/analytics/schema",
+          "query": [
+            [
+              "tenant",
+              "fixture-tenant"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "label": "compare:window",
+      "route": "/b/compare?from=2026-09-01T00%3A00%3A00Z&to=2026-09-05T00%3A00%3A00Z&tz=UTC",
+      "requests": [
+        {
+          "method": "GET",
+          "path": "/v1/analytics/distribution",
+          "query": [
+            [
+              "dim",
+              "model"
+            ],
+            [
+              "from",
+              "2026-08-28T00:00:00.000Z"
+            ],
+            [
+              "grain",
+              "call"
+            ],
+            [
+              "measure",
+              "cost_usd"
+            ],
+            [
+              "tenant",
+              "fixture-tenant"
+            ],
+            [
+              "to",
+              "2026-09-01T00:00:00.000Z"
+            ],
+            [
+              "tz",
+              "UTC"
+            ]
+          ]
+        },
+        {
+          "method": "GET",
+          "path": "/v1/analytics/distribution",
+          "query": [
+            [
+              "dim",
+              "model"
+            ],
+            [
+              "from",
+              "2026-09-01T00:00:00.000Z"
+            ],
+            [
+              "grain",
+              "call"
+            ],
+            [
+              "measure",
+              "cost_usd"
+            ],
+            [
+              "tenant",
+              "fixture-tenant"
+            ],
+            [
+              "to",
+              "2026-09-05T00:00:00.000Z"
+            ],
+            [
+              "tz",
+              "UTC"
+            ]
+          ]
+        },
+        {
+          "method": "GET",
+          "path": "/v1/analytics/query",
+          "query": [
+            [
+              "bucket",
+              "none"
+            ],
+            [
+              "dim",
+              "model"
+            ],
+            [
+              "from",
+              "2026-08-28T00:00:00.000Z"
+            ],
+            [
+              "measure",
+              "cost_usd"
+            ],
+            [
+              "tenant",
+              "fixture-tenant"
+            ],
+            [
+              "to",
+              "2026-09-01T00:00:00.000Z"
+            ],
+            [
+              "top",
+              "100"
+            ],
+            [
+              "tz",
+              "UTC"
+            ]
+          ]
+        },
+        {
+          "method": "GET",
+          "path": "/v1/analytics/query",
+          "query": [
+            [
+              "bucket",
+              "none"
+            ],
+            [
+              "dim",
+              "model"
+            ],
+            [
+              "from",
+              "2026-09-01T00:00:00.000Z"
+            ],
+            [
+              "measure",
+              "cost_usd"
+            ],
+            [
+              "tenant",
+              "fixture-tenant"
+            ],
+            [
+              "to",
+              "2026-09-05T00:00:00.000Z"
+            ],
+            [
+              "top",
+              "100"
+            ],
+            [
+              "tz",
+              "UTC"
+            ]
+          ]
+        },
+        {
+          "method": "GET",
+          "path": "/v1/analytics/schema",
+          "query": [
+            [
+              "tenant",
+              "fixture-tenant"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "label": "scatter:window",
+      "route": "/b/scatter?from=2026-09-01T00%3A00%3A00Z&to=2026-09-05T00%3A00%3A00Z&tz=UTC",
+      "requests": [
+        {
+          "method": "GET",
+          "path": "/v1/analytics/entities",
+          "query": [
+            [
+              "bucket",
+              "auto"
+            ],
+            [
+              "fields",
+              "cost_usd,commits"
+            ],
+            [
+              "from",
+              "2026-09-01T00:00:00.000Z"
+            ],
+            [
+              "grain",
+              "time"
+            ],
+            [
+              "mode",
+              "scatter"
+            ],
+            [
+              "tenant",
+              "fixture-tenant"
+            ],
+            [
+              "to",
+              "2026-09-05T00:00:00.000Z"
+            ],
+            [
+              "tz",
+              "UTC"
+            ]
+          ]
+        },
+        {
+          "method": "GET",
+          "path": "/v1/analytics/entities",
+          "query": [
+            [
+              "fields",
+              "associated_cost_usd,artifacts"
+            ],
+            [
+              "from",
+              "2026-09-01T00:00:00.000Z"
+            ],
+            [
+              "grain",
+              "plan"
+            ],
+            [
+              "mode",
+              "scatter"
+            ],
+            [
+              "tenant",
+              "fixture-tenant"
+            ],
+            [
+              "to",
+              "2026-09-05T00:00:00.000Z"
+            ],
+            [
+              "tz",
+              "UTC"
+            ]
+          ]
+        },
+        {
+          "method": "GET",
+          "path": "/v1/analytics/entities",
+          "query": [
+            [
+              "fields",
+              "cost_usd,commits,unpriced_calls"
+            ],
+            [
+              "from",
+              "2026-09-01T00:00:00.000Z"
+            ],
+            [
+              "grain",
+              "session"
+            ],
+            [
+              "mode",
+              "scatter"
+            ],
+            [
+              "tenant",
+              "fixture-tenant"
+            ],
+            [
+              "to",
+              "2026-09-05T00:00:00.000Z"
+            ],
+            [
+              "tz",
+              "UTC"
+            ]
+          ]
+        },
+        {
+          "method": "GET",
+          "path": "/v1/analytics/entities",
+          "query": [
+            [
+              "fields",
+              "writing_session_cost_usd,score:clarity"
+            ],
+            [
+              "from",
+              "2026-09-01T00:00:00.000Z"
+            ],
+            [
+              "grain",
+              "artifact"
+            ],
+            [
+              "kind",
+              "design"
+            ],
+            [
+              "mode",
+              "scatter"
+            ],
+            [
+              "tenant",
+              "fixture-tenant"
+            ],
+            [
+              "to",
+              "2026-09-05T00:00:00.000Z"
+            ],
+            [
+              "tz",
+              "UTC"
+            ]
+          ]
+        },
+        {
+          "method": "GET",
+          "path": "/v1/analytics/schema",
+          "query": [
+            [
+              "tenant",
+              "fixture-tenant"
+            ]
+          ]
+        },
+        {
+          "method": "GET",
+          "path": "/v1/analytics/scores",
+          "query": [
+            [
+              "kind",
+              "design"
+            ],
+            [
+              "tenant",
+              "fixture-tenant"
+            ],
+            [
+              "tz",
+              "Australia/Brisbane"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "label": "scatter:all-history",
+      "route": "/b/scatter?win=all&tz=UTC",
+      "requests": [
+        {
+          "method": "GET",
+          "path": "/v1/analytics/entities",
+          "query": [
+            [
+              "all",
+              "1"
+            ],
+            [
+              "bucket",
+              "auto"
+            ],
+            [
+              "fields",
+              "cost_usd,commits"
+            ],
+            [
+              "grain",
+              "time"
+            ],
+            [
+              "mode",
+              "scatter"
+            ],
+            [
+              "tenant",
+              "fixture-tenant"
+            ],
+            [
+              "tz",
+              "UTC"
+            ]
+          ]
+        },
+        {
+          "method": "GET",
+          "path": "/v1/analytics/entities",
+          "query": [
+            [
+              "all",
+              "1"
+            ],
+            [
+              "fields",
+              "associated_cost_usd,artifacts"
+            ],
+            [
+              "grain",
+              "plan"
+            ],
+            [
+              "mode",
+              "scatter"
+            ],
+            [
+              "tenant",
+              "fixture-tenant"
+            ],
+            [
+              "tz",
+              "UTC"
+            ]
+          ]
+        },
+        {
+          "method": "GET",
+          "path": "/v1/analytics/entities",
+          "query": [
+            [
+              "all",
+              "1"
+            ],
+            [
+              "fields",
+              "cost_usd,commits,unpriced_calls"
+            ],
+            [
+              "grain",
+              "session"
+            ],
+            [
+              "mode",
+              "scatter"
+            ],
+            [
+              "tenant",
+              "fixture-tenant"
+            ],
+            [
+              "tz",
+              "UTC"
+            ]
+          ]
+        },
+        {
+          "method": "GET",
+          "path": "/v1/analytics/entities",
+          "query": [
+            [
+              "all",
+              "1"
+            ],
+            [
+              "fields",
+              "writing_session_cost_usd,score:clarity"
+            ],
+            [
+              "grain",
+              "artifact"
+            ],
+            [
+              "kind",
+              "design"
+            ],
+            [
+              "mode",
+              "scatter"
+            ],
+            [
+              "tenant",
+              "fixture-tenant"
+            ],
+            [
+              "tz",
+              "UTC"
+            ]
+          ]
+        },
+        {
+          "method": "GET",
+          "path": "/v1/analytics/schema",
+          "query": [
+            [
+              "tenant",
+              "fixture-tenant"
+            ]
+          ]
+        },
+        {
+          "method": "GET",
+          "path": "/v1/analytics/scores",
+          "query": [
+            [
+              "kind",
+              "design"
+            ],
+            [
+              "tenant",
+              "fixture-tenant"
+            ],
+            [
+              "tz",
+              "Australia/Brisbane"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "label": "quality:window",
+      "route": "/b/quality?from=2026-09-01T00%3A00%3A00Z&to=2026-09-05T00%3A00%3A00Z&tz=UTC",
+      "requests": [
+        {
+          "method": "GET",
+          "path": "/v1/analytics/entities",
+          "query": [
+            [
+              "check",
+              "clarity"
+            ],
+            [
+              "dim",
+              "band:clarity"
+            ],
+            [
+              "dim",
+              "kind"
+            ],
+            [
+              "from",
+              "2026-09-01T00:00:00.000Z"
+            ],
+            [
+              "grain",
+              "artifact"
+            ],
+            [
+              "limit",
+              "4"
+            ],
+            [
+              "mode",
+              "aggregate"
+            ],
+            [
+              "scorer",
+              "jev-1.13.0"
+            ],
+            [
+              "stat",
+              "count"
+            ],
+            [
+              "tenant",
+              "fixture-tenant"
+            ],
+            [
+              "to",
+              "2026-09-05T00:00:00.000Z"
+            ],
+            [
+              "tz",
+              "UTC"
+            ]
+          ]
+        },
+        {
+          "method": "GET",
+          "path": "/v1/analytics/entities",
+          "query": [
+            [
+              "check",
+              "clarity"
+            ],
+            [
+              "fields",
+              "kind"
+            ],
+            [
+              "fields",
+              "score:clarity"
+            ],
+            [
+              "from",
+              "2026-09-01T00:00:00.000Z"
+            ],
+            [
+              "grain",
+              "artifact"
+            ],
+            [
+              "limit",
+              "4"
+            ],
+            [
+              "sort",
+              "score:clarity:asc"
+            ],
+            [
+              "tenant",
+              "fixture-tenant"
+            ],
+            [
+              "to",
+              "2026-09-05T00:00:00.000Z"
+            ],
+            [
+              "tz",
+              "UTC"
+            ]
+          ]
+        },
+        {
+          "method": "GET",
+          "path": "/v1/analytics/schema",
+          "query": [
+            [
+              "tenant",
+              "fixture-tenant"
+            ]
+          ]
+        },
+        {
+          "method": "GET",
+          "path": "/v1/analytics/score-series",
+          "query": [
+            [
+              "bucket",
+              "day"
+            ],
+            [
+              "check",
+              "clarity"
+            ],
+            [
+              "dim",
+              "session_model"
+            ],
+            [
+              "from",
+              "2026-09-01T00:00:00.000Z"
+            ],
+            [
+              "kind",
+              "design"
+            ],
+            [
+              "scorer",
+              "jev-1.13.0"
+            ],
+            [
+              "tenant",
+              "fixture-tenant"
+            ],
+            [
+              "to",
+              "2026-09-05T00:00:00.000Z"
+            ],
+            [
+              "tz",
+              "UTC"
+            ]
+          ]
+        },
+        {
+          "method": "GET",
+          "path": "/v1/analytics/scores",
+          "query": [
+            [
+              "check",
+              "clarity"
+            ],
+            [
+              "dim",
+              "harness"
+            ],
+            [
+              "from",
+              "2026-09-01T00:00:00.000Z"
+            ],
+            [
+              "kind",
+              "design"
+            ],
+            [
+              "limit",
+              "100"
+            ],
+            [
+              "scorer",
+              "jev-1.13.0"
+            ],
+            [
+              "tenant",
+              "fixture-tenant"
+            ],
+            [
+              "to",
+              "2026-09-05T00:00:00.000Z"
+            ],
+            [
+              "tz",
+              "UTC"
+            ]
+          ]
+        },
+        {
+          "method": "GET",
+          "path": "/v1/analytics/scores",
+          "query": [
+            [
+              "kind",
+              "design"
+            ],
+            [
+              "tenant",
+              "fixture-tenant"
+            ],
+            [
+              "tz",
+              "Australia/Brisbane"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "label": "cost:window",
+      "route": "/b/cost?from=2026-09-01T00%3A00%3A00Z&to=2026-09-05T00%3A00%3A00Z&tz=UTC",
+      "requests": [
+        {
+          "method": "GET",
+          "path": "/v1/analytics/distribution",
+          "query": [
+            [
+              "dim",
+              "harness"
+            ],
+            [
+              "from",
+              "2026-09-01T00:00:00.000Z"
+            ],
+            [
+              "grain",
+              "call"
+            ],
+            [
+              "measure",
+              "cost_usd"
+            ],
+            [
+              "tenant",
+              "fixture-tenant"
+            ],
+            [
+              "to",
+              "2026-09-05T00:00:00.000Z"
+            ],
+            [
+              "tz",
+              "UTC"
+            ]
+          ]
+        },
+        {
+          "method": "GET",
+          "path": "/v1/analytics/distribution",
+          "query": [
+            [
+              "dim",
+              "model"
+            ],
+            [
+              "from",
+              "2026-09-01T00:00:00.000Z"
+            ],
+            [
+              "grain",
+              "conversation"
+            ],
+            [
+              "measure",
+              "cost_usd"
+            ],
+            [
+              "tenant",
+              "fixture-tenant"
+            ],
+            [
+              "to",
+              "2026-09-05T00:00:00.000Z"
+            ],
+            [
+              "tz",
+              "UTC"
+            ]
+          ]
+        },
+        {
+          "method": "GET",
+          "path": "/v1/analytics/distribution",
+          "query": [
+            [
+              "dim",
+              "session_repo"
+            ],
+            [
+              "from",
+              "2026-09-01T00:00:00.000Z"
+            ],
+            [
+              "grain",
+              "conversation"
+            ],
+            [
+              "measure",
+              "cost_usd"
+            ],
+            [
+              "tenant",
+              "fixture-tenant"
+            ],
+            [
+              "to",
+              "2026-09-05T00:00:00.000Z"
+            ],
+            [
+              "tz",
+              "UTC"
+            ]
+          ]
+        },
+        {
+          "method": "GET",
+          "path": "/v1/analytics/query",
+          "query": [
+            [
+              "bucket",
+              "none"
+            ],
+            [
+              "dim",
+              "model"
+            ],
+            [
+              "from",
+              "2026-09-01T00:00:00.000Z"
+            ],
+            [
+              "measure",
+              "cost_usd"
+            ],
+            [
+              "tenant",
+              "fixture-tenant"
+            ],
+            [
+              "to",
+              "2026-09-05T00:00:00.000Z"
+            ],
+            [
+              "top",
+              "100"
+            ],
+            [
+              "tz",
+              "UTC"
+            ]
+          ]
+        },
+        {
+          "method": "GET",
+          "path": "/v1/analytics/schema",
+          "query": [
+            [
+              "tenant",
+              "fixture-tenant"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "label": "cost:all-history",
+      "route": "/b/cost?win=all&tz=UTC",
+      "requests": [
+        {
+          "method": "GET",
+          "path": "/v1/analytics/distribution",
+          "query": [
+            [
+              "all",
+              "1"
+            ],
+            [
+              "dim",
+              "harness"
+            ],
+            [
+              "grain",
+              "call"
+            ],
+            [
+              "measure",
+              "cost_usd"
+            ],
+            [
+              "tenant",
+              "fixture-tenant"
+            ],
+            [
+              "tz",
+              "UTC"
+            ]
+          ]
+        },
+        {
+          "method": "GET",
+          "path": "/v1/analytics/distribution",
+          "query": [
+            [
+              "all",
+              "1"
+            ],
+            [
+              "dim",
+              "model"
+            ],
+            [
+              "grain",
+              "conversation"
+            ],
+            [
+              "measure",
+              "cost_usd"
+            ],
+            [
+              "tenant",
+              "fixture-tenant"
+            ],
+            [
+              "tz",
+              "UTC"
+            ]
+          ]
+        },
+        {
+          "method": "GET",
+          "path": "/v1/analytics/distribution",
+          "query": [
+            [
+              "all",
+              "1"
+            ],
+            [
+              "dim",
+              "session_repo"
+            ],
+            [
+              "grain",
+              "conversation"
+            ],
+            [
+              "measure",
+              "cost_usd"
+            ],
+            [
+              "tenant",
+              "fixture-tenant"
+            ],
+            [
+              "tz",
+              "UTC"
+            ]
+          ]
+        },
+        {
+          "method": "GET",
+          "path": "/v1/analytics/query",
+          "query": [
+            [
+              "all",
+              "1"
+            ],
+            [
+              "bucket",
+              "none"
+            ],
+            [
+              "dim",
+              "model"
+            ],
+            [
+              "measure",
+              "cost_usd"
+            ],
+            [
+              "tenant",
+              "fixture-tenant"
+            ],
+            [
+              "top",
+              "100"
+            ],
+            [
+              "tz",
+              "UTC"
+            ]
+          ]
+        },
+        {
+          "method": "GET",
+          "path": "/v1/analytics/schema",
+          "query": [
+            [
+              "tenant",
+              "fixture-tenant"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "label": "tools:window",
+      "route": "/b/tools?from=2026-09-01T00%3A00%3A00Z&to=2026-09-05T00%3A00%3A00Z&tz=UTC",
+      "requests": [
+        {
+          "method": "GET",
+          "path": "/v1/analytics/query",
+          "query": [
+            [
+              "bucket",
+              "none"
+            ],
+            [
+              "dim",
+              "hour_of_day"
+            ],
+            [
+              "dim",
+              "weekday"
+            ],
+            [
+              "from",
+              "2026-09-01T00:00:00.000Z"
+            ],
+            [
+              "measure",
+              "hook_events"
+            ],
+            [
+              "tenant",
+              "fixture-tenant"
+            ],
+            [
+              "to",
+              "2026-09-05T00:00:00.000Z"
+            ],
+            [
+              "tz",
+              "UTC"
+            ]
+          ]
+        },
+        {
+          "method": "GET",
+          "path": "/v1/analytics/query",
+          "query": [
+            [
+              "bucket",
+              "none"
+            ],
+            [
+              "dim",
+              "tool"
+            ],
+            [
+              "from",
+              "2026-09-01T00:00:00.000Z"
+            ],
+            [
+              "measure",
+              "hook_events"
+            ],
+            [
+              "tenant",
+              "fixture-tenant"
+            ],
+            [
+              "to",
+              "2026-09-05T00:00:00.000Z"
+            ],
+            [
+              "top",
+              "100"
+            ],
+            [
+              "tz",
+              "UTC"
+            ]
+          ]
+        },
+        {
+          "method": "GET",
+          "path": "/v1/analytics/schema",
+          "query": [
+            [
+              "tenant",
+              "fixture-tenant"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "label": "workflow:window",
+      "route": "/b/workflow?from=2026-09-01T00%3A00%3A00Z&to=2026-09-05T00%3A00%3A00Z&tz=UTC",
+      "requests": [
+        {
+          "method": "GET",
+          "path": "/v1/analytics/activity",
+          "query": [
+            [
+              "from",
+              "2026-09-01T00:00:00Z"
+            ],
+            [
+              "mode",
+              "list"
+            ],
+            [
+              "tenant",
+              "fixture-tenant"
+            ],
+            [
+              "to",
+              "2026-09-05T00:00:00Z"
+            ],
+            [
+              "tz",
+              "UTC"
+            ]
+          ]
+        },
+        {
+          "method": "GET",
+          "path": "/v1/analytics/entities",
+          "query": [
+            [
+              "fields",
+              "associated_cost_usd,artifacts"
+            ],
+            [
+              "from",
+              "2026-09-01T00:00:00.000Z"
+            ],
+            [
+              "grain",
+              "plan"
+            ],
+            [
+              "mode",
+              "scatter"
+            ],
+            [
+              "tenant",
+              "fixture-tenant"
+            ],
+            [
+              "to",
+              "2026-09-05T00:00:00.000Z"
+            ],
+            [
+              "tz",
+              "UTC"
+            ]
+          ]
+        },
+        {
+          "method": "GET",
+          "path": "/v1/analytics/entities",
+          "query": [
+            [
+              "from",
+              "2026-09-01T00:00:00.000Z"
+            ],
+            [
+              "grain",
+              "execution"
+            ],
+            [
+              "limit",
+              "4"
+            ],
+            [
+              "plan",
+              "20"
+            ],
+            [
+              "repo_id",
+              "repo-a"
+            ],
+            [
+              "tenant",
+              "fixture-tenant"
+            ],
+            [
+              "to",
+              "2026-09-05T00:00:00.000Z"
+            ],
+            [
+              "tz",
+              "UTC"
+            ]
+          ]
+        },
+        {
+          "method": "GET",
+          "path": "/v1/analytics/entities",
+          "query": [
+            [
+              "from",
+              "2026-09-01T00:00:00.000Z"
+            ],
+            [
+              "grain",
+              "plan"
+            ],
+            [
+              "limit",
+              "12"
+            ],
+            [
+              "sort",
+              "last_ts:desc"
+            ],
+            [
+              "tenant",
+              "fixture-tenant"
+            ],
+            [
+              "to",
+              "2026-09-05T00:00:00.000Z"
+            ],
+            [
+              "tz",
+              "UTC"
+            ]
+          ]
+        },
+        {
+          "method": "GET",
+          "path": "/v1/analytics/entities",
+          "query": [
+            [
+              "from",
+              "2026-09-01T00:00:00.000Z"
+            ],
+            [
+              "grain",
+              "plan"
+            ],
+            [
+              "limit",
+              "4"
+            ],
+            [
+              "sort",
+              "associated_cost_usd:desc"
+            ],
+            [
+              "tenant",
+              "fixture-tenant"
+            ],
+            [
+              "to",
+              "2026-09-05T00:00:00.000Z"
+            ],
+            [
+              "tz",
+              "UTC"
+            ]
+          ]
+        },
+        {
+          "method": "GET",
+          "path": "/v1/analytics/entities",
+          "query": [
+            [
+              "from",
+              "2026-09-01T00:00:00.000Z"
+            ],
+            [
+              "grain",
+              "plan"
+            ],
+            [
+              "limit",
+              "4"
+            ],
+            [
+              "sort",
+              "executions_unreported:desc"
+            ],
+            [
+              "tenant",
+              "fixture-tenant"
+            ],
+            [
+              "to",
+              "2026-09-05T00:00:00.000Z"
+            ],
+            [
+              "tz",
+              "UTC"
+            ]
+          ]
+        },
+        {
+          "method": "GET",
+          "path": "/v1/analytics/entity",
+          "query": [
+            [
+              "collection",
+              "events"
+            ],
+            [
+              "from",
+              "2026-09-01T00:00:00.000Z"
+            ],
+            [
+              "grain",
+              "plan"
+            ],
+            [
+              "limit",
+              "4"
+            ],
+            [
+              "plan",
+              "20"
+            ],
+            [
+              "repo_id",
+              "repo-a"
+            ],
+            [
+              "tenant",
+              "fixture-tenant"
+            ],
+            [
+              "to",
+              "2026-09-05T00:00:00.000Z"
+            ],
+            [
+              "tz",
+              "UTC"
+            ]
+          ]
+        },
+        {
+          "method": "GET",
+          "path": "/v1/analytics/schema",
+          "query": [
+            [
+              "tenant",
+              "fixture-tenant"
+            ]
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -10,6 +10,10 @@ import { extname, resolve, sep } from 'node:path';
 import { createStubApi } from './stub-api.mjs';
 
 const webRoot = resolve(import.meta.dirname, '../../web');
+// Release-matrix seam: when set, static files are read from this origin (the
+// embedded release binary) while the deterministic stub API stays local. The
+// default Pages-style rig reads web/ directly and ignores this.
+const staticOrigin = (process.env.YAKKA_RELEASE_STATIC_ORIGIN || '').replace(/\/+$/, '');
 const types = {
   '.html': 'text/html; charset=utf-8',
   '.js': 'text/javascript; charset=utf-8',
@@ -81,6 +85,18 @@ export async function startWorkspaceHarness({ port = 0 } = {}) {
       return;
     }
     if (url.pathname === '/favicon.ico') { response.writeHead(204); response.end(); return; }
+
+    if (staticOrigin) {
+      const upstream = await fetch(new URL(`${url.pathname}${url.search}`, staticOrigin), { method: request.method });
+      const headers = {};
+      upstream.headers.forEach((value, name) => {
+        if (!['connection', 'content-encoding', 'transfer-encoding'].includes(name)) headers[name] = value;
+      });
+      const body = request.method === 'HEAD' ? null : Buffer.from(await upstream.arrayBuffer());
+      response.writeHead(upstream.status, headers);
+      response.end(body);
+      return;
+    }
 
     const relative = url.pathname === '/' ? 'index.html' : url.pathname.slice(1);
     let path = resolve(webRoot, relative);
