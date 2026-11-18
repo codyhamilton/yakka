@@ -26,14 +26,14 @@ func scoringFeedbackCall(t *testing.T, s *Server, path, content string) string {
 func scoringFeedbackAnswer(t *testing.T, s *Server, path, content string) string {
 	t.Helper()
 	h := s.Handler()
-	toolList := mcpDecode(t, mcpRequest(t, h, "ka", `{"id":1,"method":"tools/list"}`, nil))["result"].(map[string]any)["tools"].([]any)
+	toolList := mcpDecode(t, mcpRequest(t, h, "ka", `{"id":1,"method":"tools/list"}`, map[string]string{"Yakka-Context": "2"}))["result"].(map[string]any)["tools"].([]any)
 	decl := toolList[2].(map[string]any)["_meta"].(map[string]any)["yakka/tool"].(map[string]any)
 	local := map[string]any{
-		"_v": 1, "_rev": decl["rev"],
+		"_v": 2, "_rev": decl["rev"],
 		"resolved_path": map[string]any{"path": "/work/" + path},
 		"file":          map[string]any{"exists": true, "is_file": true, "mtime": 1700000000, "content_hash": keys.ContentHash([]byte(content))},
 		"git":           map[string]any{"repo_id": "r", "rel_path": path},
-		"queue":         map[string]any{"pending": []any{}, "rejected": []any{}},
+		"queue":         map[string]any{"pending": []any{}, "rejected": []any{}, "coverage": map[string]any{"complete": true, "pending_covering": float64(0), "rejected_covering": float64(0), "oldest_covering_age_s": nil}},
 		"drain":         map[string]any{"running": false},
 	}
 	result := mcpDecode(t, mcpRequest(t, h, "ka", mcpCallBody("artifact_feedback", map[string]any{"path": path, "_local": local}), nil))["result"].(map[string]any)

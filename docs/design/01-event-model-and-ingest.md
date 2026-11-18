@@ -19,7 +19,7 @@ Everything is a recorded fact with a join key. State is a view over facts.
 | Fact | Source | Carries |
 |---|---|---|
 | Hook event | harness hook → spool | conversation ID, harness, event, normalised event, tool, timing, model, token usage and cost where the payload has them |
-| Artifact version | write hook → drain reads file | `repo_id`, `path`, content hash, content, conversation ID, source (`worktree` or `commit`) |
+| Artifact version | write hook, or Stop/SessionEnd sweep pointer → drain reads file | `repo_id`, `path`, content hash, content, conversation ID, source (`worktree` or `commit`), and the file mtime as `ts` for a snapshot |
 | Commit | hook on `git commit` | SHA, touched paths, rename pairs, conversation ID |
 | Review run | authenticated review handler | tenant-bound repo, capture and criteria hashes, reviewer/build models, tags, configured/requested/effective effort, status, attempts, validated result and cost; captured input is stored separately by content hash. A `store=false` call writes no review fact |
 | Review usage | authenticated review handler | content-free `store=false` spend: random usage id, configured/returned model, configured/requested/effective effort, tokens, actual cost and pricing identity, timestamp, validated tags and attempt/status; no content-derived identity and no reservation accounting |
@@ -213,7 +213,17 @@ time ([design 7](07-analytics-site.md#analytics-reads)).
 - **Drain** reads artifact files and hashes them together, scrubs, delivers. For a commit it runs
   `git diff-tree -M --name-status` itself (rules in design 2, Commit facts). For design, brief and
   report paths touched by a commit it also sends the committed blob (source `commit`), so a missed
-  worktree write is recovered when the agent commits it.
+  worktree write is one recovery path; the Stop/SessionEnd sweep is the other, and commit catch-up
+  is no longer the only recovery for a missed write. On a fresh Stop or SessionEnd event (envelope
+  `ts` at most 1 h old) the drain sweeps the session's working repo: for each scored-kind path that
+  `git status --porcelain --untracked-files=all` reports modified or untracked it writes an
+  `artifact_snapshot` pointer entry in the spool's queue-file form, with payload `session_id`
+  `feedback-<repo_id>`, `cwd` and the file's absolute `path`, and no content. The drain reads the
+  file at batch time and emits exactly one `artifact_version` with `ts` the file's mtime and no
+  `hook_event`. An entry that yields no version (not UTF-8, outside the repo or a symlink out of
+  it, not a scored kind, no repo identity) moves to `queue/rejected/` with a `.reason`
+  (`unreadable`, `not_in_repo`, `not_scored_kind`) instead of a silent delete. The queue never
+  carries file content.
 - **No repair submit.** Dropped in [design 2](02-edge-capture.md#no-repair-submit): retries, commit
   catch-up and rewrites cover its cases, and what remains is a gap the view reports.
 
@@ -223,8 +233,10 @@ time ([design 7](07-analytics-site.md#analytics-reads)).
    re-run produces a new version of the same report, not a second report. Proposed path:
    `docs/plans/<plan>/reports/<brief-name>.md`, so the kind patterns cannot collide with
    `briefs/*.md`.
-2. **`spool.sh` never snapshots.** It records the event only. If the file is gone at drain time,
-   no `artifact_version` is produced; a failure log can be added later.
+2. **`spool.sh` never snapshots.** It records the event only. The drain's Stop/SessionEnd sweep
+   (Who does what) writes `artifact_snapshot` pointer entries itself and reads their files at batch
+   time, so the queue carries no content. If the file is gone at drain time, no `artifact_version`
+   is produced and the entry is rejected with a reason; a failure log can be added later.
 3. **Harness label comes from the adapter.** Each harness has its own hook config, which passes a
    literal `--harness` name. No `auto` and no default.
 4. **Every submitted fact has a conversation ID.** All harness hook schemas carry one. Hook types

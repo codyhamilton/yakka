@@ -69,7 +69,13 @@
         },
         "queue": {
           "pending": [],
-          "rejected": []
+          "rejected": [],
+          "coverage": {
+            "complete": true,
+            "pending_covering": 0,
+            "rejected_covering": 0,
+            "oldest_covering_age_s": null
+          }
         },
         "drain": {
           "running": false
@@ -102,7 +108,13 @@
         },
         "queue": {
           "pending": [],
-          "rejected": []
+          "rejected": [],
+          "coverage": {
+            "complete": true,
+            "pending_covering": 0,
+            "rejected_covering": 0,
+            "oldest_covering_age_s": null
+          }
         },
         "drain": {
           "running": false
@@ -134,7 +146,13 @@
         },
         "queue": {
           "pending": [],
-          "rejected": []
+          "rejected": [],
+          "coverage": {
+            "complete": true,
+            "pending_covering": 0,
+            "rejected_covering": 0,
+            "oldest_covering_age_s": null
+          }
         },
         "drain": {
           "running": false
@@ -166,7 +184,13 @@
         },
         "queue": {
           "pending": [],
-          "rejected": []
+          "rejected": [],
+          "coverage": {
+            "complete": true,
+            "pending_covering": 0,
+            "rejected_covering": 0,
+            "oldest_covering_age_s": null
+          }
         },
         "drain": {
           "running": false
@@ -200,7 +224,13 @@
         },
         "queue": {
           "pending": [],
-          "rejected": []
+          "rejected": [],
+          "coverage": {
+            "complete": true,
+            "pending_covering": 0,
+            "rejected_covering": 0,
+            "oldest_covering_age_s": null
+          }
         },
         "drain": {
           "running": false
@@ -234,7 +264,13 @@
         },
         "queue": {
           "pending": [],
-          "rejected": []
+          "rejected": [],
+          "coverage": {
+            "complete": true,
+            "pending_covering": 0,
+            "rejected_covering": 0,
+            "oldest_covering_age_s": null
+          }
         },
         "drain": {
           "running": false
@@ -277,13 +313,19 @@
               "mtime": 1700000002
             }
           ],
-          "rejected": []
+          "rejected": [],
+          "coverage": {
+            "complete": true,
+            "pending_covering": 2,
+            "rejected_covering": 0,
+            "oldest_covering_age_s": 4
+          }
         },
         "drain": {
           "running": false
         }
       },
-      "text": "state: queued\npath: docs/plans/x/DESIGN.md\nrepo: root:repo\ncontent_hash: abc\n\n2 events for this file still queued, oldest 4s, no drain running\nFix: start the plugin drain at the next hook event, or run the plugin's bin/yakka drain",
+      "text": "state: queued\npath: docs/plans/x/DESIGN.md\nrepo: root:repo\ncontent_hash: abc\n\n2 events for this file still queued, oldest 4s, no drain running\nthe version is on its way; call again in a few seconds\nFix: start the plugin drain at the next hook event, or run the plugin's bin/yakka drain",
       "isError": false
     },
     {
@@ -316,7 +358,13 @@
               "reason": "secret: aws_access_key at line 3 in docs/plans/x/DESIGN.md",
               "mtime": 1700000000
             }
-          ]
+          ],
+          "coverage": {
+            "complete": true,
+            "pending_covering": 0,
+            "rejected_covering": 1,
+            "oldest_covering_age_s": null
+          }
         },
         "drain": {
           "running": false
@@ -350,13 +398,19 @@
         },
         "queue": {
           "pending": [],
-          "rejected": []
+          "rejected": [],
+          "coverage": {
+            "complete": true,
+            "pending_covering": 0,
+            "rejected_covering": 0,
+            "oldest_covering_age_s": null
+          }
         },
         "drain": {
           "running": false
         }
       },
-      "text": "state: not delivered\npath: docs/plans/x/DESIGN.md\nrepo: root:repo\ncontent_hash: abc\n\nthe service has no version of this file and nothing is queued; if it was just written, wait for the hook or rewrite the file",
+      "text": "state: not delivered\npath: docs/plans/x/DESIGN.md\nrepo: root:repo\ncontent_hash: abc\n\nlocal enqueue is unsupported by this shim; deliver the file with a Write-tool edit or the end-of-turn sweep.\nFix: save the file again with the Write tool or make a real Edit (a no-op edit may be refused and fires no event); otherwise the sweep delivers it at turn end, and a session killed before its Stop or SessionEnd hook runs loses the write.",
       "isError": false
     },
     {
@@ -384,7 +438,13 @@
         },
         "queue": {
           "pending": [],
-          "rejected": []
+          "rejected": [],
+          "coverage": {
+            "complete": true,
+            "pending_covering": 0,
+            "rejected_covering": 0,
+            "oldest_covering_age_s": null
+          }
         },
         "drain": {
           "running": false

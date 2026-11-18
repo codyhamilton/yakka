@@ -167,3 +167,35 @@ The outcome's entry point is the in-process MCP `artifact_feedback` handler with
 - `packages/yakka/internal/mcp/mcp.go` (line 212-213) and `internal/mcp/feedback.go` (line 160) still carry the old description and the `cannot resolve the working directory` message. This is the legacy Go client, which the brief leaves untouched.
 - The unrelated `tools/release/test_layout.py::test_repo_passes_layout_check` failure on ignored `packages/yakka-analytics/node_modules/**` is documented by Plan 19 Phase 4; it was not run or chased.
 - Gates for Cody (egress, model session, or deployment): a fresh `codex exec` session in a scratch repo producing an `mcp__yakka__artifact_feedback` call whose relative path resolves; the live `CODEX_PROJECT_DIR` / `CLAUDE_PROJECT_DIR` check in each harness; deploying the declaration change to the live service (ledger 28); `artifact_feedback` checks on this brief and this report.
+
+## Phase 3 — A write that names no file still reaches the service
+
+Run (phase 3): tool opencode, model deepseek-v4.1-flash, started 2026-11-19T02:19:03+10:00. Logs: `/home/codyh/workspace/.briefs/q/21-p3-refine.log`, `21-p3-u1.log`, `21-p3-u2.log`, `21-p3-verify.log`. Run for Plan 21 phase 3 only; no review, terminal review or close-out.
+
+Approach: the design marks this phase `open`. The invoker instructed a refine first. Refine commit `55b0c7f` split it into two units against the code as it stood and added the Phase 3 Units list. Plan 24 E1's server side is built at `7be8aa3`, merged into the branch at `f0cbec9`; `TestMCPLocalAction` passed at that SHA before the build. The Plan 24 addendum governs the E1 mechanism, and no Plan 24 code was changed.
+
+### Briefs `phase3-01-server-feedback-v2.md`, `phase3-02-snapshot-sweep-drain.md`
+
+Status: closed.
+
+- Unit 1 (`packages/yakka/internal/serve`): `artifact_feedback` declares v2 with the one `enqueue_file_snapshot/1` action from `resolved_path`, keeps the base v1 facts and v1 scope/annotations, and declares queue reader v2. The handler answers from refreshed facts in the design order: facts/coverage, service hash, rejected before pending, `delivered`, 300 s bound, then the single directive and its continuation effects. No ingest, local write, drain start, content scan or second directive.
+- Unit 2 (`plugins/yakka/client/yakka.py` and design docs 01/04): the drain accepts an `artifact_snapshot` pointer entry, reads the file at batch time, emits one `artifact_version` with `source: worktree`, `session_id` conversation, `ts` = file mtime and no `hook_event`, and rejects no-version entries with `unreadable`, `not_in_repo` or `not_scored_kind`. Fresh `Stop`/`SessionEnd` events sweep modified/untracked scored-kind files from `git status --porcelain --untracked-files=all` into the same pointer form, bounded to events at most 1 h old. `_write_paths` matches the new kind for Plan 24's queue reader.
+- Workers: two `hlaunch.sh build` runs in parallel, one per brief, leaving changes uncommitted. Per agent: unit 1 opencode/deepseek-v4.1-flash; unit 2 opencode/deepseek-v4.1-flash. The orchestrator ran the combined tests, the read-only verification, and the two wording/coverage fixes below.
+- Reports: `reports/phase3-01-server-feedback-v2.md` (done-with-concerns) and `reports/phase3-02-snapshot-sweep-drain.md` (done).
+
+### Verification
+
+The phase's entry points are the real `artifact_feedback` handler with the product declaration and the real drain `Build`/`_Runner`. An independent read-only verification run at `55b0c7f` plus the working tree found two defects, both fixed inline and covered by tests: `feedbackCoverage` now requires `coverage.complete == true`, so incomplete or missing coverage is `local context unavailable: queue (invalid_context)` rather than evidence of absence; and the 300 s branch compares the raw `oldest_covering_age_s > 300`, so 300.4 s is not `queued` (the visible age is rounded up, 301s). A new incomplete-coverage case and the 300.4 s case are in `mcp_feedback_test.go` and `mcp_feedback_local_action_test.go`.
+
+- Go: `go test ./... -count=1` passed for every package (serve 11.4 s, cmd/yakka 61.5 s); focused feedback/local-action/scoring suite passed; `go vet ./internal/serve/` clean; every owned file gofmt-clean.
+- Python: `python3 -m unittest test_facts test_drain test_mcp test_mcp_shim` ran 101 tests, OK; `py_compile yakka.py` clean.
+- No live call, deployment or network request was made; all evidence is fakes and temp repos.
+
+### Carried
+
+- **Plan 24 v1 compatibility gap (recorded, not resolved).** Design 08 promises an old shim a v1 read-only variant with `enqueue unsupported`; Plan 24's `mcpList` instead omits a tool whose `DeclarationVersion` exceeds `Yakka-Context`, so a v1 shim sees no `artifact_feedback`. This needs a Plan 24 change.
+- **Shim pointer form mismatch (recorded, not resolved).** Plan 24's built shim spools an E1 pointer as a `PostToolUse`/`Write` entry with the call token as conversation ID, while Phase 3 A1's wording says `artifact_snapshot` and `feedback-<repo_id>`. The shim was left alone per the addendum; the drain accepts both the shim's pointer and its own sweep entries.
+- The 300.4 s boundary now reads 301s; ages between 300 and 300.5 therefore display one second above the raw value.
+- The sweep's `_Runner.swept` guard means a retried Stop/SessionEnd event does not sweep again; files missed in that window are recovered by a later turn or commit catch-up.
+- The pre-existing `tools/release/test_layout.py::test_repo_passes_layout_check` failure on ignored `packages/yakka-analytics/node_modules/**` was not run or chased. `gofmt -l internal/serve` still lists pre-existing `mcp_discovery_limits.go`, which this phase did not own.
+- Gates for Cody (egress, deployment or live observation): a live scratch-repo turn showing the drain deliver a heredoc-written file's current hash; a live `artifact_feedback` `queued` then `delivered` call through the E1 enqueue after deploying the v2 declaration (ledger 28); the issue's budget-repo case; `artifact_feedback` checks on these briefs and reports.

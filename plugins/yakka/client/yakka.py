@@ -1010,6 +1010,7 @@ class _ReadResult:
     content: str = ""
     raw: bytes = b""
     ok: bool = False
+    mtime: float = 0.0
 
 
 def _fact_json(v: dict[str, Any]) -> bytes:
@@ -1021,7 +1022,7 @@ def Build(ctx: Any, files: List[File]) -> List[Output]:
     reads: dict[str, _ReadResult] = {}
     last: dict[str, int] = {}
     for i, p in enumerate(ps):
-        if p.bad:
+        if p.bad or p.event == "artifact_snapshot":
             continue
         for abs_path in _write_paths(p):
             r = reads.get(abs_path)
@@ -1051,6 +1052,14 @@ def Build(ctx: Any, files: List[File]) -> List[Output]:
         def add(v: dict[str, Any]) -> None:
             v["id"] = f"{p.name}#{len(o.Facts)}"
             o.Facts.append(_fact_json(v))
+
+        if p.event == "artifact_snapshot":
+            v, reasons = _snapshot_fact(p)
+            o.Reasons.extend(reasons)
+            if v is not None:
+                add(v)
+            out.append(o)
+            continue
 
         def common(typ: str) -> dict[str, Any]:
             return {
@@ -1086,6 +1095,57 @@ def Build(ctx: Any, files: List[File]) -> List[Output]:
         _build_commits(ctx, p, commits, common, add, o)
         out.append(o)
     return out
+
+
+def _number_float(v: Any) -> Optional[float]:
+    if isinstance(v, _Number):
+        try:
+            return float(v.s)
+        except ValueError:
+            return None
+    if isinstance(v, bool):
+        return None
+    if isinstance(v, (int, float)):
+        return float(v)
+    return None
+
+
+def _snapshot_fact(p: _Parsed) -> Tuple[Optional[dict[str, Any]], List[str]]:
+    raw = p.payload.get("path")
+    if not isinstance(raw, str):
+        return None, ["unreadable: "]
+    if not raw:
+        return None, ["unreadable: "]
+    abs_path = raw if os.path.isabs(raw) else os.path.join(p.base, raw)
+    abs_path = os.path.normpath(abs_path)
+    if not os.path.isabs(abs_path):
+        return None, [f"unreadable: {abs_path}"]
+    rd = _read_file(abs_path)
+    if not rd.ok:
+        return None, [f"unreadable: {abs_path}"]
+    top, rel, in_repo, err = RepoPath(abs_path)
+    if err is not None or not in_repo:
+        return None, [f"not_in_repo: {abs_path}"]
+    if Kind(rel) == "":
+        return None, [f"not_scored_kind: {abs_path}"]
+    repo_id, err = RepoID(top)
+    if err is not None or not repo_id:
+        return None, [f"not_in_repo: {abs_path}"]
+    hits = Scan(rd.content)
+    if hits:
+        return None, [f"secret: {hits[0].Pattern} at line {hits[0].Line} in {rel}"]
+    return {
+        "type": "artifact_version",
+        "conversation_id": p.conv,
+        "harness": p.harness,
+        "event": "artifact_snapshot",
+        "ts": _Number(repr(rd.mtime)),
+        "repo_id": repo_id,
+        "path": rel,
+        "content_hash": ContentHash(rd.raw),
+        "content": rd.content,
+        "source": "worktree",
+    }, []
 
 
 def _parse_file(f: File) -> _Parsed:
@@ -1161,13 +1221,14 @@ def _read_file(abs_path: str) -> _ReadResult:
     try:
         with open(abs_path, "rb") as rf:
             b = rf.read()
+        mtime = os.stat(abs_path).st_mtime
     except OSError:
         return _ReadResult()
     try:
         text = b.decode("utf-8")
     except UnicodeDecodeError:
         return _ReadResult()
-    return _ReadResult(content=text, raw=b, ok=True)
+    return _ReadResult(content=text, raw=b, ok=True, mtime=mtime)
 
 
 _write_tools = frozenset(
@@ -1198,6 +1259,16 @@ def _write_paths(p: _Parsed) -> List[str]:
     raw: List[str] = []
     payload = p.payload
     event = p.event
+    if p.event == "artifact_snapshot":
+        fp = payload.get("path")
+        if not isinstance(fp, str) or not fp:
+            return []
+        abs_path = fp
+        if not os.path.isabs(fp):
+            if not p.base:
+                return []
+            abs_path = os.path.join(p.base, fp)
+        return [os.path.normpath(abs_path)]
     hen = payload.get("hook_event_name")
     if isinstance(hen, str) and hen:
         event = hen
@@ -1998,6 +2069,122 @@ def QueueStatus(dir_path: str) -> QueueStatusData:
     return st
 
 
+_SWEEP_MAX_AGE_S = 3600.0
+
+
+def _sweep_git(cwd: str, *args: str) -> Optional[str]:
+    env = {"PATH": os.environ.get("PATH", ""), "HOME": _home(), "GIT_TERMINAL_PROMPT": "0", "GIT_CONFIG_NOSYSTEM": "1"}
+    try:
+        out = subprocess.run(
+            ["git", "-C", cwd, *args],
+            check=True,
+            capture_output=True,
+            timeout=10.0,
+            env=env,
+        )
+    except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
+        return None
+    return out.stdout.decode("utf-8", "replace")
+
+
+def _sweep_status_paths(top: str) -> List[str]:
+    body = _sweep_git(top, "status", "--porcelain=v1", "-z", "--untracked-files=all")
+    if body is None:
+        return []
+    tokens = body.split("\0")
+    out: List[str] = []
+    i = 0
+    while i < len(tokens):
+        rec = tokens[i]
+        i += 1
+        if len(rec) < 4:
+            continue
+        xy = rec[:2]
+        path = rec[3:]
+        if not path:
+            continue
+        renamed = "R" in xy or "C" in xy
+        if renamed and i < len(tokens):
+            i += 1
+        if "D" in xy:
+            continue
+        abs_path = os.path.normpath(os.path.join(top, path))
+        try:
+            rel = os.path.relpath(abs_path, top).replace(os.sep, "/")
+        except ValueError:
+            continue
+        if Kind(rel) == "":
+            continue
+        if not os.path.isfile(abs_path):
+            continue
+        out.append(abs_path)
+    return out
+
+
+def _sweep_name(conv: str, ts: float) -> str:
+    rid = re.sub(r"[^A-Za-z0-9._-]", "_", conv[:128])
+    return f"{rid}-{ts:.6f}-{os.getpid()}-{random.randint(0, 32767)}"
+
+
+def _write_snapshot(queue_dir: str, conv: str, harness: str, top: str, abs_path: str, ts: float) -> str:
+    name = _sweep_name(conv, ts) + ".evt"
+    tmp_dir = os.path.join(queue_dir, "tmp")
+    tmp = os.path.join(tmp_dir, name)
+    payload = {"session_id": conv, "cwd": top, "path": abs_path}
+    data = (
+        json.dumps({"ts": ts, "harness": harness, "event": "artifact_snapshot"}, separators=(",", ":"))
+        + "\n"
+        + json.dumps(payload, separators=(",", ":"))
+    ).encode("utf-8")
+    try:
+        os.makedirs(tmp_dir, mode=0o700, exist_ok=True)
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        try:
+            os.write(fd, data)
+        finally:
+            os.close(fd)
+        os.rename(tmp, os.path.join(queue_dir, name))
+    except OSError:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        return ""
+    return name
+
+
+def _sweep_snapshots(p: _Parsed, queue_dir: str, now: Optional[float] = None) -> List[str]:
+    if p.event not in ("Stop", "SessionEnd"):
+        return []
+    ts = _number_float(p.ts)
+    if ts is None:
+        return []
+    if now is None:
+        now = time.time()
+    if now - ts > _SWEEP_MAX_AGE_S:
+        return []
+    cwd = p.payload.get("cwd")
+    if not isinstance(cwd, str) or not cwd:
+        return []
+    top = _sweep_git(cwd, "rev-parse", "--show-toplevel")
+    if top is None:
+        return []
+    top = os.path.realpath(top.strip())
+    if not top:
+        return []
+    repo_id, err = RepoID(top)
+    if err is not None or not repo_id:
+        return []
+    conv = "feedback-" + repo_id
+    ts_enqueue = time.time()
+    written: List[str] = []
+    for abs_path in _sweep_status_paths(top):
+        name = _write_snapshot(queue_dir, conv, p.harness, top, abs_path, ts_enqueue)
+        if name:
+            written.append(name)
+    return written
+
+
 @dataclass
 class _BatchItem:
     name: str
@@ -2013,6 +2200,7 @@ class _Runner:
     def __init__(self, o: Options) -> None:
         self.o = o
         self.seen: set[str] = set()
+        self.swept: set[str] = set()
         self.last_new = time.monotonic()
 
     def logf(self, fmt: str, *args: Any) -> None:
@@ -2058,6 +2246,26 @@ class _Runner:
             except OSError:
                 continue
             in_files.append(File(Name=e.name, Data=data))
+        swept: List[File] = []
+        for f in in_files:
+            if f.Name in self.swept:
+                continue
+            try:
+                p = _parse_file(f)
+                if p.bad or p.event not in ("Stop", "SessionEnd"):
+                    continue
+                self.swept.add(f.Name)
+                names = _sweep_snapshots(p, self.o.Dir)
+            except Exception as err:
+                self.logf("sweep failed: %s", err)
+                continue
+            for name in names:
+                try:
+                    with open(os.path.join(self.o.Dir, name), "rb") as sf:
+                        swept.append(File(Name=name, Data=sf.read()))
+                except OSError:
+                    continue
+        in_files.extend(swept)
         items: List[_BatchItem] = []
         for out in Build(None, in_files):
             if not out.Facts:

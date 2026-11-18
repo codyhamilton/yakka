@@ -51,7 +51,8 @@ func TestMCPArtifactFeedbackCorpus(t *testing.T) {
 	}
 	s := feedbackServer(t)
 	h := s.Handler()
-	list := mcpDecode(t, mcpRequest(t, h, "ka", `{"jsonrpc":"2.0","id":1,"method":"tools/list"}`, nil))["result"].(map[string]any)["tools"].([]any)
+	v2 := map[string]string{"Yakka-Context": "2"}
+	list := mcpDecode(t, mcpRequest(t, h, "ka", `{"jsonrpc":"2.0","id":1,"method":"tools/list"}`, v2))["result"].(map[string]any)["tools"].([]any)
 	var gotTool map[string]any
 	for _, item := range list {
 		tool := item.(map[string]any)
@@ -73,6 +74,17 @@ func TestMCPArtifactFeedbackCorpus(t *testing.T) {
 	if meta["scope"] != TokenScopeRead {
 		t.Fatalf("feedback scope: %#v", meta["scope"])
 	}
+	if meta["v"] != float64(2) {
+		t.Fatalf("feedback declaration version: %#v", meta["v"])
+	}
+	actions, ok := meta["local_actions"].([]any)
+	if !ok || len(actions) != 1 {
+		t.Fatalf("feedback local_actions: %#v", meta["local_actions"])
+	}
+	action := actions[0].(map[string]any)
+	if action["action"] != mcpEnqueueAction || action["v"] != float64(1) || action["path_from"] != mcpEnqueuePathFrom {
+		t.Fatalf("feedback local action: %#v", action)
+	}
 	readers := meta["context"].([]any)
 	wantReaders := []string{"cwd", "project_dir", "resolved_path", "file", "git", "queue", "drain"}
 	if len(readers) != len(wantReaders) {
@@ -82,6 +94,9 @@ func TestMCPArtifactFeedbackCorpus(t *testing.T) {
 		if readers[i].(map[string]any)["reader"] != name {
 			t.Fatalf("reader %d: %#v", i, readers[i])
 		}
+	}
+	if readers[5].(map[string]any)["v"] != float64(2) {
+		t.Fatalf("feedback queue reader version: %#v", readers[5])
 	}
 	params := readers[2].(map[string]any)["params"].(map[string]any)
 	if params["path_arg"] != "path" || !reflect.DeepEqual(params["bases"], []any{"project_dir"}) || readers[0].(map[string]any)["required"] != false || readers[1].(map[string]any)["required"] != false {
@@ -98,7 +113,7 @@ func TestMCPArtifactFeedbackCorpus(t *testing.T) {
 		}
 		if tc.Local != nil {
 			decl := gotTool["_meta"].(map[string]any)["yakka/tool"].(map[string]any)
-			local := map[string]any{"_v": 1, "_rev": decl["rev"]}
+			local := map[string]any{"_v": 2, "_rev": decl["rev"]}
 			for key, value := range tc.Local {
 				local[key] = value
 			}
@@ -119,18 +134,19 @@ func TestMCPArtifactFeedbackCorpus(t *testing.T) {
 func TestMCPArtifactFeedbackReaderFailuresAndTenantBoundary(t *testing.T) {
 	s := feedbackServer(t)
 	h := s.Handler()
-	list := mcpDecode(t, mcpRequest(t, h, "ka", `{"id":1,"method":"tools/list"}`, nil))["result"].(map[string]any)["tools"].([]any)
+	list := mcpDecode(t, mcpRequest(t, h, "ka", `{"id":1,"method":"tools/list"}`, map[string]string{"Yakka-Context": "2"}))["result"].(map[string]any)["tools"].([]any)
 	tool := list[2].(map[string]any)
 	if tool["name"] != "artifact_feedback" {
 		t.Fatalf("tool order: %#v", list)
 	}
 	decl := tool["_meta"].(map[string]any)["yakka/tool"].(map[string]any)
+	emptyCoverage := map[string]any{"complete": true, "pending_covering": float64(0), "rejected_covering": float64(0), "oldest_covering_age_s": nil}
 	base := map[string]any{
-		"_v": 1, "_rev": decl["rev"],
+		"_v": 2, "_rev": decl["rev"],
 		"resolved_path": map[string]any{"path": "/work/docs/plans/x/DESIGN.md"},
 		"file":          map[string]any{"exists": true, "is_file": true, "mtime": 1700000000, "content_hash": keys.ContentHash([]byte("content"))},
 		"git":           map[string]any{"repo_id": "r", "rel_path": "docs/plans/x/DESIGN.md"},
-		"queue":         map[string]any{"pending": []any{}, "rejected": []any{}},
+		"queue":         map[string]any{"pending": []any{}, "rejected": []any{}, "coverage": emptyCoverage},
 		"drain":         map[string]any{"running": false},
 	}
 	args := func(local map[string]any) string {
@@ -167,6 +183,26 @@ func TestMCPArtifactFeedbackReaderFailuresAndTenantBoundary(t *testing.T) {
 			t.Fatalf("reader %s failure became a state: %#v", check.reader, result)
 		}
 	}
+	for name, queue := range map[string]map[string]any{
+		"missing coverage": {"pending": []any{}, "rejected": []any{}},
+		"malformed coverage": {"pending": []any{}, "rejected": []any{}, "coverage": map[string]any{
+			"complete": true, "pending_covering": float64(0),
+		}},
+		"incomplete coverage": {"pending": []any{}, "rejected": []any{}, "coverage": map[string]any{
+			"complete": false, "pending_covering": float64(0), "rejected_covering": float64(0), "oldest_covering_age_s": nil,
+		}},
+	} {
+		bad := map[string]any{}
+		for k, v := range base {
+			bad[k] = v
+		}
+		bad["queue"] = queue
+		result := mcpDecode(t, mcpRequest(t, h, "ka", args(bad), nil))["result"].(map[string]any)
+		text, _ := result["content"].([]any)[0].(map[string]any)["text"].(string)
+		if result["isError"] != true || text != "local context unavailable: queue (invalid_context)" {
+			t.Fatalf("%s became a state: %#v", name, result)
+		}
+	}
 
 	content := "tenant a artifact"
 	if code, body := do(t, h, "POST", "/v1/ingest", "ka", artBodyAt("docs/plans/x/DESIGN.md", content)); code != 200 {
@@ -197,15 +233,15 @@ func TestMCPArtifactFeedbackReaderFailuresAndTenantBoundary(t *testing.T) {
 func TestMCPArtifactFeedbackRelativePathNeedsProjectDir(t *testing.T) {
 	s := feedbackServer(t)
 	h := s.Handler()
-	list := mcpDecode(t, mcpRequest(t, h, "ka", `{"id":1,"method":"tools/list"}`, nil))["result"].(map[string]any)["tools"].([]any)
+	list := mcpDecode(t, mcpRequest(t, h, "ka", `{"id":1,"method":"tools/list"}`, map[string]string{"Yakka-Context": "2"}))["result"].(map[string]any)["tools"].([]any)
 	decl := list[2].(map[string]any)["_meta"].(map[string]any)["yakka/tool"].(map[string]any)
 	run := func(extra map[string]any) string {
 		local := map[string]any{
-			"_v": 1, "_rev": decl["rev"],
+			"_v": 2, "_rev": decl["rev"],
 			"resolved_path": map[string]any{"path": nil, "base": nil},
 			"file":          map[string]any{"skipped": "no_input"},
 			"git":           map[string]any{"skipped": "no_input"},
-			"queue":         map[string]any{"pending": []any{}, "rejected": []any{}},
+			"queue":         map[string]any{"pending": []any{}, "rejected": []any{}, "coverage": map[string]any{"complete": true, "pending_covering": float64(0), "rejected_covering": float64(0), "oldest_covering_age_s": nil}},
 			"drain":         map[string]any{"running": false},
 		}
 		for k, v := range extra {
@@ -276,14 +312,14 @@ func TestMCPArtifactFeedbackDeliveredFormattingAndLogPrivacy(t *testing.T) {
 	}
 	seed("docs/plans/few-a/DESIGN.md", "few-a", store.Score{Check: "few", Result: .2})
 	seed("docs/plans/few-b/DESIGN.md", "few-b", store.Score{Check: "few", Result: .3})
-	list := mcpDecode(t, mcpRequest(t, h, "ka", `{"id":1,"method":"tools/list"}`, nil))["result"].(map[string]any)["tools"].([]any)
+	list := mcpDecode(t, mcpRequest(t, h, "ka", `{"id":1,"method":"tools/list"}`, map[string]string{"Yakka-Context": "2"}))["result"].(map[string]any)["tools"].([]any)
 	decl := list[2].(map[string]any)["_meta"].(map[string]any)["yakka/tool"].(map[string]any)
 	local := map[string]any{
-		"_v": 1, "_rev": decl["rev"],
+		"_v": 2, "_rev": decl["rev"],
 		"resolved_path": map[string]any{"path": "/work/" + path},
 		"file":          map[string]any{"exists": true, "is_file": true, "mtime": 1700000000, "content_hash": keys.ContentHash([]byte("current"))},
 		"git":           map[string]any{"repo_id": "r", "rel_path": path},
-		"queue":         map[string]any{"pending": []any{}, "rejected": []any{}}, "drain": map[string]any{"running": false},
+		"queue":         map[string]any{"pending": []any{}, "rejected": []any{}, "coverage": map[string]any{"complete": true, "pending_covering": float64(0), "rejected_covering": float64(0), "oldest_covering_age_s": nil}}, "drain": map[string]any{"running": false},
 	}
 	var logs bytes.Buffer
 	previous := slog.Default()
@@ -317,7 +353,8 @@ func TestMCPArtifactFeedbackDeliveredFormattingAndLogPrivacy(t *testing.T) {
 	result = mcpDecode(t, mcpRequest(t, h, "ka", mcpCallBody("artifact_feedback", map[string]any{"path": path, "_local": local}), nil))["result"].(map[string]any)
 	got = result["content"].([]any)[0].(map[string]any)["text"].(string)
 	short := previousArtifact.Latest.ContentHash[:12]
-	want := fmt.Sprintf("state: stale\npath: %s\nrepo: r\ncontent_hash: %s\n\ncurrent content not yet delivered (service has %s from %s); normally a write still in the batch window", path, keys.ContentHash([]byte("current")), short, previousArtifact.Latest.ReceivedAt.UTC().Format("2006-01-02T15:04:05Z"))
+	currentHash := keys.ContentHash([]byte("current"))
+	want := fmt.Sprintf("state: stale\npath: %s\nrepo: r\ncontent_hash: %s\n\ncurrent content not yet delivered (service has %s from %s; local file is %s); normally a write still in the batch window\nlocal enqueue is unsupported by this shim; deliver the file with a Write-tool edit or the end-of-turn sweep.\nFix: save the file again with the Write tool or make a real Edit (a no-op edit may be refused and fires no event); otherwise the sweep delivers it at turn end, and a session killed before its Stop or SessionEnd hook runs loses the write.", path, currentHash, short, previousArtifact.Latest.ReceivedAt.UTC().Format("2006-01-02T15:04:05Z"), currentHash[:12])
 	if got != want {
 		t.Fatalf("stale feedback:\ngot:  %q\nwant: %q", got, want)
 	}
@@ -358,61 +395,59 @@ func TestMCPArtifactFeedbackDeliveredFormattingAndLogPrivacy(t *testing.T) {
 	}
 }
 
-func TestMCPArtifactFeedbackRunningDrainWaitsWithoutStartingOne(t *testing.T) {
+func TestMCPArtifactFeedbackCoveringPendingAnswersAtOnce(t *testing.T) {
 	s := feedbackServer(t)
 	h := s.Handler()
-	toolList := mcpDecode(t, mcpRequest(t, h, "ka", `{"id":1,"method":"tools/list"}`, nil))["result"].(map[string]any)["tools"].([]any)
+	toolList := mcpDecode(t, mcpRequest(t, h, "ka", `{"id":1,"method":"tools/list"}`, map[string]string{"Yakka-Context": "2"}))["result"].(map[string]any)["tools"].([]any)
 	decl := toolList[2].(map[string]any)["_meta"].(map[string]any)["yakka/tool"].(map[string]any)
 	local := map[string]any{
-		"_v": 1, "_rev": decl["rev"],
+		"_v": 2, "_rev": decl["rev"],
 		"resolved_path": map[string]any{"path": "/work/docs/plans/x/DESIGN.md"},
 		"file":          map[string]any{"exists": true, "is_file": true, "mtime": 1700000000, "content_hash": keys.ContentHash([]byte("queued"))},
 		"git":           map[string]any{"repo_id": "r", "rel_path": "docs/plans/x/DESIGN.md"},
-		"queue":         map[string]any{"pending": []any{map[string]any{"age_s": float64(2), "mtime": float64(1700000000)}}, "rejected": []any{}},
-		"drain":         map[string]any{"running": true},
+		"queue": map[string]any{
+			"pending":  []any{map[string]any{"age_s": float64(4), "mtime": float64(1700000000)}, map[string]any{"age_s": float64(2), "mtime": float64(1700000002)}},
+			"rejected": []any{},
+			"coverage": map[string]any{"complete": true, "pending_covering": float64(2), "rejected_covering": float64(0), "oldest_covering_age_s": float64(4)},
+		},
+		"drain": map[string]any{"running": true},
 	}
 	started := time.Now()
 	result := mcpDecode(t, mcpRequest(t, h, "ka", mcpCallBody("artifact_feedback", map[string]any{"path": "docs/plans/x/DESIGN.md", "_local": local}), nil))["result"].(map[string]any)
-	if elapsed := time.Since(started); elapsed < 1400*time.Millisecond {
-		t.Fatalf("running drain did not get its bounded wait: %s", elapsed)
+	if elapsed := time.Since(started); elapsed >= time.Second {
+		t.Fatalf("covering pending waited %s; the drain wait was removed", elapsed)
 	}
 	text := result["content"].([]any)[0].(map[string]any)["text"].(string)
-	if !strings.Contains(text, "state: queued") || !strings.Contains(text, "oldest 4s, draining") {
-		t.Fatalf("running drain result: %s", text)
+	if !strings.Contains(text, "state: queued") || !strings.Contains(text, "oldest 4s, draining") || !strings.Contains(text, "the version is on its way; call again in a few seconds") {
+		t.Fatalf("covering pending result: %s", text)
 	}
 }
 
-func TestMCPArtifactFeedbackRunningDrainSeesDelivery(t *testing.T) {
+func TestMCPArtifactFeedbackDeliveredBeforeQueueWait(t *testing.T) {
 	s := feedbackServer(t)
 	h := s.Handler()
-	toolList := mcpDecode(t, mcpRequest(t, h, "ka", `{"id":1,"method":"tools/list"}`, nil))["result"].(map[string]any)["tools"].([]any)
+	toolList := mcpDecode(t, mcpRequest(t, h, "ka", `{"id":1,"method":"tools/list"}`, map[string]string{"Yakka-Context": "2"}))["result"].(map[string]any)["tools"].([]any)
 	decl := toolList[2].(map[string]any)["_meta"].(map[string]any)["yakka/tool"].(map[string]any)
-	content := []byte("queued content")
-	hash := keys.ContentHash(content)
+	content := "queued content"
+	hash := keys.ContentHash([]byte(content))
+	if code, body := do(t, h, "POST", "/v1/ingest", "ka", artBodyAt("docs/plans/x/DESIGN.md", content)); code != 200 {
+		t.Fatalf("ingest: %d %s", code, body)
+	}
 	local := map[string]any{
-		"_v": 1, "_rev": decl["rev"],
+		"_v": 2, "_rev": decl["rev"],
 		"resolved_path": map[string]any{"path": "/work/docs/plans/x/DESIGN.md"},
 		"file":          map[string]any{"exists": true, "is_file": true, "mtime": 1700000000, "content_hash": hash},
 		"git":           map[string]any{"repo_id": "r", "rel_path": "docs/plans/x/DESIGN.md"},
-		"queue":         map[string]any{"pending": []any{map[string]any{"age_s": float64(2), "mtime": float64(1700000000)}}, "rejected": []any{}},
-		"drain":         map[string]any{"running": true},
+		"queue": map[string]any{
+			"pending":  []any{map[string]any{"age_s": float64(2), "mtime": float64(1700000000)}},
+			"rejected": []any{},
+			"coverage": map[string]any{"complete": true, "pending_covering": float64(1), "rejected_covering": float64(0), "oldest_covering_age_s": float64(2)},
+		},
+		"drain": map[string]any{"running": true},
 	}
-	ts, err := s.tenant("a")
-	if err != nil {
-		t.Fatal(err)
-	}
-	go func() {
-		time.Sleep(200 * time.Millisecond)
-		raw := []byte(`{"type":"artifact_version"}`)
-		_, _ = ts.t.Append(context.Background(), []store.FactRow{{RowHash: keys.ContentHash(raw), Type: "artifact_version", ConversationID: "c", RepoID: "r", Path: "docs/plans/x/DESIGN.md", ContentHash: hash, Raw: raw}})
-	}()
-	started := time.Now()
 	result := mcpDecode(t, mcpRequest(t, h, "ka", mcpCallBody("artifact_feedback", map[string]any{"path": "docs/plans/x/DESIGN.md", "_local": local}), nil))["result"].(map[string]any)
-	if elapsed := time.Since(started); elapsed < 150*time.Millisecond || elapsed >= 1400*time.Millisecond {
-		t.Fatalf("delivery observation was not bounded by the running-drain wait: %s", elapsed)
-	}
 	text := result["content"].([]any)[0].(map[string]any)["text"].(string)
 	if !strings.Contains(text, "state: delivered") || !strings.Contains(text, "versions: 1") {
-		t.Fatalf("running drain delivery: %s", text)
+		t.Fatalf("delivered before queue wait: %s", text)
 	}
 }

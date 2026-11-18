@@ -414,6 +414,58 @@ class RelayTests(unittest.TestCase):
         self.assertEqual(str(raised.exception), "incomplete queue")
         self.assertTrue(git.called)
 
+    def _repo_with_design(self, name: str) -> tuple[str, str, str]:
+        repo = os.path.join(self.temp.name, name)
+        os.makedirs(os.path.join(repo, "docs", "plans", "a"))
+        path = os.path.join(repo, "docs", "plans", "a", "DESIGN.md")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write("# " + name + "\n")
+        subprocess.run(["git", "-C", repo, "init", "-q"], check=True)
+        subprocess.run(["git", "-C", repo, "-c", "user.name=t", "-c", "user.email=t@x", "add", "."], check=True)
+        subprocess.run(["git", "-C", repo, "-c", "user.name=t", "-c", "user.email=t@x", "commit", "-qm", "fixture"], check=True)
+        repo_id, err = yakka.RepoID(repo)
+        if err:
+            raise err
+        return repo, repo_id, path
+
+    def _write_snapshot_entry(self, name: str, cwd: str, path: str) -> None:
+        payload = {"session_id": "feedback-x", "cwd": cwd, "path": path}
+        raw = (
+            b'{"ts":1,"harness":"claude","event":"artifact_snapshot"}\n'
+            + json.dumps(payload).encode()
+        )
+        with open(os.path.join(self.queue, name), "wb") as fh:
+            fh.write(raw)
+
+    def test_snapshot_entry_counts_in_v2_coverage(self) -> None:
+        repo1, repo_id1, path1 = self._repo_with_design("repo1")
+        repo2, repo_id2, path2 = self._repo_with_design("repo2")
+        rel = "docs/plans/a/DESIGN.md"
+        self._write_snapshot_entry("s1.evt", repo1, rel)
+        self._write_snapshot_entry("s2.evt", repo2, path2)
+        deadline = time.monotonic() + 5
+
+        pending, rejected, cov = yakka._mcp_queue_entries(
+            self.queue, repo_id1, rel, path1, 0, deadline
+        )
+        self.assertEqual(len(pending), 1)
+        self.assertEqual(rejected, [])
+        self.assertTrue(cov["complete"])
+        self.assertEqual(cov["pending_covering"], 1)
+        self.assertIsNotNone(cov["oldest_covering_age_s"])
+
+        pending, _, cov = yakka._mcp_queue_entries(
+            self.queue, repo_id2, rel, path2, 0, deadline
+        )
+        self.assertEqual(len(pending), 1)
+        self.assertEqual(cov["pending_covering"], 1)
+
+        pending, _, cov = yakka._mcp_queue_entries(
+            self.queue, "another-repo", rel, path1, 0, deadline
+        )
+        self.assertEqual(len(pending), 1)
+        self.assertEqual(cov["pending_covering"], 1)
+
     def test_cancel_does_not_collapse_string_and_number_ids(self) -> None:
         self.assertNotEqual(yakka._mcp_id_key(1), yakka._mcp_id_key("1"))
         number_conn = mock.Mock()

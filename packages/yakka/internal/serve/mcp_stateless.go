@@ -66,8 +66,10 @@ func (s *Server) RegisterStatelessMCPTools() error {
 // RegisterFeedbackMCPTool adds the tenant-backed read-only feedback tool.
 func (s *Server) RegisterFeedbackMCPTool() error {
 	return s.RegisterMCPTool(MCPTool{
-		Name:        "artifact_feedback",
-		Description: "State of one design, brief or report file: queued, rejected (with the reason), delivered (screen verdict, scores against the tenant baseline), stale or not delivered. " + feedbackMCPInstruction,
+		Name:               "artifact_feedback",
+		Description:        "State of one design, brief or report file: queued, rejected (with the reason), delivered (screen verdict, scores against the tenant baseline), stale or not delivered. " + feedbackMCPInstruction,
+		DeclarationVersion: 2,
+		LocalActions:       []MCPLocalAction{{Action: mcpEnqueueAction, Version: mcpEnqueueActionVersion, PathFrom: mcpEnqueuePathFrom}},
 		InputSchema: map[string]any{
 			"type":       "object",
 			"properties": map[string]any{"path": map[string]any{"type": "string", "description": "path of the file: absolute, or relative to the project directory the harness supplies"}},
@@ -81,7 +83,7 @@ func (s *Server) RegisterFeedbackMCPTool() error {
 			{Reader: "resolved_path", Version: 1, Params: map[string]any{"path_arg": "path", "bases": []any{"project_dir"}}},
 			{Reader: "file", Version: 1, Params: map[string]any{"of": "resolved_path"}},
 			{Reader: "git", Version: 1, Params: map[string]any{"of": "resolved_path"}},
-			{Reader: "queue", Version: 1, Params: map[string]any{"of": "git", "path": "resolved_path"}},
+			{Reader: "queue", Version: 2, Params: map[string]any{"of": "git", "path": "resolved_path"}},
 			{Reader: "drain", Version: 1},
 		},
 		Validate: func(args map[string]any) string {
