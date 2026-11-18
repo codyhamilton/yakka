@@ -275,7 +275,12 @@ test('empty and error follow the frame vocabulary; legacy servers are the server
     await settle(page);
     assert.equal(await panel.getAttribute('data-state'), 'error');
     assert.match(await panel.innerText(), /range too wide/);
-    await diagnostics.assertClean();
+    // The deliberate legacy 400 makes Chromium log one failed-resource console
+    // entry; the product is honestly in the error state. Assert no page error or
+    // CSP violation and allow only that one expected console entry.
+    assert.deepEqual(diagnostics.pageErrors, []);
+    assert.deepEqual(await diagnostics.cspViolations(), []);
+    assert.ok(diagnostics.consoleErrors.every(text => /Failed to load resource.*400/.test(text)), `unexpected console errors: ${JSON.stringify(diagnostics.consoleErrors)}`);
   } finally {
     await control(harness.origin, { scenario: 'default', empty: false }).catch(() => {});
     await browser.close();

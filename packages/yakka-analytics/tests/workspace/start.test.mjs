@@ -37,7 +37,15 @@ test('workspace Start, routes, deep links, saved boards and Follow', { skip: env
 
   await page.goto(`${harness.origin}/b/pulse`);
   await settle(page);
-  assert.match(await page.locator('main').innerText(), /Delivered in Phase 9: Pulse/);
+  const pulseIds = ['river', 'pulse-strips', 'movers', 'calendar', 'coverage'];
+  await page.waitForFunction(ids => ids.every(id => {
+    const panel = document.querySelector(`.workspace-panel[data-panel="${id}"]`);
+    return panel && panel.getAttribute('data-idle') === 'true';
+  }), pulseIds);
+  assert.doesNotMatch(await page.locator('main').innerText(), /Delivered in Phase 9: Pulse/);
+  for (const id of pulseIds) {
+    assert.equal(await page.locator(`.workspace-panel[data-panel="${id}"]`).count(), 1, `${id} panel renders`);
+  }
 
   // win=all survives reload and Back.
   await page.goto(`${harness.origin}/b/trends?win=all&repo_id=r1&exclude=model%3Ax&p1=${encodeURIComponent(panelSpec)}`);
