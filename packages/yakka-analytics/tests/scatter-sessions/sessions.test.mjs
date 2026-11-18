@@ -95,6 +95,7 @@ test('the list maps into the one panel-state vocabulary and unpriced is never $0
   assert.match(formatSessionCost({ m: { cost_usd: 1.5, unpriced_calls: 0 } }), /^\$1\.50$/);
   const population = { unit: 'session', scope_n: 40, eligible_n: 40, returned_n: 20 };
   assert.equal(populationText(population, rows.slice(0, 20)), '20 of 40 sessions shown');
+  assert.equal(populationText(population, rows), '40 loaded; 20 on this page; 40 sessions total');
   const notes = sessionCoverageNotes({ population, rows: [rows[4], rows[9], { l: { session_repo: '(none)' }, m: {} }] });
   assert.ok(notes.some(note => /all-unpriced/.test(note)));
   assert.ok(notes.some(note => /lower-bound/.test(note)));

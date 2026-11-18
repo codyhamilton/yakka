@@ -372,7 +372,7 @@ test('Sessions sorts and pages server-side and narrows through the pushed URL', 
   assert.equal(new Set(ids).size, 40, 'Load-more appends with no duplicate identity');
   const secondPage = p11SessionList({ sort: 'last_ts:desc', limit: 20, cursor: firstPage.next });
   assert.deepEqual(ids.slice(20), secondPage.rows.map(row => row.id));
-  assert.match(await page.locator('[data-panel="sessions-list"]').innerText(), /of 40 sessions/);
+  assert.match(await page.locator('[data-panel="sessions-list"]').innerText(), /40 loaded; 20 on this page; 40 sessions total/);
   assert.equal(await page.locator('.sessions-load-more').count(), 0);
 
   await page.goto(`${harness.origin}/sessions?win=all`);

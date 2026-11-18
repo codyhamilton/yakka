@@ -192,10 +192,14 @@ export function formatSessionCost(row = {}) {
 }
 
 export function populationText(population, rows = []) {
-  const returned = Number(population?.returned_n ?? rows.length);
-  const scope = Number(population?.scope_n ?? returned);
+  const page = Number(population?.returned_n ?? rows.length);
+  const loaded = rows.length;
+  const scope = Number(population?.scope_n ?? page);
   const unit = population?.unit || 'session';
-  return `${formatNumber(returned)} of ${formatNumber(scope)} ${unit}${scope === 1 ? '' : 's'} shown`;
+  if (loaded > page) {
+    return `${formatNumber(loaded)} loaded; ${formatNumber(page)} on this page; ${formatNumber(scope)} ${unit}${scope === 1 ? '' : 's'} total`;
+  }
+  return `${formatNumber(page)} of ${formatNumber(scope)} ${unit}${scope === 1 ? '' : 's'} shown`;
 }
 
 // Counts describe the rows on screen only; they are never presented as totals.
