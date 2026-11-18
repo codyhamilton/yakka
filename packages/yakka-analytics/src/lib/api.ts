@@ -13,8 +13,35 @@ export class ApiError extends Error {
 	}
 }
 
-/** A tenant: `id` is the immutable unique key the API takes; `name` is a display label, unique per owner only. */
-export type Tenant = { id: string; name: string };
+export type LifecycleState = 'active' | 'resetting' | 'deleting' | 'unsupported';
+
+const LIFECYCLE_STATES: ReadonlySet<string> = new Set(['active', 'resetting', 'deleting', 'unsupported']);
+
+/**
+ * A tenant: `id` is the immutable unique key the API takes; `name` is a display label, unique per owner only.
+ * `lifecycle_state`/`lifecycle_generation` are absent when the collector predates owner lifecycle fields, so an
+ * older API stays usable. A missing state is treated as active; ownership-marked active tenants carry a generation.
+ */
+export type Tenant = {
+	id: string;
+	name: string;
+	lifecycle_state?: LifecycleState;
+	lifecycle_generation?: string | null;
+};
+
+/** The lifecycle state, defaulting a pre-lifecycle collector to active. */
+export function tenantLifecycleState(tenant: Tenant): LifecycleState {
+	return tenant.lifecycle_state ?? 'active';
+}
+
+/** True when the collector marks this tenant with an ownership marker and opaque generation. */
+export function isLifecycleTracked(tenant: Tenant): boolean {
+	return (
+		tenant.lifecycle_state === 'active' ||
+		tenant.lifecycle_state === 'resetting' ||
+		tenant.lifecycle_state === 'deleting'
+	);
+}
 
 export type MeResponse = {
 	github_id: number;
@@ -81,6 +108,14 @@ export function resolvedBase(hostname?: string): string {
 	if (configured) return configured;
 	if (isPagesHost(hostname)) return API_ORIGIN;
 	return '';
+}
+
+/**
+ * Navigation URL for the API-origin lifecycle view. Pages navigates here; it never issues
+ * reset/delete requests itself. Embedded local mode stays same-origin.
+ */
+export function lifecycleProfileUrl(hostname?: string): string {
+	return `${resolvedBase(hostname)}/profile/lifecycle`;
 }
 
 function originOf(base: string): string {
@@ -214,6 +249,19 @@ function sessionRoute(path: string): boolean {
 	return p === 'me' || p.startsWith('device/') || p.startsWith('tenants') || p.startsWith('tokens') || p.startsWith('admin/');
 }
 
+/** A tenant-selection check the layout installs; it runs before a collector-mode tenant data read. */
+export type TenantReadGuard = () => Promise<void>;
+let tenantReadGuard: TenantReadGuard | null = null;
+
+export function setTenantReadGuard(guard: TenantReadGuard | null): void {
+	tenantReadGuard = guard;
+}
+
+async function guardTenantRead(path: string): Promise<void> {
+	if (tenantReadGuard === null || sessionRoute(path) || !isCollectorMode()) return;
+	await tenantReadGuard();
+}
+
 /** GET <base>/v1/<path>?<params>. `path` is relative to /v1, e.g. "analytics/summary". */
 export async function apiGet<T = unknown>(
 	path: string,
@@ -225,6 +273,7 @@ export async function apiGet<T = unknown>(
 	const key = session || read(TOKEN_KEY) === '' || resolvedBase() === '' ? '' : read(TOKEN_KEY);
 	const creds = session || key === '';
 	const url = apiUrl(path, params);
+	await guardTenantRead(path);
 	const res = await fetch(url, apiInit('GET', creds, key, undefined, signal));
 	return parseJsonResponse<T>(res, url);
 }
@@ -328,9 +377,24 @@ export async function revokeToken(id: string, signal?: AbortSignal): Promise<voi
 	await apiPost(`tokens/${id}/revoke`, {}, signal);
 }
 
+function normalizeTenant(raw: Tenant): Tenant {
+	const tenant: Tenant = { id: raw.id, name: raw.name };
+	if (typeof raw.lifecycle_state === 'string' && LIFECYCLE_STATES.has(raw.lifecycle_state)) {
+		tenant.lifecycle_state = raw.lifecycle_state as LifecycleState;
+	}
+	if (typeof raw.lifecycle_generation === 'string') {
+		tenant.lifecycle_generation = raw.lifecycle_generation;
+	} else if (Object.prototype.hasOwnProperty.call(raw, 'lifecycle_generation')) {
+		tenant.lifecycle_generation = null;
+	}
+	return tenant;
+}
+
 /** Session identity and owned tenants (`GET /v1/me`). Collector mode only; same transport as `apiGet`. */
 export async function fetchMe(signal?: AbortSignal): Promise<MeResponse> {
-	return apiGet<MeResponse>('me', undefined, signal);
+	const raw = await apiGet<MeResponse>('me', undefined, signal);
+	const tenants = Array.isArray(raw.tenants) ? raw.tenants.map(normalizeTenant) : [];
+	return { ...raw, tenants };
 }
 
 function rawRedirectHost(raw: string): string | null {

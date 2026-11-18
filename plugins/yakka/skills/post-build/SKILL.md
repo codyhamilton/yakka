@@ -55,6 +55,18 @@ Review settles the code; QA tests only settled code; required checks are read on
 
 A worker that returns nothing usable is relaunched once with its partial output; a second failure stops for a human.
 
+## Advisory range review
+
+At the final candidate PR head, after every artifact and fix is committed, make exactly one non-gating advisory `review_change` call alongside the existing review work, including absorbed runs:
+
+```json
+{"mode":"range","base":"<default-branch merge-base SHA>","head":"<candidate SHA>","kind":"pr","plan":"<NN>-<slug>","pr":1,"build_models":[{"id":"unknown"}],"detail":"full"}
+```
+
+Resolve `base` and `head` to explicit commit SHAs. Substitute the actual PR number and plan folder name; the plan reference supplies all stored phase outcomes for PR criteria. Omit `plan` when no stored design exists and let the receipt expose missing criteria. Take contributor model IDs only from the run record for `build_models`; retain `unknown` for unavailable provenance, never guess. Send no `trial` argument. The independent reviewer owns its separate stage call; do not repeat either stage's call to force fresh findings.
+
+This call uses `read_write` scope and a server-declared 150-second timeout to spend and record on the server; it has no local actions. If the tool is absent, unavailable or failed, continue. Summarize the receipt ID, status, coverage/limitations and returned findings only in session output, separate from the merge-readiness report; a `skipped_duplicate` receipt refers to an earlier review and is not new independent evidence. Never feed the result into a gate, verdict, commit, trailer, exit code or any plan-folder file; never fix or dispatch work from it. Required checks, remediation and QA keep their existing decision inputs.
+
 ## Invariants
 
 - Never touch production targets or data; absent an adapter, every target is production.

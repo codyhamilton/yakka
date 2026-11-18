@@ -6,6 +6,7 @@
 		DEFAULT_TOKEN_LIFETIME,
 		fetchMe,
 		isCollectorMode,
+		lifecycleProfileUrl,
 		listAdminTokens,
 		listTokens,
 		revokeToken,
@@ -13,12 +14,20 @@
 		type AdminTokenListItem,
 		type CreatedTokenResponse,
 		type MeResponse,
+		type Tenant,
 		type TokenLifetime,
 		type TokenListItem
 	} from '$lib/api';
 	import { setError } from '$lib/state.svelte';
 	import { IdentityPanel } from '$lib/analysis';
 	import { initialTenantChoice, readRememberedTenant, showsTenantChoice } from '$lib/session-gate';
+	import { chooseTenant, reconcileTenantSelection, sessionGate } from '$lib/session-gate.svelte';
+
+	const lifecycleUrl = $derived(lifecycleProfileUrl());
+	const needsReselect = $derived(sessionGate.invalidated || sessionGate.pending !== '');
+	const reselectNotice = $derived(
+		sessionGate.notice || 'Choose a tenant again before loading analytics.'
+	);
 
 	let me = $state<MeResponse | null>(null);
 	let tokens = $state<TokenListItem[]>([]);
@@ -40,6 +49,7 @@
 		try {
 			const m = await fetchMe();
 			me = m;
+			reconcileTenantSelection({ kind: 'ok', body: m });
 			tokenTenant = initialTenantChoice(m.tenants, tokenTenant, readRememberedTenant());
 			tokens = await listTokens();
 			adminTokens = m.admin ? await listAdminTokens() : [];
@@ -67,9 +77,14 @@
 			tenantName = '';
 			await reload();
 			tokenTenant = id;
+			chooseTenant(id, me?.tenants.find((t) => t.id === id));
 		} catch (err) {
 			tenantStatus = err instanceof ApiError ? err.message : 'Could not create tenant.';
 		}
+	}
+
+	function selectTenant(tenant: Tenant) {
+		chooseTenant(tenant.id, tenant);
 	}
 
 	async function submitToken(e: Event) {
@@ -124,6 +139,29 @@
 	<p>Loading…</p>
 {:else if me}
 	<p>Signed in as <strong>{me.github_login}</strong> (GitHub id {me.github_id}).</p>
+
+	<section>
+		<h2>Tenant lifecycle</h2>
+		<p>
+			<a data-testid="profile-lifecycle-link" href={lifecycleUrl}>Open the lifecycle view</a> on the API
+			origin to reset or delete a tenant. Only the human owner may reset or delete a tenant. Agents must
+			not perform or attempt this on a user's behalf.
+		</p>
+		{#if needsReselect}
+			<div class="reselect" data-testid="profile-reselect" role="alert">
+				<p>{reselectNotice}</p>
+				{#if me.tenants.length > 0}
+					<div class="reselect-actions">
+						{#each me.tenants as t (t.id)}
+							<button type="button" data-testid="profile-reselect-{t.id}" onclick={() => selectTenant(t)}>
+								Use {t.name}
+							</button>
+						{/each}
+					</div>
+				{/if}
+			</div>
+		{/if}
+	</section>
 
 	<section>
 		<h2>Create tenant</h2>
@@ -292,6 +330,16 @@
 		border: 1px solid var(--border);
 		padding: 0.35rem 0.5rem;
 		text-align: left;
+	}
+	.reselect {
+		padding: 0.75rem;
+		border: 1px solid var(--border);
+		background: var(--surface);
+	}
+	.reselect-actions {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.5rem;
 	}
 	.plaintext {
 		margin-top: 0.75rem;

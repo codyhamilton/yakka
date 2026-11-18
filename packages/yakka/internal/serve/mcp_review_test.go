@@ -1,0 +1,308 @@
+package serve
+
+import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/codyhamilton/yakka/packages/yakka/internal/review"
+)
+
+func TestReviewMCPRegistrationContract(t *testing.T) {
+	s, _ := newServer(t, true)
+	if err := s.RegisterReviewMCPTool(); err != nil {
+		t.Fatal(err)
+	}
+	tool := s.mcpTool("review_change")
+	if tool == nil {
+		t.Fatal("review_change is not registered")
+	}
+	if tool.Scope != TokenScopeReadWrite || tool.TimeoutS != 150 || len(tool.LocalActions) != 0 || len(tool.Context) != 4 {
+		t.Fatalf("registration scope=%q timeout=%d local_actions=%v context=%v", tool.Scope, tool.TimeoutS, tool.LocalActions, tool.Context)
+	}
+	want := []string{"project_dir", "cwd", "git", "change"}
+	for i, name := range want {
+		if tool.Context[i].Reader != name || tool.Context[i].required() {
+			t.Fatalf("context[%d]=%+v", i, tool.Context[i])
+		}
+	}
+	if !tool.Context[3].Bulk || fmt.Sprint(tool.Context[3].Params["budget_bytes"]) != "2.097152e+06" {
+		t.Fatalf("change declaration=%+v", tool.Context[3])
+	}
+	if err := validateReviewMCPArgs(map[string]any{"mode": "range", "base": "a", "head": "b", "build_models": []any{map[string]any{"id": "unknown"}}}); err != "" {
+		t.Fatal(err)
+	}
+	if idempotent, ok := tool.Annotations["idempotentHint"].(bool); ok && idempotent {
+		t.Fatal("review_change must not promise unconditional idempotency")
+	}
+	properties, _ := tool.InputSchema["properties"].(map[string]any)
+	for _, key := range []string{"effort", "tags", "store"} {
+		if properties[key] == nil {
+			t.Fatalf("review schema missing %s", key)
+		}
+	}
+	if err := validateReviewMCPArgs(map[string]any{"mode": "uncommitted", "build_models": []any{map[string]any{"id": "unknown"}}, "effort": "max", "tags": []any{"run:1"}, "store": false}); err != "" {
+		t.Fatalf("valid call controls rejected: %s", err)
+	}
+	for _, args := range []map[string]any{
+		{"mode": "range", "build_models": []any{map[string]any{"id": "unknown"}}},
+		{"mode": "uncommitted", "build_models": []any{map[string]any{"id": "unknown"}}, "surprise": true},
+		{"mode": "uncommitted", "build_models": []any{map[string]any{"id": "unknown"}}, "include_untracked": "yes"},
+		{"mode": "uncommitted", "build_models": []any{map[string]any{"id": "unknown"}}, "effort": "min"},
+		{"mode": "uncommitted", "build_models": []any{map[string]any{"id": "unknown"}}, "tags": "run"},
+		{"mode": "uncommitted", "build_models": []any{map[string]any{"id": "unknown"}}, "tags": []any{"ok", 5}},
+		{"mode": "uncommitted", "build_models": []any{map[string]any{"id": "unknown"}}, "tags": make([]any, 17)},
+		{"mode": "uncommitted", "build_models": []any{map[string]any{"id": "unknown"}}, "store": "yes"},
+	} {
+		if err := validateReviewMCPArgs(args); err == "" {
+			t.Fatalf("invalid args accepted: %#v", args)
+		}
+	}
+}
+
+func TestReviewMCPRegistrationAvailability(t *testing.T) {
+	listed := func(s *Server) bool {
+		list := mcpDecode(t, mcpRequest(t, s.Handler(), "ka", `{"id":1,"method":"tools/list"}`, nil))["result"].(map[string]any)["tools"].([]any)
+		for _, raw := range list {
+			if m, _ := raw.(map[string]any); m["name"] == "review_change" {
+				return true
+			}
+		}
+		return false
+	}
+	token := New(Config{Addr: "0.0.0.0:8770", Data: t.TempDir(), Keys: []KeyPair{{"a", "ka"}}, ReviewToken: "fixture-only"}, Options{DisableWorker: true})
+	t.Cleanup(func() { _ = token.Close() })
+	if token.mcpTool("review_change") == nil {
+		t.Fatal("token in remote mode did not register review_change")
+	}
+	if !listed(token) {
+		t.Fatal("token in remote mode did not list review_change")
+	}
+	noToken := New(Config{Addr: "0.0.0.0:8770", Data: t.TempDir(), Keys: []KeyPair{{"a", "ka"}}}, Options{DisableWorker: true})
+	t.Cleanup(func() { _ = noToken.Close() })
+	if noToken.mcpTool("review_change") != nil {
+		t.Fatal("token-less server registered review_change")
+	}
+	if listed(noToken) {
+		t.Fatal("token-less server listed review_change")
+	}
+	local := New(Config{Addr: "127.0.0.1:8770", Data: t.TempDir(), ReviewToken: "fixture-only"}, Options{DisableWorker: true})
+	t.Cleanup(func() { _ = local.Close() })
+	if local.mcpTool("review_change") != nil {
+		t.Fatal("local token server registered review_change")
+	}
+}
+
+func TestReviewChangeRegistrationUsesOptionalModel(t *testing.T) {
+	listed := func(s *Server) bool {
+		list := mcpDecode(t, mcpRequest(t, s.Handler(), "ka", `{"id":1,"method":"tools/list"}`, nil))["result"].(map[string]any)["tools"].([]any)
+		for _, raw := range list {
+			if m, _ := raw.(map[string]any); m["name"] == "review_change" {
+				return true
+			}
+		}
+		return false
+	}
+	env := func(m map[string]string) func(string) string { return func(k string) string { return m[k] } }
+
+	unset, err := ConfigFromEnv(env(map[string]string{"CLAUDE_API_TOKEN": "fixture-only", "YAKKA_SERVE_DATA": t.TempDir()}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if unset.ReviewModel != "" || unset.EffectiveReviewModel() != review.LiveModel {
+		t.Fatalf("env unset: %+v", unset)
+	}
+	sUnset := New(Config{Addr: "0.0.0.0:8770", Data: t.TempDir(), Keys: []KeyPair{{"a", "ka"}}, ReviewToken: unset.ReviewToken, ReviewModel: unset.ReviewModel}, Options{DisableWorker: true})
+	t.Cleanup(func() { _ = sUnset.Close() })
+	if sUnset.mcpTool("review_change") == nil || !listed(sUnset) {
+		t.Fatal("env unset: review_change should register with default model")
+	}
+	if sUnset.reviewAvailability().EffectiveModel() != review.LiveModel {
+		t.Fatalf("env unset effective model=%q", sUnset.reviewAvailability().EffectiveModel())
+	}
+
+	override := "optional-env-model"
+	set, err := ConfigFromEnv(env(map[string]string{"CLAUDE_API_TOKEN": "fixture-only", "YAKKA_REVIEW_MODEL": override, "YAKKA_SERVE_DATA": t.TempDir()}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if set.EffectiveReviewModel() != override {
+		t.Fatalf("env set effective model=%q", set.EffectiveReviewModel())
+	}
+	var gotModel string
+	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var payload map[string]any
+		if json.NewDecoder(r.Body).Decode(&payload) != nil {
+			t.Error("invalid provider request")
+		}
+		if m, _ := payload["model"].(string); m != "" {
+			gotModel = m
+		}
+		answer, _ := json.Marshal(map[string]any{"outcomes": []any{}, "findings": []any{}, "limitations": []any{}, "coverage": "complete"})
+		response, _ := json.Marshal(map[string]any{"model": override, "content": []any{map[string]any{"type": "text", "text": string(answer)}}, "usage": map[string]any{"input_tokens": 8, "output_tokens": 2}})
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(response)
+	}))
+	t.Cleanup(fake.Close)
+	sSet := New(Config{Addr: "0.0.0.0:8770", Data: t.TempDir(), Keys: []KeyPair{{"a", "ka"}}, ReviewToken: set.ReviewToken, ReviewModel: set.ReviewModel}, Options{DisableWorker: true, ReviewEndpoint: fake.URL, PollInterval: time.Hour})
+	t.Cleanup(func() { _ = sSet.Close() })
+	if sSet.mcpTool("review_change") == nil || !listed(sSet) {
+		t.Fatal("env set: review_change should still register")
+	}
+	if sSet.reviewAvailability().EffectiveModel() != override {
+		t.Fatalf("env set availability model=%q", sSet.reviewAvailability().EffectiveModel())
+	}
+	diff := "diff --git a/pkg/a.go b/pkg/a.go\nindex 1111111..2222222 100644\n--- a/pkg/a.go\n+++ b/pkg/a.go\n@@ -1 +1 @@\n-old code\n+new code\n"
+	hash := sha256.Sum256([]byte(diff))
+	head := strings.Repeat("b", 40)
+	baseSHA := strings.Repeat("a", 40)
+	capture := review.Capture{RepoID: "repo-a", Mode: "range", View: "combined", Base: baseSHA, Head: head, Diff: diff, DiffSHA256: hex.EncodeToString(hash[:]), Complete: true}
+	args := map[string]any{"mode": "range", "view": "combined", "base": baseSHA, "head": head, "kind": "adhoc", "build_models": []any{map[string]any{"id": "unknown"}}, "detail": "full", "_local": map[string]any{"change": capture}}
+	callBody, _ := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": map[string]any{"name": "review_change", "arguments": args}})
+	req := httptest.NewRequest(http.MethodPost, "/v1/mcp", strings.NewReader(string(callBody)))
+	req.Header.Set("Authorization", "Bearer ka")
+	rec := httptest.NewRecorder()
+	sSet.Handler().ServeHTTP(rec, req)
+	if rec.Code != 200 {
+		t.Fatalf("review call status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var rpc struct {
+		Result review.Receipt `json:"result"`
+	}
+	if json.Unmarshal(rec.Body.Bytes(), &rpc) != nil {
+		t.Fatalf("review result %s", rec.Body.String())
+	}
+	if gotModel != override {
+		t.Fatalf("provider model=%q want %q (body=%s)", gotModel, override, rec.Body.String())
+	}
+	if rpc.Result.Status == "unavailable" {
+		t.Fatalf("review unavailable: %s", rec.Body.String())
+	}
+
+	sNone := New(Config{Addr: "0.0.0.0:8770", Data: t.TempDir(), Keys: []KeyPair{{"a", "ka"}}}, Options{DisableWorker: true})
+	t.Cleanup(func() { _ = sNone.Close() })
+	if sNone.mcpTool("review_change") != nil || listed(sNone) {
+		t.Fatal("no Claude token: review_change must not be registered")
+	}
+}
+
+func TestReviewMCPMissingReaderIsCaptureUnsupportedWithoutRecord(t *testing.T) {
+	s, _ := newServer(t, true)
+	defer s.Close()
+	ts, err := s.tenant("a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := LocalContext{declared: map[string]bool{"change": true}, values: map[string]json.RawMessage{}}
+	_, err = s.mcpReviewChange(context.Background(), "a", ts, map[string]any{"mode": "uncommitted", "build_models": []any{map[string]any{"id": "unknown"}}}, ctx)
+	if err == nil || err.Error() != "capture_unsupported" {
+		t.Fatalf("error=%v", err)
+	}
+}
+
+func TestReviewMCPReadScopeAndLocalSpoofStripping(t *testing.T) {
+	s, _ := newServer(t, true)
+	if err := s.RegisterReviewMCPTool(); err != nil {
+		t.Fatal(err)
+	}
+	result := s.mcpCall(context.Background(), "a", TokenScopeRead, "review_change", nil)
+	b, _ := json.Marshal(result)
+	if !strings.Contains(string(b), "insufficient_scope") {
+		t.Fatalf("read scope was not refused: %s", b)
+	}
+}
+
+func TestReviewMCPAndRESTShareOrchestrationAndReceipt(t *testing.T) {
+	var providerCalls int
+	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		providerCalls++
+		var payload map[string]any
+		if json.NewDecoder(r.Body).Decode(&payload) != nil {
+			t.Error("invalid provider request")
+		}
+		if payload["model"] != "claude-haiku-5-5" || payload["output_config"].(map[string]any)["effort"] != "high" {
+			t.Errorf("provider settings=%#v", payload)
+		}
+		answer, _ := json.Marshal(map[string]any{"outcomes": []any{}, "findings": []any{}, "limitations": []any{}, "coverage": "complete"})
+		response, _ := json.Marshal(map[string]any{"model": "claude-haiku-5-5", "content": []any{map[string]any{"type": "text", "text": string(answer)}}, "usage": map[string]any{"input_tokens": 80, "output_tokens": 20}})
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(response)
+	}))
+	defer fake.Close()
+	dir := t.TempDir()
+	s := New(Config{Data: dir, Keys: []KeyPair{{"a", "ka"}}, ReviewToken: "fixture-only"}, Options{DisableWorker: true, ReviewEndpoint: fake.URL, PollInterval: time.Hour})
+	defer s.Close()
+	h := s.Handler()
+	for _, mode := range []string{"uncommitted", "range"} {
+		diff := "diff --git a/pkg/a.go b/pkg/a.go\nindex 1111111..2222222 100644\n--- a/pkg/a.go\n+++ b/pkg/a.go\n@@ -1 +1 @@\n-old code\n+new code\n"
+		if mode == "range" {
+			diff = strings.ReplaceAll(diff, "new code", "range code")
+		}
+		hash := sha256.Sum256([]byte(diff))
+		head := strings.Repeat("b", 40)
+		capture := review.Capture{RepoID: "repo-a", Mode: mode, View: "combined", Head: head, Diff: diff, DiffSHA256: hex.EncodeToString(hash[:]), Complete: true}
+		args := map[string]any{"mode": mode, "view": "combined", "kind": "adhoc", "build_models": []any{map[string]any{"id": "unknown"}}, "detail": "full", "_local": map[string]any{"change": capture, "spoof": "ignored"}}
+		if mode == "range" {
+			capture.Base = strings.Repeat("a", 40)
+			args["base"] = capture.Base
+			args["head"] = head
+			args["_local"].(map[string]any)["change"] = capture
+		}
+		callBody, _ := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": map[string]any{"name": "review_change", "arguments": args}})
+		req := httptest.NewRequest(http.MethodPost, "/v1/mcp", strings.NewReader(string(callBody)))
+		req.Header.Set("Authorization", "Bearer ka")
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		if rec.Code != 200 || strings.Contains(rec.Body.String(), diff) {
+			t.Fatalf("MCP %s status=%d body=%s", mode, rec.Code, rec.Body.String())
+		}
+		var rpc struct {
+			Result review.Receipt `json:"result"`
+		}
+		if json.Unmarshal(rec.Body.Bytes(), &rpc) != nil || rpc.Result.ID == "" {
+			t.Fatalf("MCP result %s", rec.Body.String())
+		}
+		mcpReceipt := rpc.Result
+		// A second call through MCP exercises the same complete cache response
+		// that REST receives, including the original review payload.
+		req = httptest.NewRequest(http.MethodPost, "/v1/mcp", strings.NewReader(string(callBody)))
+		req.Header.Set("Authorization", "Bearer ka")
+		rec = httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		var mcpDuplicate struct {
+			Result review.Receipt `json:"result"`
+		}
+		if rec.Code != 200 || json.Unmarshal(rec.Body.Bytes(), &mcpDuplicate) != nil || mcpDuplicate.Result.Status != "skipped_duplicate" || mcpDuplicate.Result.Result == nil || mcpDuplicate.Result.OriginalReviewID != mcpReceipt.ID {
+			t.Fatalf("MCP duplicate parity status=%d body=%s MCP=%+v", rec.Code, rec.Body.String(), mcpReceipt)
+		}
+		restReq := review.Request{Capture: capture, Kind: "adhoc", BuildModels: []review.BuildModel{{ID: "unknown"}}, Detail: "full"}
+		restBody, _ := json.Marshal(restReq)
+		req = httptest.NewRequest(http.MethodPost, "/v1/reviews", strings.NewReader(string(restBody)))
+		req.Header.Set("Authorization", "Bearer ka")
+		req.Header.Set("Content-Type", "application/json")
+		rec = httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		var restReceipt review.Receipt
+		if rec.Code != 200 || json.Unmarshal(rec.Body.Bytes(), &restReceipt) != nil || restReceipt.Reason != mcpReceipt.ID || restReceipt.CaptureID != mcpReceipt.CaptureID || restReceipt.Status != "skipped_duplicate" {
+			t.Fatalf("REST parity status=%d body=%s MCP=%+v", rec.Code, rec.Body.String(), mcpReceipt)
+		}
+		mcpJSON, _ := json.Marshal(mcpDuplicate.Result)
+		restJSON, _ := json.Marshal(restReceipt)
+		if string(mcpJSON) != string(restJSON) {
+			t.Fatalf("REST and MCP cached receipts differ: MCP=%s REST=%s", mcpJSON, restJSON)
+		}
+		if strings.Contains(rec.Body.String(), diff) || mcpReceipt.Result == nil {
+			t.Fatalf("receipt exposed capture/full input: %s", rec.Body.String())
+		}
+	}
+	if providerCalls != 2 {
+		t.Fatalf("provider calls=%d want 2", providerCalls)
+	}
+}

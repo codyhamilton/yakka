@@ -69,6 +69,12 @@ Server configuration is environment only:
 | `YAKKA_SERVE_CORS_ORIGINS` | comma-separated exact origins allowed to call bearer-authenticated reads from a browser; unset or empty means no CORS headers; ignored in local mode, which allows loopback origins ([design 7](07-analytics-site.md#browser-access)) |
 | `GITHUB_OAUTH_CLIENT_ID`, `GITHUB_OAUTH_CLIENT_SECRET`, `YAKKA_PUBLIC_URL` | set together for remote collector mode (non-loopback bind); ignored on loopback ([design 5](05-distribution.md#local-bootstrap)) |
 | `TYPESAFE_API_KEY` | scorer credential; server side only, never in any client config |
+| `CLAUDE_API_TOKEN` | review provider credential; set in remote mode and review is available to every authenticated tenant for any repo; server side only, sent only in the provider authentication header |
+
+`CLAUDE_API_TOKEN` is the setting that enables review. The model defaults to `claude-haiku-5-5`;
+`YAKKA_REVIEW_MODEL` is an optional override and is not required for registration. Effort is chosen
+per call (`high`, `xhigh` or `max`, default `high`) and validated server-side; and Yakka applies no
+spend cap. Actual cost is still recorded per review.
 
 **Local mode** is loopback with no credential requirement, for one user on one machine:
 
@@ -106,6 +112,8 @@ endpoints. Unknown fields in a fact are kept in its raw payload, never rejected.
 |---|---|---|
 | `GET /v1/health` | none | liveness, version, pending count, screen gaps, `compaction` (`complete` or `required`) |
 | `POST /v1/ingest` | local: none; remote: bearer `read_write` | a batch of facts from a drain |
+| `POST /v1/reviews` | local: none; remote: bearer `read_write` (JSON body) | one advisory review call with optional `effort`, `tags` and `store`; returns the review receipt or a full cached duplicate receipt |
+| `GET /v1/reviews` | local: none; remote: bearer `read` or `read_write`, or session with `?tenant=` for an owned tenant | complete cursor-paged listing with `repo_id`, `plan`, `phase`, `kind`, `status`, `effort`, `profile`, `manifest_hash` and `since` filters, repeated conjunctive `tag`, `detail=full`, `limit` (default 100, range 1–500) and `cursor`; returns `reviews`, `next_cursor` and `complete` |
 | advisory reads (`/v1/artifacts`, `/v1/checks`, `/v1/baselines`, `/v1/search`) | local: none; remote: bearer `read` or `read_write`, or session with `?tenant=` for an owned tenant | defined by [design 4](04-advisory-surface.md#api) |
 | analytics reads (`/v1/analytics/*`) | same as advisory reads | defined by [design 7](07-analytics-site.md#analytics-reads) |
 | `GET /v1/whoami` | bearer only (local: none) | the tenant, scope and `expires_at` (Unix seconds, 0 for none) a bearer token resolves to; no cookie, never opens the tenant. `yakka sync` calls it before sending to check the target tenant and `read_write` scope. A 404 means a collector too old to be a sync target |
@@ -118,7 +126,7 @@ endpoints. Unknown fields in a fact are kept in its raw payload, never rejected.
 | `GET /v1/admin/tokens` | session (admin) | list every token without plaintext |
 | `GET /v1/admin/status` | session (admin) | per tenant: fact count, disk by part (ledger, WAL, archive, blobs, pending), latest screen verdicts, score counts, recent screen failures, rescore progress; plus data-volume total and free bytes and whether scoring is configured |
 | `POST /v1/admin/rescore` | session (admin), same-origin, JSON | body `{"tenant"}`; screens every blob whose latest verdict is `unscreened` in the background and answers `202` with the job state. `409` when no scorer is configured or a rescore is already running for that tenant |
-| `POST /v1/mcp` | bearer (per-tool `read` or `read_write`; keyless loopback local mode) | stateless JSON-RPC endpoint used by the `yakka mcp` stdio shim for server-defined MCP tools. The shim supplies declared local context and relays replies; cookie sessions and requests with an `Origin` header are refused. |
+| `POST /v1/mcp` | bearer (per-tool `read` or `read_write`; keyless loopback local mode with full dispatch; keyless remote discovery for `initialize`, `ping`, `tools/list`, and notifications only) | stateless JSON-RPC endpoint used by the `yakka mcp` stdio shim for server-defined MCP tools. The shim supplies declared local context and relays replies; cookie sessions and requests with an `Origin` header are refused. |
 
 Admin operations are remote-only: local mode has no session, so `/v1/admin/*` answers `401`. A
 rescore runs through the same screen step the worker uses, one blob at a time, and counts a
@@ -179,9 +187,68 @@ One directory per tenant: `<data>/<tenant>/`.
 compaction takes it exclusively. Serve refuses to start on a tenant that compaction holds, and
 compaction refuses while serve runs, so SQLite never has two writers.
 
-Per-tenant files mean writes for different tenants never share a lock, and deleting a tenant is
-deleting a directory.
+Per-tenant files mean writes for different tenants never share a lock. Deleting the directory
+removes tenant-local storage, but is not a complete tenant deletion on its own: `registry.json`
+lives alongside tenant directories and retains tokens, owner/name entries and user-global sessions;
+review claims also live outside the tenant directory. Raw directory deletion therefore leaves
+orphaned registry entries, and a still-valid token can lazily recreate the directory. The owner
+lifecycle routes below are the complete-cleanup path: they coordinate tenant storage with the
+registry, global claims and the cleanup journal.
 
+The [Plan 23 follow-up amendment](../plans/23-llm-review-shadow.md) landed owner
+self-serve reset and delete with complete tenant/global cleanup. Its per-call effort/tags/store
+controls, removal of the trial env gate, and complete paged review reads are also implemented and
+described above.
+
+### Owner tenant lifecycle API
+
+Only the human owner may reset or delete a tenant. Agents must not perform or attempt this on a user's behalf.
+This language is required in both endpoint descriptions and their UI confirmations. No reset/delete
+MCP tool, CLI command or admin alias exists.
+
+| Endpoint | Description / success |
+| --- | --- |
+| `POST /v1/tenants/<tenant-id>/reset` | Only the human owner may reset or delete a tenant. Agents must not perform or attempt this on a user's behalf. `204` wipes all assets and revokes all keys/grants, retaining tenant id/name/owner/trustworthy marker and a fresh store generation for explicit re-selection and rekeying. |
+| `DELETE /v1/tenants/<tenant-id>` | Only the human owner may reset or delete a tenant. Agents must not perform or attempt this on a user's behalf. `204` removes the entire tenant: storage, reviews, usage, tokens, tenant-bound sessions if any, owner/name/marker, grants, attributed claims and cleanup journal. |
+
+Both require a valid owner `workflow_session` cookie, JSON body
+`{"confirm_tenant_id":"<exact path id>"}`, exact `Origin` equal to the public API origin,
+`Sec-Fetch-Site: same-origin` when present, and **`X-Yakka-UI: tenant-lifecycle`**. Missing/null or
+other Origin, conflicting Fetch-Site or missing/wrong UI header is `403 tenant_lifecycle_ui_only`.
+These routes tighten the admin JSON/Origin pattern: Pages and configured CORS origins cannot call
+them cross-origin. The API origin serves a bounded profile lifecycle UI, including production;
+Pages navigates the person there. This does not change other routes' browser policy.
+
+Reject **any** supplied Authorization/API-key/token credential first with
+`403` JSON `{"error":"tenant_lifecycle_ui_only","message":"Only the human owner may reset or delete a tenant. Agents must not perform or attempt this on a user's behalf. Open the profile UI."}`, even when a valid owner
+cookie and UI headers are also present. Local mode has the same refusal. With no key credential,
+an absent/invalid cookie is `401 session_required` with sign-in guidance. After the UI gate,
+non-JSON is `415 json_required`; absent ids are `404 tenant_not_found`; existing tenants owned by
+someone else are `403 tenant_owner_required`, including for an admin non-owner. Malformed JSON,
+missing/wrong-type/mismatched confirmation is `400 tenant_confirmation_mismatch`. After those
+checks, legacy tenants without a trustworthy ownership/creation marker return
+`409 legacy_tenant_cleanup_unsupported`. All rejections are no-ops before destructive work or
+selection changes. Busy work that cannot safely quiesce returns `409 tenant_busy`; partial cleanup
+is `503 tenant_cleanup_incomplete`, unavailable until operation-bound durable recovery finishes.
+Neither operation returns `204` before its full cleanup proof and journal removal. Repeated delete
+or reset of an absent id is `404`; repeated confirmed reset wipes its current assets again.
+
+The current selected/only owned tenant may be reset or deleted with confirmation. On success the
+profile clears its selection/caches/cursors, refreshes owned tenants and requires explicit
+re-selection or creation; it preserves global login and other tenants. Reset retains only the
+listed identity metadata; delete leaves zero target references. Old credentials, cursors, queued
+work and restarts cannot resurrect erased assets. Anonymous provider safety exposure remains,
+without target identity or tenant analytics residue. Each owned `/v1/me` tenant carries `lifecycle_state`
+(`active`, `resetting`, `deleting`, `unsupported`) and `lifecycle_generation` (opaque string, null
+for unsupported legacy). Read from registry/journal metadata without lazy-open; disable lifecycle actions while recovery is
+unresolved. Pending entries remain owner-visible until completion; reset changes
+generation, delete disappears. Both API-origin and Pages UI revalidate selection/generation on
+return/focus/pageshow and before tenant reads, clearing absent/changed selections and cached reads
+without auto-selecting another tenant. In-progress state suspends target reads. An eligible
+remembered selection lacking a generation requires explicit re-selection. Failed recovery reads
+show completion unknown and never trigger automatic mutation replay. The gate is a **spoofable guardrail, not proof
+of a human**; future human verification/captcha is explicitly out of scope. Detailed concurrency,
+recovery and no-cross-tenant proofs are in the plan's Phase 2.
 ### Writer
 
 Each open tenant has one writer goroutine. Ingest requests hand their facts to it and wait. The
@@ -205,8 +272,9 @@ The one sanctioned exception is offline compaction (below).
 
 A hook fact's `raw` is its envelope with no payload (design 1). Its analytics columns are filled at
 insert: `norm_event`, `tool`, `model`, `tok_in`, `tok_out`, `tok_cache_read`, `tok_cache_write`,
-`tok_reasoning` and `cost_reported` (null unless the harness reported a cost). Artifact and commit
-facts carry `kind`, `plan`, `source` and `sha`. Schema migrations run in `Open()` and only add
+`tok_reasoning` and `cost_reported` (null unless the harness reported a cost). Artifact facts carry
+`kind`, `plan`, `source` and (commit-sourced ones) `sha`; commit facts carry `sha`, with `kind` and
+`plan` empty because they have no path. Schema migrations run in `Open()` and only add
 columns, indexes and tables, so they never rewrite rows.
 
 ### Event archive

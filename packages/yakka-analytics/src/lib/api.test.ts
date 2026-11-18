@@ -1,8 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import * as api from './api';
 import {
 	ApiError,
 	apiGet,
 	apiPost,
+	lifecycleProfileUrl,
+	tenantLifecycleState,
 	createToken,
 	fetchAdminStatus,
 	startRescore,
@@ -271,5 +274,41 @@ describe('apiGet', () => {
 		const err = await apiGet('analytics/summary').catch((e) => e);
 		expect(err).not.toBeInstanceOf(ApiError);
 		expect(String(err.message)).toContain('/v1/analytics/summary did not return JSON');
+	});
+});
+
+describe('lifecycle fields', () => {
+	it('parses lifecycle state and generation, and defaults a pre-lifecycle payload to active', async () => {
+		fetchMock.mockImplementation(() =>
+			ok({
+				github_id: 1,
+				github_login: 'u',
+				admin: false,
+				tenants: [
+					{ id: 't-1', name: 'new', lifecycle_state: 'resetting', lifecycle_generation: 'g1' },
+					{ id: 't-2', name: 'legacy', lifecycle_state: 'unsupported', lifecycle_generation: null },
+					{ id: 't-3', name: 'old-api' }
+				]
+			})
+		);
+		const me = await fetchMe();
+		expect(me.tenants[0]).toMatchObject({ lifecycle_state: 'resetting', lifecycle_generation: 'g1' });
+		expect(me.tenants[1]).toMatchObject({ lifecycle_state: 'unsupported', lifecycle_generation: null });
+		expect(me.tenants[2].lifecycle_state).toBeUndefined();
+		expect(tenantLifecycleState(me.tenants[2])).toBe('active');
+	});
+
+	it('builds the API-origin lifecycle view for Pages, a configured base, and embedded local mode', () => {
+		expect(lifecycleProfileUrl('yakka.build')).toBe('https://api.yakka.build/profile/lifecycle');
+		expect(lifecycleProfileUrl('www.yakka.build')).toBe('https://api.yakka.build/profile/lifecycle');
+		store['yakka-analytics-base'] = 'https://collector.example/';
+		expect(lifecycleProfileUrl('yakka.build')).toBe('https://collector.example/profile/lifecycle');
+		delete store['yakka-analytics-base'];
+		expect(lifecycleProfileUrl('localhost')).toBe('/profile/lifecycle');
+	});
+
+	it('exposes no lifecycle mutation helper from the Pages client', () => {
+		expect(Object.keys(api).filter((name) => /reset|delete/i.test(name))).toEqual([]);
+		expect(typeof api.lifecycleProfileUrl).toBe('function');
 	});
 });

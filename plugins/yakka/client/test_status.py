@@ -105,6 +105,7 @@ class TestStatus(StatusEnv):
         self.assertIn("yakka is not logged in", out)
         self.assertIn("/yakka:login", out)
         self.assertNotIn("127.0.0.1:8770", out)
+        self.assertIn(f"mcp: {yakka.DefaultEndpoint} no-credential\n", out, msg=out)
 
         lock_path = os.path.join(self._queue, ".drain.lock")
         lock = open(lock_path, "a+b")
@@ -170,6 +171,7 @@ class TestHalfSetEnvRefusalStatus(StatusEnv):
         self.assertEqual(code, 1, msg=out)
         self.assertNotIn("127.0.0.1:8770", out, msg=out)
         self.assertIn("YAKKA_ENDPOINT", out, msg=out)
+        self.assertIn("mcp: http://collector.example no-credential\n", out, msg=out)
 
 
 class TestNoLoopbackFallback(StatusEnv):

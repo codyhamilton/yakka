@@ -151,10 +151,13 @@ def skills_root_for(
     home: Path,
     workspace: Path | None,
     skills_name: str = WORKSPACE_SKILLS_NAME,
+    cursor_user: bool = False,
 ) -> Path | None:
     if harness == HARNESS_CLAUDE:
         return home / ".claude" / "skills"
     if harness == HARNESS_CURSOR:
+        if cursor_user:
+            return home / ".cursor" / "skills"
         if workspace is None:
             return None
         return workspace / ".cursor" / "skills" / skills_name
@@ -202,6 +205,7 @@ def report_for_env(
     can_prompt: bool,
     cwd: Path | None = None,
     harness_override: str | None = None,
+    cursor_user: bool = False,
 ) -> dict[str, object]:
     home = home_from(env)
     manifest_present = manifest_path(home).is_file()
@@ -217,6 +221,7 @@ def report_for_env(
         home=home,
         workspace=workspace,
         skills_name=skills_name,
+        cursor_user=cursor_user,
     )
     return build_report(harness=harness, root=root)
 
@@ -246,6 +251,11 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="Skip detection and check this harness's install root",
     )
+    parser.add_argument(
+        "--cursor-user",
+        action="store_true",
+        help="Check ~/.cursor/skills/<skill>/SKILL.md (user-level Cursor skills)",
+    )
     args = parser.parse_args(argv)
 
     env = dict(os.environ)
@@ -254,10 +264,14 @@ def main(argv: list[str] | None = None) -> int:
     if args.workspace is not None:
         env["YAKKA_WORKSPACE"] = str(args.workspace)
 
+    harness_override = args.harness
+    if args.cursor_user and harness_override is None:
+        harness_override = HARNESS_CURSOR
     report = report_for_env(
         env,
         can_prompt=can_prompt_interactively(),
-        harness_override=args.harness,
+        harness_override=harness_override,
+        cursor_user=args.cursor_user,
     )
     json.dump(report, sys.stdout, indent=2)
     sys.stdout.write("\n")

@@ -123,14 +123,18 @@ drain uses `flock(2)` as on Linux.
 
 ## Config
 
-The drain and the shim resolve endpoint and bearer key the same way on every batch (no restart
-needed to pick up a change):
+The drain resolves endpoint and bearer on every batch (no restart needed to pick up a change). The
+MCP shim uses a separate resolver (`LoadMCP`): default origin `https://api.yakka.build` with an
+optional key when nothing overrides it, and it does not fall back to loopback when no file exists.
+The drain list is unchanged:
 
+1. **`YAKKA_ENDPOINT` and `YAKKA_KEY` both set** — remote mode with those values. They win over
 1. **`YAKKA_ENDPOINT` and `YAKKA_KEY` both set** — remote mode with those values. They win over
    `client.toml`; combining them with `YAKKA_MODE=local` is bad config.
 2. **Exactly one remote environment variable set** — bad config. `yakka drain` and `yakka status`
    exit before any request; they do not read the file or contact loopback. `YAKKA_MODE=local` with
-   either remote variable is also bad config.
+   either remote variable is also bad config. The shim still resolves via `LoadMCP` (for example
+   endpoint-only override with no bearer for discovery).
 3. **`YAKKA_MODE=local`, with neither remote variable** — explicit local mode at
    `http://127.0.0.1:8770` with no bearer.
 4. **Neither remote variable set, and `client.toml` present** — `mode = "local"` selects local mode;
@@ -166,8 +170,8 @@ The drain never starts or manages the quality service, local or remote (principl
 
 ## MCP shim
 
-`python3 plugins/yakka/client/yakka.py mcp` is a local stdio shim. It uses the shared login,
-forwards MCP requests to `POST /v1/mcp`, relays server tool definitions and replies, and injects
+`python3 plugins/yakka/client/yakka.py mcp` is a local stdio shim. It uses `LoadMCP` (not the drain's
+`Load()`), forwards MCP requests to `POST /v1/mcp`, relays server tool definitions and replies, and injects
 only the local facts declared by each server tool from a fixed reader table. The server owns tool
 names, schemas, validation, state and user-facing wording. An unknown or unsupported declaration
 is reported as local context failure; local read failures are facts sent to the server, never
