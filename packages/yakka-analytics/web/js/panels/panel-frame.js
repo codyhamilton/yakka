@@ -13,6 +13,26 @@ function text(doc, tag, className, value) {
   return node;
 }
 
+// A panel result may carry the badge flags directly rather than under meta.
+// Fold those flags into the coverage the existing badge module already reads.
+function badgeInput(result = {}) {
+  const meta = result.meta && typeof result.meta === 'object' ? { ...result.meta } : {};
+  const flags = {
+    partial: result.partial,
+    sampled: result.sampled,
+    coarsened: result.coarsened,
+    clipped: result.clipped,
+    lowerBound: result.lowerBound ?? result.lower_bound
+  };
+  if (Array.isArray(meta.coverage)) {
+    for (const [kind, value] of Object.entries(flags)) if (value && !meta.coverage.includes(kind)) meta.coverage.push(kind);
+  } else {
+    meta.coverage = { ...(meta.coverage || {}) };
+    for (const [kind, value] of Object.entries(flags)) if (value) meta.coverage[kind] = true;
+  }
+  return meta;
+}
+
 export function createPanelFrame({ panel, spec = {}, scope = {}, transport, scheduler, tenant = '', doc = globalThis.document } = {}) {
   if (!panel || !panel.id) throw new Error('panel frame needs a registered panel');
   const element = doc.createElement('section');
@@ -55,7 +75,7 @@ export function createPanelFrame({ panel, spec = {}, scope = {}, transport, sche
     element.dataset.state = next;
     element.dataset.idle = isSettled(next) ? 'true' : 'false';
     if (options.inFlight !== undefined) element.dataset.inFlight = String(options.inFlight);
-    badges.update(badgeModel(options.meta || {}));
+    badges.update(badgeModel(badgeInput(options)));
     status.replaceChildren();
     if (next === 'loading') {
       const count = Number(options.inFlight) || 0;
@@ -134,9 +154,12 @@ export function createPanelFrame({ panel, spec = {}, scope = {}, transport, sche
       return;
     }
     const classified = classifyResult(result);
-    setState(classified.state, classified);
-    if (classified.population) setPopulation(classified.population);
-    if (classified.basis) setBasis(classified.basis);
+    const withRetry = (classified.state === 'error' || classified.state === 'cancelled') && typeof classified.retry !== 'function'
+      ? { ...classified, retry: load }
+      : classified;
+    setState(withRetry.state, withRetry);
+    if (withRetry.population) setPopulation(withRetry.population);
+    if (withRetry.basis) setBasis(withRetry.basis);
   }
 
   function destroy() {

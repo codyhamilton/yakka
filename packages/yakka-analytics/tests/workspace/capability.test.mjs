@@ -8,7 +8,10 @@ const environment = loadBrowserEnvironment();
 
 async function settle(page) {
   await page.waitForFunction(() => document.documentElement.dataset.idle === 'true');
-  await page.waitForFunction(() => document.querySelector('.workspace-panel')?.dataset.state === 'ready');
+  await page.waitForFunction(() => {
+    const state = document.querySelector('.workspace-panel')?.dataset.state;
+    return state && state !== 'loading';
+  });
 }
 
 async function control(origin, body) {
@@ -91,7 +94,7 @@ test('a missing feature names its source in the drawer and the board still rende
   assert.equal(await missing.count(), 1);
   assert.match(await missing.innerText(), /entities_session is not supported/);
   assert.match(await missing.innerText(), /supplied by Phase 9/);
-  assert.equal(await page.locator('.workspace-panel').getAttribute('data-state'), 'ready');
+  assert.equal(await page.locator('.workspace-panel').getAttribute('data-state'), 'unsupported');
 
   await diagnostics.assertClean();
   const stats = await (await fetch(`${harness.origin}/__test/stats`)).json();

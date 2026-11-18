@@ -44,6 +44,9 @@ test('the timeline model draws one marker per item in its declared lane', () => 
     assert.equal(row.laneIndex, LANES.findIndex(lane => lane.key === item.lane));
     assert.equal(row.priced, item.priced !== false);
     assert.equal(row.hollow, item.priced === false);
+    for (const [name, value] of Object.entries(item.values || {})) {
+      assert.equal(row.values[name], value, `${item.key} keeps its ${name} value`);
+    }
   }
   for (const key of ['model:atlas', 'harness:orca', 'repo:core', 'kind:test']) {
     assert.ok(model.entityKeys.includes(key), `fixture carries ${key}`);
@@ -100,7 +103,8 @@ test('an unpriced marker is hollow and named, never formatted as zero', () => {
   const unpriced = model.rows.find(row => !row.priced);
   const unpricedTable = model.tableRows.find(row => row.key === unpriced.key);
   assert.equal(unpriced.hollow, true);
-  assert.deepEqual(unpriced.values, { 'kind:call': null });
+  assert.equal(unpriced.values['kind:call'], null);
+  assert.equal(unpriced.values.cost, 0);
   assert.equal(unpricedTable.values.value, 'unpriced');
   assert.doesNotMatch(unpricedTable.values.value, /\$0/);
   const priced = model.rows.find(row => row.priced && row.kind === 'kind:call');

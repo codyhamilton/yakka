@@ -36,6 +36,22 @@ test('concurrent fetch count never exceeds four', async () => {
   assert.equal(maximum, 4);
 });
 
+test('two identical concurrent callers each read the same JSON body', async () => {
+  let calls = 0;
+  const scheduler = createScheduler({ fetchImpl: async () => {
+    calls++;
+    return new Response(JSON.stringify({ ok: true, rows: [1, 2, 3] }), { headers: { 'Content-Type': 'application/json' } });
+  } });
+  const [first, second] = await Promise.all([
+    scheduler.request('/same', { method: 'POST' }),
+    scheduler.request('/same', { method: 'POST' })
+  ]);
+  assert.equal(calls, 1);
+  assert.notEqual(first, second);
+  assert.deepEqual(await first.json(), { ok: true, rows: [1, 2, 3] });
+  assert.deepEqual(await second.json(), { ok: true, rows: [1, 2, 3] });
+});
+
 test('a queued request aborted before a slot opens is removed cleanly', async () => {
   const first = deferred(); let calls = 0;
   const scheduler = createScheduler({ maxInFlight: 1, fetchImpl: async () => { calls++; if (calls === 1) await first.promise; return new Response('{}'); } });

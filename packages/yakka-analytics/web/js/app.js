@@ -17,6 +17,7 @@ import {
 import { buildCohort, createSelectionTray, nextCohortSlot, openListDestination, writeCohort } from './core/selection-tray.js';
 import { createInspector } from './core/inspector.js';
 import { createCapabilityInspector } from './core/capability-inspector.js';
+import { unsupportedState } from './core/panel-state.js';
 import { decodePick, encodePick } from './core/selection-model.js';
 
 const root = document.querySelector('#app');
@@ -403,7 +404,16 @@ async function renderBoard(container, record, state, schema, tenant) {
     });
     frame.element.addEventListener('open', () => router.push(openListDestination(entry.panel.grain)));
 
+    const missingFeature = (entry.panel.requires || []).find(feature => !featureAvailable(schema, feature));
     grid.append(frame.element);
+    if (missingFeature) {
+      const source = entry.panel.capabilitySources?.[missingFeature]
+        || entry.panel.requiresSource?.[missingFeature]
+        || entry.panel.capabilitySource
+        || 'this plan\'s server phases';
+      frame.setState('unsupported', unsupportedState({ feature: missingFeature, reason: 'the server does not advertise it', source }));
+      continue;
+    }
     frame.load();
   }
   container.append(grid, tray.element, inspector.element);

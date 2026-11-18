@@ -23,7 +23,7 @@ export function createScheduler({ fetchImpl = fetch, maxInFlight = 4, onChange =
   function request(url, init = {}, stateKey = '') {
     const key = `${init.method || 'GET'} ${url}`;
     const prior = active.get(key);
-    if (prior) return prior.promise;
+    if (prior) return prior.wait();
     const id = ++sequence;
     const controller = new AbortController();
     if (init.signal) {
@@ -33,10 +33,14 @@ export function createScheduler({ fetchImpl = fetch, maxInFlight = 4, onChange =
     let resolve;
     let reject;
     const promise = new Promise((yes, no) => { resolve = yes; reject = no; });
-    const item = { id, key, url, init, controller, resolve, reject, promise, stateKey };
+    // One network fetch, one Response per waiter: each waiter clones the
+    // resolved response before any caller reads a body, so identical
+    // concurrent requests can each parse the same JSON.
+    const item = { id, key, url, init, controller, resolve, reject, promise, stateKey, wait: () => promise.then(response => response.clone()) };
     active.set(key, item); queue.push(item); pump();
-    promise.abort = () => controller.abort();
-    return promise;
+    const result = item.wait();
+    result.abort = () => controller.abort();
+    return result;
   }
   function supersede(stateKey) {
     for (const item of active.values()) if (item.stateKey === stateKey) item.controller.abort();

@@ -164,7 +164,8 @@ export function buildLanesModel({ spec = {}, data = [] } = {}) {
   const rows = prepared.map((row, index) => {
     const priced = row.item.priced !== false;
     const measure = row.span ? measureOf(row.item) : measureOf(row.item);
-    const values = { [row.kind]: priced ? measure : null };
+    const inherited = row.item.values && typeof row.item.values === 'object' ? row.item.values : {};
+    const values = { ...inherited, [row.kind]: priced ? measure : null };
     return {
       key: row.key,
       index,

@@ -476,7 +476,12 @@ test('every panel state and badge is reached through the harness scenes', { skip
   record('a coarsened response shows the coarsened badge', await page.locator('[data-panel="calendar"] .yk-badge[data-kind="coarsened"]').count(), 1);
   routes.state.effective = 'day';
 
-  await diagnostics.assertClean();
+  // The error and member scenes above deliberately return a real 500 and 403;
+  // Chromium logs those failed resources. Page errors and CSP stay empty and
+  // only the deliberate statuses may appear in the console.
+  assert.deepEqual(diagnostics.pageErrors, []);
+  assert.deepEqual(await diagnostics.cspViolations(), []);
+  assert.ok(diagnostics.consoleErrors.every(text => /status of (500|403)/.test(text)), `unexpected console errors: ${JSON.stringify(diagnostics.consoleErrors)}`);
   const stats = await (await fetch(`${harness.origin}/__test/stats`)).json();
   assert.ok(stats.maxInFlight <= 4, `max in flight ${stats.maxInFlight}`);
 });
