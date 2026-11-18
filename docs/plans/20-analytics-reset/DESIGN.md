@@ -761,8 +761,37 @@ Refinement verdict: **Proceed**, six units. 9-01 runs first and establishes the 
 
 - Outcome: From Workflow and Plans, grouped process shapes, plan cost ranking/scatter and version/execution timelines open the relevant plan. Plan detail pages artifacts/executions/sessions/events and shows stored design phase headings/outcomes and brief paths as content context, without inferring phase completion or review outcomes. Artifact reader navigation, per-version metadata and bounded text-only content connect bidirectionally to plans/sessions. Two-version line diff matches the fixture, declines above its stated size ceiling and never diffs unavailable/incomplete text. Malicious HTML/script content stays inert; missing/oversized bodies show exact reasons. Every catalog panel and all three explorers are now delivered.
 - Surfaces: `web/js/explorers/{plans,artifact}*`, `web/js/panels/` (plan panels), `tests/plans-artifacts/`.
-- Approach: open (the diff algorithm, outline parsing and chunked rendering of long bodies).
+- Approach: known. The diff is a first-party line diff with a declared ceiling of 256 KiB and 2,000 lines per side; the outline is line-based and skips fenced code; long bodies render in 400-line display chunks over the complete body.
 - Depends on: Phases 5, 6, 8, 9, 10 and 11.
+
+#### Units
+
+| Unit | Brief | Depends on | Runs alongside |
+|---|---|---|---|
+| 12-01 Process-shape and plan-timeline panels, P12 fixture scene | [briefs/12-01-workflow-panels.md](briefs/12-01-workflow-panels.md) | Phases 3–11 | Nothing; establishes the two panels, their registration seam, the P12 fixture/stub scene and the browser loader that later units extend. |
+| 12-02 Plan-cost rank mode and the Workflow preset | [briefs/12-02-rank-preset.md](briefs/12-02-rank-preset.md) | 12-01 | Nothing; edits the shared registration module, CSS and P12 scene, and owns the Phase 9 `/b/workflow` expectation update. |
+| 12-03 Artifact reader core and `/artifact` | [briefs/12-03-artifact-reader.md](briefs/12-03-artifact-reader.md) | 12-01 | Nothing; establishes the reader, the text fetch/outline/band helpers and the content-state mapping, and converts the `/artifact` route. |
+| 12-04 Artifact two-version line diff | [briefs/12-04-artifact-diff.md](briefs/12-04-artifact-diff.md) | 12-03 | Nothing; edits the reader, artifact CSS and the shared P12 scene. |
+| 12-05 Plans list explorer and `/plans` | [briefs/12-05-plans-list.md](briefs/12-05-plans-list.md) | 12-02, 12-04 | Nothing; converts the list route, mounts the delivered plan scatter with inspect/tray wiring, edits the router and P12 scene, and owns the `/plans` Phase 9 expectation update. |
+| 12-06 Plan detail, collections and stored design context | [briefs/12-06-plan-detail.md](briefs/12-06-plan-detail.md) | 12-01, 12-03, 12-05 | Nothing; adds the detail route and sections, reuses the timeline panel and content helper, and edits the shared plans explorer/router/P12 scene. |
+| 12-07 Phase 12 acceptance and stale-notice cleanup | [briefs/12-07-acceptance.md](briefs/12-07-acceptance.md) | 12-01–12-06 | Nothing; owns the phase-wide Chromium proof, destination probes from P10/P11, and the removal of the old "Phase 12" notices and their assertions. |
+
+**Carried from Phase 11**
+
+- `gate: the exact artifact id lens grammar is unconfirmed` (carried from 9-04/11-02). Phase 12 identifies an artifact by `repo_id` + `path` + `hash` in the reader URL, never by the artifact `id` lens; no unit promotes an `id` lens to an axis, colour or cohort.
+- The external Pages automation gate belongs to Phase 13. Every Phase 12 browser spec records it where relevant and does not attempt a Pages-style serve.
+- Browser evidence needs `playwright-core` under `NODE_PATH=/home/codyh/workspace/yakka/packages/yakka-analytics/node_modules` and the Chromium 1243 cache outside this worktree; a spec that cannot reach them skips with the named reason and records a gate in its done evidence.
+- The committed P10/P11 stub bodies stay byte-identical. Phase 12 adds an opt-in `p12` scene additively; the P12 schema must not disable a P10/P11 feature the earlier suites use.
+- Two-sided `cmp=cohorts` remains limited to the compare-preset panels. The Plans explorer's plan scatter is one-sided; its rectangle selection becomes a typed plan cohort through the existing tray and does not invent a comparison.
+- The Tools route-interception spec is timing-sensitive under parallel files. The Phase 12 suite runs sequentially (`--test-concurrency=1`) where the harness shares a route log; this is a test constraint, not a product defect.
+- `systemd-run -p MemoryMax=8G` OOM-kills the heavy browser case on this host, so the cap is applied as in Phases 9–11 via `NODE_OPTIONS=--max-old-space-size=8192`; no `/tmp` is used.
+- The plan events collection has no version `content_hash`. Timeline markers open the plan and, in plan detail, the artifact's latest version; exact historical version selection happens in the artifact reader's version strip. No hash is invented.
+- **Carried shortfall:** the `shape-bars` catalog row offers grouping "per plan, harness or repo" from P6 execution aggregate mode, but the server implements no execution aggregate mode and execution list filters do not accept `shape`. Phase 12 delivers exact plan grouping from plan `executions_*` measures and renders an observable unsupported state for harness/repo grouping naming the missing aggregate. It does not count execution pages in the browser. This needs a server/contract unit (or an amendment) before harness/repo process-shape grouping is offered.
+- The P10/P11 panels and Sessions explorer named the artifact reader and plan explorer as Phase 12. 12-07 replaces those user-facing notices with neutral link text and updates the assertions that pinned the old wording; no link, count or population assertion is weakened.
+
+**Refinement verdict**
+
+**Proceed**, seven units. 12-01 establishes the two plan process panels and the P12 fixture/stub scene; 12-02 adds plan-grain cost ranking and registers the five-panel Workflow preset, making `/b/workflow` a delivered board; 12-03 delivers the artifact reader and its text/outline/band helpers and converts `/artifact`; 12-04 adds the ceiling-bounded line diff; 12-05 converts `/plans` into the ranked table plus the delivered plan scatter with real inspect/tray wiring; 12-06 adds plan detail with artifacts, executions, sessions, events, the version/execution timeline and display-only design context; 12-07 proves the phase outcome and removes the stale Phase 12 notices. Every unit composes existing grains, joins, routes, chart elements and gestures and adds no server, route, grain, join, dependency or contract change. The one real shortfall is recorded above: harness/repo grouping for process shape has no served execution aggregate, so Phase 12 delivers plan grouping with a named unsupported state and carries the gap. All evidence uses the committed fixture through the first-party test-only stub API and deterministic fixtures; no live server, production data, credential, deployment or migration is required. `artifact_feedback` on all seven briefs was **unreachable** (`local context unavailable: queue (invalid_context)`), so no screen verdict was issued and none is claimed; the briefs are submitted for review on the next reachable run.
 
 ### Phase 13 — Release readiness
 
