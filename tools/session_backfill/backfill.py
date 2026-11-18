@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Deterministic, offline first pass for session work labels.
+"""Deterministic, offline labelling of past sessions from their own signals.
 
-All store roots and queue-log roots are explicit inputs. The normal CLI defaults
-are provided by `cli.py`; tests use temporary synthetic roots.
+All store roots are explicit inputs. The normal CLI defaults are provided by
+`cli.py`; tests use temporary synthetic roots. The tool never reads a queue log,
+never calls a model and never touches the network. Dry run is the default.
 """
 
 from __future__ import annotations
@@ -10,10 +11,8 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-from collections import Counter
 import os
 import re
-import secrets
 import sys
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -27,10 +26,34 @@ PLAN_RE = re.compile(r"(?:docs/plans/|\bplan[: /]|(?:^|[/\\])(?:feat|worktree)[/
 PHASE_RE = re.compile(r"\bphase\s+0*([1-9][0-9]?)\b", re.I)
 ISSUE_RE = re.compile(r"(?<![\w/])#([1-9][0-9]{0,8})\b")
 PR_RE = re.compile(r"(?i)\b(?:pull\s+request|PR)\s*#?([1-9][0-9]{0,8})\b")
-FLASH_RE = re.compile(r"flash", re.I)
+BRIEF_RE = re.compile(r"docs/plans/([A-Za-z0-9._-]+)/briefs/([A-Za-z0-9._/-]+?)\.md")
+COMMAND_RE = re.compile(r"<command-name>(.*?)</command-name>(?:\s*<command-args>(.*?)</command-args>)?", re.S)
+MANUAL_SKILLS_RE = re.compile(r"<manually_attached_skills>(.*?)</manually_attached_skills>", re.S)
+SKILL_NAME_RE = re.compile(r"Skill name\s*:?\s*([A-Za-z0-9._:-]+)")
 SECRET_ASSIGN_RE = re.compile(r"(?i)\b(api[_-]?key|token|secret|password)\s*[:=]\s*[^\s,;]+")
-QUEUE_FILE_RE = re.compile(r"^par-(.+)-(\d{1,2}|[a-z][a-z0-9-]*)-(claude|codex|opencode|cursor)-\d+\.log$", re.I)
 SAFE_SESSION_RE = re.compile(r"^[A-Za-z0-9._:-]{1,200}$")
+
+# The one signal table. The id is the part after the last ":".
+# id -> (signal class, kind)
+SKILL_SIGNAL_TABLE = {
+    "design": ("planning", "design"),
+    "plan": ("planning", "design"),
+    "planning": ("planning", "design"),
+    "refine": ("refining", "refine"),
+    "execute": ("executing", "build"),
+    "plan-execution": ("executing", "build"),
+}
+SIGNAL_CLASSES = ("planning", "refining", "executing", "brief")
+STATUSES = ("labelled", "multi_signal", "no_signal", "no_subject", "unreadable")
+
+
+@dataclass
+class Signal:
+    signal_class: str
+    kind: str
+    text: str
+    source: str
+    ident: str = ""
 
 
 @dataclass
@@ -44,8 +67,11 @@ class Session:
     branch: str = ""
     files: list[str] = field(default_factory=list)
     # Set when the transcript could not be read or has no parseable records.
-    # Such a session is still labelled (unresolved) so it is never silently dropped.
+    # Such a session is still counted (unreadable) so it is never silently dropped.
     unreadable: bool = False
+    # The store's own first user prompt, not the concatenated transcript text.
+    first_prompt: str = ""
+    signals: list[Signal] = field(default_factory=list)
 
 
 @dataclass
@@ -57,6 +83,7 @@ class Label:
     evidence: str = ""
     confidence: float = 0.0
     source_file: str = ""
+    signal_class: str = ""
 
 
 def _walk_strings(value, out: list[str], key_values: dict[str, list[str]]) -> None:
@@ -70,6 +97,152 @@ def _walk_strings(value, out: list[str], key_values: dict[str, list[str]]) -> No
             _walk_strings(child, out, key_values)
     elif isinstance(value, str):
         out.append(value)
+
+
+def _text_of_content(content) -> str:
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "\n".join(
+            block.get("text", "")
+            for block in content
+            if isinstance(block, dict) and block.get("type") == "text" and isinstance(block.get("text"), str)
+        )
+    return ""
+
+
+def _signal_from_id(raw, source: str, text: str = "") -> Signal | None:
+    if not isinstance(raw, str):
+        return None
+    ident = raw.strip().split(":")[-1].strip().lower()
+    entry = SKILL_SIGNAL_TABLE.get(ident)
+    if not entry:
+        return None
+    signal_class, kind = entry
+    return Signal(signal_class, kind, text, source, ident)
+
+
+def _claude_first_prompt(objects: list) -> str:
+    for obj in objects:
+        if not isinstance(obj, dict) or obj.get("type") != "user":
+            continue
+        message = obj.get("message")
+        if not isinstance(message, dict) or message.get("role") != "user":
+            continue
+        content = message.get("content")
+        if isinstance(content, list) and content and all(
+            isinstance(block, dict) and block.get("type") == "tool_result" for block in content
+        ):
+            continue
+        text = _text_of_content(content)
+        if text.strip():
+            return text
+    return ""
+
+
+def _claude_signals(objects: list) -> list[Signal]:
+    out: list[Signal] = []
+    for obj in objects:
+        if not isinstance(obj, dict):
+            continue
+        message = obj.get("message")
+        content = message.get("content") if isinstance(message, dict) else None
+        if isinstance(content, list):
+            for block in content:
+                if isinstance(block, dict) and block.get("type") == "tool_use" and block.get("name") == "Skill":
+                    payload = block.get("input") if isinstance(block.get("input"), dict) else {}
+                    signal = _signal_from_id(payload.get("skill"), "claude_skill", str(payload.get("args") or ""))
+                    if signal:
+                        out.append(signal)
+        if obj.get("type") == "user":
+            for match in COMMAND_RE.finditer(_text_of_content(content)):
+                signal = _signal_from_id((match.group(1) or "").strip().lstrip("/"),
+                                         "claude_command", match.group(2) or "")
+                if signal:
+                    out.append(signal)
+    return out
+
+
+def _cursor_first_prompt(objects: list) -> str:
+    for obj in objects:
+        if not isinstance(obj, dict) or obj.get("role") != "user":
+            continue
+        message = obj.get("message")
+        content = message.get("content") if isinstance(message, dict) else None
+        text = _text_of_content(content)
+        if text.strip():
+            return text
+    return ""
+
+
+def _cursor_signals(objects: list) -> list[Signal]:
+    out: list[Signal] = []
+    for obj in objects:
+        if not isinstance(obj, dict) or obj.get("role") != "user":
+            continue
+        message = obj.get("message")
+        content = message.get("content") if isinstance(message, dict) else None
+        for block in MANUAL_SKILLS_RE.findall(_text_of_content(content)):
+            for ident in SKILL_NAME_RE.findall(block):
+                signal = _signal_from_id(ident, "cursor_block", "")
+                if signal:
+                    out.append(signal)
+    return out
+
+
+def _codex_payload_text(payload: dict) -> str:
+    content = payload.get("content")
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "\n".join(
+            block.get("text", "")
+            for block in content
+            if isinstance(block, dict) and isinstance(block.get("text"), str)
+        )
+    return ""
+
+
+def _codex_first_prompt(objects: list) -> str:
+    for obj in objects:
+        if not isinstance(obj, dict) or obj.get("type") != "event_msg":
+            continue
+        payload = obj.get("payload")
+        if (isinstance(payload, dict) and payload.get("type") == "user_message"
+                and isinstance(payload.get("message"), str) and payload["message"].strip()):
+            return payload["message"]
+    for obj in objects:
+        if not isinstance(obj, dict) or obj.get("type") != "response_item":
+            continue
+        payload = obj.get("payload")
+        if isinstance(payload, dict) and payload.get("type") == "message" and payload.get("role") == "user":
+            text = _codex_payload_text(payload)
+            if text.strip():
+                return text
+    return ""
+
+
+def _first_prompt(store: str, objects: list) -> str:
+    if store == "claude":
+        return _claude_first_prompt(objects)
+    if store == "cursor":
+        return _cursor_first_prompt(objects)
+    if store == "codex":
+        return _codex_first_prompt(objects)
+    return ""
+
+
+def _signals(store: str, objects: list) -> list[Signal]:
+    if store == "claude":
+        return _claude_signals(objects)
+    if store == "cursor":
+        return _cursor_signals(objects)
+    return []
+
+
+def _brief_signals(prompt: str) -> list[Signal]:
+    return [Signal("brief", "build", match.group(0), "brief_path", match.group(0))
+            for match in BRIEF_RE.finditer(prompt)]
 
 
 def _unreadable(path: Path, store: str, session_id: str | None) -> Session:
@@ -138,7 +311,10 @@ def read_session(path: Path, store: str, session_id: str | None = None, related_
     sid = session_id if store == "codex" else session_id or path.stem
     if store == "cursor" and path.parent.name == sid:
         sid = path.parent.name
-    return Session(sid, store, str(path), text[:256_000], cwd, branch, sorted(set(files)))
+    first_prompt = _first_prompt(store, objects)
+    return Session(sid, store, str(path), text[:256_000], cwd, branch, sorted(set(files)),
+                   first_prompt=first_prompt,
+                   signals=_signals(store, objects) + _brief_signals(first_prompt))
 
 
 def _read_objects(raw: str) -> list:
@@ -159,6 +335,23 @@ def _read_objects(raw: str) -> list:
     return objects
 
 
+def _opencode_first_prompt(entries: list[tuple[str, Path]], message_rows: dict[str, dict],
+                           parts_by_message: dict[str, list[dict]]) -> str:
+    users = [
+        (mid, path) for mid, path in entries
+        if isinstance(message_rows.get(mid), dict) and message_rows[mid].get("role") == "user"
+    ]
+    if not users:
+        return ""
+    users.sort(key=lambda item: item[0])
+    mid, _ = users[0]
+    parts = sorted(parts_by_message.get(mid, []), key=lambda row: str(row.get("id") or ""))
+    return "\n".join(
+        row.get("text", "") for row in parts
+        if row.get("type") == "text" and isinstance(row.get("text"), str)
+    )
+
+
 def _discover_opencode(root: Path) -> Iterable[Session]:
     session_root = root / "session"
     message_root = root / "message"
@@ -169,8 +362,8 @@ def _discover_opencode(root: Path) -> Iterable[Session]:
             if session:
                 yield session
         return
-    messages_by_session: dict[str, list[Path]] = {}
-    message_ids: dict[str, str] = {}
+    messages_by_session: dict[str, list[tuple[str, Path]]] = {}
+    message_rows: dict[str, dict] = {}
     for path in message_root.rglob("*.json") if message_root.is_dir() else ():
         try:
             row = json.loads(path.read_text(encoding="utf-8", errors="replace"))
@@ -180,11 +373,11 @@ def _discover_opencode(root: Path) -> Iterable[Session]:
             continue
         sid = row.get("sessionID") or row.get("sessionId")
         mid = row.get("id")
-        if isinstance(sid, str):
-            messages_by_session.setdefault(sid, []).append(path)
-        if isinstance(mid, str) and isinstance(sid, str):
-            message_ids[mid] = sid
+        if isinstance(sid, str) and isinstance(mid, str):
+            messages_by_session.setdefault(sid, []).append((mid, path))
+            message_rows[mid] = row
     parts_by_session: dict[str, list[Path]] = {}
+    parts_by_message: dict[str, list[dict]] = {}
     for path in part_root.rglob("*.json") if part_root.is_dir() else ():
         try:
             row = json.loads(path.read_text(encoding="utf-8", errors="replace"))
@@ -193,8 +386,12 @@ def _discover_opencode(root: Path) -> Iterable[Session]:
         if not isinstance(row, dict):
             continue
         mid = row.get("messageID") or row.get("messageId")
-        sid = message_ids.get(mid) if isinstance(mid, str) else None
-        if sid:
+        if not isinstance(mid, str):
+            continue
+        parts_by_message.setdefault(mid, []).append(row)
+        message = message_rows.get(mid)
+        sid = (message.get("sessionID") or message.get("sessionId")) if isinstance(message, dict) else None
+        if isinstance(sid, str):
             parts_by_session.setdefault(sid, []).append(path)
     for path in sorted(session_root.rglob("*.json")):
         try:
@@ -204,12 +401,32 @@ def _discover_opencode(root: Path) -> Iterable[Session]:
             continue
         sid = meta.get("id") if isinstance(meta, dict) else None
         sid = sid if isinstance(sid, str) else path.stem
-        related = [*messages_by_session.get(sid, []), *parts_by_session.get(sid, [])]
-        yield read_session(path, "opencode", sid, related)
+        entries = messages_by_session.get(sid, [])
+        related = [message_path for _, message_path in entries] + parts_by_session.get(sid, [])
+        session = read_session(path, "opencode", sid, related)
+        session.first_prompt = _opencode_first_prompt(entries, message_rows, parts_by_message)
+        session.signals = _brief_signals(session.first_prompt)
+        yield session
 
 
-def discover(roots: dict[str, Path]) -> Iterable[Session]:
-    """Discover only within explicit roots; caller chooses whether roots are real or synthetic."""
+def _empty_store_stats() -> dict[str, int]:
+    return {
+        "transcripts_discovered": 0,
+        "skipped_subagent": 0,
+        "skipped_child": 0,
+        "duplicate_ids": 0,
+        "duplicate_transcripts": 0,
+    }
+
+
+def discover(roots: dict[str, Path], stats: dict[str, dict[str, int]] | None = None) -> Iterable[Session]:
+    """Discover only within explicit roots; caller chooses whether roots are real or synthetic.
+
+    Duplicate conversation ids inside a store collapse to one session row. The
+    stats dict (when given) is filled with the discovery counts the report needs
+    to reconcile with the sessions.
+    """
+    stats = stats if stats is not None else {}
     patterns = {
         "claude": ("*.jsonl",),
         "codex": ("rollout-*.jsonl",),
@@ -217,8 +434,28 @@ def discover(roots: dict[str, Path]) -> Iterable[Session]:
         "cursor": ("*.jsonl",),
     }
     for store, root in roots.items():
+        store_stats = stats.setdefault(store, _empty_store_stats())
+        seen: set[str] = set()
+        duplicate_seen: set[str] = set()
+
+        def accept(session: Session) -> bool:
+            sid = session.session_id
+            if not sid:
+                return True
+            if sid in seen:
+                store_stats["duplicate_transcripts"] += 1
+                if sid not in duplicate_seen:
+                    duplicate_seen.add(sid)
+                    store_stats["duplicate_ids"] += 1
+                return False
+            seen.add(sid)
+            return True
+
         if store == "opencode":
-            yield from _discover_opencode(root)
+            for session in _discover_opencode(root):
+                store_stats["transcripts_discovered"] += 1
+                if accept(session):
+                    yield session
             continue
         if store not in patterns or not root.is_dir():
             continue
@@ -226,38 +463,17 @@ def discover(roots: dict[str, Path]) -> Iterable[Session]:
         for pattern in patterns[store]:
             found.update(root.rglob(pattern))
         for path in sorted(found):
+            store_stats["transcripts_discovered"] += 1
+            if store == "claude" and "subagents" in path.parts:
+                store_stats["skipped_subagent"] += 1
+                continue
             if store == "cursor" and "subagents" in path.parts:
+                store_stats["skipped_child"] += 1
                 continue
             sid = path.parent.name if store == "cursor" and path.parent.name != path.stem else path.stem
             session = read_session(path, store, sid)
-            if session:
+            if session and accept(session):
                 yield session
-
-
-def parse_queue_logs(root: Path) -> dict[str, dict[str, str]]:
-    """Extract launch truth from queue-log filenames and optional status mapping."""
-    truth: dict[str, dict[str, str]] = {}
-    if not root.is_dir():
-        return truth
-    for path in sorted(root.rglob("par-*.log")):
-        match = QUEUE_FILE_RE.match(path.name)
-        if not match:
-            continue
-        plan, phase_or_action, harness = match.groups()
-        kind = phase_or_action.lower() if phase_or_action.lower() in {"design", "refine", "build", "review", "fix", "close-out", "sync", "escalation", "triage", "research"} else ""
-        phase = phase_or_action if phase_or_action.isdigit() else ""
-        try:
-            body = path.read_text(encoding="utf-8", errors="replace")[:200_000]
-        except OSError:
-            body = ""
-        kind_match = re.search(r"(?i)\b(?:kind|action)\s*[:=]\s*(design|refine|build|review|fix|close-out|sync|escalation|triage|research)\b", body)
-        if kind_match:
-            kind = kind_match.group(1).lower()
-        # A queue run's own transcript path or UUID can be included by harness wrappers.
-        ids = re.findall(r"(?:session_id|sessionID|conversation_id)\s*[=:]\s*[\"']?([A-Za-z0-9._:-]{1,200})", body)
-        for session_id in ids:
-            truth[session_id] = {"plan": plan, "phase": phase, "kind": kind, "harness": harness.lower(), "queue_log": path.name}
-    return truth
 
 
 def _scrub_evidence(text: str, limit: int = 300) -> str:
@@ -267,84 +483,143 @@ def _scrub_evidence(text: str, limit: int = 300) -> str:
     return text[:limit]
 
 
-def label_session(session: Session, repo: str = "", queue_truth: dict[str, dict[str, str]] | None = None) -> Label:
+def _identity(text: str) -> tuple[str, str, str, str]:
+    plans = [m.group(1).lower() for m in PLAN_RE.finditer(text)]
+    phase_match = PHASE_RE.search(text)
+    issue = ISSUE_RE.search(text)
+    pr = PR_RE.search(text)
+    return (
+        plans[0] if plans else "",
+        phase_match.group(1) if phase_match else "",
+        issue.group(1) if issue else "",
+        pr.group(1) if pr else "",
+    )
+
+
+def _brief_identity(text: str) -> tuple[str, str]:
+    match = BRIEF_RE.search(text)
+    if not match:
+        return "", ""
+    plan = match.group(1).lower()
+    filename = match.group(2).rsplit("/", 1)[-1]
+    phase_match = re.match(r"(\d+)-", filename)
+    return plan, phase_match.group(1) if phase_match else ""
+
+
+def label_session(session: Session, repo: str = "") -> Label:
     if session.unreadable:
-        return Label(session.session_id, session.store, "unresolved",
+        return Label(session.session_id, session.store, "unreadable",
                      evidence="transcript unreadable or has no parseable records",
                      source_file=session.path)
     if not session.session_id:
-        # Keep identity failures visible without creating a label that a later
-        # pass could complete and attach to an invented conversation ID.
-        return Label("", session.store, "unresolved",
+        # Keep identity failures visible without creating a label that could be
+        # enqueued against an invented conversation ID.
+        return Label("", session.store, "unreadable",
                      evidence="missing or invalid session_meta conversation ID",
                      source_file=session.path)
-    truth = (queue_truth or {}).get(session.session_id, {})
-    haystack = "\n".join((session.text[:200_000], session.cwd, session.branch, *session.files))
-    plans = [m.group(1).lower() for m in PLAN_RE.finditer(haystack)]
-    plan = truth.get("plan") or (plans[0] if plans else "")
-    phase_match = PHASE_RE.search(haystack)
-    phase = truth.get("phase") or (phase_match.group(1) if phase_match else "")
-    issue = ISSUE_RE.search(session.text)
-    pr = PR_RE.search(session.text)
-    action: dict[str, str] = {}
-    evidence_parts: list[str] = []
-    if plan and repo:
-        action.update(subject_type="plan", subject_id=f"{repo.lower()}:plan/{plan.lower()}")
-        evidence_parts.append("plan:" + ("queue-log" if truth else "transcript/cwd/files"))
-    elif issue and repo:
-        action.update(subject_type="github", subject_id=f"{repo.lower()}#{issue.group(1)}")
-        evidence_parts.append("issue:prompt")
-    if phase:
-        action["phase"] = str(int(phase))
-        evidence_parts.append("phase:" + ("queue-log" if truth else "transcript"))
-    if pr:
-        action["pr"] = pr.group(1)
-        evidence_parts.append("pr:prompt")
-    kind = truth.get("kind", "")
-    if kind:
-        action["kind"] = kind
-        evidence_parts.append("kind:queue-log")
-    if repo:
-        action["repo"] = repo.lower()
-    # Prompt snippets are evidence only after scrub; content itself is not exported.
-    prompt = next((line[:2048] for line in session.text.splitlines() if line.strip()), "")
-    evidence = _scrub_evidence("; ".join(evidence_parts + ([prompt] if prompt else [])))
-    complete = bool(action.get("subject_type") and action.get("subject_id") and action.get("kind"))
-    status = "complete" if complete else ("partial" if action.get("subject_id") else "unresolved")
-    if truth:
-        confidence = 1.0
-    elif action.get("subject_id"):
-        confidence = 0.65 if phase else 0.55
+
+    classes = {signal.signal_class for signal in session.signals}
+    sources = ",".join(sorted({f"{signal.source}:{signal.ident}" for signal in session.signals}))
+    if len(classes) > 1:
+        return Label(session.session_id, session.store, "multi_signal",
+                     evidence=_scrub_evidence(f"signal:{sources}; status:multi_signal"),
+                     source_file=session.path)
+    if not classes:
+        return Label(session.session_id, session.store, "no_signal",
+                     evidence=_scrub_evidence("signal:none; status:no_signal"),
+                     source_file=session.path)
+
+    signal_class = next(iter(classes))
+    chosen = next(signal for signal in session.signals if signal.signal_class == signal_class)
+    plan = phase = issue = pr = ""
+    subject_source = ""
+    if signal_class == "brief":
+        for signal in session.signals:
+            if signal.signal_class != "brief":
+                continue
+            candidate_plan, candidate_phase = _brief_identity(signal.text)
+            if candidate_plan:
+                plan, phase, subject_source = candidate_plan, candidate_phase, "signal"
+                break
     else:
-        confidence = 0.0
-    return Label(session.session_id, session.store, status, action, evidence, confidence, truth.get("queue_log", ""))
+        for signal in session.signals:
+            if signal.signal_class != signal_class:
+                continue
+            candidate_plan, candidate_phase, candidate_issue, candidate_pr = _identity(signal.text)
+            if candidate_plan or candidate_issue:
+                plan, phase, issue, pr = candidate_plan, candidate_phase, candidate_issue, candidate_pr
+                subject_source = "signal"
+                break
+    if not subject_source:
+        haystack = "\n".join((session.text[:200_000], session.cwd, session.branch, *session.files))
+        candidate_plan, candidate_phase, candidate_issue, candidate_pr = _identity(haystack)
+        if candidate_plan or candidate_issue:
+            plan, phase, issue, pr = candidate_plan, candidate_phase, candidate_issue, candidate_pr
+            subject_source = "fallback"
+
+    action: dict[str, str] = {}
+    if plan and repo:
+        action.update(subject_type="plan", subject_id=f"{repo.lower()}:plan/{plan}")
+    elif issue and repo:
+        action.update(subject_type="github", subject_id=f"{repo.lower()}#{issue}")
+    if action:
+        action["kind"] = chosen.kind
+        if phase:
+            action["phase"] = str(int(phase))
+        if pr:
+            action["pr"] = pr
+        if repo:
+            action["repo"] = repo.lower()
+        confidence = 1.0 if subject_source == "signal" else 0.65
+        return Label(session.session_id, session.store, "labelled", action,
+                     _scrub_evidence(f"signal:{chosen.source}:{chosen.ident}; subject:{subject_source}"),
+                     confidence, session.path, signal_class)
+    return Label(session.session_id, session.store, "no_subject",
+                 evidence=_scrub_evidence(f"signal:{chosen.source}:{chosen.ident}; subject:none"),
+                 source_file=session.path, signal_class=signal_class)
 
 
-def score_gold(labels: Iterable[Label], truth: dict[str, dict[str, str]]) -> tuple[int, int, float]:
-    total = correct = 0
+def _empty_report_row() -> dict:
+    return {
+        "sessions": 0,
+        "labelled": 0,
+        "multi_signal": 0,
+        "no_signal": 0,
+        "no_subject": 0,
+        "unreadable": 0,
+        "labelled_by_signal": {signal_class: 0 for signal_class in SIGNAL_CLASSES},
+        "skipped_subagent": 0,
+        "skipped_child": 0,
+        "duplicate_ids": 0,
+        "duplicate_transcripts": 0,
+        "transcripts_discovered": 0,
+    }
+
+
+def summarize(labels: list[Label], stats: dict[str, dict[str, int]] | None = None) -> tuple[dict[str, dict], dict]:
+    stats = stats or {}
+    stores: dict[str, dict] = {}
     for label in labels:
-        expected = truth.get(label.session_id)
-        if not expected or not label.action.get("subject_id"):
-            continue
-        total += 1
-        subject_id = label.action.get("subject_id", "")
-        if (label.action.get("subject_type") == "plan"
-                and subject_id.endswith(":plan/" + expected.get("plan", "\0"))
-                and label.action.get("phase", "") == (str(int(expected["phase"])) if expected.get("phase") else "")):
-            correct += 1
-    return correct, total, (correct / total if total else 0.0)
-
-
-def is_flash_analysis(session: Session) -> bool:
-    return bool(FLASH_RE.search(session.text) and re.search(r"analysis|rating|classification", session.text, re.I))
-
-
-def summarize(labels: list[Label]) -> dict[str, dict[str, int]]:
-    out: dict[str, dict[str, int]] = {}
-    for label in labels:
-        row = out.setdefault(label.store, {"complete": 0, "partial": 0, "unresolved": 0, "excluded": 0})
-        row[label.status] += 1
-    return out
+        row = stores.setdefault(label.store, _empty_report_row())
+        row["sessions"] += 1
+        if label.status in STATUSES:
+            row[label.status] += 1
+        if label.status == "labelled" and label.signal_class in row["labelled_by_signal"]:
+            row["labelled_by_signal"][label.signal_class] += 1
+    for store, store_stats in stats.items():
+        row = stores.setdefault(store, _empty_report_row())
+        for key in ("skipped_subagent", "skipped_child", "duplicate_ids",
+                    "duplicate_transcripts", "transcripts_discovered"):
+            row[key] = store_stats.get(key, 0)
+    total = _empty_report_row()
+    for row in stores.values():
+        for key in ("sessions", "labelled", "multi_signal", "no_signal", "no_subject", "unreadable",
+                    "skipped_subagent", "skipped_child", "duplicate_ids",
+                    "duplicate_transcripts", "transcripts_discovered"):
+            total[key] += row[key]
+        for signal_class in SIGNAL_CLASSES:
+            total["labelled_by_signal"][signal_class] += row["labelled_by_signal"][signal_class]
+    return stores, total
 
 
 def write_labels(path: Path, labels: list[Label]) -> None:
@@ -360,10 +635,10 @@ def enqueue(labels: Iterable[Label], queue_dir: str | None = None) -> int:
     count = 0
     # One action per conversation: the same ID can come from two transcript files
     # (Cursor files one chat under two project directories), so only the first
-    # complete label for an ID is emitted.
+    # labelled row for an ID is emitted.
     seen: set[str] = set()
     for label in labels:
-        if label.status != "complete" or not label.session_id or label.session_id in seen:
+        if label.status != "labelled" or not label.session_id or label.session_id in seen:
             continue
         seen.add(label.session_id)
         yakka.EnqueueSessionAction(
@@ -382,12 +657,11 @@ def enqueue(labels: Iterable[Label], queue_dir: str | None = None) -> int:
 def parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--root", action="append", default=[], metavar="STORE=PATH", help="explicit store root; repeat for claude/codex/opencode/cursor")
-    p.add_argument("--queue-logs", type=Path)
     p.add_argument("--repo", default="", help="owner/repo for inferred subjects")
     p.add_argument("--labels", type=Path, default=Path("session-labels.jsonl"))
     p.add_argument("--server-fact-count", type=int, help="offline count supplied from a prior GET /v1/actions snapshot")
     p.add_argument("--server-action-ids", type=Path, help="newline-delimited conversation IDs from a prior GET /v1/actions snapshot")
-    p.add_argument("--enqueue", action="store_true", help="write complete labels to the local Yakka queue; never sends network traffic")
+    p.add_argument("--enqueue", action="store_true", help="write labelled sessions to the local Yakka queue; never sends network traffic")
     p.add_argument("--queue-dir", help="queue directory override for isolated use")
     return p
 
@@ -402,32 +676,24 @@ def main(argv: list[str] | None = None) -> int:
         if name not in {"claude", "codex", "opencode", "cursor"}:
             raise SystemExit(f"unknown store: {name}")
         roots[name] = Path(path)
-    sessions = discover(roots)
-    truth = parse_queue_logs(args.queue_logs) if args.queue_logs else {}
+    stats: dict[str, dict[str, int]] = {}
     labels: list[Label] = []
-    excluded: list[Label] = []
-    session_count = 0
-    unreadable_count = 0
-    gold: list[Label] = []
-    for session in sessions:
-        session_count += 1
-        unreadable_count += session.unreadable
-        if session.store == "opencode" and is_flash_analysis(session):
-            excluded.append(Label(session.session_id, session.store, "excluded", evidence="automated Flash analysis excluded"))
-            continue
-        label = label_session(session, args.repo, truth)
-        labels.append(label)
-        if session.session_id in truth:
-            gold.append(label_session(session, args.repo, {}))
-    report = summarize(labels)
-    for label in excluded:
-        report.setdefault(label.store, {"complete": 0, "partial": 0, "unresolved": 0, "excluded": 0})["excluded"] += 1
+    for session in discover(roots, stats):
+        labels.append(label_session(session, args.repo))
+    stores, total = summarize(labels, stats)
     if args.labels:
-        write_labels(args.labels, [*labels, *excluded])
-    correct, total, agreement = score_gold(gold, truth)
+        write_labels(args.labels, labels)
     server_ids = set(args.server_action_ids.read_text(encoding="utf-8").splitlines()) if args.server_action_ids else set()
-    id_counts = Counter(label.session_id for label in labels if label.session_id)
-    result = {"stores": report, "sessions": session_count, "unreadable": unreadable_count, "duplicate_conversation_ids": sum(1 for n in id_counts.values() if n > 1), "gold":{"correct": correct, "labelled": total, "agreement": agreement}, "coverage": {"complete": sum(r["complete"] for r in report.values()), "incomplete": sum(r["partial"] + r["unresolved"] for r in report.values())}, "label_file": str(args.labels), "server_fact_count": args.server_fact_count, "labelled_sessions_with_server_facts": sum(1 for label in labels if label.action.get("subject_id") and label.session_id in server_ids) if args.server_action_ids else None}
+    result = {
+        "stores": stores,
+        "total": total,
+        "label_file": str(args.labels),
+        "server_fact_count": args.server_fact_count,
+        "labelled_sessions_with_server_facts": (
+            sum(1 for label in labels if label.status == "labelled" and label.session_id in server_ids)
+            if args.server_action_ids else None
+        ),
+    }
     if args.enqueue:
         result["emitted"] = enqueue(labels, args.queue_dir)
     print(json.dumps(result, sort_keys=True))
