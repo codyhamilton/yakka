@@ -528,6 +528,49 @@ class RelayTests(unittest.TestCase):
             self.assertEqual(spool_calls, 1)
         self.assertEqual(sorted(item["outcome"] for item in outcomes), ["covered", "enqueued"])
 
+    def test_changed_file_can_be_enqueued_again_within_spool_dedupe_window(self) -> None:
+        repo = os.path.join(self.temp.name, "dedupe-enqueue-repo")
+        os.makedirs(repo)
+        target = os.path.join(repo, "design.md")
+        Path(target).write_text("first version\n")
+        subprocess.run(["git", "-C", repo, "init", "-q"], check=True)
+        subprocess.run(["git", "-C", repo, "-c", "user.name=t", "-c", "user.email=t@x", "add", "design.md"], check=True)
+        subprocess.run(["git", "-C", repo, "-c", "user.name=t", "-c", "user.email=t@x", "commit", "-qm", "fixture"], check=True)
+        request = {"params": {"arguments": {"path": target}}}
+
+        def current_guards() -> dict:
+            _, _, guards, _ = yakka._mcp_context_call(
+                json.dumps(request).encode(), "tools/call", request, action_declaration(),
+                self.queue, getwd=lambda: (repo, None),
+            )
+            return guards
+
+        env_patch = mock.patch.dict(os.environ, {"YAKKA_HOOKLOG_KICK": "0"})
+        with env_patch:
+            first = yakka._mcp_enqueue(current_guards(), target, self.queue, threading.Event(), time.monotonic() + 5, "first")
+            self.assertEqual(first["outcome"], "enqueued")
+
+            entries = [name for name in os.listdir(self.queue) if name.endswith(".evt")]
+            self.assertEqual(len(entries), 1)
+            entry_mtime = os.stat(os.path.join(self.queue, entries[0])).st_mtime
+            Path(target).write_text("second version, with a different hash\n")
+            target_stat = os.stat(target)
+            new_mtime = max(time.time_ns(), int((entry_mtime + 1) * 1_000_000_000))
+            os.utime(target, ns=(target_stat.st_atime_ns, new_mtime))
+
+            second = yakka._mcp_enqueue(current_guards(), target, self.queue, threading.Event(), time.monotonic() + 5, "second")
+        self.assertEqual(second["outcome"], "enqueued")
+        queued = []
+        for name in os.listdir(self.queue):
+            if not name.endswith(".evt"):
+                continue
+            with open(os.path.join(self.queue, name), "rb") as fh:
+                parsed = yakka._parse_file(yakka.File(Name=name, Data=fh.read()))
+            if not parsed.bad and parsed.event == "artifact_snapshot":
+                queued.append(parsed)
+        self.assertEqual(len(queued), 2)
+        self.assertEqual([item.event for item in queued], ["artifact_snapshot", "artifact_snapshot"])
+
 
 def action_declaration() -> dict:
     return {"v": 2, "rev": "0123456789abcdef", "local_actions": [yakka._MCP_ACTION], "context": [

@@ -3150,6 +3150,7 @@ def _mcp_enqueue(guards: dict[str, Any], resolved: Any, queue_dir: str, cancelle
         env = os.environ.copy()
         env["YAKKA_QUEUE"] = queue_dir
         env["YAKKA_SPOOL_PRINT"] = "1"
+        env["YAKKA_SPOOL_DEDUPE_SECS"] = "0"
         timeout = max(0.05, min(10.0, deadline - time.monotonic()))
         if cancelled.is_set() or time.monotonic() >= deadline:
             return failed("effect_unknown", "unknown")
