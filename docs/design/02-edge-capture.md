@@ -36,7 +36,21 @@ The queue is transit, not storage: a file is deleted once the remote accepts it.
   ID with a bounded text match on the payload; a payload without one is not spooled (design 1,
   decision 4).
 - `--harness` is a literal from the adapter. `auto` is removed.
+- Session-start adapters may add the six raw `YAKKA_ACTION_*` values to the envelope's `action`
+  object. `spool.sh` and the OpenCode plugin read them only on `SessionStart`/`sessionStart` or
+  `session.created`, strip control characters, and retain an over-256-byte value through the
+  first character boundary at or beyond byte 257. They do no vocabulary or semantic validation;
+  the drain emits the regular `hook_event` plus a `session_action` fact. A tag-only
+  `yakka.session_action` queue file emits only that fact.
+- The back-fill writer in `plugins/yakka/client/yakka.py` writes a tag-only envelope with an empty
+  payload, top-level `conversation_id`, `source`, `method`, `confidence`, `evidence` and raw action
+  strings. Its content-derived event filename makes an identical enqueue repeatable; changed label
+  content gets a distinct fact id. It only writes under the Yakka queue and never sends a request.
 - Never snapshots a file and never fails: exit 0 always.
+
+The environment values are set by `harness pick` on the launched process (or manually for an
+ad-hoc session), never by the plugin. No non-empty action values means no action fact and preserves
+the existing capture path. Values do not participate in client endpoint/key resolution.
 
 ## Drain
 

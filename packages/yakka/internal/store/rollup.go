@@ -71,7 +71,7 @@ const convRollupUpsert = `INSERT INTO conversations_hourly
 // convRollupFill refills conversations_hourly from the base facts.
 const convRollupFill = `INSERT INTO conversations_hourly
 	SELECT CAST(ts/3600 AS INTEGER)*3600, harness, repo_id, model, conversation_id, count(*)
-	FROM facts
+	FROM facts WHERE type!='session_action'
 	GROUP BY CAST(ts/3600 AS INTEGER)*3600, harness, repo_id, model, conversation_id`
 
 // convRollupColumns are the facts columns convRollupFill selects. A pre-migration-4 layout (which a
@@ -152,13 +152,13 @@ var facetDims = []struct {
 // tool branch restricted to hook_event as the base histogram is. It is the aggregate the open-time
 // backfill rebuilds the table from.
 const facetRollupFill = `INSERT INTO facets_hourly (dim,hour,value,n)
-	SELECT 'repo_id', CAST(ts/3600 AS INTEGER)*3600, repo_id, count(*) FROM facts GROUP BY 2,3
-	UNION ALL SELECT 'harness', CAST(ts/3600 AS INTEGER)*3600, harness, count(*) FROM facts GROUP BY 2,3
-	UNION ALL SELECT 'plan', CAST(ts/3600 AS INTEGER)*3600, plan, count(*) FROM facts GROUP BY 2,3
-	UNION ALL SELECT 'event', CAST(ts/3600 AS INTEGER)*3600, event, count(*) FROM facts GROUP BY 2,3
-	UNION ALL SELECT 'model', CAST(ts/3600 AS INTEGER)*3600, model, count(*) FROM facts GROUP BY 2,3
-	UNION ALL SELECT 'norm_event', CAST(ts/3600 AS INTEGER)*3600, norm_event, count(*) FROM facts GROUP BY 2,3
-	UNION ALL SELECT 'kind', CAST(ts/3600 AS INTEGER)*3600, kind, count(*) FROM facts GROUP BY 2,3
+	SELECT 'repo_id', CAST(ts/3600 AS INTEGER)*3600, repo_id, count(*) FROM facts WHERE type!='session_action' GROUP BY 2,3
+	UNION ALL SELECT 'harness', CAST(ts/3600 AS INTEGER)*3600, harness, count(*) FROM facts WHERE type!='session_action' GROUP BY 2,3
+	UNION ALL SELECT 'plan', CAST(ts/3600 AS INTEGER)*3600, plan, count(*) FROM facts WHERE type!='session_action' GROUP BY 2,3
+	UNION ALL SELECT 'event', CAST(ts/3600 AS INTEGER)*3600, event, count(*) FROM facts WHERE type!='session_action' GROUP BY 2,3
+	UNION ALL SELECT 'model', CAST(ts/3600 AS INTEGER)*3600, model, count(*) FROM facts WHERE type!='session_action' GROUP BY 2,3
+	UNION ALL SELECT 'norm_event', CAST(ts/3600 AS INTEGER)*3600, norm_event, count(*) FROM facts WHERE type!='session_action' GROUP BY 2,3
+	UNION ALL SELECT 'kind', CAST(ts/3600 AS INTEGER)*3600, kind, count(*) FROM facts WHERE type!='session_action' GROUP BY 2,3
 	UNION ALL SELECT 'tool', CAST(ts/3600 AS INTEGER)*3600, tool, count(*) FROM facts WHERE type='hook_event' GROUP BY 2,3`
 
 // facetRollupColumns are the facts columns facetRollupFill selects. A pre-migration-4 layout (which

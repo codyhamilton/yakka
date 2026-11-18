@@ -154,7 +154,7 @@ func validate(obj map[string]any) string {
 	typ, _ := str(obj, "type")
 	conv, _ := str(obj, "conversation_id")
 	switch typ {
-	case "hook_event", "artifact_version", "commit", "review_run", "review_usage":
+	case "hook_event", "artifact_version", "commit", "session_action", "review_run", "review_usage":
 	default:
 		return invalid("unknown type")
 	}

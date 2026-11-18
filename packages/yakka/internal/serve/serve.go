@@ -218,11 +218,13 @@ type Options struct {
 	DisableWorker      bool          // tests: leave pending/ alone
 	PollInterval       time.Duration // default 3s
 	GroupWindow        time.Duration
-	ScreenStep         ScreenFunc     // default: promote as unscreened
-	Checks             *scorer.Checks // loaded checks for /v1/checks; nil = none loaded
-	ScreenBackoff      time.Duration  // first wait after an unreachable scorer; default 5s, doubles to 5 min
-	GitHubHTTPBase     string         // tests: mock GitHub authorize/token/api base URL
-	ReviewEndpoint     string         // tests: fake provider endpoint; production uses the fixed URL
+	ScreenStep         ScreenFunc                                         // default: promote as unscreened
+	Checks             *scorer.Checks                                     // loaded checks for /v1/checks; nil = none loaded
+	ScreenBackoff      time.Duration                                      // first wait after an unreachable scorer; default 5s, doubles to 5 min
+	GitHubHTTPBase     string                                             // tests: mock GitHub authorize/token/api base URL
+	ActionPollInterval time.Duration                                      // tests may shorten action projection polling; default 10s
+	ActionProject      func(context.Context, *store.Tenant, string) error // tests inject isolated failures
+	ReviewEndpoint     string                                             // tests: fake provider endpoint; production uses the fixed URL
 	ReviewReservations *review.Reservations
 	// LifecycleFault is a test-only seam that stops a reset/delete at a named
 	// cleanup stage so crash/restart resume can be exercised. Production leaves
@@ -342,6 +344,47 @@ func (s *Server) startWorkerLocked(ts *tenantState) {
 	ts.workerDone = done
 	s.wg.Add(1)
 	go s.worker(ts, ts.stop, done)
+	s.wg.Add(1)
+	go s.actionWorker(ts)
+}
+
+func (s *Server) actionWorker(ts *tenantState) {
+	defer s.wg.Done()
+	interval := s.opts.ActionPollInterval
+	if interval <= 0 || interval > 10*time.Second {
+		interval = 10 * time.Second
+	}
+	tick := time.NewTicker(interval)
+	defer tick.Stop()
+	for {
+		s.projectActions(ts)
+		select {
+		case <-s.stop:
+			return
+		case <-tick.C:
+		}
+	}
+}
+
+func (s *Server) projectActions(ts *tenantState) {
+	rows, err := ts.t.PendingActionProjections(s.ctx, 100)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "yakka serve: action projection list: %v\n", err)
+		return
+	}
+	for _, row := range rows {
+		if s.ctx.Err() != nil {
+			return
+		}
+		step := s.opts.ActionProject
+		if step == nil {
+			step = func(ctx context.Context, t *store.Tenant, hash string) error { return t.ProjectAction(ctx, hash) }
+		}
+		if err := step(s.ctx, ts.t, row.Hash); err != nil {
+			_ = ts.t.FailActionProjection(s.ctx, row.Hash, err)
+			fmt.Fprintf(os.Stderr, "yakka serve: action projection %s: %v\n", row.Hash, err)
+		}
+	}
 }
 
 const maxBackoff = 5 * time.Minute
@@ -550,6 +593,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/v1/mcp", s.method(http.MethodPost, s.mcp))
 	mux.HandleFunc("/v1/whoami", s.method(http.MethodGet, s.whoami))
 	mux.HandleFunc("/v1/ingest", s.method(http.MethodPost, s.auth(s.ingest)))
+	mux.HandleFunc("/v1/actions", s.method(http.MethodGet, s.auth(s.actions)))
 	mux.HandleFunc("/v1/reviews", s.reviewsRoute)
 	mux.HandleFunc("/v1/artifacts", s.method(http.MethodGet, s.auth(s.artifacts)))
 	mux.HandleFunc("/v1/checks", s.method(http.MethodGet, s.auth(s.checks)))

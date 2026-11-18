@@ -26,7 +26,7 @@ type MeasureSpec struct {
 //	| `artifact_versions`, `distinct_content` | `harness`, `repo_id`, `kind`, `plan`, `source`, `conversation_id` |
 //	| `commits` | `harness`, `repo_id`, `conversation_id` |
 //	| `rejections` | `stage` |
-//	| `model_calls`, `tokens_*`, `cost_usd`, `unpriced_calls` | `harness`, `repo_id`, `model`, `conversation_id` |
+//	| `model_calls`, `tokens_*`, `cost_usd`, `unpriced_calls`, `sessions` | `harness`, `repo_id`, `model`, `conversation_id`, `action_*` |
 //
 // Every measure also takes hour_of_day and weekday, appended by Measures.
 var measureMatrix = []MeasureSpec{
@@ -44,11 +44,12 @@ var measureMatrix = []MeasureSpec{
 	{Name: "tokens_reasoning", Unit: "tokens", Dims: []string{"harness", "repo_id", "model", "conversation_id"}},
 	{Name: "cost_usd", Unit: "usd", Dims: []string{"harness", "repo_id", "model", "conversation_id"}},
 	{Name: "unpriced_calls", Unit: "count", Dims: []string{"harness", "repo_id", "model", "conversation_id"}},
+	{Name: "sessions", Unit: "count", Dims: []string{"harness", "repo_id", "model", "conversation_id"}},
 }
 
 var usageMeasures = map[string]bool{
 	"model_calls": true, "tokens_in": true, "tokens_out": true, "tokens_cache_read": true,
-	"tokens_cache_write": true, "tokens_reasoning": true, "cost_usd": true, "unpriced_calls": true,
+	"tokens_cache_write": true, "tokens_reasoning": true, "cost_usd": true, "unpriced_calls": true, "sessions": true,
 }
 
 // Measures returns the matrix in the design's order; every measure's Dims ends with
@@ -56,8 +57,11 @@ var usageMeasures = map[string]bool{
 func Measures() []MeasureSpec {
 	out := make([]MeasureSpec, 0, len(measureMatrix))
 	for _, m := range measureMatrix {
-		dims := make([]string, 0, len(m.Dims)+2)
+		dims := make([]string, 0, len(m.Dims)+8)
 		dims = append(dims, m.Dims...)
+		if usageMeasures[m.Name] {
+			dims = append(dims, "action_kind", "action_plan", "action_phase", "action_subject", "action_pr", "action_source")
+		}
 		dims = append(dims, "hour_of_day", "weekday")
 		out = append(out, MeasureSpec{Name: m.Name, Unit: m.Unit, Dims: dims})
 	}
@@ -67,11 +71,32 @@ func Measures() []MeasureSpec {
 var Buckets = []string{"none", "hour", "day", "week", "month"}
 
 type QueryParams struct {
-	Measure string
-	Dims    []string
-	Bucket  string
-	Top     int
+	Measure        string
+	Dims           []string
+	Bucket         string
+	Top            int
+	ActionKinds    []string
+	ActionPlans    []string
+	ActionPhases   []string
+	ActionSubjects []string
+	ActionPRs      []string
+	ActionSources  []string
 }
+
+func (p QueryParams) hasActionFilters() bool {
+	return len(p.ActionKinds)+len(p.ActionPlans)+len(p.ActionPhases)+len(p.ActionSubjects)+len(p.ActionPRs)+len(p.ActionSources) > 0
+}
+
+func isActionDim(dim string) bool {
+	switch dim {
+	case "action_kind", "action_plan", "action_phase", "action_subject", "action_pr", "action_source":
+		return true
+	}
+	return false
+}
+
+// IsActionDimension reports whether dim is one of the cost-by-work query dimensions.
+func IsActionDimension(dim string) bool { return isActionDim(dim) }
 
 type QueryRow struct {
 	T string
@@ -118,8 +143,8 @@ func measureByName(name string) (measureDef, bool) {
 			rollup: "hook_events_hourly", rollupType: "hook_event",
 			rollupCols: []string{"harness", "repo_id", "norm_event", "event", "tool", "conversation_id"}}, true
 	case "conversations":
-		return measureDef{table: "facts", distinct: "conversation_id", dims: []string{"harness", "repo_id", "model"},
-			rollup:     "conversations_hourly",
+		return measureDef{table: "facts", pred: "type!='session_action'", distinct: "conversation_id", dims: []string{"harness", "repo_id", "model"},
+			rollup: "conversations_hourly", rollupType: "legacy_fact",
 			rollupCols: []string{"harness", "repo_id", "model", "conversation_id"}}, true
 	case "artifact_versions":
 		return measureDef{table: "facts", pred: "type='artifact_version'", dims: []string{"harness", "repo_id", "kind", "plan", "source", "conversation_id"}}, true
@@ -138,6 +163,9 @@ func measureByName(name string) (measureDef, bool) {
 
 func (d measureDef) hasDim(dim string) bool {
 	if dim == "hour_of_day" || dim == "weekday" {
+		return true
+	}
+	if d.usage && isActionDim(dim) {
 		return true
 	}
 	for _, x := range d.dims {
@@ -239,6 +267,9 @@ func (t *Tenant) Query(ctx context.Context, f AnalyticsFilter, p QueryParams) (Q
 	if !ok {
 		return QueryResult{}, fmt.Errorf("unknown measure %q", p.Measure)
 	}
+	if p.hasActionFilters() && !def.usage {
+		return QueryResult{}, fmt.Errorf("action dimensions and filters unsupported for %s: %w", p.Measure, ErrUnsupported)
+	}
 	if def.usage {
 		if usageQuery == nil {
 			return QueryResult{}, errors.New("measure not available")
@@ -272,6 +303,15 @@ func (t *Tenant) Query(ctx context.Context, f AnalyticsFilter, p QueryParams) (Q
 		top = 100
 	}
 	return t.queryMeasure(ctx, f, p, def, top, bucket)
+}
+
+func hasActionDim(dims []string) bool {
+	for _, d := range dims {
+		if isActionDim(d) {
+			return true
+		}
+	}
+	return false
 }
 
 func (t *Tenant) queryMeasure(ctx context.Context, f AnalyticsFilter, p QueryParams, def measureDef, top int, bucket string) (QueryResult, error) {

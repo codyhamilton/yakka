@@ -26,6 +26,11 @@ func TestQueryMeasuresMatrix(t *testing.T) {
 		{Name: "tokens_reasoning", Unit: "tokens", Dims: append(append([]string{}, ud...), "hour_of_day", "weekday")},
 		{Name: "cost_usd", Unit: "usd", Dims: append(append([]string{}, ud...), "hour_of_day", "weekday")},
 		{Name: "unpriced_calls", Unit: "count", Dims: append(append([]string{}, ud...), "hour_of_day", "weekday")},
+		{Name: "sessions", Unit: "count", Dims: append(append([]string{}, ud...), "hour_of_day", "weekday")},
+	}
+	actionDims := []string{"action_kind", "action_plan", "action_phase", "action_subject", "action_pr", "action_source"}
+	for i := 6; i < len(want); i++ {
+		want[i].Dims = append(want[i].Dims[:len(want[i].Dims)-2], append(actionDims, want[i].Dims[len(want[i].Dims)-2:]...)...)
 	}
 	if got := Measures(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("matrix mismatch:\n got %#v\nwant %#v", got, want)

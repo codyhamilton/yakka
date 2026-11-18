@@ -36,7 +36,7 @@ func knownMeasure(name string) bool {
 	return false
 }
 
-// analyticsQuery answers one measure × 0..2 dims × bucket × top-N question.
+// analyticsQuery answers one measure × dimensions × bucket × top-N question.
 func (s *Server) analyticsQuery(w http.ResponseWriter, r *http.Request, _ string, ts *tenantState) {
 	q := r.URL.Query()
 	measure := q.Get("measure")
@@ -49,7 +49,17 @@ func (s *Server) analyticsQuery(w http.ResponseWriter, r *http.Request, _ string
 		return
 	}
 	dims := q["dim"]
-	if len(dims) > 2 {
+	allActionDims := len(dims) > 0
+	for _, d := range dims {
+		if !store.IsActionDimension(d) {
+			allActionDims = false
+		}
+	}
+	if allActionDims && len(dims) > 3 {
+		errJSON(w, 400, "at most three action dims")
+		return
+	}
+	if !allActionDims && len(dims) > 2 {
 		errJSON(w, 400, "at most two dim")
 		return
 	}
@@ -82,7 +92,9 @@ func (s *Server) analyticsQuery(w http.ResponseWriter, r *http.Request, _ string
 		errJSON(w, 400, "range too wide")
 		return
 	}
-	res, err := ts.t.Query(r.Context(), f, store.QueryParams{Measure: measure, Dims: dims, Bucket: bucket, Top: top})
+	res, err := ts.t.Query(r.Context(), f, store.QueryParams{Measure: measure, Dims: dims, Bucket: bucket, Top: top,
+		ActionKinds: q["action_kind"], ActionPlans: q["action_plan"], ActionPhases: q["action_phase"],
+		ActionSubjects: q["action_subject"], ActionPRs: q["action_pr"], ActionSources: q["action_source"]})
 	if err != nil {
 		switch {
 		case errors.Is(err, store.ErrUnsupported):

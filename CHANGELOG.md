@@ -11,6 +11,12 @@
 - `scripts/cloud-install.sh --target claude` does the same full user-level install for Claude Code cloud environments: client and `yakka` on PATH, MCP merged into `~/.claude.json` (server `yakka`, no `env` block), hooks merged into `~/.claude/settings.json` with absolute `spool.sh` paths, and skills under `~/.claude/skills/<name>/`. Default `--target cursor` is unchanged. The key is read from `YAKKA_KEY` at runtime and is never printed or written into config. Set `YAKKA_ENDPOINT=https://api.yakka.build` as well so drain is not left with a partial override.
 
 
+## 3.5.0 — 2026-11-07 — session work tags
+
+- Claude Code, Codex, OpenCode and Cursor capture non-empty `YAKKA_ACTION_*` values at session
+  start into the local queue. Values remain unvalidated until the server projects the action fact.
+- Bump the independently versioned OpenCode hooks package to 0.2.2.
+
 ## 3.4.12 — 2026-11-15 — Full user-level Cursor cloud install
 
 - `scripts/cloud-install.sh` is the single environment-build installer when the Yakka plugin is absent: client under `~/.local/share/yakka/install`, `yakka` on PATH, merged `~/.cursor/mcp.json` (server `yakka`, absolute `client/yakka.py mcp`, no `env` block), merged `~/.cursor/hooks.json` (absolute `spool.sh`, idempotent reruns), and core plugin skills under `~/.cursor/skills/<name>/` (per Cursor docs — not `skills-cursor/`). Removes stale `~/.cursor/skills/yakka/<name>/` layouts from older bootstraps. Plugin surface is skills, hooks and MCP only (no separate rules or agents manifest). Fix `skills/close-out/SKILL.md` YAML `description`. `check_skills.py --cursor-user` verifies the tree. Delete stale account-level Yakka MCP in the Cursor dashboard that still expands `${CLAUDE_PLUGIN_ROOT}`.

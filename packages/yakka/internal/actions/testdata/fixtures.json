@@ -1,0 +1,6 @@
+[
+ {"input":{"kind":" Build ","subject_type":" PLAN ","subject_id":" CodyHamilton/Yakka:plan/22-X "},"status":"accepted","normalised":{"kind":"build","subject_type":"plan","subject_id":"codyhamilton/yakka:plan/22-x"}},
+ {"input":{"kind":"bogus","subject_type":"plan","subject_id":"owner/repo#5","phase":"two"},"status":"rejected","reasons":["bad_phase","subject_type_mismatch","unknown_kind"]},
+ {"input":{"kind":"build","subject_type":"plan","subject_id":"owner/repo"},"status":"rejected","reasons":["bad_subject_id"]},
+ {"input":{"kind":"build","subject_type":"plan","subject_id":"owner/repo:plan/158","phase":"01","repo":"Owner/Repo","pr":"0005"},"status":"accepted","normalised":{"kind":"build","subject_type":"plan","subject_id":"owner/repo:plan/158","phase":"1","repo":"owner/repo","pr":"5"}}
+]

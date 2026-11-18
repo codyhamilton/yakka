@@ -94,6 +94,11 @@ func TestAnalyticsSchema(t *testing.T) {
 		{"tokens_reasoning", "tokens", []string{"harness", "repo_id", "model", "conversation_id"}},
 		{"cost_usd", "usd", []string{"harness", "repo_id", "model", "conversation_id"}},
 		{"unpriced_calls", "count", []string{"harness", "repo_id", "model", "conversation_id"}},
+		{"sessions", "count", []string{"harness", "repo_id", "model", "conversation_id"}},
+	}
+	actionDims := []string{"action_kind", "action_plan", "action_phase", "action_subject", "action_pr", "action_source"}
+	for i := 6; i < len(design); i++ {
+		design[i].dims = append(design[i].dims, actionDims...)
 	}
 	got := rowsOf(m, "measures")
 	if len(got) != len(design) {
@@ -205,6 +210,65 @@ func TestAnalyticsQuery(t *testing.T) {
 		aerr(t, s, A+"measure=hook_events&dim=harness&bucket=hour&from="+from+"&to="+to, 400, "range too wide")
 		aok(t, s, A+"measure=hook_events&dim=harness&bucket=day&from="+from+"&to="+to)
 	})
+}
+
+func TestAnalyticsQueryActionDimensionsAndFilters(t *testing.T) {
+	s, ts := queryTenant(t)
+	at := time.Now().UTC().Add(-time.Minute).Truncate(time.Second)
+	addAction := func(conv, kind string, rejected bool) {
+		t.Helper()
+		value := "owner/repo:plan/22-session-work-tagging"
+		if rejected {
+			kind = "bogus"
+		}
+		payload := fx{"type": "session_action", "conversation_id": conv, "harness": "codex", "ts": float64(at.Unix()), "source": "env", "action": fx{"kind": kind, "subject_type": "plan", "subject_id": value, "phase": "3"}}
+		raw, err := json.Marshal(payload)
+		if err != nil {
+			t.Fatal(err)
+		}
+		hash, err := keys.RowHash(raw)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := ts.t.Append(context.Background(), []store.FactRow{{RowHash: hash, Raw: raw, Type: "session_action", ConversationID: conv, Harness: "codex", TS: float64(at.Unix())}}); err != nil {
+			t.Fatal(err)
+		}
+		if err := ts.t.ProjectAction(context.Background(), hash); err != nil {
+			t.Fatal(err)
+		}
+	}
+	addAction("tagged", "build", false)
+	addAction("rejected", "", true)
+	qadd(t, ts, store.FactRow{Type: "hook_event", ConversationID: "tagged", Harness: "codex", RepoID: "r", Event: "usage", NormEvent: "usage", Model: "kimi-k2.5", TS: float64(at.Unix()), TokIn: 1000, TokCacheRead: 400}, nil)
+	qadd(t, ts, store.FactRow{Type: "hook_event", ConversationID: "untagged", Harness: "codex", RepoID: "r", Event: "usage", NormEvent: "usage", Model: "kimi-k2.5", TS: float64(at.Unix()), TokIn: 1000, TokCacheRead: 400}, nil)
+	qadd(t, ts, store.FactRow{Type: "hook_event", ConversationID: "rejected", Harness: "codex", RepoID: "r", Event: "usage", NormEvent: "usage", Model: "kimi-k2.5", TS: float64(at.Unix()), TokIn: 1000, TokCacheRead: 400}, nil)
+	window := "&from=" + at.Add(-time.Minute).Format(time.RFC3339) + "&to=" + at.Add(time.Minute).Format(time.RFC3339)
+	base := "/v1/analytics/query?measure=cost_usd" + window
+	allowed := aok(t, s, base+"&dim=action_plan&dim=action_phase&dim=action_kind")
+	if !equalStrs(strs(allowed["dims"]), []string{"action_plan", "action_phase", "action_kind"}) {
+		t.Fatalf("dims: %v", allowed["dims"])
+	}
+	filtered := aok(t, s, base+"&dim=action_kind&action_kind=build")
+	rows := rowsOf(filtered, "rows")
+	if len(rows) != 1 || !equalStrs(strs(rows[0]["k"]), []string{"build"}) || rows[0]["v"] != 0.0004 {
+		t.Fatalf("filtered action result: %#v", rows)
+	}
+	aerr(t, s, base+"&dim=action_kind&dim=action_plan&dim=action_phase&dim=action_subject", 400, "at most three action dims")
+	aerr(t, s, base+"&dim=action_kind&dim=action_plan&dim=harness", 400, "at most two dim")
+	aerr(t, s, "/v1/analytics/query?measure=hook_events&action_kind=build", 400, "action dimensions and filters unsupported for hook_events")
+	aerr(t, s, "/v1/analytics/query?measure=hook_events&dim=action_kind", 400, "unsupported dimension action_kind for hook_events")
+}
+
+func TestAnalyticsQueryWithoutActionFieldsKeepsUsageJSON(t *testing.T) {
+	s, ts := queryTenant(t)
+	at := time.Date(2026, 10, 5, 12, 0, 0, 0, time.UTC)
+	qadd(t, ts, store.FactRow{Type: "hook_event", ConversationID: "legacy", Harness: "codex", RepoID: "r", Event: "usage", NormEvent: "usage", Model: "kimi-k2.5", TS: float64(at.Unix()), TokIn: 1000, TokCacheRead: 400}, nil)
+	from, to := at.Add(-time.Minute).Format(time.RFC3339), at.Add(time.Minute).Format(time.RFC3339)
+	code, body := do(t, s.Handler(), "GET", "/v1/analytics/query?measure=cost_usd&from="+from+"&to="+to, "ka", "")
+	want := "{\"bucket\":\"none\",\"dims\":[],\"measure\":\"cost_usd\",\"rows\":[{\"k\":[],\"v\":0.0004}]}\n"
+	if code != 200 || body != want {
+		t.Fatalf("legacy usage JSON: code=%d body=%q want=%q", code, body, want)
+	}
 }
 
 func TestAnalyticsQueryPartial(t *testing.T) {
