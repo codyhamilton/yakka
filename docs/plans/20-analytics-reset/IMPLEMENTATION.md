@@ -1,10 +1,14 @@
 # Plan 20 implementation
 
 Tool: opencode execute skill
-Run ID: feat/20-analytics-reset phase 10 (2026-11-18)
-Start time: 2026-11-18 13:08 Australia/Brisbane
+Run ID: feat/20-analytics-reset phase 11 (2026-11-18)
+Start time: 2026-11-18 18:56 Australia/Brisbane
 
-Phase 9 (below) closed at `b0fe838` with the `Yakka-Phase: 20-analytics-reset:9` trailer. This run builds Phase 10 only.
+Phase 10 (below) closed at `9846759` with the `Yakka-Phase: 20-analytics-reset:10` trailer. This run builds Phase 11 only.
+
+## Phase 11 — Scatter lab and Sessions
+
+The phase outcome is approach-known. This run uses the signed outcome, the panel catalog and preset mapping, the Interaction model, CONTRACTS.md 17.1, 17.2, 17.3, 17.3.1, 17.5 and 17.7 as the fixed yardstick. No new grain, join, route, dependency, gesture or contract is authorized. Phase 11 has no Units list in DESIGN.md and is more than one worker's work, so `refine` is dispatched as its own context; its verdict decides the units.
 
 ## Phase 10 — Trends, Compare, Quality, Cost and Tools
 
