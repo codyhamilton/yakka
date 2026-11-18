@@ -93,7 +93,7 @@ func TestMCPRegistrationValidation(t *testing.T) {
 	if err := s.RegisterMCPTool(MCPTool{Name: "slow", Handler: handler, TimeoutS: 301}); err == nil {
 		t.Fatal("timeout above cap accepted")
 	}
-	if err := s.RegisterMCPTool(MCPTool{Name: "effect", Handler: handler, LocalActions: []string{"write"}}); err == nil {
+	if err := s.RegisterMCPTool(MCPTool{Name: "effect", Handler: handler, LocalActions: []MCPLocalAction{{Action: "write", Version: 1, PathFrom: "resolved_path"}}}); err == nil {
 		t.Fatal("local action accepted")
 	}
 }

@@ -477,6 +477,220 @@ class RelayTests(unittest.TestCase):
         self.assertEqual(sorted(item["outcome"] for item in outcomes), ["covered", "enqueued"])
 
 
+def action_declaration() -> dict:
+    return {"v": 2, "rev": "0123456789abcdef", "local_actions": [yakka._MCP_ACTION], "context": [
+        {"reader": "cwd", "v": 1, "params": {}, "required": True},
+        {"reader": "resolved_path", "v": 1, "params": {"path_arg": "path", "bases": ["cwd"]}, "required": True},
+        {"reader": "file", "v": 1, "params": {"of": "resolved_path"}, "required": True},
+        {"reader": "git", "v": 1, "params": {"of": "resolved_path"}, "required": True},
+        {"reader": "queue", "v": 2, "params": {"of": "git", "path": "resolved_path"}, "required": True},
+        {"reader": "drain", "v": 1, "params": {}, "required": True},
+    ]}
+
+
+class ActionMCPServer:
+    """Authenticated fixture that emits one bound v2 directive and accepts its continuation."""
+
+    def __init__(self) -> None:
+        self.requests: list[tuple[dict, dict]] = []
+        self.lock = threading.Lock()
+        self.declaration = action_declaration()
+        self.mutate_directive = None
+        self.change_declaration = False
+        self.fail_continuation = False
+        server = self
+
+        class Handler(BaseHTTPRequestHandler):
+            def log_message(self, *_: object) -> None:
+                pass
+
+            def do_POST(self) -> None:
+                size = int(self.headers.get("Content-Length", "0"))
+                request = json.loads(self.rfile.read(size))
+                with server.lock:
+                    server.requests.append((request, dict(self.headers)))
+                if self.headers.get("Authorization") != "Bearer " + KEY:
+                    self.send_response(401)
+                    self.end_headers()
+                    return
+                method = request.get("method")
+                local = request.get("params", {}).get("arguments", {}).get("_local", {})
+                if method == "initialize":
+                    payload = {"jsonrpc": "2.0", "id": request.get("id"), "result": {
+                        "protocolVersion": "2025-11-25", "capabilities": {"tools": {"listChanged": False}},
+                        "serverInfo": {"name": "yakka", "version": "fixture"},
+                        "_meta": {"yakka/local-actions": yakka._MCP_ACTION_CAPABILITY}}}
+                elif method == "tools/list":
+                    declaration = dict(server.declaration)
+                    if server.change_declaration:
+                        declaration["timeout_s"] = (declaration.get("timeout_s") or 20) + 1
+                    payload = {"jsonrpc": "2.0", "id": request.get("id"), "result": {"tools": [
+                        {"name": "fixture", "description": "test-only", "inputSchema": {"type": "object"},
+                         "_meta": {"yakka/tool": declaration}}]}}
+                elif "effects" in local:
+                    if server.fail_continuation:
+                        self.close_connection = True
+                        return
+                    payload = {"jsonrpc": "2.0", "id": request.get("id"), "result": {"result": "final", "effects": local["effects"]}}
+                else:
+                    data = {
+                        "code": "local_action_required", "v": 1, "call": local.get("_call"),
+                        "rev": local.get("_rev"), "action_id": "action-1", "action": "enqueue_file_snapshot",
+                        "action_v": 1, "path": (local.get("resolved_path") or {}).get("path"),
+                    }
+                    if server.mutate_directive is not None:
+                        server.mutate_directive(data)
+                    payload = {"jsonrpc": "2.0", "id": request.get("id"), "error": {
+                        "code": -32011, "message": "local action required", "data": data}}
+                raw = json.dumps(payload, separators=(",", ":")).encode()
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(raw)))
+                self.end_headers()
+                try:
+                    self.wfile.write(raw)
+                except (BrokenPipeError, ConnectionResetError):
+                    pass
+
+        self.http = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        self.thread = threading.Thread(target=self.http.serve_forever, daemon=True)
+        self.thread.start()
+        self.url = f"http://127.0.0.1:{self.http.server_port}"
+
+    def close(self) -> None:
+        self.http.shutdown()
+        self.http.server_close()
+        self.thread.join(timeout=2)
+
+
+class LocalActionDirectiveTests(unittest.TestCase):
+    """Cover the one-directive/no-replay contract from the shim side."""
+
+    def setUp(self) -> None:
+        self.old_env = {name: os.environ.get(name) for name in ("YAKKA_ENDPOINT", "YAKKA_KEY", "YAKKA_CLIENT_CONFIG", "YAKKA_QUEUE", "YAKKA_HOOKLOG", "YAKKA_BIN")}
+        self.temp = tempfile.TemporaryDirectory(dir=Path(__file__).parent)
+        self.addCleanup(self.temp.cleanup)
+        self.repo = Path(self.temp.name)
+        self.path = self.repo / "docs" / "plans" / "01-x" / "DESIGN.md"
+        self.path.parent.mkdir(parents=True)
+        self.path.write_text("reviewed\n")
+        subprocess.run(["git", "-C", str(self.repo), "init", "-q"], check=True)
+        subprocess.run(["git", "-C", str(self.repo), "-c", "user.name=t", "-c", "user.email=t@x", "add", "."], check=True)
+        subprocess.run(["git", "-C", str(self.repo), "-c", "user.name=t", "-c", "user.email=t@x", "commit", "-qm", "fixture"], check=True)
+        self.queue = str(self.repo / "queue")
+        os.makedirs(self.queue)
+        self.server = ActionMCPServer()
+        os.environ["YAKKA_ENDPOINT"] = self.server.url
+        os.environ["YAKKA_KEY"] = KEY
+        os.environ["YAKKA_CLIENT_CONFIG"] = str(self.repo / "missing.toml")
+        os.environ["YAKKA_QUEUE"] = self.queue
+        os.environ.pop("YAKKA_HOOKLOG", None)
+        os.environ.pop("YAKKA_BIN", None)
+        self.relay = yakka._McpRelay(yakka.McpOptions(QueueDir=self.queue, Version="test"))
+        self.relay.declarations = {"fixture": self.server.declaration}
+        self.addCleanup(self.server.close)
+
+    def tearDown(self) -> None:
+        for name, value in self.old_env.items():
+            if value is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = value
+
+    def run_call(self, patch_enqueue=None, spool_returncode: int = 0, spool_stdout: bytes = b"entry.evt\n") -> tuple[dict, int]:
+        request = {"jsonrpc": "2.0", "id": "action", "method": "tools/call", "params": {
+            "name": "fixture", "arguments": {"path": str(self.path)}}}
+        self.relay.writer = io.BytesIO()
+        spool_calls = 0
+        real_run = subprocess.run
+
+        def spool(argv, *args, **kwargs):
+            nonlocal spool_calls
+            if argv[0] == os.path.realpath(os.path.join(os.path.dirname(yakka.__file__), "..", "script", "spool.sh")):
+                spool_calls += 1
+                return subprocess.CompletedProcess(argv, spool_returncode, spool_stdout, b"")
+            return real_run(argv, *args, **kwargs)
+
+        patches = [mock.patch.object(yakka.subprocess, "run", side_effect=spool)]
+        if patch_enqueue is not None:
+            patches.append(patch_enqueue)
+        for patch in patches:
+            patch.start()
+        try:
+            self.relay._dispatch(json.dumps(request, separators=(",", ":")).encode(), request, "action", "tools/call", True, threading.Event())
+        finally:
+            for patch in reversed(patches):
+                patch.stop()
+        return json.loads(self.relay.writer.getvalue()), spool_calls
+
+    def continuation_effects(self, reply: dict) -> list:
+        continuations = [req for req, _ in self.server.requests if req.get("method") == "tools/call" and "effects" in req.get("params", {}).get("arguments", {}).get("_local", {})]
+        self.assertEqual(len(continuations), 1)
+        return continuations[0]["params"]["arguments"]["_local"]["effects"]
+
+    def test_directive_and_continuation_round_trip_once(self) -> None:
+        reply, spool_calls = self.run_call()
+        self.assertEqual(spool_calls, 1)
+        self.assertEqual(reply["result"]["result"], "final")
+        effects = self.continuation_effects(reply)
+        self.assertEqual(effects, [{"action": "enqueue_file_snapshot", "v": 1, "action_id": "action-1", "ok": True, "outcome": "enqueued", "error": None}])
+        calls = [req for req, _ in self.server.requests if req.get("method") == "tools/call"]
+        self.assertEqual(len(calls), 2)
+
+    def test_malformed_directive_never_runs_the_action(self) -> None:
+        for key, value in (("call", "other-call"), ("path", "/elsewhere/DESIGN.md"), ("rev", "other-rev"), ("v", 2)):
+            with self.subTest(key=key):
+                self.server.mutate_directive = lambda data, key=key, value=value: data.__setitem__(key, value)
+                reply, spool_calls = self.run_call()
+                self.assertEqual(spool_calls, 0)
+                self.assertEqual(reply["error"]["data"]["code"], "bad_directive")
+                self.server.mutate_directive = None
+
+    def test_unsupported_action_version_is_a_fact_and_is_not_replayed(self) -> None:
+        self.server.mutate_directive = lambda data: data.__setitem__("action_v", 2)
+        reply, spool_calls = self.run_call()
+        self.assertEqual(spool_calls, 0)
+        self.assertEqual(reply["result"]["result"], "final")
+        effects = self.continuation_effects(reply)
+        self.assertEqual((effects[0]["outcome"], effects[0]["error"]), ("failed", "unsupported"))
+
+    def test_changed_descriptor_ends_the_call_before_any_effect(self) -> None:
+        self.server.change_declaration = True
+        reply, spool_calls = self.run_call()
+        self.assertEqual(spool_calls, 0)
+        self.assertEqual(reply["error"]["data"]["code"], "bad_directive")
+
+    def test_incomplete_queue_reader_is_a_failure_not_absence(self) -> None:
+        declaration = action_declaration()
+        request = {"params": {"arguments": {"path": str(self.path)}}}
+        with mock.patch.object(yakka, "_mcp_queue_entries", side_effect=OSError("incomplete queue")):
+            values, _ = yakka._mcp_readers(request, declaration, self.queue)
+        self.assertEqual(values["queue"], {"_failed": {"code": "incomplete_queue"}})
+
+    def test_rejected_and_interrupted_enqueue_are_effect_facts(self) -> None:
+        coverage = ([], [], {"complete": True, "pending_covering": 0, "rejected_covering": 1, "oldest_covering_age_s": None})
+        reply, spool_calls = self.run_call(mock.patch.object(yakka, "_mcp_queue_entries", return_value=coverage))
+        self.assertEqual(spool_calls, 0)
+        rejected = self.continuation_effects(reply)[0]
+        self.assertEqual((rejected["outcome"], rejected["error"]), ("failed", "queue_rejected"))
+
+        with self.server.lock:
+            self.server.requests.clear()
+        reply, spool_calls = self.run_call(spool_returncode=1, spool_stdout=b"")
+        self.assertEqual(spool_calls, 1)
+        interrupted = self.continuation_effects(reply)[0]
+        self.assertEqual((interrupted["outcome"], interrupted["error"]), ("failed", "spool_dropped"))
+
+    def test_post_effect_transport_failure_never_replays_the_action(self) -> None:
+        self.server.fail_continuation = True
+        reply, spool_calls = self.run_call()
+        self.assertEqual(spool_calls, 1)
+        self.assertEqual(reply["error"]["data"]["code"], "unreachable")
+        self.assertEqual(reply["error"]["data"]["local_effect_outcome"], "enqueued")
+        continuations = [req for req, _ in self.server.requests if req.get("method") == "tools/call" and "effects" in req.get("params", {}).get("arguments", {}).get("_local", {})]
+        self.assertGreaterEqual(len(continuations), 1)
+
+
 class ChangeReaderTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp = tempfile.TemporaryDirectory(dir=Path(__file__).parent)
