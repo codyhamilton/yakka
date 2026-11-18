@@ -535,3 +535,11 @@ UTC `ScoreSeries` now groups bucket membership in SQL and returns only the bound
 ### Issue 209 — session scatter marginals
 
 Conversation-grain distribution histograms and the no-call count now apply the same session `where` predicate as the scatter points and `population_n`. A two-session fixture filtered to `tokens_out:0..100` reports marginal `n` of 1.
+
+### `9-05-ops.md` — over budget handoff
+
+- Done: `/ops` now mounts an `ops-footprint` panel over `/v1/admin/status`; the panel renders version, scoring, optional volume and per-tenant facts, compaction, footprint bytes/counts, screens (verdicts, scored content, score rows, rejections, total), recent failures at the server cap and rescore state, all with units and no cross-tenant sums; 403 is "administrator only", absent fields are named and read-only behaviour is preserved. Report: `reports/9-05-ops.md`.
+- Not done: none for the unit. Phase 9 acceptance remains 9-06.
+- Learned: the shared panel frame has no body renderer, so an explorer with a table must render its own body while reusing frame state/idle/basis; the registry cannot describe a table-only panel without a chart name; the committed stub's `adminStatus()` is minimal, so full-shape browser proof needs an intercepted status response until the harness owner extends it.
+- Gates: extend the workspace stub/fixture status shape and add status error/delay scenes; give the registry a table-only representation. Both are outside this brief's owned paths.
+- Budget: 885 changed lines and more than 12 files read, against ~500 lines and 12 files. The overrun is the table renderer plus the pure and Chromium checks. No scope was added.
