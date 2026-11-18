@@ -204,7 +204,7 @@ func validate(obj map[string]any) string {
 		switch status {
 		case "ok", "ok_partial", "timeout", "api_error", "invalid_output", "truncated", "input_too_large", "unavailable",
 			"refused_capture", "refused_disclosure", "refused_criteria", "skipped_budget", "skipped_duplicate",
-			"skipped_busy":
+			"skipped_busy", "pending", "running":
 		default:
 			return invalid("review_run has unknown status")
 		}
