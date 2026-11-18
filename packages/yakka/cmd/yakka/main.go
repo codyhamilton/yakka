@@ -116,6 +116,10 @@ func runServe() int {
 		fmt.Fprintln(os.Stderr, "yakka serve: MCP tools:", err)
 		return 1
 	}
+	if err := s.RegisterListReviewsMCPTool(); err != nil {
+		fmt.Fprintln(os.Stderr, "yakka serve: MCP tools:", err)
+		return 1
+	}
 	srv := &http.Server{Handler: s.Handler(), ReadHeaderTimeout: 10 * time.Second}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()

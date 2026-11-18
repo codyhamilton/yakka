@@ -42,6 +42,37 @@ Teams and individual developers who want:
 
 **OpenCode (partial)** — skills only: `./install.sh --opencode-skills` or `YAKKA_INSTALL_MODE=opencode` symlinks `skills/*` into `~/.config/opencode/skills/`. Phase running maps to the `execute` skill; harness persona name `orchestrate` is separate from skill names. Built-in OpenCode `plan` is not workflow `design`. **DeepSeek Flash** is encouraged for brief/unit work when rationing capacity; sign-off only is gated in [`docs/lab/GUIDANCE-flash-review-gate.md`](lab/GUIDANCE-flash-review-gate.md) (Sonnet 5.5 review of Flash work, then Claude Code or Grok phase sign-off — no Flash auto close-out).
 
+## Advisory change review
+
+The server-owned `review_change` MCP tool supplies a single-call shadow review beside existing
+reviews. `execute` calls once after each phase closes; `comprehensive-review` and `post-build` each
+call once at their reviewed/candidate PR head. Each call uses an explicit Git range, available
+stored brief or plan criteria, and contributor `build_models` from the run record or `unknown`.
+Stages send no `trial` argument. Calls may set `effort`/`tags`/`store`; a `store=true` duplicate
+returns the earlier review in full (`cached`, `original_review_id`, `original_status`) rather than a
+new independent review, while `store=false` is independent paid work. A read-only `list_reviews`
+tool serves the same cursor-paged listing as `GET /v1/reviews`. This is non-gating advisory
+evidence: receipt summaries and findings stay in session output and never enter gates, verdicts,
+commits, trailers, exit codes or plan-folder files, or trigger fixes. Absent, unavailable and failed
+calls leave existing decisions unchanged.
+
+The Go server owns the definition, prompt/policy, criteria resolution, provider call, validation,
+actual-cost recording and tenant-local records, through the same orchestrator as `POST /v1/reviews`. The
+Python shim alone captures a bounded diff and omission manifest, scans before egress and forwards
+declared local context; the server rescans. Machines use their existing Yakka login and need no
+provider key. `read_write` scope and `readOnlyHint:false` disclose the server-side provider
+call-and-record boundary; the tool declares 150 seconds and no local actions. Receipts omit captured diff content;
+`detail=full` includes validated findings, and a completed duplicate carries the original findings.
+The `read`-only `list_reviews` tool declares no local readers or actions. Registration requires a
+non-empty `CLAUDE_API_TOKEN` in authenticated remote mode and an MCP timeout ceiling of at least 150
+seconds; it does not depend on `YAKKA_REVIEW_MODEL`. Deployment and live availability require
+separate evidence. The model defaults to `claude-haiku-5-5` (optional `YAKKA_REVIEW_MODEL` override),
+any authenticated tenant's repo is reviewable, and `skipped_busy` reports the
+two-call per-tenant in-flight limit. Per-call effort defaults to `high`, is validated server-side and
+is never capped by a setting.
+See [architecture](ARCHITECTURE.md#advisory-change-review) and
+[the advisory surface](design/04-advisory-surface.md#review_change).
+
 ## Core Intent
 
 Optimize for outcome quality per token. Prevent:

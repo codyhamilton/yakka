@@ -33,12 +33,23 @@ const (
 var mcpReaderTable []byte
 
 type mcpReaderSpec struct {
-	Name           string              `json:"name"`
-	Versions       []int               `json:"versions"`
-	Depends        []string            `json:"depends_on"`
-	Params         map[string][]string `json:"params"`
-	Bulk           bool                `json:"bulk"`
-	RequiredParams []string            `json:"required_params"`
+	Name           string                  `json:"name"`
+	Versions       []int                   `json:"versions"`
+	Depends        []string                `json:"depends_on"`
+	Params         map[string][]string     `json:"params"`
+	TypedParams    map[string]mcpParamSpec `json:"typed_params,omitempty"`
+	Bulk           bool                    `json:"bulk"`
+	RequiredParams []string                `json:"required_params"`
+}
+
+// mcpParamSpec describes only the fixed scalar and string-array policy values
+// supported by the closed reader table. It is not a general schema language.
+type mcpParamSpec struct {
+	Type   string   `json:"type"`
+	Min    int64    `json:"min,omitempty"`
+	Max    int64    `json:"max,omitempty"`
+	Values []string `json:"values,omitempty"`
+	Exact  []string `json:"exact,omitempty"`
 }
 
 // MCPTool is registered during server construction, before serving requests.
@@ -199,10 +210,21 @@ func (s *Server) RegisterMCPTool(t MCPTool) error {
 				if err != nil || json.Unmarshal(b, &n) != nil || n < 1 || n > mcpMaxBody {
 					return fmt.Errorf("invalid MCP bulk budget")
 				}
+				if typed, ok := spec.TypedParams[key]; ok {
+					if err := validateMCPReaderParam(value, typed); err != nil {
+						return fmt.Errorf("invalid MCP reader param %q: %w", key, err)
+					}
+				}
 				budget += n
 				continue
 			}
 			allowed, ok := spec.Params[key]
+			if typed, typedOK := spec.TypedParams[key]; typedOK {
+				if err := validateMCPReaderParam(value, typed); err != nil {
+					return fmt.Errorf("invalid MCP reader param %q: %w", key, err)
+				}
+				continue
+			}
 			if !ok {
 				return fmt.Errorf("unknown MCP reader param %q", key)
 			}
@@ -291,17 +313,130 @@ func (s *Server) RegisterMCPTool(t MCPTool) error {
 	return nil
 }
 
-func (s *Server) mcpAuth(w http.ResponseWriter, r *http.Request) (string, string, bool) {
+func validateMCPReaderParam(value any, spec mcpParamSpec) error {
+	switch spec.Type {
+	case "integer":
+		var n int64
+		switch v := value.(type) {
+		case int:
+			n = int64(v)
+		case int64:
+			n = v
+		case float64:
+			if v != float64(int64(v)) {
+				return fmt.Errorf("must be an integer")
+			}
+			n = int64(v)
+		default:
+			return fmt.Errorf("must be an integer")
+		}
+		if n < spec.Min || n > spec.Max {
+			return fmt.Errorf("integer outside allowed range")
+		}
+		return nil
+	case "boolean":
+		if _, ok := value.(bool); !ok {
+			return fmt.Errorf("must be a boolean")
+		}
+		return nil
+	case "string":
+		v, ok := value.(string)
+		if !ok || !mcpAllowedString(v, spec.Values) {
+			return fmt.Errorf("must be an allowed string")
+		}
+		return nil
+	case "string_array":
+		var values []any
+		switch v := value.(type) {
+		case []any:
+			values = v
+		case []string:
+			for _, item := range v {
+				values = append(values, item)
+			}
+		default:
+			return fmt.Errorf("must be an array of strings")
+		}
+		if len(values) == 0 {
+			return fmt.Errorf("must not be empty")
+		}
+		if len(spec.Exact) > 0 {
+			if len(values) != len(spec.Exact) {
+				return fmt.Errorf("must match the fixed policy order")
+			}
+			for i, item := range values {
+				v, ok := item.(string)
+				if !ok || v != spec.Exact[i] {
+					return fmt.Errorf("must match the fixed policy order")
+				}
+			}
+		}
+		for _, item := range values {
+			v, ok := item.(string)
+			if !ok || !mcpAllowedString(v, spec.Values) {
+				return fmt.Errorf("contains an unsafe or disallowed string")
+			}
+		}
+		return nil
+	default:
+		return fmt.Errorf("unsupported typed policy")
+	}
+}
+
+func mcpAllowedString(value string, values []string) bool {
+	if value == "" || strings.TrimSpace(value) != value {
+		return false
+	}
+	for _, allowed := range values {
+		if value == allowed {
+			return true
+		}
+	}
+	// Exclusion patterns are deliberately path-like: no absolute paths,
+	// traversal, URLs, backslashes, whitespace or control characters.
+	if len(values) == 0 {
+		if strings.HasPrefix(value, "/") || strings.Contains(value, "..") || strings.Contains(value, "://") || strings.Contains(value, `\\`) {
+			return false
+		}
+		for _, c := range value {
+			if !(c == '/' || c == '*' || c == '.' || c == '-' || c == '_' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9') {
+				return false
+			}
+		}
+		return true
+	}
+	return false
+}
+
+type mcpAuthResult struct {
+	tenant, scope string
+	anonymous     bool
+}
+
+func (s *Server) mcpAuth(w http.ResponseWriter, r *http.Request) (mcpAuthResult, bool) {
 	if _, present := r.Header["Origin"]; present {
 		writeJSON(w, 403, map[string]string{"error": "forbidden"})
-		return "", "", false
+		return mcpAuthResult{}, false
 	}
-	res := s.authorizeBearer(r)
-	if res.status != authOK {
-		writeJSON(w, 401, map[string]string{"error": res.msg})
-		return "", "", false
+	if s.cfg.Local() {
+		res := s.authorizeBearer(r)
+		return mcpAuthResult{tenant: res.tenant, scope: res.scope}, true
 	}
-	return res.tenant, res.scope, true
+	if r.Header.Get("Authorization") != "" {
+		res := s.authorizeBearer(r)
+		if res.status != authOK {
+			writeJSON(w, 401, map[string]string{"error": res.msg})
+			return mcpAuthResult{}, false
+		}
+		return mcpAuthResult{tenant: res.tenant, scope: res.scope}, true
+	}
+	if err := s.mcpDiscovery.admit(deviceClientIP(r)); err != nil {
+		if errors.Is(err, errMCPDiscoveryRateLimited) {
+			writeJSON(w, 429, map[string]string{"error": "rate_limited"})
+		}
+		return mcpAuthResult{}, false
+	}
+	return mcpAuthResult{scope: TokenScopeRead, anonymous: true}, true
 }
 
 type mcpResponseWriter struct {
@@ -322,11 +457,14 @@ func (s *Server) mcp(w http.ResponseWriter, r *http.Request) {
 	defer func() {
 		slog.Info("mcp", "method", method, "tool", toolName, "tenant", tenant, "status", logged.status, "duration_ms", time.Since(started).Milliseconds())
 	}()
-	var scope string
-	var ok bool
-	tenant, scope, ok = s.mcpAuth(w, r)
+	auth, ok := s.mcpAuth(w, r)
 	if !ok {
 		return
+	}
+	tenant, scope := auth.tenant, auth.scope
+	bodyCap := s.mcpTools.maxBody
+	if auth.anonymous {
+		bodyCap = mcpDefaultBody
 	}
 	if mt := r.Header.Get("Content-Type"); mt != "" {
 		media, _, err := mime.ParseMediaType(mt)
@@ -335,7 +473,7 @@ func (s *Server) mcp(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, int64(s.mcpTools.maxBody)))
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, int64(bodyCap)))
 	if err != nil {
 		var tooBig *http.MaxBytesError
 		if errors.As(err, &tooBig) {
@@ -385,6 +523,14 @@ func (s *Server) mcp(w http.ResponseWriter, r *http.Request) {
 	}
 	if !hasID {
 		w.WriteHeader(202)
+		return
+	}
+	if auth.anonymous && requestedMethod == "tools/call" {
+		msg := "unauthorized: this service requires a key; run yakka login"
+		if s.cfg.Remote() {
+			msg = s.remoteUnauthorizedMsg()
+		}
+		writeJSON(w, 401, map[string]string{"error": msg})
 		return
 	}
 	var result any
@@ -507,6 +653,14 @@ func (s *Server) mcpCall(parent context.Context, tenant, scope, name string, p m
 	}
 	ctx, cancel := context.WithTimeout(parent, time.Duration(t.TimeoutS)*time.Second)
 	defer cancel()
+	release, uerr := s.beginTenantUse(tenant)
+	if uerr != nil {
+		if errors.Is(uerr, ErrTenantLifecycleBusy) {
+			return mcpToolError("tenant_busy")
+		}
+		return mcpToolError("tenant unavailable")
+	}
+	defer release()
 	ts, err := s.tenant(tenant)
 	if err != nil {
 		return mcpToolError("tenant unavailable")

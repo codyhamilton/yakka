@@ -100,6 +100,16 @@ class QueueDefault(Base):
         self.assertEqual(json.loads(r.stdout), {"permission": "allow"})
         self.assertEqual(r.returncode, 0)
 
+    def test_dedupe_drops_repeat_within_window(self):
+        payload = '{"session_id":"s-dedupe","n":1}'
+        q = self.q()
+        run_spool(payload, "cursor", "sessionStart", YAKKA_QUEUE=q, HOME=self.d)
+        self.assertEqual(len(evts(q)), 1)
+        run_spool(payload, "cursor", "sessionStart", YAKKA_QUEUE=q, HOME=self.d)
+        self.assertEqual(len(evts(q)), 1)
+        run_spool('{"session_id":"s-dedupe","n":2}', "cursor", "sessionStart", YAKKA_QUEUE=q, HOME=self.d)
+        self.assertEqual(len(evts(q)), 2)
+
     def test_bash32_lint(self):
         text = SPOOL.read_text()
         for pat in (r"read -r -N", r"read -N", "EPOCHREALTIME", "mapfile", ",,}", r"[[ -v"):

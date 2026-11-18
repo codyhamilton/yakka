@@ -16,8 +16,9 @@ similar work exists.
 ## Shape
 
 `python3 plugins/yakka/client/yakka.py mcp` is a stdio shim registered by each harness. The server
-owns all three tool definitions, argument validation, state logic and user-facing wording. The
-shim forwards `initialize`, `tools/list` and `tools/call` to `POST /v1/mcp` using the shared login,
+owns all tool definitions, argument validation, state logic and user-facing wording. The
+shim forwards `initialize`, `tools/list` and `tools/call` to `POST /v1/mcp` using `LoadMCP`
+(default `https://api.yakka.build` when unconfigured, bearer only when a key resolves),
 injects the declared facts it reads from its fixed local reader table, and relays server replies.
 Local read failures are injected context, not synthesized tool results. A remote transport or
 configuration failure is the shim's own error; it never answers from local queue state while the
@@ -31,16 +32,65 @@ a separate, explicitly bounded queue effect. It writes pointer metadata through 
 spool path; the drain remains the content reader and uploader. Enqueue acknowledgment does not
 prove queued or delivered: those states require current covering queue evidence or a matching
 service hash. Unsupported versions, unknown outcomes and failures remain visible. The shim does
-not upload content, scan secrets, wake workers, run arbitrary commands or delete queue entries.
+not upload artifact content or scan it on this feedback path, wake workers, run arbitrary commands
+or delete queue entries. The separate `change` reader below scans and transmits bounded diffs.
 
 | Tool | Answers | Changes the agent's decision by |
 |---|---|---|
 | `artifact_feedback(path)` | for the file at `path`: delivery state of its current content, screen verdict, scores per check with the tenant's baseline for that kind | telling it to fix a refusal, or revise a criterion that is out of norm, before moving on |
 | `list_checks(kind)` | the checks a design, brief or report is scored against | letting it write to the rubric rather than discover it afterwards |
 | `search_artifacts(query, kind?)` | similar past designs, briefs and reports in this tenant, with path, repo and a snippet | reusing or contrasting prior work |
+| `review_change(mode, build_models, …)` | a server-owned single-call review receipt, with validated findings when `detail=full` | advisory comparison beside existing reviews; never a workflow decision input |
+| `list_reviews(filters…)` | a tenant's stored reviews as a complete, cursor-paged listing with the same filters as `GET /v1/reviews` | whether earlier reviews exist and what they found, without spending on a new call |
 
-Nothing else is exposed. Maintainer operations (defining checks, rescoring, rating) are CLI or REST
+The review tool is exposed only when `CLAUDE_API_TOKEN` is non-empty in authenticated remote mode and
+the MCP timeout ceiling of at least 150 seconds permits registration, and only to `read_write`
+callers. The model is fixed in code (`claude-haiku-5-5`), any authenticated tenant's repo is
+reviewable, and `skipped_busy` reports the two-call per-tenant in-flight limit. `list_reviews` is a
+`read` tool with no local readers or actions. Maintainer operations (defining checks, rescoring, rating) are CLI or REST
 only.
+
+Only the human owner may reset or delete a tenant. Agents must not perform or attempt this on a user's behalf.
+There is no reset/delete MCP tool. The [owner lifecycle API](03-remote-service.md#owner-tenant-lifecycle-api)
+is cookie-session/profile-UI-only, with same-origin and dedicated UI-header guards; keys never
+qualify, even beside an owner cookie. Agents must not try REST, browser automation or header
+spoofing to bypass that boundary. The guards are spoofable, not proof of a human; a future
+human-verification/captcha step is out of scope for this amendment.
+
+## `review_change`
+
+The [Plan 23 follow-up amendment](../plans/23-llm-review-shadow.md) added per-call
+effort/tags/store controls, full cached duplicate replies and a paged `list_reviews` tool. All three
+are implemented. The same amendment's owner-only tenant reset/delete is also implemented, but it is
+cookie-session/profile-UI-only and adds no MCP tool or key path.
+
+The server owns the tool definition, prompt and exclusion policy, stored brief or plan/phase criteria
+resolution, provider call, validation, actual-cost recording and tenant-local review record. It uses the same
+orchestrator as authenticated `POST /v1/reviews`; records are read through `GET /v1/reviews` or the
+read-only `list_reviews` tool. Optional `effort` (default `high`; `high`, `xhigh` or `max` only),
+`tags` (at most 16 exact strings) and `store` (default `true`; `false`
+skips all dedupe, cache and record writes) are validated before any spend or storage; per-call
+effort defaults to `high`, is validated server-side and is never capped by a setting.
+`read_write` scope and `readOnlyHint:false` disclose this spend-and-record boundary. Local collection
+is read-only: the declaration has a 150-second timeout and no local actions. The shim alone captures
+uncommitted changes or an explicit Git range using the server-declared `change` reader, scans before
+egress and supplies bounded diff content and an omission manifest. The server rescans, and alone
+holds the provider credential; machines use their existing Yakka login and need no provider key.
+Receipts contain no captured diff content; `detail=full` includes validated findings. A duplicate of
+a completed stored original returns the original review in the full fresh response shape, with
+`cached=true`, `original_review_id`, `original_status` and the original findings; a still-running or
+unknown original returns `in_progress` or `outcome_unknown` with `cached=false` and no second
+provider call, and a missing or corrupt original returns `cache_unavailable`.
+
+`execute` calls once after each phase closing commit; `comprehensive-review` and `post-build` each
+call once at their reviewed/candidate PR head. These are non-gating `range` calls with explicit base
+and head SHAs, stored criteria references where available, and contributor `build_models` from the
+run record or `unknown`. Stages send no `trial` argument. Identical repeated `store=true` captures
+return `skipped_duplicate` with the earlier review's full content, not an independent review;
+`store=false` calls are independent paid work and are never deduplicated. Receipt summaries
+and findings stay in session output, outside workflow handoffs. They never feed gates, verdicts,
+commits, trailers, exit codes or plan-folder files and never trigger local fixes or dispatch.
+Absent, unavailable and failed calls leave the stage's existing decisions unchanged.
 
 ## `artifact_feedback`
 
@@ -56,10 +106,13 @@ drain (design 1).
 
 ## API
 
-Service reads behind the tools. All need the key, all are scoped to the key's tenant.
+Service reads behind the original advisory tools. All need the key, all are scoped to the key's tenant.
+The review POST additionally spends and records with `read_write` scope as described above.
 
 | Request | Response |
 |---|---|
+| `POST /v1/reviews` | a review receipt: `status`, optional `reason`, validated findings under `detail=full`, and for a completed duplicate `cached`, `original_review_id`, `original_status` and the original findings even at receipt detail; captured content is never returned |
+| `GET /v1/reviews?repo_id=&plan=&phase=&kind=&status=&effort=&profile=&manifest_hash=&since=&tag=&detail=&limit=&cursor=` | `{"reviews":[…],"next_cursor":<string\|null>,"complete":<bool>}`; repeated `tag` filters are conjunctive (ALL), `limit` defaults to 100 (range 1–500), and `cursor` is opaque and bound to the tenant, filters and detail |
 | `GET /v1/artifacts?repo_id=&path=` | `{"repo_id","path","kind","versions":n,"latest":{"content_hash","received_at","conversation_id","source","screen":{"verdict","scorer","at"}\|null,"scores":[{"check","score"}]}}`, or 404 |
 | `GET /v1/checks?kind=` | `{"checks":[{"kind","name","q","levels","invert"}]}` |
 | `GET /v1/baselines?kind=` | `{"kind","checks":{"<name>":{"n","p25","median","p75"}}}` over the latest version of each artifact of that kind |
@@ -68,6 +121,15 @@ Service reads behind the tools. All need the key, all are scoped to the key's te
 `search` is SQLite FTS5 over the latest screened content of each artifact (`passed` or
 `unscreened`), ranked by `bm25`, with `snippet()` for the excerpt; `limit` defaults to 10. Nothing
 smarter in this round.
+
+`GET /v1/reviews` is a complete cursor walk, not a capped export. The first page fixes an insertion
+high-water mark; later pages use a strict descending `(ts, insertion_id)` boundary, so rows appended
+after the first page, including backdated ones, cannot enter the walk. A nonterminal page is
+`complete=false` with a `next_cursor`; the exhausted page is `complete=true` with `next_cursor=null`.
+The authenticated tenant, route, filters and detail are bound into the cursor; a malformed,
+mismatched or foreign-tenant cursor is an error, never a silent row drop. `detail=full` includes the
+stored payload; default receipts omit it. Captured diff content is never stored in or returned from
+a review row.
 
 ## Scores and baselines
 
@@ -105,9 +167,16 @@ removed.
 
 ## Tests
 
-1. Over stdio against a test service: `initialize`, `tools/list` relays the server's three tools,
-   and each declared call carries the required reader facts to the server.
+1. Over stdio against a test service: `initialize`, `tools/list` relays the server's registered,
+   scope-visible tools, and each declared call carries the required reader facts to the server.
 2. `artifact_feedback` for a file that is queued, rejected, delivered, and delivered at an older
    hash gives the corresponding server-formatted states; failed required context never becomes a
    clean state.
 3. Service down: the shim reports its transport error and does not synthesize a local tool answer.
+4. Fake-provider review calls exercise both capture modes, `read`-scope refusal, validated full
+   findings, `effort`/`tags`/`store` validation, and a completed duplicate that returns the original
+   review with `cached`/`original_review_id`/`original_status`, plus `in_progress`, `outcome_unknown`
+   and `cache_unavailable` paths, without local file changes or returned captured content. A paged
+   `list_reviews` walk matches `GET /v1/reviews` across filters, tags, cursors and completion
+   metadata. Stage text checks establish one non-gating range call per stage and recorded
+   build-model provenance.

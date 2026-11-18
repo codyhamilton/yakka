@@ -3,6 +3,7 @@
   "name": "yakka",
   "description": "Cloud-safe core workflow skills for Claude Code: design, refine, execute, comprehensive-review, close-out, post-build. Also login (interactive).",
   "version": "3.5.0",
+  "mcpServers": "./claude-mcp.json",
   "author": {
     "name": "William Hamilton",
     "email": "codyh@ctzns.net"

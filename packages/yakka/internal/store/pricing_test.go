@@ -100,3 +100,52 @@ func TestCostVendorRates(t *testing.T) {
 		}
 	}
 }
+
+func TestHaiku55PublishedInputTiers(t *testing.T) {
+	const boundary = int64(100_000)
+	for _, tc := range []struct {
+		name  string
+		input int64
+		want  float64
+	}{
+		{"below", boundary - 1, 0.0100004},
+		{"at", boundary, 0.0100005},
+		{"above", boundary + 1, 0.050003},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, ok := CostAtInputSize("claude", "claude-haiku-5-5", Tokens{In: tc.input, Out: 1}, tc.input, nil)
+			if !ok || !near(got, tc.want) {
+				t.Fatalf("got %.9f, %v; want %.9f", got, ok, tc.want)
+			}
+		})
+	}
+}
+
+// TestLiveReviewModelIsPriced mirrors review.LiveModel ("claude-haiku-5-5").
+// It lives here because store cannot import review and review no longer checks
+// pricing at runtime, so this test is the only guard that the live model stays
+// in the embedded pricing table.
+func TestLiveReviewModelIsPriced(t *testing.T) {
+	if !PricedModel("claude-haiku-5-5") {
+		t.Fatal("live review model claude-haiku-5-5 is missing from the pricing table")
+	}
+}
+
+func TestPricingTiersAndTableIdentity(t *testing.T) {
+	// Uncertain size chooses the upper tier even below the boundary.
+	if PricingTableID() == "" {
+		t.Fatal("pricing table identity is empty")
+	}
+	for _, tc := range []struct {
+		size      int64
+		uncertain bool
+		want      string
+	}{
+		{99_999, false, "up_to_100k"}, {100_000, false, "up_to_100k"},
+		{100_001, false, "over_100k"}, {1, true, "over_100k"},
+	} {
+		if got, ok := PricingTier("claude-haiku-5-5", tc.size, tc.uncertain); !ok || got != tc.want {
+			t.Fatalf("tier for size %d uncertain=%v: got %q, %v; want %q", tc.size, tc.uncertain, got, ok, tc.want)
+		}
+	}
+}

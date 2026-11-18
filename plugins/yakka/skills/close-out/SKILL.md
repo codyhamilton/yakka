@@ -1,6 +1,10 @@
 ---
 name: close-out
-description: End a plan by collapsing its folder into one record file at `docs/plans/<NN>-<slug>.md` and deleting the folder in the same commit. Use when the work is finished: dispatched by `execute` after terminal review, or invoked after a pipeline-posture PR has merged.
+description: >-
+  End a plan by collapsing its folder into one record file at
+  docs/plans/<NN>-<slug>.md and deleting the folder in the same commit. Use when
+  the work is finished, including after execute terminal review or a merged
+  pipeline-posture PR.
 ---
 
 # Close-Out

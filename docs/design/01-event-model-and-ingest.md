@@ -21,9 +21,23 @@ Everything is a recorded fact with a join key. State is a view over facts.
 | Hook event | harness hook → spool | conversation ID, harness, event, normalised event, tool, timing, model, token usage and cost where the payload has them |
 | Artifact version | write hook → drain reads file | `repo_id`, `path`, content hash, content, conversation ID, source (`worktree` or `commit`) |
 | Commit | hook on `git commit` | SHA, touched paths, rename pairs, conversation ID |
+| Review run | authenticated review handler | tenant-bound repo, capture and criteria hashes, reviewer/build models, tags, configured/requested/effective effort, status, attempts, validated result and cost; captured input is stored separately by content hash. A `store=false` call writes no review fact |
+| Review usage | authenticated review handler | content-free `store=false` spend: random usage id, configured/returned model, configured/requested/effective effort, tokens, actual cost and pricing identity, timestamp, validated tags and attempt/status; no content-derived identity and no reservation accounting |
 
 Gaps (a brief whose design has no version, a write with no artifact version) are computed by the
 view, not submitted.
+
+`review_run` is appended through the in-process ingest path after review argument and capture
+validation. A `store=false` call instead writes one content-free `review_usage` fact to the caller's
+tenant: it carries no repo, plan, session or capture identity, prompt, criteria, findings, error body
+or content-derived hash, and `dry_run` writes neither fact. Both `review_run` and `review_usage`
+remain outside conversation, hook-event and facet counts and work/quality aggregates;
+`review_usage` also stays outside `review_run` and feeds only the tenant review-spend measure.
+New `review_run` and `review_usage` rows carry actual cost only, not `reservation_outcome` or
+`reservation_usd` (both remain accepted when ingesting older rows); a provider failure with no
+reported usage records `cost_usd: null` with `cost_known: false`. `skipped_busy` is a `review_run`
+status reporting the per-tenant in-flight limit, and `skipped_budget` remains readable.
+Captured review input is kept outside the artifact blob and screening areas.
 
 ### Keys
 
@@ -170,7 +184,8 @@ One table in `internal/ingest` maps `(harness, event)` to `keep` or `remove`; a 
 - **`keep`** stores the event as an envelope plus extracted fields. Row-hash identity is the
   full received envelope's, as above.
 - **Stored form.** A hook fact's stored `raw` is its envelope (`type`, `harness`, `event`,
-  `conversation_id`, `ts`, `repo_id`) with no `payload`. The body goes verbatim, after secret
+  `conversation_id`, `ts`) with no `payload`; a hook fact has no `repo_id` (only artifact and commit
+  facts carry one, so a session's repos are known only through those). The body goes verbatim, after secret
   redaction, to the per-conversation archive ([design 3](03-remote-service.md#event-archive)), so
   a session whose hooks are the only transcript keeps its source outside the database.
   `artifact_version` and `commit` facts keep their full `raw`.

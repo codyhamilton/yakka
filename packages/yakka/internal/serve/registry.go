@@ -74,12 +74,13 @@ type legacyDeviceCodeRecord struct {
 
 // registryDoc is the on-disk shape of registry.json.
 type registryDoc struct {
-	Version     int                      `json:"version"`
-	Policy      DomainPolicy             `json:"policy"`
-	Sessions    map[string]SessionRecord `json:"sessions"`
-	Owners      map[string]string        `json:"owners"`
-	Names       map[string]string        `json:"names,omitempty"`
-	TokenHashes []TokenHashRecord        `json:"token_hashes"`
+	Version     int                              `json:"version"`
+	Policy      DomainPolicy                     `json:"policy"`
+	Sessions    map[string]SessionRecord         `json:"sessions"`
+	Owners      map[string]string                `json:"owners"`
+	Names       map[string]string                `json:"names,omitempty"`
+	TokenHashes []TokenHashRecord                `json:"token_hashes"`
+	Lifecycle   map[string]TenantLifecycleRecord `json:"lifecycle,omitempty"`
 }
 
 // Registry holds collector-wide state outside tenant directories.
@@ -91,6 +92,7 @@ type Registry struct {
 	sessions    map[string]SessionRecord
 	owners      map[string]string // tenant ID -> owner GitHub ID
 	names       map[string]string // tenant ID -> display name; a missing entry means the name is the ID
+	lifecycle   map[string]TenantLifecycleRecord
 	tokenHashes []TokenHashRecord
 	dirty       bool
 }
@@ -98,11 +100,12 @@ type Registry struct {
 // OpenRegistry loads or creates registry state for dataDir.
 func OpenRegistry(dataDir string) (*Registry, error) {
 	r := &Registry{
-		path:     filepath.Join(dataDir, registryFileName),
-		policy:   DomainPolicy{Mode: PolicyEveryone},
-		sessions: map[string]SessionRecord{},
-		owners:   map[string]string{},
-		names:    map[string]string{},
+		path:      filepath.Join(dataDir, registryFileName),
+		policy:    DomainPolicy{Mode: PolicyEveryone},
+		sessions:  map[string]SessionRecord{},
+		owners:    map[string]string{},
+		names:     map[string]string{},
+		lifecycle: map[string]TenantLifecycleRecord{},
 	}
 	if err := r.load(); err != nil {
 		return nil, err
@@ -138,6 +141,9 @@ func (r *Registry) load() error {
 	if doc.Names != nil {
 		r.names = doc.Names
 	}
+	if doc.Lifecycle != nil {
+		r.lifecycle = doc.Lifecycle
+	}
 	r.tokenHashes = doc.TokenHashes
 	var legacy struct {
 		DeviceCodes []legacyDeviceCodeRecord `json:"device_codes"`
@@ -170,6 +176,7 @@ func (r *Registry) saveLocked() error {
 		Owners:      r.owners,
 		Names:       r.names,
 		TokenHashes: r.tokenHashes,
+		Lifecycle:   r.lifecycle,
 	}
 	b, err := json.MarshalIndent(doc, "", "  ")
 	if err != nil {
@@ -293,8 +300,21 @@ func (r *Registry) createTenantLocked(name, owner string) (string, error) {
 		if _, taken := r.owners[id]; taken {
 			continue
 		}
+		marker, err := newLifecycleValue()
+		if err != nil {
+			return "", err
+		}
+		generation, err := newLifecycleValue()
+		if err != nil {
+			return "", err
+		}
 		r.owners[id] = owner
 		r.names[id] = name
+		r.lifecycle[id] = TenantLifecycleRecord{
+			Marker:     marker,
+			Generation: generation,
+			State:      lifecycleStateActive,
+		}
 		r.dirty = true
 		return id, nil
 	}
@@ -342,8 +362,10 @@ func (r *Registry) EnsureDefaultTenant(githubID int64) (bool, error) {
 
 // TenantInfo is a tenant as shown to its owner.
 type TenantInfo struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
+	ID                  string  `json:"id"`
+	Name                string  `json:"name"`
+	LifecycleState      string  `json:"lifecycle_state"`
+	LifecycleGeneration *string `json:"lifecycle_generation"`
 }
 
 // TenantName returns the display name for a tenant ID (the ID itself when none was set).

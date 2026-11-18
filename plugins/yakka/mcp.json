@@ -2,7 +2,7 @@
   "mcpServers": {
     "yakka": {
       "command": "python3",
-      "args": ["${CLAUDE_PLUGIN_ROOT}/client/yakka.py", "mcp"]
+      "args": ["${CURSOR_PLUGIN_ROOT}/client/yakka.py", "mcp"]
     }
   }
 }

@@ -4,7 +4,7 @@ Operator guide for triggering the `post-build` stage from an external automation
 
 ## Shape: one orchestrated automation per stage
 
-The pipeline chains at **stage seams**, through the PR: the build stage lands a PR carrying the `Workflow-Plan:` marker, and that PR is the entire handoff into post-build. Within the stage, run **one automation** whose parent orchestrates all phases as subagents — do not split the phases (review / remediation / QA plan / checks / deploy / QA) into separately triggered automations:
+The pipeline chains at **stage seams**, through the PR: the build stage lands a PR carrying the `Yakka-Plan:` marker, and that PR is the entire handoff into post-build. Within the stage, run **one automation** whose parent orchestrates all phases as subagents — do not split the phases (review / remediation / QA plan / checks / deploy / QA) into separately triggered automations:
 
 - The stage's cross-phase state — classification, candidate SHA, exact deployment URL, remediation and QA cycle counts, final results — is exactly the state that must never be committed. Chained automations hand off through commits or trigger payloads; a single run holds it in the parent.
 - Bounded loops need one authority that remembers. Chained runs would reconstruct cycle counts from artifact archaeology, and a retrigger loop is one parsing bug away.
@@ -21,7 +21,7 @@ Trigger **once per build handoff**, not on every push to the branch:
 - Preferred: PR opened / marked ready-for-review by the build agent, or a dedicated label (e.g. `post-build`) the build stage applies.
 - Manual/operator trigger is equally valid; garcia-music runs this way.
 - If the harness only offers push triggers, add a guard to the prompt: exit immediately when the head commit is the stage's own artifact commit (`REVIEW.md`/`QA.md`/remediation), so the automation cannot feed itself.
-- Pass an explicit plan-folder path in trigger context only to override discovery; normally the PR's `Workflow-Plan:` marker is sufficient.
+- Pass an explicit plan-folder path in trigger context only to override discovery; normally the PR's `Yakka-Plan:` marker is sufficient.
 - Trivial non-functional PRs may still enter this automation; the skill is expected to classify, read the required checks at the end, and exit early with an absorbed report rather than running the full stage.
 
 ## Re-runs and resumability
@@ -56,7 +56,7 @@ You are the parent: coordinate by default; absorb only trivial/small
 non-functional changes. Dispatch each worker by naming its worker skill plus
 the run's situational context.
 
-Resolve plan context from the PR's Workflow-Plan marker, or classify as
+Resolve plan context from the PR's Yakka-Plan marker, or classify as
 ad-hoc when none is needed.
 
 Classify the change (intent source, surface, size), then right-size:
@@ -88,7 +88,7 @@ functional work. Otherwise leave the PR open with the merge-readiness report.
 
 ## Pre-wiring checklist
 
-- [ ] Build stage lands PRs with `Workflow-Plan: docs/plans/<NN>-<slug>/` as the first body line (ad-hoc/no-plan PRs are still handled via classification).
+- [ ] Build stage lands PRs with `Yakka-Plan: docs/plans/<NN>-<slug>/` as the first body line (ad-hoc/no-plan PRs are still handled via classification).
 - [ ] Adapter skill named `post-build-automation` exists and supplies: production boundaries, required checks, deploy-proof + health-check mechanics, QA identities and sign-in routes, environment setup, worker/model routing.
 - [ ] Automation has the adapter's named secrets and non-production repo access.
 - [ ] Trigger fires once per handoff (or carries the self-commit guard).

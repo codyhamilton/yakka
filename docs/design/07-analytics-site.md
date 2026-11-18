@@ -1,5 +1,11 @@
 # Design Intent 7: Analytics Site
 
+> **Replacement designed, not built.** [plans/20-analytics-reset](../plans/20-analytics-reset/DESIGN.md)
+> designs a static, no-build analytics workspace to replace the SvelteKit site described below, and
+> removes the 399-day reporting-window cap. The sections below describe master `b2094eb`; each implementation phase updates the sections it
+> changes. The proposed server/UI contracts are in that plan's `CONTRACTS.md` section 17 and are
+> promoted here at close-out; this design-only publication changes no serving behavior.
+
 The person-facing view of one tenant's yakka ledger: read-only aggregate routes on `yakka
 serve`, and a static Svelte site that renders them. Part of
 [system-architecture.md](system-architecture.md); it reads the service in
@@ -45,6 +51,42 @@ What the request's words mean on the ledger: an **agent** is a `conversation_id`
 design usage** is the design → brief → commit → report shape, not CI or driver cost; **usage and
 cost** are the model calls, tokens and cost the harnesses report; an **analysis
 type** is the artifact kind plus its check distributions.
+
+## Owner lifecycle UI (Plan 23 Phase 2)
+
+The [Plan 23 amendment](../plans/23-llm-review-shadow.md) landed human-owner
+reset/delete controls in the profile. Only the human owner may reset or delete a tenant. Agents must not perform or attempt this on a user's behalf.
+The API-origin lifecycle view and the Pages navigation to it are implemented; there is no lifecycle
+MCP tool or key/bearer path.
+
+Each confirmation names the operation, display name and immutable tenant id, requires typing that
+id, and says: **“Only the human owner may reset or delete a tenant. Agents must not perform or attempt this on a user's behalf.”**
+Reset explains that it erases data/revokes keys but keeps identity/ownership for reuse after
+rekeying. Delete explains permanent removal of tenant/data/keys/ownership. Cancellation or a
+rejected request changes neither selection nor data. Both may target the selected/only tenant;
+after `204`, clear target selection and cached reads/cursors across the acting UI origin's tabs,
+refresh `/v1/me` and require explicit re-selection/create on profile, without automatic fallback.
+Global login and other owned tenants remain usable. API-origin and Pages localStorage are
+separate. Owned `/v1/me` entries carry `lifecycle_state`
+(`active`, `resetting`, `deleting`, `unsupported`) and `lifecycle_generation` (opaque, null for
+unsupported legacy), read from registry/journal metadata without lazy-open. Disable lifecycle
+actions while recovery is unresolved. Pending entries remain owner-visible; reset changes generation and delete
+removes the entry. Both origins revalidate on return/focus/pageshow and before tenant reads,
+compare remembered id/generation, clear absent/changed selections and caches without automatic
+fallback, and suspend target reads during cleanup. Eligible remembered selections lacking a
+generation require explicit re-selection. Same-origin tabs receive invalidation notices; other
+origins/browsers observe it on their next validation. Failed reads show completion unknown. Do not replay a destructive request automatically
+after an ambiguous response; refresh state before a new typed confirmation.
+
+The lifecycle view is served at the **API origin**, including the production collector, which
+currently lacks the site bundle. This bounded view and a navigation link from the
+Pages profile are implemented; they do not require the paused analytics redesign or move other site routes.
+Its requests use only the owner cookie, exact API `Origin`, `Sec-Fetch-Site: same-origin` when
+present, `X-Yakka-UI: tenant-lifecycle`, JSON and exact `confirm_tenant_id`. It sends no bearer.
+Pages/configured CORS origins are rejected for these lifecycle fetches, despite remaining valid
+for other browser routes. See [API errors and cleanup](03-remote-service.md#owner-tenant-lifecycle-api).
+The gate is spoofable and is not human attestation; future human verification/captcha is out of
+scope. No deployment, hosting change or destructive action is authorized or claimed here.
 
 ## Analytics reads
 
@@ -225,7 +267,7 @@ on a compacted copy of the real ledger.
   Other origins get no CORS headers, so a public page cannot read a keyless loopback ledger.
   `localGuard` (loopback `Host`, JSON-only POST) runs first.
 - Keyed mode: the same headers only for an origin listed exactly in `YAKKA_SERVE_CORS_ORIGINS`
-  ([design 3](03-remote-service.md#configuration-first-round)). No wildcard, no reflected origin.
+  ([design 3](03-remote-service.md#configuration)). No wildcard, no reflected origin.
 - Remote collector: state-changing `Origin` checks and credentialed CORS allow
   `https://yakka.build`, `https://www.yakka.build`, the public API origin, and each exact entry
   of `YAKKA_SERVE_CORS_ORIGINS`. Credentialed responses set `Access-Control-Allow-Credentials: true`
