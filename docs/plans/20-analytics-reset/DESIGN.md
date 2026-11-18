@@ -734,6 +734,29 @@ Refinement verdict: **Proceed**, six units. 9-01 runs first and establishes the 
 - Approach: known.
 - Depends on: Phases 4, 5, 6, 7, 8, 9 and 10.
 
+#### Units
+
+| Unit | Brief | Depends on | Runs alongside |
+|---|---|---|---|
+| 11-01 Scatter foundation, session scatter and range selection seam | [briefs/11-01-scatter-foundation.md](briefs/11-01-scatter-foundation.md) | Phases 4–10 | Nothing; establishes the shared scatter request/axes/chooser helpers, the canonical rectangle predicate and selection-tray count seam, the P11 fixture/stub scene, scatter CSS and the unit specs. It registers the four panel seams but not the `scatter` preset. |
+| 11-02 Artifact and plan scatter | [briefs/11-02-artifact-plan-scatter.md](briefs/11-02-artifact-plan-scatter.md) | 11-01 | Nothing; appends the artifact/plan panels to the shared registration module and the same P11 fixture/stub scene. |
+| 11-03 Time scatter, time cohorts and the Scatter preset | [briefs/11-03-time-scatter.md](briefs/11-03-time-scatter.md) | 11-01, 11-02 | Nothing; owns `scatter-day`, the frozen time-cohort source/association seam, the final four-panel preset and the Phase 9 Start/acceptance expectation updates. |
+| 11-04 Sessions list and detail | [briefs/11-04-sessions.md](briefs/11-04-sessions.md) | 11-01, 11-03 | Nothing; converts the named `/sessions` route to the server-sorted explorer, adds `/sessions/<id>` and `session-lanes`, and owns the conversation-cap reconciliation and engine expectation update. |
+| 11-05 Scatter lab and Sessions acceptance | [briefs/11-05-acceptance.md](briefs/11-05-acceptance.md) | 11-01–11-04 | Nothing; owns the phase acceptance proof across the four scatters and both session surfaces. |
+
+**Carried from Phase 10**
+
+- The artifact reader is Phase 12 and the exact artifact `id` lens grammar stays unconfirmed. 11-02 identifies an artifact by `repo_id`+`path`+`hash`, names the `/artifact?…` destination, and promotes no `id` lens to an axis or cohort; 11-04 does the same from a session. No Phase 11 unit builds the reader.
+- The external Pages automation gate belongs to Phase 13. Every Phase 11 browser spec records it where relevant and does not attempt a Pages-style serve.
+- Browser evidence needs `playwright-core` 1.63.0 under `NODE_PATH` and the Chromium 1243 cache outside this worktree; a spec that cannot reach them skips with the named reason and records a gate in its done evidence.
+- The committed P10 stub carries one scores/artifact body. 11-02 extends the P11 scene additively and never rewrites a P10 body; 11-03/11-04 do the same for their list/conversation/scatter bodies.
+- Two-sided `cmp=cohorts` remains limited to the compare-preset panels; `trend-columns`, `trend-multiples` and `mix` keep single-cohort behaviour outside the compare preset. Phase 11 adds no two-sided cost/quality comparison.
+- The Tools route-interception spec is timing-sensitive under parallel files. The Phase 11 suite runs sequentially (`--test-concurrency=1`) where the harness shares a route log; this is a test constraint, not a product defect.
+- Charts paint the frame after a panel goes idle; every Phase 11 spec reads through `inspect()` and uses no fixed sleep or animation assertion.
+- The `systemd-run -p MemoryMax=8G` scope OOM-kills the heavy browser case on this host, so the 8G cap is applied as in Phases 9/10 via `NODE_OPTIONS=--max-old-space-size=8192`; no `/tmp` is used.
+
+**Proceed**, five units. 11-01 establishes the shared scatter request/axis/chooser and range-selection seams plus the session scatter and the P11 fixture/stub scene; 11-02 adds the artifact and plan panels; 11-03 adds the time scatter, freezes the time-cohort source, resolves contributing sessions and missing/orphan associations, and only then registers the four-panel Scatter preset; 11-04 delivers the server-sorted Sessions explorer and the bounded session detail; 11-05 proves the phase outcome end to end. Every unit composes the existing grains, joins, routes, chart elements/gestures and dependencies and adds no new one. All evidence uses the committed fixture through the first-party test-only stub API and deterministic fixtures; no live server, production data, credential, deployment or migration is required. `artifact_feedback` on all five briefs returned **unreachable** (`local context unavailable: queue (invalid_context)`); no screen verdict was issued and none is claimed.
+
 ### Phase 12 — Workflow, Plans and the artifact reader
 
 - Outcome: From Workflow and Plans, grouped process shapes, plan cost ranking/scatter and version/execution timelines open the relevant plan. Plan detail pages artifacts/executions/sessions/events and shows stored design phase headings/outcomes and brief paths as content context, without inferring phase completion or review outcomes. Artifact reader navigation, per-version metadata and bounded text-only content connect bidirectionally to plans/sessions. Two-version line diff matches the fixture, declines above its stated size ceiling and never diffs unavailable/incomplete text. Malicious HTML/script content stays inert; missing/oversized bodies show exact reasons. Every catalog panel and all three explorers are now delivered.
