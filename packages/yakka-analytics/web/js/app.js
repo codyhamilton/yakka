@@ -10,6 +10,11 @@ import { encodePanelSpec } from './core/view-spec.js';
 import { assembleBoard } from './boards/board.js';
 import { createPanelFrame } from './panels/panel-frame.js';
 import { currentBoardUrl, readBoards, saveBoard, deleteBoard, openBoard } from './core/saved-boards.js';
+import { addFilterChip, createChips, legendFocusFilter, stateUrl, withPick } from './core/chips.js';
+import { buildCohort, createSelectionTray, nextCohortSlot, openListDestination, writeCohort } from './core/selection-tray.js';
+import { createInspector } from './core/inspector.js';
+import { createCapabilityInspector } from './core/capability-inspector.js';
+import { decodePick, encodePick } from './core/selection-model.js';
 
 const root = document.querySelector('#app');
 const scheduler = createScheduler({ onChange: ({ inFlight }) => {
@@ -18,6 +23,7 @@ const scheduler = createScheduler({ onChange: ({ inFlight }) => {
   status.textContent = `${inFlight} requests in flight`;
 } });
 const transport = createTransport(scheduler);
+let activeBoardTeardown = null;
 let sessionPromise;
 function loadSessionOnce() {
   if (!sessionPromise) sessionPromise = transport.request('me').then(result => {
@@ -243,6 +249,10 @@ function mountFollow(container, schema, tenant) {
   return follow;
 }
 
+function currentState() {
+  return decodeUrlState(globalThis.location?.search || '');
+}
+
 async function renderBoard(container, record, state, schema, tenant) {
   renderScopeBar(container, state);
   renderCoverageStrip(container, schema);
@@ -251,6 +261,33 @@ async function renderBoard(container, record, state, schema, tenant) {
   if (board.kind !== 'board') { renderNotFound(container, record); container.append(element('p', 'notice', board.reason)); return; }
   container.append(element('h1', '', board.title));
   const grid = element('div', 'panel-grid');
+
+  const runtime = { grain: '', unit: '', population: null, selection: null, unmapped: '', chips: [] };
+  const inspector = createInspector({ doc: document, router, onAction: detail => handleInspectorAction(detail, runtime, record) });
+  activeBoardTeardown = () => inspector.destroy();
+  const tray = createSelectionTray({ doc: document, router, path: record.path });
+  const clearSelection = () => router.replaceTransient(stateUrl(withPick(currentState(), ''), globalThis.location?.search || '', record.path));
+  const defaultGrain = board.panels.find(entry => entry.panel)?.panel?.grain || '';
+
+  function updateTray() {
+    tray.update({
+      state: currentState(),
+      pick: decodePick(currentState().pick),
+      grain: runtime.grain || defaultGrain,
+      unit: runtime.unit || runtime.population?.unit || defaultGrain || 'row',
+      population: runtime.population,
+      selection: runtime.selection,
+      schema,
+      search: globalThis.location?.search || '',
+      onClear: clearSelection,
+      now: Date.now()
+    });
+  }
+
+  function updateChips() {
+    for (const update of runtime.chips) update();
+  }
+
   for (const entry of board.panels) {
     if (!entry.panel) {
       const missing = element('section', 'workspace-panel');
@@ -260,13 +297,114 @@ async function renderBoard(container, record, state, schema, tenant) {
       grid.append(missing);
       continue;
     }
-    const frame = createPanelFrame({ panel: entry.panel, spec: entry.spec, scope: entry.scope, transport, scheduler, tenant });
+    const panelRuntime = { population: null };
+    const wrappedPanel = entry.panel.load
+      ? {
+        ...entry.panel,
+        load: async context => {
+          const result = await entry.panel.load(context);
+          panelRuntime.population = result?.population || null;
+          if (!runtime.population) runtime.population = panelRuntime.population;
+          if (!runtime.unit && panelRuntime.population?.unit) runtime.unit = panelRuntime.population.unit;
+          updateTray();
+          return result;
+        }
+      }
+      : entry.panel;
+    const frame = createPanelFrame({ panel: wrappedPanel, spec: entry.spec, scope: entry.scope, transport, scheduler, tenant });
+    const capability = createCapabilityInspector({ doc: document, panel: entry.panel, spec: entry.spec || {}, schema });
+    frame.element.append(capability.element);
+
+    const chips = createChips({ doc: document, router, path: record.path });
+    frame.chipSlot.append(chips.element);
+    const updateChipsForPanel = () => chips.update({
+      state: currentState(),
+      search: globalThis.location?.search || '',
+      schema,
+      grain: entry.panel.grain,
+      unmapped: runtime.unmapped,
+      onClearSelection: clearSelection
+    });
+    runtime.chips.push(updateChipsForPanel);
+    updateChipsForPanel();
+
+    frame.element.addEventListener('select', event => {
+      const selection = event.detail?.selection || { include: [], exclude: [] };
+      runtime.grain = entry.panel.grain;
+      runtime.population = panelRuntime.population || runtime.population;
+      runtime.unit = runtime.population?.unit || entry.panel.grain;
+      runtime.selection = selection;
+      const pick = encodePick({ include: selection.include || [], exclude: selection.exclude || [] });
+      router.replaceTransient(stateUrl(withPick(currentState(), pick), globalThis.location?.search || '', record.path));
+    });
+    frame.element.addEventListener('inspect', event => {
+      const detail = event.detail || {};
+      const series = event.target?.spec?.series || event.target?.inspect?.().series || [];
+      const facts = Object.entries(detail.values || {}).map(([key, value]) => {
+        const match = series.find(item => item.key === key);
+        return { label: match?.label || key, value, unit: match?.unit || '' };
+      });
+      inspector.open({
+        grain: entry.panel.grain,
+        key: detail.key,
+        values: detail.values,
+        facts,
+        unit: panelRuntime.population?.unit || entry.panel.grain,
+        population: panelRuntime.population,
+        selection: runtime.selection,
+        opener: (event.composedPath?.() || []).find(node => node?.dataset?.mark !== undefined)
+          || event.target?.shadowRoot?.activeElement
+          || event.target,
+        url: globalThis.location?.href || ''
+      });
+    });
+    frame.element.addEventListener('filter', event => {
+      const detail = event.detail || {};
+      const series = event.target?.spec?.series || event.target?.inspect?.().series || [];
+      const mapped = legendFocusFilter(detail, { series });
+      if (!mapped) { runtime.unmapped = detail.key || ''; updateChips(); return; }
+      runtime.unmapped = '';
+      const next = addFilterChip(currentState(), mapped.filter, mapped.value);
+      router.pushScope(stateUrl(next, globalThis.location?.search || '', record.path));
+    });
+    frame.element.addEventListener('cohort', event => {
+      const detail = event.detail || {};
+      const selection = detail.selection || runtime.selection;
+      if (!selection) return;
+      const slot = `c${detail.slot || 'a'}`;
+      try {
+        const cohort = buildCohort({ state: currentState(), pick: { include: selection.include || [], exclude: selection.exclude || [] }, grain: entry.panel.grain, schema });
+        router.pushScope(stateUrl(writeCohort(currentState(), slot, cohort), globalThis.location?.search || '', record.path));
+      } catch { /* a cohort needs a selection; leaving the board unchanged is the contract */ }
+    });
+    frame.element.addEventListener('open', () => router.push(openListDestination(entry.panel.grain)));
+
     grid.append(frame.element);
     frame.load();
   }
-  container.append(grid);
+  container.append(grid, tray.element, inspector.element);
+  updateTray();
   mountFollow(container, schema, tenant);
   mountSavedBoards(container, state);
+}
+
+function handleInspectorAction(detail, runtime, record) {
+  if (!detail || detail.action === 'close' || detail.action === 'open' || detail.action === 'copy') return;
+  const state = currentState();
+  if (detail.action === 'filter') {
+    const mapped = legendFocusFilter({ key: detail.key }, { series: [] });
+    if (!mapped) { runtime.unmapped = String(detail.key ?? ''); runtime.chips.forEach(update => update()); return; }
+    router.pushScope(stateUrl(addFilterChip(state, mapped.filter, mapped.value), globalThis.location?.search || '', record.path));
+  } else if (detail.action === 'exclude' || detail.action === 'cohort') {
+    if (!detail.key) return;
+    const op = detail.action === 'exclude' ? 'exclude' : 'include';
+    const next = writeCohort(
+      op === 'exclude' ? { ...state, cmp: 'cohorts' } : state,
+      nextCohortSlot(state) || 'ca',
+      buildCohort({ state, pick: { include: [String(detail.key)], exclude: [] }, grain: detail.grain, schema: null, op })
+    );
+    router.pushScope(stateUrl(next, globalThis.location?.search || '', record.path));
+  }
 }
 
 async function renderExplorer(container, record) {
@@ -278,6 +416,7 @@ async function renderExplorer(container, record) {
 async function render(record) {
   const path = record.path;
   const state = decodeUrlState(record.search);
+  if (activeBoardTeardown) { activeBoardTeardown(); activeBoardTeardown = null; }
   root.replaceChildren();
   root.dataset.route = path;
   setShellState('loading', 'false');
