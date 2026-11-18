@@ -33,6 +33,13 @@ Refinement commit `f95a8b8` (`docs: refine Plan 20 Phase 12 into seven units`) r
 - Deviations / unfinished: worker reported **done**. The check chooser unions observed version scores with `/scores?kind=` because the P12 scene publishes no catalogue; `artifactKind` returns `other` where Go returns empty and labels it "other (not stored)" without fetching content; version selection pushes history without a popstate refetch and caches by hash. Known: a deep-linked hash beyond the first `page_max` versions shows "version not found" until Load more (auto-walking `next` is forbidden). `gate: the Phase 13 Pages/deploy automation gate is unchanged and untested.`
 - Verification: artifact-reader 15/15 with Chromium (plain and env), each browser spec `maxInFlight <= 4`; engine/start 11/11; workspace acceptance 5/5 and workspace 72/72; scatter-sessions 42/42; trends-quality 54/54; `git diff --check` clean. `artifact_feedback` unreachable (`invalid_context`).
 
+### `12-04-artifact-diff.md`
+
+- Outcome: committed as `12da403` (`Add bounded artifact version diff`). Added `explorers/artifact-diff.js` (deterministic text-only line diff, hunk headers, +/−/space prefixes, no-final-newline handling, 262,144 bytes and 2,000 lines per side with a named refusal), URL-backed `compare=` version selection, abortable complete-body fetches, and no diff when either side is unavailable; extended the reader controls, artifact CSS and the P12 fixture; added `artifact-diff.test.mjs` (pure + Chromium).
+- Surfaces: the brief's owned paths.
+- Deviations / unfinished: worker reported **over budget** with the unit complete and green; no added scope. For an unstored `other` path it renders a disabled control with a named reason and sends no diff request (brief says no control; chose disabled+reason, no request). The Chromium refusal spec permits the expected fixture 404 console message; page errors and CSP violations are empty. `gate: none`.
+- Verification: diff 6/6; reader 15/15; workspace 72/72; scatter-sessions 42/42; `git diff --check` clean. `artifact_feedback` unreachable (`invalid_context`).
+
 ## Phase 11 — Scatter lab and Sessions
 
 The phase outcome is approach-known. This run uses the signed outcome, the panel catalog and preset mapping, the Interaction model, CONTRACTS.md 17.1, 17.2, 17.3, 17.3.1, 17.5 and 17.7 as the fixed yardstick. No new grain, join, route, dependency, gesture or contract is authorized. Phase 11 has no Units list in DESIGN.md and is more than one worker's work, so `refine` is dispatched as its own context; its verdict decides the units.
