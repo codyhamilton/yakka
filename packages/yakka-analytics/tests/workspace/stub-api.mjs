@@ -1,7 +1,7 @@
 // Deterministic same-origin stub of the analytics API, generated from the
 // committed fixture manifest. Test-only: product code never imports this.
 
-import { makeSchema, activityProbe, activityList, summary, population, adminStatus, explorePage, COUNTS, p10Schema, p10Summary, p10Query, p10Distribution, p10Entities, p10Scores, p10ScoreSeries, p10Baselines, p11Schema, p11Scatter, p11ArtifactScatter, p11PlanScatter, p11TimeScatter, p11TimeAggregate, p11Scores, p11Entities, p11Aggregate } from './fixture.mjs';
+import { makeSchema, activityProbe, activityList, summary, population, adminStatus, explorePage, COUNTS, p10Schema, p10Summary, p10Query, p10Distribution, p10Entities, p10Scores, p10ScoreSeries, p10Baselines, p11Schema, p11Scatter, p11ArtifactScatter, p11PlanScatter, p11TimeScatter, p11TimeAggregate, p11Scores, p11Entities, p11Aggregate, p11SessionList, p11Conversation, p11Entity } from './fixture.mjs';
 
 const json = (response, status, body) => {
   response.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
@@ -20,6 +20,7 @@ export function createStubApi() {
     statusDelayMs: 0,
     statusRequests: 0,
     statusAborted: 0,
+    sessionError: false,
     p10: false,
     p11: false,
     requests: []
@@ -101,7 +102,51 @@ export function createStubApi() {
           json(response, 200, body);
           return true;
         }
+        if (grain === 'session' && state.sessionError) {
+          json(response, 500, { error: 'sessions read failed', code: 'read failed' });
+          return true;
+        }
+        if (grain === 'session' && state.empty) {
+          json(response, 200, {
+            grain, rows: [],
+            population: { grain, unit: 'session', scope_n: 0, cohort_n: 0, eligible_n: 0, returned_n: 0, missing_by_reason: {}, relation: null }
+          });
+          return true;
+        }
+        if (grain === 'session') {
+          const filters = {};
+          for (const key of ['harness', 'session_model', 'session_repo', 'origin', 'has_artifacts', 'id']) filters[key] = query.getAll(key);
+          json(response, 200, p11SessionList({
+            sort: query.get('sort') || 'last_ts:desc',
+            limit: Number(query.get('limit')) || 500,
+            cursor: query.get('cursor') || '',
+            filters
+          }));
+          return true;
+        }
         json(response, 200, p11Entities(grain));
+        return true;
+      }
+      if (path === '/v1/analytics/conversation') {
+        if (query.has('cohort')) {
+          json(response, 400, { error: 'cohort is not supported on this route', code: 'cohort_invalid', reason: 'route_not_supported' });
+          return true;
+        }
+        const id = query.get('id') || '';
+        if (!id) { json(response, 400, { error: 'id required', code: 'id required' }); return true; }
+        const body = p11Conversation(id);
+        if (!body) { json(response, 404, { error: 'conversation not found', code: 'not found' }); return true; }
+        json(response, 200, body);
+        return true;
+      }
+      if (path === '/v1/analytics/entity') {
+        if (query.has('cohort')) {
+          json(response, 400, { error: 'cohort is not supported on this route', code: 'cohort_invalid', reason: 'route_not_supported' });
+          return true;
+        }
+        const body = p11Entity({ grain: query.get('grain') || 'session', id: query.get('id') || '' });
+        if (!body) { json(response, 404, { error: 'conversation not found', code: 'not found' }); return true; }
+        json(response, 200, body);
         return true;
       }
       if (path === '/v1/analytics/scores') {

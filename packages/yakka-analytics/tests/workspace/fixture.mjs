@@ -993,6 +993,176 @@ export function p11TimeAggregate({ predicate = '' } = {}) {
   };
 }
 
+
+// ---------------------------------------------------------------------------
+// P11 sessions: the server-sorted list pages and the bounded conversation.
+// Additive bodies; the scatter/list/aggregate shapes above are untouched.
+// ---------------------------------------------------------------------------
+
+export function p11SessionListRows() {
+  return p11SessionRows().map((row, index) => {
+    const flags = { ...(row.flags || {}) };
+    delete flags.sampled;
+    const m = { ...row.m };
+    if (index === 4) {
+      m.cost_usd = null;
+      m.unpriced_calls = 5;
+      flags.unpriced = true;
+    }
+    if (index === 9) flags.lower_bound = true;
+    return { ...row, m, flags };
+  });
+}
+
+function p11Cursor(offset) {
+  return Buffer.from(`p11:${offset}`, 'utf8').toString('base64');
+}
+
+function p11CursorOffset(cursor) {
+  if (!cursor) return 0;
+  try {
+    const text = Buffer.from(String(cursor), 'base64').toString('utf8');
+    const match = /^p11:(\d+)$/.exec(text);
+    return match ? Number(match[1]) : 0;
+  } catch { return 0; }
+}
+
+// Server-sorted, opaque keyset cursor pages. The page size is capped at 20 so
+// the list proves a real second page even though the client asks for page_max.
+export function p11SessionList({ sort = 'last_ts:desc', limit = 20, cursor = '', filters = {} } = {}) {
+  let rows = p11SessionListRows();
+  for (const [key, values] of Object.entries(filters || {})) {
+    if (!Array.isArray(values) || !values.length) continue;
+    rows = rows.filter(row => values.includes(row.l?.[key] ?? row.m?.[key]));
+  }
+  const at = String(sort || '').lastIndexOf(':');
+  const measure = at === -1 ? String(sort || 'last_ts') : String(sort).slice(0, at);
+  const dir = at !== -1 && String(sort).slice(at + 1) === 'asc' ? 'asc' : 'desc';
+  rows.sort((a, b) => {
+    const av = a.m?.[measure];
+    const bv = b.m?.[measure];
+    if (av === bv) return String(a.id).localeCompare(String(b.id));
+    if (av === null || av === undefined) return 1;
+    if (bv === null || bv === undefined) return -1;
+    return (av < bv ? -1 : 1) * (dir === 'asc' ? 1 : -1);
+  });
+  const offset = p11CursorOffset(cursor);
+  const size = Math.max(1, Math.min(Number(limit) || 20, 20));
+  const page = rows.slice(offset, offset + size);
+  const nextOffset = offset + page.length;
+  const body = {
+    grain: 'session',
+    rows: page,
+    population: {
+      grain: 'session', unit: 'session', scope_n: rows.length, cohort_n: rows.length,
+      eligible_n: rows.length, returned_n: page.length, missing_by_reason: {}, relation: null
+    }
+  };
+  if (nextOffset < rows.length) body.next = p11Cursor(nextOffset);
+  return body;
+}
+
+const P11_TOOL_KINDS = ['shell', 'read', 'edit', 'search', 'web'];
+const P11_TOOL_NAMES = { shell: 'Bash', read: 'Read', edit: 'Edit', search: 'Grep', web: 'WebFetch' };
+
+// 5,000 returned events of 5,123. Ten returned model calls are unpriced; three
+// more unpriced calls sit beyond the cap, so displayed markers reconcile only
+// with returned events while the whole-run unpriced total stays larger.
+export function p11ConversationEvents(index = 0) {
+  const base = Math.floor(P11.start / 1000) + index * 60;
+  const iso = seconds => new Date(seconds * 1000).toISOString();
+  const events = [];
+  for (let i = 0; i < 5000; i += 1) {
+    const ts = iso(base + i * 10);
+    if (i % 500 === 49) {
+      events.push({
+        ts, type: 'hook_event', norm_event: 'usage', event: 'usage', tool: '', model: i % 1000 === 49 ? 'claude' : 'gpt',
+        tokens: { in: 100 + i, out: 40 + (i % 30), cache_read: 10, cache_write: 2, reasoning: 1 },
+        priced: false
+      });
+      continue;
+    }
+    if (i % 500 === 99) {
+      events.push({
+        ts, type: 'hook_event', norm_event: 'usage', event: 'usage', tool: '', model: i % 1000 === 99 ? 'claude' : 'gpt',
+        tokens: { in: 200 + i, out: 60 + (i % 20), cache_read: 20, cache_write: 4, reasoning: 2 },
+        cost_usd: 0.0025, priced: true
+      });
+      continue;
+    }
+    if (i === 100) {
+      events.push({
+        ts, type: 'artifact_version', norm_event: 'artifact_version', event: 'artifact_version', tool: '', model: '',
+        path: 'docs/plans/20-analytics-reset/DESIGN.md', kind: 'design', source: 'worktree', sha: 'hash-design',
+        repo_id: 'repo-a', plan: '20-analytics-reset'
+      });
+      continue;
+    }
+    if (i === 250) {
+      events.push({
+        ts, type: 'artifact_version', norm_event: 'artifact_version', event: 'artifact_version', tool: '', model: '',
+        path: 'docs/plans/20-analytics-reset/briefs/11-04-sessions.md', kind: 'brief', source: 'worktree', sha: 'hash-brief',
+        repo_id: 'repo-a', plan: '20-analytics-reset'
+      });
+      continue;
+    }
+    if (i === 350) {
+      events.push({ ts, type: 'commit', norm_event: 'commit', event: 'commit', tool: '', model: '', source: 'commit', sha: 'commit-sha', repo_id: 'repo-a' });
+      continue;
+    }
+    if (i === 400) {
+      events.push({
+        ts, type: 'artifact_version', norm_event: 'artifact_version', event: 'artifact_version', tool: '', model: '',
+        path: 'docs/plans/20-analytics-reset/reports/11-04-sessions.md', kind: 'report', source: 'worktree', sha: 'hash-report',
+        repo_id: 'repo-b', plan: '20-analytics-reset'
+      });
+      continue;
+    }
+    const toolKind = P11_TOOL_KINDS[i % P11_TOOL_KINDS.length];
+    events.push({
+      ts, type: 'hook_event', norm_event: 'tool_use', event: 'PreToolUse', tool: P11_TOOL_NAMES[toolKind], tool_kind: toolKind,
+      model: ''
+    });
+  }
+  return events;
+}
+
+export function p11Conversation(id = '') {
+  const match = /^conv-(\d{3})$/.exec(String(id));
+  if (!match) return null;
+  const index = Number(match[1]);
+  if (index < 0 || index >= 40) return null;
+  const events = p11ConversationEvents(index);
+  const base = Math.floor(P11.start / 1000) + index * 60;
+  return {
+    conversation_id: id,
+    harness: 'orca',
+    repos: ['repo-a', 'repo-b'],
+    models: ['claude', 'gpt'],
+    first_ts: new Date(base * 1000).toISOString(),
+    last_ts: new Date((base + 5000 * 10) * 1000).toISOString(),
+    totals: {
+      model_calls: 21, tokens_in: 2100, tokens_out: 840, tokens_cache_read: 120, tokens_cache_write: 24,
+      tokens_reasoning: 12, cost_usd: 3.75, unpriced_calls: 13
+    },
+    window_totals: {
+      model_calls: 5, tokens_in: 500, tokens_out: 200, tokens_cache_read: 30, tokens_cache_write: 6,
+      tokens_reasoning: 3, cost_usd: 0.75, unpriced_calls: 3
+    },
+    returned_events: events.length,
+    total_events: 5123,
+    returned_unpriced_calls: 10,
+    total_unpriced_calls: 13,
+    events,
+    truncated: true
+  };
+}
+
+export function p11Entity({ grain = 'session', id = '' } = {}) {
+  if (grain !== 'session') return null;
+  return p11Conversation(id);
+}
+
 export function p11Fixture() {
   return {
     schema: p11Schema(),
@@ -1008,6 +1178,9 @@ export function p11Fixture() {
     artifactRows: p11ArtifactRows,
     planRows: p11PlanRows,
     timeRows: p11TimeRows,
-    sessionId: p11SessionId
+    sessionId: p11SessionId,
+    sessionList: p11SessionList,
+    conversation: p11Conversation,
+    entity: p11Entity
   };
 }

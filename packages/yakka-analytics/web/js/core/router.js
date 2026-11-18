@@ -6,12 +6,11 @@ import { isPresetId, lookupPreset, presetDestination } from '../boards/presets.j
 
 export const ACCOUNT_PATHS = ['/login', '/oauth/callback', '/device', '/profile', '/settings'];
 export const START_PATH = '/';
-export const EXPLORER_PATHS = new Map([['/ledger', 'ledger'], ['/ops', 'ops']]);
+export const EXPLORER_PATHS = new Map([['/ledger', 'ledger'], ['/ops', 'ops'], ['/sessions', 'sessions']]);
 
 // Later destinations and the phase that delivers them.
 const NAMED_ROUTES = [
   { pattern: /^\/plans(?:\/[^/]+\/[^/]+)?$/, title: 'Plans', phase: 12 },
-  { pattern: /^\/sessions(?:\/[^/]+)?$/, title: 'Sessions', phase: 11 },
   { pattern: /^\/artifact$/, title: 'Artifact reader', phase: 12 }
 ];
 
@@ -33,9 +32,14 @@ export function parseRoute(pathname = '/', search = '') {
     }
     return { kind: 'board', path, search, title: destination?.title || presetId, presetId };
   }
+  const sessionDetail = /^\/sessions\/([^/]+)$/.exec(path);
+  if (sessionDetail) {
+    return { kind: 'explorer', path, search, explorer: 'sessions', sessionId: decodeURIComponent(sessionDetail[1]), title: 'Session' };
+  }
   if (EXPLORER_PATHS.has(path)) {
     const explorer = EXPLORER_PATHS.get(path);
-    return { kind: 'explorer', path, search, explorer, title: explorer === 'ledger' ? 'Ledger' : 'Operations' };
+    const title = explorer === 'ledger' ? 'Ledger' : explorer === 'sessions' ? 'Sessions' : 'Operations';
+    return { kind: 'explorer', path, search, explorer, title };
   }
   if (ACCOUNT_PATHS.includes(path)) return { kind: 'account', path, search, title: accountTitle(path) };
   for (const route of NAMED_ROUTES) {
@@ -60,6 +64,7 @@ export function isAccountRoute(pathname) {
 export async function loadExplorer(kind) {
   if (kind === 'ledger') return import('../explorers/ledger.js');
   if (kind === 'ops') return import('../ops.js');
+  if (kind === 'sessions') return import('../explorers/sessions.js');
   throw new Error(`unknown explorer ${kind}`);
 }
 
