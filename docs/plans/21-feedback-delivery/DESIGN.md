@@ -503,6 +503,13 @@ Carried placement: no earlier carried item touches Phase 6, so none is absorbed.
 - Surfaces: Claude and Codex sessions, the `yakka:design` skill's feedback step (`plugins/yakka/skills/design/SKILL.md:18`, which names only rejection, flagged checks, `queued`, `unreachable` and `bad config`, and is updated to name `not tracked`, `not delivered` and `stale`, and to say a `queued` answer means call once more after a few seconds), the server's `artifact_feedback`.
 - Approach: known
 - Depends on: 3, 4, 5. Transitively requires phase 3 implementation/closure; the E1 choice hold is removed, and all original dependencies remain.
+- Units:
+
+| Unit | Brief | Depends on | Runs alongside |
+|---|---|---|---|
+| 1 — Name the server states in the design skill's feedback step | `briefs/phase7-01-feedback-states.md` | nothing inside the phase (design phases 3, 4 and 5 are closed in `IMPLEMENTATION.md`; their live closures remain Cody gates) | nothing |
+
+Carried placement: no earlier carried item touches Phase 7, so none is absorbed. The unrelated `tools/release/test_layout.py::test_repo_passes_layout_check` failure on ignored `packages/yakka-analytics/node_modules/**` is not chased here. Phase 3's Plan 24 v1 compatibility gap, the shim pointer-form mismatch, the 300.4 s display and the `_Runner.swept` guard concern the shim, the server or the live drain, not the skill sentence or the server's existing fix wording; Phase 4's scoring-line caveats, Phase 5's open question 1, design 08 wording and the legacy Go client are likewise outside Phase 7's surfaces. The two fresh-session transcripts and the `artifact_feedback` checks on this phase's brief and report remain Cody egress gates.
 
 ## Provenance Notes
 
