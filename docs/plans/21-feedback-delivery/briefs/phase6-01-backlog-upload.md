@@ -2,7 +2,7 @@
 
 Consumer: one build worker owning the Python client and its test.
 Owned paths: `plugins/yakka/client/yakka.py`, `plugins/yakka/client/test_backlog.py` (new), `docs/plans/21-feedback-delivery/reports/phase6-01-backlog-upload.md`. Touch nothing else.
-Commits: leave changes in the working tree. The orchestrator reviews, then runs the gated live upload.
+Commits: leave changes in the working tree. The orchestrator reviews and commits; it does not run the live upload (that is a Cody egress gate).
 Report: write `docs/plans/21-feedback-delivery/reports/phase6-01-backlog-upload.md` before finishing, using the `execution-report` rubric (`packages/yakka/catalogue/checks/execution-report.json`). Counts only: no event payload, no content, no key, no bearer, no endpoint with credentials.
 Depends on: nothing inside this phase (single unit). The phase's design dependencies 1, 2 and 3 are Cody's order and are already closed on this branch; the upload uses no shim and no effect.
 Runs alongside: nothing.
@@ -150,7 +150,7 @@ Identify or write the failing checks before changing code. Report output before 
 - Do not push, merge, change branches, touch master, Plans 22/23/24, PR #184 or `/home/codyh/workspace/yakka-wt/`.
 - Do not run `fly` or `wrangler`, deploy, set/read/print secrets, touch production configuration, Cloudflare or Fly settings, or reset/delete a tenant.
 - Do not call the live remote, `artifact_feedback`, a harness or a model session, or create any egress. Tests use a fake loopback sink only.
-- Do not stage or drain into the original queue; do not archive or delete it. Do not use `/tmp` for the stage or for test fixtures (`tempfile.mkdtemp` under the default temp root is acceptable for unit tests only; the real stage goes under `~/workspace`).
+- Do not stage or drain into the original queue; do not archive or delete it. Do not use `/tmp` for anything, including unit-test fixtures: create scratch directories under `~/workspace/.briefs/q/` (for example `tempfile.mkdtemp(dir=os.path.expanduser("~/workspace/.briefs/q"))`) and remove them afterwards. The real stage goes under `~/workspace`.
 - Do not change the normal drain's behaviour for live queues, the plugin hooks, the shim, or Go code.
 - Do not run `tools/release/test_layout.py::test_repo_passes_layout_check` (pre-existing failure on ignored `packages/yakka-analytics/node_modules/**`).
 
