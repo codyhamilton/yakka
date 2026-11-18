@@ -322,7 +322,7 @@ func TestMCPRegistrationAndBudgets(t *testing.T) {
 		{Name: "reader", Context: []MCPReader{{Reader: "no_such", Version: 1}}},
 		{Name: "version", Context: []MCPReader{{Reader: "cwd", Version: 2}}},
 		{Name: "dependency", Context: []MCPReader{{Reader: "file", Version: 1}, {Reader: "resolved_path", Version: 1}}},
-		{Name: "effect", LocalActions: []string{"enqueue"}}, {Name: "timeout", TimeoutS: 301},
+		{Name: "effect", LocalActions: []MCPLocalAction{{Action: "enqueue", Version: 1, PathFrom: "resolved_path"}}}, {Name: "timeout", TimeoutS: 301},
 		{Name: "budget", Context: []MCPReader{{Reader: "bulk_test", Version: 1, Bulk: true, Params: map[string]any{"budget_bytes": mcpMaxBody}}}},
 		{Name: "fraction", Context: []MCPReader{{Reader: "bulk_test", Version: 1, Bulk: true, Params: map[string]any{"budget_bytes": 1.5}}}},
 		{Name: "param", Context: []MCPReader{{Reader: "cwd", Version: 1, Params: map[string]any{"command": "cat"}}}},
