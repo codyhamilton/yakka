@@ -1,12 +1,12 @@
 # Brief: 10-05 — Cohort and comparison wiring across the P10 presets
 
 Consumer: an execute worker.
-Owned paths: `packages/yakka-analytics/web/js/panels/p10-shared.js`, `trend-columns.js`, `trend-lines.js`, `trend-multiples.js`, `rhythm.js`, `dist-ranges.js`, `dist-hist.js`, `dist-ecdf.js`, `rank.js`, `score-ranges.js`, `score-trend.js`, `score-strips.js`, `band-mix.js`, `treemap.js`, `mix.js`, `p10-trends.js`, `p10-compare.js`, `p10-quality.js`, `p10-cost.js`, `p10-tools.js`, `packages/yakka-analytics/web/js/core/selection-tray.js`, `packages/yakka-analytics/tests/trends-quality/cohort-compare.test.mjs`, and `docs/plans/20-analytics-reset/reports/10-05-cohort-compare.md`. Touch nothing else.
+Owned paths: `packages/yakka-analytics/web/js/panels/p10-shared.js`, `trend-columns.js`, `trend-lines.js`, `trend-multiples.js`, `rhythm.js`, `dist-ranges.js`, `dist-hist.js`, `dist-ecdf.js`, `rank.js`, `score-ranges.js`, `score-trend.js`, `score-strips.js`, `band-mix.js`, `treemap.js`, `mix.js`, `p10-trends.js`, `p10-compare.js`, `p10-quality.js`, `p10-cost.js`, `p10-tools.js`, `packages/yakka-analytics/web/js/core/selection-tray.js`, `packages/yakka-analytics/tests/trends-quality/cohort-compare.test.mjs`, `packages/yakka-analytics/tests/workspace/fixture.mjs`, `packages/yakka-analytics/tests/workspace/stub-api.mjs`, and `docs/plans/20-analytics-reset/reports/10-05-cohort-compare.md`. Touch nothing else.
 Commits: Commit to the current branch when done evidence passes, with a plain-summary title.
 Report: before committing, write `docs/plans/20-analytics-reset/reports/10-05-cohort-compare.md` (a handoff; rubric in `packages/yakka/catalogue/checks/execution-report.json`) and include it in the commit.
 Depends on: 10-01, 10-02, 10-03 and 10-04.
 Runs alongside: nothing; it runs after every panel exists.
-Budget: 16 files to read, about 650 lines to change, 30 tool turns. Past the budget, stop: write a handoff under this brief's name in `IMPLEMENTATION.md` (done, not done, what you learned), commit if this brief commits, and report `over budget`.
+Budget: 18 files to read, about 850 lines to change, 36 tool turns. Past the budget, stop: write a handoff under this brief's name in `IMPLEMENTATION.md` (done, not done, what you learned), commit if this brief commits, and report `over budget`.
 
 ## Required reading, in order
 
@@ -15,7 +15,7 @@ Budget: 16 files to read, about 650 lines to change, 30 tool turns. Past the bud
 3. `docs/plans/20-analytics-reset/CONTRACTS.md` — 7.2/17.1 for the window and `/query`, `/distribution`, `/scores`, `/score-series`, `/entities`; `/baselines` refuses a cohort.
 4. `packages/yakka-analytics/web/js/panels/p10-shared.js` and the P10 panels — the `requestParams`/`comparisonPlan` seams and how each panel renders its population.
 5. `packages/yakka-analytics/web/js/core/{selection-model,selection-tray,chips}.js` and `contract/url-state.js` — cohort encode/decode, build, slot, chip and scope state.
-6. `packages/yakka-analytics/tests/trends-quality/{fixture,browser}.mjs`, `packages/yakka-analytics/tests/workspace/{harness,stub-api}.mjs` — the P10 fixture, request log and browser pattern.
+6. `packages/yakka-analytics/tests/trends-quality/{fixture,browser}.mjs`, `packages/yakka-analytics/tests/workspace/{harness,fixture,stub-api}.mjs` — the P10 fixture, request log, browser pattern, and the stub scenes/bodies you correct below.
 7. `docs/plans/20-analytics-reset/IMPLEMENTATION.md` — Phase 6 Carried on the single `content_hash` population and the legacy `exclude=band:<check>` cut; Phase 9 Carried on cohort forwarding.
 
 Read ranges and grep; do not read a whole file to find one section, do not re-read a file already in context, and truncate long tool output.
@@ -56,6 +56,24 @@ Wire the `ca`–`cd` cohorts and the two comparison modes into every P10 panel r
   - `cmp=period` keeps the equal-length previous window; it must not use the cohort parameter. A panel with a cohort plus `cmp=period` applies the same frozen cohort to both periods; if the cohort grain differs from the panel's target grain, the server resolves it per 17.3.1 and the panel labels the relation.
   - Compare plus a non-empty split renders small multiples (one current/previous group per split value), not an overlay. If a panel cannot produce that shape for a supported split, it is a defect; report it.
   - `win=all` + `cmp=period` shows the existing “Choose a finite period to compare periods.” copy, has no previous side, and sends no previous-window request.
+### Distribution lens breadth and the Cost repo investigation
+
+- `dist-ranges.js`, `dist-hist.js` and `dist-ecdf.js` currently pin `grain=call&dim=model`. CONTRACTS.md 17.3 gives `/distribution` `dim=model|harness|session_model|session_repo` beside `grain=call|conversation`; call rows use the call harness/model, conversation rows use declared session attributes. Let each panel take `grain` and `dim` from its spec (default unchanged: `call`/`model`), validate the pair before requesting, and show the chosen grain/dim, unit and population. `session_model`/`session_repo` are offered only at `conversation` grain; a call-grain session-lens request is `unsupported` with the `conversation` alternative, never a fabricated empty group.
+- Mount the Cost preset's repository investigation: add a second distribution starting shape in `p10-cost.js` that uses `grain=conversation&dim=session_repo` (and a harness variant at `grain=call&dim=harness`), so model, harness and repo cost are all real investigations. The `treemap` repo refusal must name this mounted distribution alternative instead of an unbuilt one. Do not form a repo cost total from `/query`; the real `/schema.grains.time.lenses` publishes only `id`, so a time-grain repo split stays `unsupported_join`.
+- The Cost/Compare presets keep every catalog panel; the repo variant may be an added starting spec on the existing `dist-*` panels, not a new panel id.
+
+### Fixture and stub truthfulness
+
+- `tests/workspace/fixture.mjs` and `stub-api.mjs` are test-only and unshipped. Correct them so the browser proofs use committed bodies instead of per-spec intercepts:
+  - serve `GET /v1/baselines` (the contract route the product calls) with a non-empty `population=content` scorer/check body; do not rely on `/v1/analytics/baselines`;
+  - give the P10 `/scores`, `/score-series`, `/entities?grain=artifact` and `/baselines` bodies the non-empty groups/rows the Quality panels need;
+  - return two-level `k:[parent, child]` rows for a two-dim `/query`, and per-dim `/distribution` rows for `harness`, `session_model` and `session_repo` at `conversation` grain (with an unpriced row and a distinct `(mixed)`/`(none)` group);
+  - align the P10 `/schema` time grain with the real server: `lenses: ["id"]` only; do not publish `session_repo`/`session_model` on time `/query`. Keep distribution dims out of the time-grain lens list.
+- Do not weaken a unit assertion to fit the corrected fixture. If a 10-02/10-03 spec assumed a contradictory body, adjust only that spec's fixture expectation and say so in the report; product behaviour must follow CONTRACTS.md.
+### Shared named-join guards
+
+- Apply the honest-join refusal in the shared `mix`, `treemap` and `rank` loaders, not only in a preset helper: a direct `repo_id` split on `hook_events` (or another measure whose facts carry no `repo_id`, CONTRACTS.md 17.3) groups every row under the empty string, so it is `unsupported` with `try: harness`, never an empty group. A cost measure by `tool`/`tool_kind` is likewise `unsupported` with the `hook_events by tool` alternative.
+- Make the treemap child schema-aware: if a starting spec names a child lens `/schema` does not publish, fall back to the next published child (`tool` → `tool_kind`) and label the fallback, or name `unsupported`; do not request an unpublished dim.
 - Do not send `cohort` to `/baselines`. Do not send `cmp`, `win`, `cohorts`, `pick`, `sel` or `hide` as shared filters; only the contract's filter names and `cohort` go on the wire.
 
 ### Keep untouched
@@ -75,7 +93,13 @@ Identify or write the failing check before changing code. Report its output befo
   - an `exclude=band:<check>` chip becomes the structured lens `band:<check>` and a band cohort resolves; a legacy first-colon split would have changed the population, so the fixture includes a check with a colon-sensitive name;
   - A and B with different source grains show the named refusal and issue no comparison request; `win=all&cmp=period` shows the existing copy and issues no previous-window request; a single cohort plus `cmp=period` applies to both periods;
   - compare + split renders more than one small-multiple group; no console/page/CSP error; ≤4 requests in flight.
-- Pure checks: `comparisonPlan` for none/single/period/cohorts/different-grain/all; `splitExclude` for `band:quality:low`, `repo_id:r1` and an unknown two-colon value; `requestParams` never duplicates `cohort` and never includes `cmp`.
+- Browser, Cost repo/harness and fixture truthfulness:
+  - `/b/cost?win=30d` mounts a real `session_repo` distribution view (conversation grain) and a harness view, both `ready`, with their units/populations and an unpriced group; a model cost view is still present; no panel fakes a `/query` repo total.
+  - The Quality browser spec runs against the committed stub with non-empty `/scores`, `/score-series`, `/entities` and `/v1/baselines` bodies and needs no route interception; `/b/quality` still settles every frame with the same fixture values.
+  - A two-dim `/query` treemap shows distinct parent and child cells in the browser (not mirrored parent totals), and the stub request log shows the second dim.
+  - The P10 stub `/schema` time-grain `lenses` is exactly `["id"]`; a time-grain repo request is `unsupported_join`, and the distribution repo view is the only repo cost route.
+  - In `/b/tools`, a `repo_id` split on `hook_events` in `mix`/`treemap`/`rank` renders `unsupported` with `try: harness` and no empty bucket; a `tool` child absent from `/schema` falls back to `tool_kind` (or names unsupported) without requesting the unpublished dim; a cost-by-tool request is `unsupported` with the `hook_events by tool` alternative.
+- Pure checks: `comparisonPlan` for none/single/period/cohorts/different-grain/all; `splitExclude` for `band:quality:low`, `repo_id:r1` and an unknown two-colon value; `requestParams` never duplicates `cohort` and never includes `cmp`; the distribution grain/dim guard accepts `call/model`, `call/harness`, `conversation/session_model`, `conversation/session_repo` and refuses `call/session_repo` with the conversation alternative.
 - `NODE_PATH=… node --test tests/trends-quality/*.test.mjs` → the whole P10 suite stays green.
 - `git diff --check` clean; the report records the exact before/after outputs, files read/changed, fixture counts and any deviation.
 
