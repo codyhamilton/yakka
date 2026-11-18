@@ -29,7 +29,7 @@ test('the Cost preset registers six valid panels with canonical starting specs',
   assert.equal(COST_SPECS.treemap.scope.parent, 'harness');
   assert.equal(COST_SPECS.treemap.split, 'model');
   assert.equal(lookupPanel('treemap').charts[0], 'treemap');
-  assert.equal(hasPanel('mix'), false, 'mix is shared for Tools, not part of Cost');
+  assert.equal(COST_PANELS.some(panel => panel.id === 'mix'), false, 'mix is shared for Tools, not part of Cost');
   assert.doesNotThrow(() => registerCostPanels());
 });
 
