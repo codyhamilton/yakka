@@ -24,6 +24,7 @@ const scheduler = createScheduler({ onChange: ({ inFlight }) => {
 } });
 const transport = createTransport(scheduler);
 let activeBoardTeardown = null;
+let activeRouteTeardown = null;
 let sessionPromise;
 function loadSessionOnce() {
   if (!sessionPromise) sessionPromise = transport.request('me').then(result => {
@@ -407,15 +408,24 @@ function handleInspectorAction(detail, runtime, record) {
   }
 }
 
+// Each explorer gets one route-scoped AbortController. Leaving the route aborts
+// it (and any request it started); a module may also return a destroy function.
 async function renderExplorer(container, record) {
+  const controller = new AbortController();
+  activeRouteTeardown = () => controller.abort();
   const module = await loadExplorer(record.explorer);
-  module.render?.(container, document);
+  if (controller.signal.aborted) return;
+  const cleanup = await module.render?.(container, document, { signal: controller.signal });
+  if (typeof cleanup === 'function') {
+    activeRouteTeardown = () => { controller.abort(); cleanup(); };
+  }
   if (!module.render) container.append(element('h1', '', record.title), element('p', 'notice', record.label || record.title));
 }
 
 async function render(record) {
   const path = record.path;
   const state = decodeUrlState(record.search);
+  if (activeRouteTeardown) { activeRouteTeardown(); activeRouteTeardown = null; }
   if (activeBoardTeardown) { activeBoardTeardown(); activeBoardTeardown = null; }
   root.replaceChildren();
   root.dataset.route = path;

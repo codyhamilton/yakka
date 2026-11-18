@@ -4,6 +4,10 @@
 
 // Chart names derive from the chart kit's published elements and modes
 // (CONTRACTS.md 17.5), so a panel cannot name a chart the kit does not draw.
+// A table-only panel has no chart: it declares `charts: []` plus `table: true`.
+// That is the least invasive representation: no fake chart name is invented and
+// the chart kit's name list stays honest. `table` is optional; any non-empty
+// `charts` array must name real kit charts.
 export const CHART_NAMES = new Set([
   'lines', 'area', 'columns', 'cumulative', 'share', 'scatter', 'ecdf',
   'bars', 'stacked', 'rank', 'lollipop', 'slope',
@@ -28,7 +32,8 @@ export function validatePanelEntry(entry) {
   if (!Array.isArray(entry.lenses)) fail(`panel ${entry.id} lenses must be an array`);
   if (!Array.isArray(entry.requires)) fail(`panel ${entry.id} requires must be an array`);
   if (typeof entry.caveats !== 'string') fail(`panel ${entry.id} caveats must be a string`);
-  if (!Array.isArray(entry.charts) || entry.charts.length === 0) fail(`panel ${entry.id} charts must be a non-empty array`);
+  if (!Array.isArray(entry.charts)) fail(`panel ${entry.id} charts must be an array`);
+  if (entry.charts.length === 0 && entry.table !== true) fail(`panel ${entry.id} has no charts and is not marked table: true`);
   for (const chart of entry.charts) {
     if (!CHART_NAMES.has(chart)) fail(`panel ${entry.id} names unknown chart ${chart}`);
   }

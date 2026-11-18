@@ -101,6 +101,41 @@ export function population(grain, unit, n) {
   return { grain, unit, scope_n: n, cohort_n: n, eligible_n: n, returned_n: n, missing_by_reason: {}, relation: null };
 }
 
+// The full `/v1/admin/status` shape (CONTRACTS.md 6): server summary, optional
+// volume, and two tenants so cross-tenant separation is visible. Times are Unix
+// seconds and sizes are bytes.
 export function adminStatus() {
-  return { version: 'fixture', scoring: { scorer: true, checks: true, rescorable: true }, tenants: [{ id: 'fixture-tenant', name: 'Fixture' }] };
+  return {
+    version: 'fixture-2',
+    scoring: { scorer: true, checks: false, rescorable: true },
+    volume: { total_bytes: 1073741824, free_bytes: 536870912 },
+    tenants: [
+      {
+        id: 'alpha',
+        name: 'Alpha',
+        facts: 10,
+        compaction: 'none',
+        footprint: { ledger_bytes: 1000, wal_bytes: 0, archive_bytes: 2048, archive_files: 2, blob_bytes: 3072, blobs: 3, pending_bytes: 0, pending: 0, other_bytes: 0 },
+        screens: {
+          verdicts: { design: 4, brief: 1 },
+          scored_content: 7,
+          score_rows: 9,
+          rejections: [{ stage: 'screen', pattern: 'missing-report', count: 2, last: 1700000000 }],
+          total_rejections: 2
+        },
+        failures: [{ stage: 'screen', pattern: 'missing-report', reason: 'no report', path: 'docs/01.md', content_hash: 'hash-a', at: 1700000000 }],
+        rescore: { running: true, total: 5, done: 3, failed: 0, started: 1700000000, finished: 0 }
+      },
+      {
+        id: 'beta',
+        name: 'Beta',
+        facts: 20,
+        compaction: 'partial',
+        footprint: { ledger_bytes: 2000, wal_bytes: 4, archive_bytes: 0, archive_files: 0, blob_bytes: 0, blobs: 0, pending_bytes: 8, pending: 1, other_bytes: 0 },
+        screens: { verdicts: {}, scored_content: 0, score_rows: 0, rejections: null, total_rejections: 0 },
+        failures: [],
+        rescore: { running: false, total: 2, done: 2, failed: 1, started: 1700000000, finished: 1700000100, error: 'one item failed' }
+      }
+    ]
+  };
 }

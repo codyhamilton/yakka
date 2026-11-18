@@ -15,7 +15,11 @@ export function createStubApi() {
     missingFeature: 'entities_session',
     activityError: false,
     empty: false,
-    activityDelayMs: 0
+    activityDelayMs: 0,
+    statusError: false,
+    statusDelayMs: 0,
+    statusRequests: 0,
+    statusAborted: 0
   };
   let probes = 0;
 
@@ -41,8 +45,25 @@ export function createStubApi() {
       return true;
     }
     if (path === '/v1/admin/status') {
-      if (state.role !== 'admin') { json(response, 403, { error: 'forbidden' }); return true; }
-      json(response, 200, adminStatus());
+      state.statusRequests += 1;
+      const answer = () => {
+        if (state.role !== 'admin') { json(response, 403, { error: 'forbidden' }); return; }
+        if (state.statusError) { json(response, 500, { error: 'status read failed', code: 'read failed' }); return; }
+        json(response, 200, adminStatus());
+      };
+      if (state.statusDelayMs > 0) {
+        let aborted = false;
+        const onClose = () => {
+          if (response.writableEnded) return;
+          aborted = true;
+          state.statusAborted += 1;
+        };
+        response.on('close', onClose);
+        setTimeout(() => {
+          response.off('close', onClose);
+          if (!aborted) answer();
+        }, state.statusDelayMs);
+      } else answer();
       return true;
     }
     if (path === '/v1/analytics/schema') { json(response, 200, schema()); return true; }

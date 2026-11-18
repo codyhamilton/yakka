@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { loadBrowserEnvironment, launchBrowser, SKIP_REASON } from './browser.mjs';
 import { startWorkspaceHarness } from './harness.mjs';
+import { adminStatus } from './fixture.mjs';
 import { watchPage } from '../gallery/harness.mjs';
 import {
   OPS_PANEL,
@@ -26,39 +27,7 @@ async function control(origin, body) {
   return response.json();
 }
 
-const FULL_STATUS = {
-  version: 'fixture-2',
-  scoring: { scorer: true, checks: false, rescorable: true },
-  volume: { total_bytes: 1073741824, free_bytes: 536870912 },
-  tenants: [
-    {
-      id: 'alpha',
-      name: 'Alpha',
-      facts: 10,
-      compaction: 'none',
-      footprint: { ledger_bytes: 1000, wal_bytes: 0, archive_bytes: 2048, archive_files: 2, blob_bytes: 3072, blobs: 3, pending_bytes: 0, pending: 0, other_bytes: 0 },
-      screens: {
-        verdicts: { design: 4, brief: 1 },
-        scored_content: 7,
-        score_rows: 9,
-        rejections: [{ stage: 'screen', pattern: 'missing-report', count: 2, last: 1700000000 }],
-        total_rejections: 2
-      },
-      failures: [{ stage: 'screen', pattern: 'missing-report', reason: 'no report', path: 'docs/01.md', content_hash: 'hash-a', at: 1700000000 }],
-      rescore: { running: true, total: 5, done: 3, failed: 0, started: 1700000000, finished: 0 }
-    },
-    {
-      id: 'beta',
-      name: 'Beta',
-      facts: 20,
-      compaction: 'partial',
-      footprint: { ledger_bytes: 2000, wal_bytes: 4, archive_bytes: 0, archive_files: 0, blob_bytes: 0, blobs: 0, pending_bytes: 8, pending: 1, other_bytes: 0 },
-      screens: { verdicts: {}, scored_content: 0, score_rows: 0, rejections: null, total_rejections: 0 },
-      failures: [],
-      rescore: { running: false, total: 2, done: 2, failed: 1, started: 1700000000, finished: 1700000100, error: 'one item failed' }
-    }
-  ]
-};
+const FULL_STATUS = adminStatus();
 
 test('byte, seconds and unit formatting names every unit and never fakes zero', () => {
   assert.equal(formatBytes(0), '0 B');
@@ -126,9 +95,12 @@ test('absent fields are recorded as absent rather than invented zeroes', () => {
   assert.equal(tenant.failuresSupplied, false);
 });
 
-test('the ops panel entry is a valid, read-only registry entry for the admin status route', () => {
+test('the ops panel entry is a valid, table-only registry entry for the admin status route', () => {
   assert.doesNotThrow(() => validatePanelEntry(OPS_PANEL));
   assert.equal(OPS_PANEL.grain, 'tenant');
+  assert.deepEqual(OPS_PANEL.charts, []);
+  assert.equal(OPS_PANEL.table, true);
+  assert.throws(() => validatePanelEntry({ ...OPS_PANEL, table: false }), /table: true/);
   assert.deepEqual(OPS_PANEL.requests(), [{ route: '/v1/admin/status', method: 'GET', session: true }]);
   assert.equal(typeof OPS_PANEL.load, 'function');
 });
@@ -146,7 +118,7 @@ test('cancelling the load returns cancelled, not an error', async () => {
   assert.equal(result.state, 'cancelled');
 });
 
-test('admin sees the stub status; absent fields are named and tenants stay separate', { skip: environment.ok ? false : SKIP_REASON }, async t => {
+test('admin sees the full committed stub status; tenants stay separate', { skip: environment.ok ? false : SKIP_REASON }, async t => {
   const harness = await startWorkspaceHarness();
   const browser = await launchBrowser(environment);
   t.after(async () => { await browser.close(); await harness.close(); });
@@ -157,14 +129,18 @@ test('admin sees the stub status; absent fields are named and tenants stay separ
   await settle(page);
   const panel = page.locator('[data-panel="ops-footprint"]');
   assert.equal(await panel.getAttribute('data-state'), 'ready');
+  assert.equal(await panel.getAttribute('data-chart'), 'table');
   const text = await panel.innerText();
   assert.match(text, /Version/);
-  assert.match(text, /fixture/);
+  assert.match(text, /fixture-2/);
   assert.match(text, /Scorer/);
   assert.match(text, /configured/);
-  assert.match(text, /Fixture \(fixture-tenant\)/);
-  assert.match(text, /Not supplied by the server: facts, compaction, footprint, screens, failures, rescore/);
-  assert.equal(await page.locator('.ops-tenant').count(), 1);
+  assert.match(text, /Checks/);
+  assert.match(text, /not configured/);
+  assert.match(text, /Alpha \(alpha\)/);
+  assert.match(text, /Beta \(beta\)/);
+  assert.ok(!text.includes('Not supplied'), 'the committed stub supplies every contracted field');
+  assert.equal(await page.locator('.ops-tenant').count(), 2);
   await diagnostics.assertClean();
   const stats = await (await fetch(`${harness.origin}/__test/stats`)).json();
   assert.ok(stats.maxInFlight <= 4, `max in flight ${stats.maxInFlight}`);
@@ -176,7 +152,6 @@ test('full status renders disk, screens, failures and rescore per tenant with un
   t.after(async () => { await browser.close(); await harness.close(); });
   const page = await browser.newPage();
   const diagnostics = await watchPage(page);
-  await page.route('**/v1/admin/status', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(FULL_STATUS) }));
 
   await page.goto(`${harness.origin}/ops`);
   await settle(page);
@@ -235,8 +210,7 @@ test('a 500 shows the server message and code, and retry recovers after the faul
   t.after(async () => { await browser.close(); await harness.close(); });
   const page = await browser.newPage();
   const diagnostics = await watchPage(page);
-  const routePattern = '**/v1/admin/status';
-  await page.route(routePattern, route => route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ error: 'status read failed', code: 'read failed' }) }));
+  await control(harness.origin, { statusError: true });
 
   await page.goto(`${harness.origin}/ops`);
   await settle(page);
@@ -247,10 +221,31 @@ test('a 500 shows the server message and code, and retry recovers after the faul
   const retry = panel.locator('button', { hasText: 'Retry' });
   assert.equal(await retry.count(), 1);
 
-  await page.unroute(routePattern);
+  await control(harness.origin, { statusError: false });
   await retry.click();
   await settle(page);
   assert.equal(await page.locator('[data-panel="ops-footprint"]').getAttribute('data-state'), 'ready');
+  assert.equal(diagnostics.pageErrors.length, 0);
+  assert.deepEqual(await diagnostics.cspViolations(), []);
+});
+
+test('leaving /ops aborts the in-flight status request', { skip: environment.ok ? false : SKIP_REASON }, async t => {
+  const harness = await startWorkspaceHarness();
+  await control(harness.origin, { statusDelayMs: 1000 });
+  const browser = await launchBrowser(environment);
+  t.after(async () => { await browser.close(); await harness.close(); });
+  const page = await browser.newPage();
+  const diagnostics = await watchPage(page);
+
+  await page.goto(`${harness.origin}/ops`);
+  await page.waitForFunction(async () => (await (await fetch('/__test/control')).json()).statusRequests >= 1);
+  await page.evaluate(() => {
+    history.pushState({}, '', '/ledger');
+    window.dispatchEvent(new PopStateEvent('popstate'));
+  });
+  await page.waitForFunction(async () => (await (await fetch('/__test/control')).json()).statusAborted >= 1);
+  await page.waitForFunction(() => document.querySelector('#app')?.dataset.route === '/ledger');
+  assert.equal(await page.locator('[data-panel="ops-footprint"]').count(), 0);
   assert.equal(diagnostics.pageErrors.length, 0);
   assert.deepEqual(await diagnostics.cspViolations(), []);
 });

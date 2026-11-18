@@ -30,7 +30,7 @@ function register() {
   if (!hasPanel(OPS_PANEL.id)) registerPanel(OPS_PANEL);
 }
 
-export function render(root, doc = globalThis.document) {
+export function render(root, doc = globalThis.document, { signal } = {}) {
   loadStyles(doc);
   register();
   root.replaceChildren();
@@ -43,6 +43,8 @@ export function render(root, doc = globalThis.document) {
   root.append(heading, intro);
 
   const frame = createPanelFrame({ panel: OPS_PANEL, transport, scheduler, doc });
+  // The entry is table-only; this names the representation without drawing a chart.
+  frame.element.dataset.chart = 'table';
   root.append(frame.element);
   const body = frame.element.querySelector('.workspace-panel-body');
 
@@ -50,9 +52,11 @@ export function render(root, doc = globalThis.document) {
     controller?.abort();
     controller = new AbortController();
     const id = ++runSequence;
+    if (signal?.aborted) controller.abort();
+    else signal?.addEventListener('abort', () => controller.abort(), { once: true });
     frame.setState('loading', { inFlight: 1 });
     const result = await OPS_PANEL.load({ signal: controller.signal, scheduler, transport });
-    if (id !== runSequence) return;
+    if (id !== runSequence || signal?.aborted) return;
     if (result.state === 'error' || result.state === 'cancelled') result.retry = run;
     frame.setState(result.state, result);
     if (result.state === 'ready') renderOpsStatus(body, result, doc);
