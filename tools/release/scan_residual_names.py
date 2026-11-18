@@ -56,6 +56,12 @@ TRAILER_EXCEPTION_PREFIXES = (
     "evals/scenarios/trailer-completeness/",
 )
 
+# Exact Phase 12 workflow-panel identifiers: the PANEL_IDS, PANELS, PRESET_ID and SPECS
+# names, with or without the P12_ prefix. They are current symbols, not legacy names.
+# The tail must end on a word boundary, so any other stale name with the same prefix,
+# such as the same stem plus _OLD, still fails.
+PHASE12_SYMBOL_TAIL = r"(?:PANEL_IDS|PANELS|PRESET_ID|SPECS)\b"
+
 DATE_SECTION = re.compile(r"^#{1,6}\s+.*\d{4}-\d{2}-\d{2}")
 RENAME_CHANGELOG_HEADING = re.compile(r"^##\s+.*\brename\b", re.I | re.M)
 
@@ -72,7 +78,10 @@ def _patterns() -> list[tuple[str, re.Pattern[str]]]:
     w = _w()
     wf = _wf_prefix()
     return [
-        (wf + "(?!QUALITY_)", re.compile(wf + r"(?!QUALITY_)")),
+        (
+            wf + "(?!QUALITY_|" + PHASE12_SYMBOL_TAIL + ")",
+            re.compile(wf + r"(?!QUALITY_|" + PHASE12_SYMBOL_TAIL + ")"),
+        ),
         (r"\bbin/" + w + r"\b", re.compile(r"\bbin/" + w + r"\b")),
         (r"\bcmd/" + w + r"\b", re.compile(r"\bcmd/" + w + r"\b")),
         (r"\bpackages/" + w + r"\b", re.compile(r"\bpackages/" + w + r"\b")),

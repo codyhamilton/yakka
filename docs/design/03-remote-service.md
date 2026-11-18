@@ -86,7 +86,7 @@ spend cap. Actual cost is still recorded per review.
 
 **Remote collector mode** is a non-loopback bind with the GitHub OAuth env set. `YAKKA_PUBLIC_URL`
 is the API origin. A person signs in with GitHub; the Pages site (or the embedded site in a local
-or release binary) uses the session for the dashboard and profile ([design
+or release binary) uses the session for the workspace and profile ([design
 7](07-analytics-site.md#shape)). On the profile they create tenants and issue API tokens.
 Each issued token is plaintext `wk_` plus an unguessable body, belongs to one tenant, has scope
 `read` or `read_write` chosen at creation, a name that says which host or use it is for, and a
@@ -137,6 +137,12 @@ screen failures but offers no retry, because content that fails five times is de
 Outside `/v1`, a binary with the site embedded serves it at `/`. The production Fly image does not
 embed the site, so those paths are `analytics bundle not embedded`. Browsers follow the CORS rules
 in [design 7](07-analytics-site.md#browser-access). `/v1` paths are never HTML.
+
+The site is the static, no-build tree in `packages/yakka-analytics/web/`. `tools/release/build.sh` embeds it
+into release binaries and never uploads; the Docker image and `go test` keep the placeholder. Pages serves the same
+directory (`pages_build_output_dir = "./web"`) and deploys on merge to master through an external automation job
+outside this repo. The API is released separately on Fly, and the UI detects its capabilities from
+`/v1/analytics/schema`. No manual deploy, configuration or secrets step is part of this release path.
 
 ### Analytics ranges and output budgets
 
