@@ -224,6 +224,10 @@ type Options struct {
 	GitHubHTTPBase     string         // tests: mock GitHub authorize/token/api base URL
 	ReviewEndpoint     string         // tests: fake provider endpoint; production uses the fixed URL
 	ReviewReservations *review.Reservations
+	// ReviewWait bounds how long MCP review_change waits for a detached attempt to
+	// finish before returning the id and its in-flight status. Zero uses the
+	// declared 630s tool budget. Tests set a short value.
+	ReviewWait time.Duration
 	// LifecycleFault is a test-only seam that stops a reset/delete at a named
 	// cleanup stage so crash/restart resume can be exercised. Production leaves
 	// it nil; there is no configuration or CLI for it.
@@ -551,6 +555,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/v1/whoami", s.method(http.MethodGet, s.whoami))
 	mux.HandleFunc("/v1/ingest", s.method(http.MethodPost, s.auth(s.ingest)))
 	mux.HandleFunc("/v1/reviews", s.reviewsRoute)
+	mux.HandleFunc("/v1/reviews/{id}", s.reviewsItemRoute)
 	mux.HandleFunc("/v1/artifacts", s.method(http.MethodGet, s.auth(s.artifacts)))
 	mux.HandleFunc("/v1/checks", s.method(http.MethodGet, s.auth(s.checks)))
 	mux.HandleFunc("/v1/baselines", s.method(http.MethodGet, s.auth(s.baselines)))
@@ -809,18 +814,162 @@ func (s *Server) reviewsPostRoute(w http.ResponseWriter, r *http.Request) {
 		writeTenantUseError(w, uerr)
 		return
 	}
+	var releaseOnce sync.Once
+	releaseUse := func() { releaseOnce.Do(release) }
+	held := false
+	defer func() {
+		if !held {
+			releaseUse()
+		}
+	}()
+	ts, err := s.tenant(res.tenant)
+	if err != nil {
+		writeJSON(w, 503, map[string]string{"error": "tenant unavailable"})
+		return
+	}
+	// Hold a shutdown slot before Start. Close waits for it so the detached
+	// attempt can record its terminal row before tenant databases close.
+	finish, ok := s.beginDetachedReview(releaseUse)
+	if !ok {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "shutting down"})
+		return
+	}
+	owned := false
+	defer func() {
+		if !owned {
+			finish()
+		}
+	}()
+	// Synchronous decisions, including store=false, use the request context.
+	// Also end them when the server is closing so Close is not stuck behind a
+	// provider call that does not watch the server lifetime.
+	callCtx, stopCall := context.WithCancel(r.Context())
+	defer stopCall()
+	go func() {
+		select {
+		case <-s.ctx.Done():
+			stopCall()
+		case <-callCtx.Done():
+		}
+	}()
+	job, receipt, err := review.Start(callCtx, ts.t, res.tenant, req, review.RunConfig{
+		Availability: s.reviewAvailability(),
+		Reservations: s.reviewReservations,
+		Endpoint:     s.opts.ReviewEndpoint,
+		Lifetime:     s.ctx,
+		OnFinish:     finish,
+	})
+	owned = job != nil
+	// A detached attempt holds the tenant's read gate until it finalizes, so a
+	// reset/delete cannot erase the row it is about to update.
+	held = job != nil
+	if err != nil {
+		writeJSON(w, 400, map[string]string{"error": err.Error()})
+		return
+	}
+	status := http.StatusOK
+	switch {
+	case job != nil:
+		status = http.StatusAccepted
+	case receipt.Status == review.StatusPending || receipt.Status == review.StatusRunning:
+		status = http.StatusAccepted
+	case receipt.Status == "in_progress":
+		// A repeated POST while the first attempt is still in flight resolves to
+		// the existing review instead of starting a second provider call.
+		if receipt.OriginalReviewID != "" {
+			receipt.ID = receipt.OriginalReviewID
+		}
+		receipt.Status = review.StatusRunning
+		status = http.StatusAccepted
+	}
+	writeJSON(w, status, receipt)
+}
+
+// beginDetachedReview reserves one slot on the server wait group so Close can
+// wait for a review Start to finish its terminal write before closing tenant
+// databases. finish releases that slot once. after, when set, runs first and
+// is the caller's tenant-use release. ok is false once Close has started.
+func (s *Server) beginDetachedReview(after func()) (finish func(), ok bool) {
+	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
+		return nil, false
+	}
+	s.wg.Add(1)
+	s.mu.Unlock()
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			defer s.wg.Done()
+			if after != nil {
+				after()
+			}
+		})
+	}, true
+}
+
+// reviewsItemRoute is the tenant-scoped polling surface for an asynchronous
+// review. It returns the same receipt shape as a list item and never leaks
+// another tenant's review: each tenant reads only its own storage.
+func (s *Server) reviewsItemRoute(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", "GET")
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		return
+	}
+	res := s.authorizeRequest(r)
+	if res.status != authOK {
+		code := http.StatusUnauthorized
+		if res.status == authForbidden {
+			code = http.StatusForbidden
+		}
+		writeJSON(w, code, map[string]string{"error": "unauthorized"})
+		return
+	}
+	if !s.cfg.Local() && res.scope != "" && res.scope != TokenScopeRead && res.scope != TokenScopeReadWrite {
+		writeJSON(w, 403, map[string]string{"error": "read scope required"})
+		return
+	}
+	detail := r.URL.Query().Get("detail")
+	if detail != "" && detail != "full" {
+		writeJSON(w, 400, map[string]string{"error": "detail must be full"})
+		return
+	}
+	id := r.PathValue("id")
+	if id == "" {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "review not found"})
+		return
+	}
+	release, uerr := s.beginTenantUse(res.tenant)
+	if uerr != nil {
+		writeTenantUseError(w, uerr)
+		return
+	}
 	defer release()
 	ts, err := s.tenant(res.tenant)
 	if err != nil {
 		writeJSON(w, 503, map[string]string{"error": "tenant unavailable"})
 		return
 	}
-	receipt, err := review.Run(r.Context(), ts.t, res.tenant, req, review.RunConfig{Availability: s.reviewAvailability(), Reservations: s.reviewReservations, Endpoint: s.opts.ReviewEndpoint})
+	row, found, err := ts.t.ReviewByID(r.Context(), id)
 	if err != nil {
-		writeJSON(w, 400, map[string]string{"error": err.Error()})
+		writeJSON(w, 500, map[string]string{"error": "review read failed"})
 		return
 	}
-	writeJSON(w, 200, receipt)
+	if !found {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "review not found"})
+		return
+	}
+	var item map[string]any
+	if json.Unmarshal(row.Raw, &item) != nil {
+		writeJSON(w, 500, map[string]string{"error": "review read failed"})
+		return
+	}
+	restoreReviewID(item)
+	if detail != "full" {
+		delete(item, "payload")
+	}
+	writeJSON(w, 200, item)
 }
 
 func (s *Server) reviewsGetRoute(w http.ResponseWriter, r *http.Request) {

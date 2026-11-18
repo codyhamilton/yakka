@@ -51,13 +51,14 @@ func TestReviewRESTRoutesAuthTenantAndReceipt(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
-	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"status":"ok"`) || strings.Contains(rec.Body.String(), "new code") {
+	if rec.Code != 202 || !strings.Contains(rec.Body.String(), `"status":"running"`) || strings.Contains(rec.Body.String(), "new code") {
 		t.Fatalf("POST status=%d body=%s", rec.Code, rec.Body.String())
 	}
 	var posted review.Receipt
 	if err := json.Unmarshal(rec.Body.Bytes(), &posted); err != nil || posted.ID == "" {
 		t.Fatalf("receipt id: %v %s", err, rec.Body.String())
 	}
+	posted = pollReview(t, h, "ka", posted.ID)
 	code, body := do(t, h, "GET", "/v1/reviews?repo_id=repo-a&kind=adhoc&status=ok&effort=high&profile=shadow&limit=10", "ka", "")
 	if code != 200 || !strings.Contains(body, `"reviews":[{`) || strings.Contains(body, `"payload"`) {
 		t.Fatalf("receipt GET=%d %s", code, body)
@@ -114,6 +115,29 @@ func TestReviewRESTReadTokenCanReadButCannotPost(t *testing.T) {
 	}
 	if code, body := do(t, h, "GET", "/v1/reviews?repo_id=repo-a", readToken, ""); code != 200 || !strings.Contains(body, `"reviews":[]`) {
 		t.Fatalf("read token GET=%d %s", code, body)
+	}
+}
+
+func pollReview(t *testing.T, h http.Handler, key, id string) review.Receipt {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		code, body := do(t, h, "GET", "/v1/reviews/"+id, key, "")
+		if code == 200 {
+			var receipt review.Receipt
+			if err := json.Unmarshal([]byte(body), &receipt); err != nil {
+				t.Fatalf("poll decode: %v %s", err, body)
+			}
+			if receipt.Status != "pending" && receipt.Status != "running" {
+				return receipt
+			}
+		} else if code != 404 {
+			t.Fatalf("poll %s = %d %s", id, code, body)
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("review %s never finished", id)
+		}
+		time.Sleep(5 * time.Millisecond)
 	}
 }
 

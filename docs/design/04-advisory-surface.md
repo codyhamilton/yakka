@@ -66,13 +66,15 @@ cookie-session/profile-UI-only and adds no MCP tool or key path.
 
 The server owns the tool definition, prompt and exclusion policy, stored brief or plan/phase criteria
 resolution, provider call, validation, actual-cost recording and tenant-local review record. It uses the same
-orchestrator as authenticated `POST /v1/reviews`; records are read through `GET /v1/reviews` or the
+orchestrator as authenticated `POST /v1/reviews`; records are read through `GET /v1/reviews`,
+`GET /v1/reviews/{id}` (the polling surface for an accepted asynchronous review) or the
 read-only `list_reviews` tool. Optional `effort` (default `high`; `high`, `xhigh` or `max` only),
 `tags` (at most 16 exact strings) and `store` (default `true`; `false`
 skips all dedupe, cache and record writes) are validated before any spend or storage; per-call
 effort defaults to `high`, is validated server-side and is never capped by a setting.
 `read_write` scope and `readOnlyHint:false` disclose this spend-and-record boundary. Local collection
-is read-only: the declaration has a 150-second timeout and no local actions. The shim alone captures
+is read-only: the declaration has a 630-second timeout (a 10-minute attempt plus 30 seconds of
+headroom) and no local actions. The shim alone captures
 uncommitted changes or an explicit Git range using the server-declared `change` reader, scans before
 egress and supplies bounded diff content and an omission manifest. The server rescans, and alone
 holds the provider credential; machines use their existing Yakka login and need no provider key.
@@ -81,6 +83,25 @@ a completed stored original returns the original review in the full fresh respon
 `cached=true`, `original_review_id`, `original_status` and the original findings; a still-running or
 unknown original returns `in_progress` or `outcome_unknown` with `cached=false` and no second
 provider call, and a missing or corrupt original returns `cache_unavailable`.
+
+The HTTP review contract is asynchronous for stored work. `POST /v1/reviews` performs validation,
+criteria resolution, availability/refusal decisions, cached-original lookup and in-flight
+reservations synchronously, then persists an in-flight `running` record and returns `202` with the
+review id. The provider attempt runs on a detached server-lifetime context, so the Cloudflare edge
+cut-off (roughly 100–125 seconds) can no longer cancel it: a client disconnect after `202` does not
+cancel the attempt. When the attempt finishes, the terminal status, tokens and cost are written back
+onto the same review id; list and GET-by-id never show two rows for one review. Clients poll
+`GET /v1/reviews/{id}` (and may also use `GET /v1/reviews` filtered by tag). A repeated POST of a
+completed stored original still returns the cached receipt; a repeated POST while the review is in
+flight returns the existing id and `pending`/`running` and starts no second provider call, including
+after a process restart. `skipped_busy`, `skipped_duplicate`, refusals, `input_too_large`,
+`unavailable` and validation errors stay on the synchronous decision path and are not turned into
+`202`. `dry_run` remains an unpaid, unsaved synchronous receipt, and `store=false` remains
+synchronous and writes no `review_run`: the detached `202` contract applies to stored reviews.
+MCP `review_change` starts the same detached attempt but waits in-process, up to the 630-second tool
+budget, and still returns the finished receipt that existing callers expect. If that budget is hit
+it returns the review id and current status without cancelling the work; the shim's existing
+~635-second wait is unchanged.
 
 `execute` calls once after each phase closing commit; `comprehensive-review` and `post-build` each
 call once at their reviewed/candidate PR head. These are non-gating `range` calls with explicit base
@@ -121,7 +142,8 @@ The review POST additionally spends and records with `read_write` scope as descr
 
 | Request | Response |
 |---|---|
-| `POST /v1/reviews` | a review receipt: `status`, optional `reason`, validated findings under `detail=full`, and for a completed duplicate `cached`, `original_review_id`, `original_status` and the original findings even at receipt detail; captured content is never returned |
+| `POST /v1/reviews` | for accepted stored work, `202` with the review `id` and `pending`/`running`; poll `GET /v1/reviews/{id}`. Synchronous decisions return the existing receipt: `status`, optional `reason`, validated findings under `detail=full`, and for a completed duplicate `cached`, `original_review_id`, `original_status` and the original findings even at receipt detail; captured content is never returned |
+| `GET /v1/reviews/{id}?detail=` | one review as the same shape as a list item; in-flight reviews report `pending`/`running`; missing or another tenant's id is `404` JSON |
 | `GET /v1/reviews?repo_id=&plan=&phase=&kind=&status=&effort=&profile=&manifest_hash=&since=&tag=&detail=&limit=&cursor=` | `{"reviews":[…],"next_cursor":<string\|null>,"complete":<bool>}`; repeated `tag` filters are conjunctive (ALL), `limit` defaults to 100 (range 1–500), and `cursor` is opaque and bound to the tenant, filters and detail |
 | `GET /v1/artifacts?repo_id=&path=` | `{"repo_id","path","kind","versions":n,"latest":{"content_hash","received_at","conversation_id","source","screen":{"verdict","scorer","at"}\|null,"scores":[{"check","score"}]}}`, or 404 |
 | `GET /v1/checks?kind=` | `{"checks":[{"kind","name","q","levels","invert"}]}` |

@@ -92,7 +92,11 @@ capped by a setting. A completed `store=true` duplicate returns the earlier revi
 `cached`, `original_review_id` and `original_status`, not fresh evidence; `store=false` skips dedupe
 and records, so `review_change` does not promise unconditional idempotency. The separate `read`-only
 `list_reviews` tool returns the same tenant-bound cursor pages as `GET /v1/reviews` and declares no
-local readers or actions.
+local readers or actions. The HTTP review POST is asynchronous for stored work: it returns `202`
+with the review id after persisting an in-flight row, and clients poll `GET /v1/reviews/{id}` until
+the detached attempt finishes. `review_change` starts the same detached attempt, waits in-process up
+to its 630-second budget, and returns the finished receipt; a budget hit returns the id and current
+status without cancelling the work.
 
 Beside existing reviews, `execute` makes one non-gating range call after each phase closing commit;
 `comprehensive-review` and `post-build` each make one at their reviewed/candidate PR head. Explicit

@@ -14,6 +14,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/codyhamilton/yakka/packages/yakka/internal/ingest"
@@ -24,6 +25,11 @@ import (
 
 const (
 	MaxReviewBody = 3 << 20
+	// StatusPending and StatusRunning are the in-flight statuses of an asynchronous
+	// stored review. A POST that accepts work returns one of them with the review id;
+	// clients poll GET /v1/reviews/{id} until the attempt reaches a terminal status.
+	StatusPending = "pending"
+	StatusRunning = "running"
 	// AttemptTimeout bounds one provider attempt. It was raised from 60s
 	// after seven high-effort reviews timed out at exactly 60s. Tune it again
 	// once high/xhigh/max wall times have been measured.
@@ -198,62 +204,191 @@ type RunConfig struct {
 	Endpoint       string
 	Now            func() time.Time
 	AttemptTimeout time.Duration
+	// Lifetime anchors a detached stored attempt started by Start. It is the
+	// server/process lifetime, never a request context, so a client disconnect
+	// cannot cancel the provider call. Run ignores it.
+	Lifetime context.Context
+	// OnFinish, when set, runs exactly once after a detached attempt returns
+	// and has released its reservation, including when the attempt panics.
+	// It must not block. It is not called for synchronous completions.
+	OnFinish func()
+}
+
+// Job is one detached stored review attempt. Wait reports the current receipt and
+// whether the attempt has reached a terminal status.
+type Job struct {
+	ID   string
+	done chan struct{}
+
+	mu      sync.Mutex
+	receipt Receipt
+	err     error
+}
+
+// Done is closed when the detached attempt has finished persisting its final row.
+func (j *Job) Done() <-chan struct{} { return j.done }
+
+// Wait blocks until the attempt is terminal or ctx ends. The returned bool reports
+// whether it is terminal. Ending ctx never cancels the detached work.
+func (j *Job) Wait(ctx context.Context) (Receipt, bool) {
+	select {
+	case <-j.done:
+	case <-ctx.Done():
+	}
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	select {
+	case <-j.done:
+		return j.receipt, true
+	default:
+		return j.receipt, false
+	}
+}
+
+// Snapshot returns the latest known receipt without blocking.
+func (j *Job) Snapshot() Receipt {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	return j.receipt
+}
+
+// prepared is a stored review whose synchronous decisions have already succeeded and
+// whose provider attempt is ready to run. A non-nil release owns an in-flight slot.
+type prepared struct {
+	tenant      *store.Tenant
+	req         Request
+	tenantID    string
+	repo        string
+	id          string
+	controls    callControls
+	criteria    []Criterion
+	criteriaRec CriteriaRecord
+	packet      Packet
+	inputHash   string
+	key         string
+	release     func()
+	detachable  bool
+}
+
+func (p *prepared) releaseReservation() {
+	if p.release != nil {
+		p.release()
+		p.release = nil
+	}
 }
 
 // Run composes the landed criteria, packet, provider, pricing and persistence
-// APIs. It records one fact after all argument/capture validation succeeds.
+// APIs synchronously. It records one fact after all argument/capture validation
+// succeeds and waits for the provider attempt before returning.
 func Run(ctx context.Context, tenant *store.Tenant, tenantID string, req Request, cfg RunConfig) (Receipt, error) {
+	p, out, err := begin(ctx, tenant, tenantID, req, cfg, false)
+	if err != nil || p == nil {
+		return out, err
+	}
+	return p.finish(ctx, cfg)
+}
+
+// Start applies the synchronous review decisions and, when a stored provider attempt
+// is accepted, persists an in-flight row and runs the attempt on cfg.Lifetime. It
+// returns either a terminal receipt (refusal, cache hit, duplicate, dry run,
+// store=false, unavailable) with a nil job, or an in-flight receipt plus the job.
+// A returned job's work is never cancelled by ctx ending.
+func Start(ctx context.Context, tenant *store.Tenant, tenantID string, req Request, cfg RunConfig) (*Job, Receipt, error) {
+	p, out, err := begin(ctx, tenant, tenantID, req, cfg, true)
+	if err != nil || p == nil {
+		if out.Status == "in_progress" && out.OriginalReviewID != "" {
+			out.ID = out.OriginalReviewID
+			out.Status = StatusRunning
+		}
+		return nil, out, err
+	}
+	if !p.detachable {
+		receipt, ferr := p.finish(ctx, cfg)
+		return nil, receipt, ferr
+	}
+	lifetime := cfg.Lifetime
+	if lifetime == nil {
+		lifetime = context.Background()
+	}
+	initial := Receipt{ID: p.id, Status: StatusRunning, Cached: boolPtr(false)}
+	job := &Job{ID: p.id, done: make(chan struct{}), receipt: initial}
+	go func() {
+		// close and OnFinish are deferred so a panic cannot skip them. OnFinish
+		// releases the caller's tenant gate; leaving it uncalled wedges reset
+		// and delete for the process lifetime.
+		defer close(job.done)
+		defer func() {
+			if cfg.OnFinish != nil {
+				cfg.OnFinish()
+			}
+		}()
+		defer func() {
+			if recover() != nil {
+				job.mu.Lock()
+				job.err = errors.New("review attempt failed")
+				job.mu.Unlock()
+			}
+		}()
+		receipt, ferr := p.finishDetached(lifetime, cfg)
+		job.mu.Lock()
+		job.receipt, job.err = receipt, ferr
+		job.mu.Unlock()
+	}()
+	return job, initial, nil
+}
+
+func begin(ctx context.Context, tenant *store.Tenant, tenantID string, req Request, cfg RunConfig, async bool) (*prepared, Receipt, error) {
 	if err := validateRequest(req); err != nil {
-		return Receipt{}, err
+		return nil, Receipt{}, err
 	}
 	if tenant == nil {
-		return Receipt{}, errors.New("tenant unavailable")
+		return nil, Receipt{}, errors.New("tenant unavailable")
 	}
 	repo := req.Capture.RepoID
 	if repo == "" {
 		repo = req.RepoID
 	}
 	if repo == "" {
-		return Receipt{}, errors.New("repo_id required")
+		return nil, Receipt{}, errors.New("repo_id required")
 	}
 	if req.RepoID != "" && req.Capture.RepoID != "" && req.RepoID != req.Capture.RepoID {
-		return Receipt{}, errors.New("wrong_checkout")
+		return nil, Receipt{}, errors.New("wrong_checkout")
 	}
 	if req.Capture.RepoID == "" {
 		req.Capture.RepoID = repo
 	}
 	if len(secrets.Scan(repo)) > 0 || len(secrets.Scan(req.Plan)) > 0 || (req.Brief != nil && len(secrets.Scan(req.Brief.Path)) > 0) {
-		return Receipt{}, errors.New("review identity arguments invalid")
+		return nil, Receipt{}, errors.New("review identity arguments invalid")
 	}
 	if len(req.BuildModels) == 0 {
-		return Receipt{}, errors.New("build_models required")
+		return nil, Receipt{}, errors.New("build_models required")
 	}
 	for _, m := range req.BuildModels {
 		if strings.TrimSpace(m.ID) == "" || len(secrets.Scan(m.ID+"\n"+m.Role)) > 0 {
-			return Receipt{}, errors.New("build_models entries require id")
+			return nil, Receipt{}, errors.New("build_models entries require id")
 		}
 	}
 	if req.Kind != "phase" && req.Kind != "pr" && req.Kind != "adhoc" {
-		return Receipt{}, errors.New("kind must be phase, pr or adhoc")
+		return nil, Receipt{}, errors.New("kind must be phase, pr or adhoc")
 	}
 	if (req.Kind == "phase" && (req.Plan == "" || req.Phase < 1)) || (req.Kind == "pr" && req.PR < 1) {
-		return Receipt{}, errors.New("review kind identity is incomplete")
+		return nil, Receipt{}, errors.New("review kind identity is incomplete")
 	}
 	// MCP advertises detail=receipt for the summary shape. Empty means the same thing.
 	if req.Detail == "receipt" {
 		req.Detail = ""
 	}
 	if req.Detail != "" && req.Detail != "full" {
-		return Receipt{}, errors.New("detail must be full")
+		return nil, Receipt{}, errors.New("detail must be full")
 	}
 	controls, err := resolveCallControls(req)
 	if err != nil {
-		return Receipt{}, err
+		return nil, Receipt{}, err
 	}
 	model := cfg.Availability.EffectiveModel()
 	if req.DryRun {
 		if err := CheckAvailability(cfg.Availability, controls.effective); err != nil {
-			return Receipt{Status: "unavailable", Reason: safeReason(err)}, nil
+			return nil, Receipt{Status: "unavailable", Reason: safeReason(err)}, nil
 		}
 	}
 
@@ -282,33 +417,35 @@ func Run(ctx context.Context, tenant *store.Tenant, tenantID string, req Request
 	if buildErr != nil {
 		var re *Error
 		if !errors.As(buildErr, &re) {
-			return Receipt{}, errors.New("capture invalid")
+			return nil, Receipt{}, errors.New("capture invalid")
 		}
 		if re.Code == "bad_capture" {
-			return Receipt{}, buildErr
+			return nil, Receipt{}, buildErr
 		}
 		packet.CaptureID = keys.ContentHash([]byte(req.Capture.RepoID + "\n" + req.Capture.Mode + "\n" + req.Capture.View + "\n" + req.Capture.DiffSHA256))
 		if req.DryRun {
-			return Receipt{Status: re.Code}, nil
+			return nil, Receipt{Status: re.Code}, nil
 		}
 		if !controls.store {
-			return Receipt{Status: re.Code, Reason: re.Pattern, CaptureID: packet.CaptureID, Manifest: packet.Manifest}, nil
+			return nil, Receipt{Status: re.Code, Reason: re.Pattern, CaptureID: packet.CaptureID, Manifest: packet.Manifest}, nil
 		}
-		return persistRefusal(ctx, tenant, tenantID, req, repo, re.Code, re.Pattern, resolved.Record, packet, "", cfg, controls)
+		receipt, err := persistRefusal(ctx, tenant, tenantID, req, repo, re.Code, re.Pattern, resolved.Record, packet, "", cfg, controls)
+		return nil, receipt, err
 	}
 	if criteriaErr != nil {
 		var ce *CriteriaError
 		errors.As(criteriaErr, &ce)
 		if req.DryRun {
-			return Receipt{Status: "refused_criteria", Reason: ce.Code, CaptureID: packet.CaptureID, Manifest: packet.Manifest}, nil
+			return nil, Receipt{Status: "refused_criteria", Reason: ce.Code, CaptureID: packet.CaptureID, Manifest: packet.Manifest}, nil
 		}
 		if !controls.store {
-			return Receipt{Status: "refused_criteria", Reason: ce.Code, CaptureID: packet.CaptureID, Manifest: packet.Manifest}, nil
+			return nil, Receipt{Status: "refused_criteria", Reason: ce.Code, CaptureID: packet.CaptureID, Manifest: packet.Manifest}, nil
 		}
-		return persistRefusal(ctx, tenant, tenantID, req, repo, "refused_criteria", ce.Code, resolved.Record, packet, "", cfg, controls)
+		receipt, err := persistRefusal(ctx, tenant, tenantID, req, repo, "refused_criteria", ce.Code, resolved.Record, packet, "", cfg, controls)
+		return nil, receipt, err
 	}
 	if req.DryRun {
-		return Receipt{Status: "dry_run", CaptureID: packet.CaptureID, Coverage: packet.Coverage, Manifest: packet.Manifest}, nil
+		return nil, Receipt{Status: "dry_run", CaptureID: packet.CaptureID, Coverage: packet.Coverage, Manifest: packet.Manifest}, nil
 	}
 
 	status, reason := "", ""
@@ -321,7 +458,7 @@ func Run(ctx context.Context, tenant *store.Tenant, tenantID string, req Request
 		inputBytes := packetInput(packet)
 		inputHash = keys.ContentHash(inputBytes)
 		if err := tenant.WriteReviewInput(inputHash, inputBytes); err != nil {
-			return Receipt{}, errors.New("review input persistence failed")
+			return nil, Receipt{}, errors.New("review input persistence failed")
 		}
 		key = executionKey(req, tenantID, repo, packet, resolved.Record, model, controls.effective, controls.profile, controls.tags)
 	}
@@ -332,14 +469,17 @@ func Run(ctx context.Context, tenant *store.Tenant, tenantID string, req Request
 		if lookupErr != nil {
 			status, reason = "unavailable", "review record lookup failed"
 		} else if found {
+			if inflight, ok := inFlightReceipt(hitRow); ok {
+				return nil, inflight, nil
+			}
 			cached, usable := cachedReceipt(hitRow)
 			if !usable {
-				return cached, nil
+				return nil, cached, nil
 			}
 			if _, err := persistRecord(ctx, tenant, tenantID, req, repo, makeID(), "skipped_duplicate", cached.OriginalReviewID, Result{}, nil, packet, resolved.Record, inputHash, cfg, controls, key, true); err != nil {
-				return Receipt{}, err
+				return nil, Receipt{}, err
 			}
-			return cached, nil
+			return nil, cached, nil
 		} else if controls.legacyFallback {
 			legacyKey := PreUpgradeExecutionKey(req, tenantID, repo, packet, resolved.Record, model, controls.effective, controls.profile)
 			if legacyKey != key {
@@ -347,14 +487,17 @@ func Run(ctx context.Context, tenant *store.Tenant, tenantID string, req Request
 				if legacyErr != nil {
 					status, reason = "unavailable", "review record lookup failed"
 				} else if legacyFound && legacyIdentityMatches(legacyRow, req.Trial) {
+					if inflight, ok := inFlightReceipt(legacyRow); ok {
+						return nil, inflight, nil
+					}
 					cached, usable := cachedReceipt(legacyRow)
 					if !usable {
-						return cached, nil
+						return nil, cached, nil
 					}
 					if _, err := persistRecord(ctx, tenant, tenantID, req, repo, makeID(), "skipped_duplicate", cached.OriginalReviewID, Result{}, nil, packet, resolved.Record, inputHash, cfg, controls, key, true); err != nil {
-						return Receipt{}, err
+						return nil, Receipt{}, err
 					}
-					return cached, nil
+					return nil, cached, nil
 				}
 			}
 		}
@@ -367,10 +510,15 @@ func Run(ctx context.Context, tenant *store.Tenant, tenantID string, req Request
 			if err := cfg.Reservations.begin(key, id, tenantID); err != nil {
 				if first, dup := duplicateReview(err); dup {
 					originalID := first
-					if stateID, state := cfg.Reservations.claimState(key); state == claimActive && stateID != "" {
-						return Receipt{Status: "in_progress", Reason: originalID, Cached: boolPtr(false), OriginalReviewID: originalID}, nil
+					if row, found, lerr := tenant.ReviewByExecutionKey(ctx, repo, key); lerr == nil && found {
+						if inflight, ok := inFlightReceipt(row); ok {
+							return nil, inflight, nil
+						}
 					}
-					return Receipt{Status: "outcome_unknown", Reason: originalID, Cached: boolPtr(false), OriginalReviewID: originalID}, nil
+					if stateID, state := cfg.Reservations.claimState(key); state == claimActive && stateID != "" {
+						return nil, Receipt{Status: "in_progress", Reason: originalID, Cached: boolPtr(false), OriginalReviewID: originalID}, nil
+					}
+					return nil, Receipt{Status: "outcome_unknown", Reason: originalID, Cached: boolPtr(false), OriginalReviewID: originalID}, nil
 				} else if errors.Is(err, ErrClaimState) {
 					status, reason = "unavailable", "review claim state unavailable"
 				} else {
@@ -385,73 +533,141 @@ func Run(ctx context.Context, tenant *store.Tenant, tenantID string, req Request
 			release = func() { cfg.Reservations.finish(tenantID) }
 		}
 	}
+	if status != "" {
+		receipt, err := persistRecord(ctx, tenant, tenantID, req, repo, id, status, reason, Result{}, nil, packet, resolved.Record, inputHash, cfg, controls, key, controls.store)
+		return nil, receipt, err
+	}
+	p := &prepared{tenant: tenant, req: req, tenantID: tenantID, repo: repo, id: id, controls: controls, criteria: resolved.Criteria, criteriaRec: resolved.Record, packet: packet, inputHash: inputHash, key: key, release: release}
+	if async && controls.store {
+		if _, err := persistRecord(ctx, tenant, tenantID, req, repo, id, StatusRunning, "", Result{}, nil, packet, resolved.Record, inputHash, cfg, controls, key, true); err != nil {
+			p.releaseReservation()
+			return nil, Receipt{}, err
+		}
+		p.detachable = true
+	}
+	return p, Receipt{}, nil
+}
+
+// inFlightReceipt recognises a persisted pending/running row so a repeated POST
+// resolves to the existing review id without starting a second provider call.
+func inFlightReceipt(row store.ReviewRecord) (Receipt, bool) {
+	var rec storedReview
+	if json.Unmarshal(row.Raw, &rec) != nil {
+		return Receipt{}, false
+	}
+	if rec.Status != StatusPending && rec.Status != StatusRunning {
+		return Receipt{}, false
+	}
+	id := rec.ID
+	if id == "" {
+		id = rec.LegacyID
+	}
+	return Receipt{ID: id, Status: rec.Status, Cached: boolPtr(false), OriginalReviewID: id, CaptureID: rec.CaptureID, Tags: rec.Tags, Model: rec.ReturnedModel, Effort: rec.EffectiveEffort, Attempts: rec.Attempts}, true
+}
+
+func (p *prepared) finish(ctx context.Context, cfg RunConfig) (Receipt, error) {
+	defer p.releaseReservation()
+	result, attempts, status, reason := p.attempt(ctx, cfg)
+	return persistRecord(ctx, p.tenant, p.tenantID, p.req, p.repo, p.id, status, reason, result, attempts, p.packet, p.criteriaRec, p.inputHash, cfg, p.controls, p.key, p.controls.store)
+}
+
+func (p *prepared) finishDetached(ctx context.Context, cfg RunConfig) (receipt Receipt, err error) {
+	defer p.releaseReservation()
+	var (
+		result   Result
+		attempts []Attempt
+		status   string
+		reason   string
+	)
+	func() {
+		// A provider or parsing panic on this detached goroutine would otherwise
+		// take down the whole server (net/http only recovers request goroutines)
+		// and strand the row in running.
+		defer func() {
+			if recover() != nil {
+				result, attempts, status, reason = Result{}, nil, "api_error", "internal error"
+			}
+		}()
+		result, attempts, status, reason = p.attempt(ctx, cfg)
+	}()
+	// Finalizing must survive server shutdown cancelling ctx, otherwise the
+	// running row is never replaced.
+	fctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	defer cancel()
+	receipt, err = finalizeRecord(fctx, p.tenant, p.tenantID, p.req, p.repo, p.id, status, reason, result, attempts, p.packet, p.criteriaRec, p.inputHash, cfg, p.controls, p.key)
+	if err != nil {
+		// Keep the in-flight identity visible rather than a zero receipt; the
+		// persisted running row remains the polling answer.
+		return Receipt{ID: p.id, Status: StatusRunning, Cached: boolPtr(false)}, err
+	}
+	return receipt, nil
+}
+
+func (p *prepared) attempt(ctx context.Context, cfg RunConfig) (Result, []Attempt, string, string) {
 	var result Result
 	var attempts []Attempt
-	if status == "" {
-		if release != nil {
-			defer release()
+	status, reason := "", ""
+	model := cfg.Availability.EffectiveModel()
+	reviewer := NewReviewer(cfg.Availability.Token, model, p.controls.effective, cfg.Endpoint)
+	reviewCtx, cancelReview := context.WithTimeout(ctx, reviewWallTime)
+	defer cancelReview()
+	for n := 1; n <= 2; n++ {
+		if n > 1 && reviewCtx.Err() != nil {
+			break
 		}
-		reviewer := NewReviewer(cfg.Availability.Token, model, controls.effective, cfg.Endpoint)
-		reviewCtx, cancelReview := context.WithTimeout(ctx, reviewWallTime)
-		defer cancelReview()
-		for n := 1; n <= 2; n++ {
-			if n > 1 && reviewCtx.Err() != nil {
-				break
+		at := time.Now()
+		if cfg.Now != nil {
+			at = cfg.Now()
+		}
+		timeout := cfg.AttemptTimeout
+		if timeout <= 0 {
+			timeout = defaultAttemptTimeout
+		}
+		callCtx, cancel := context.WithTimeout(reviewCtx, timeout)
+		res, err := reviewer.Review(callCtx, p.packet, p.criteria)
+		cancel()
+		lat := time.Since(at).Milliseconds()
+		a := Attempt{Number: n, LatencyMS: lat}
+		if err == nil {
+			result = res
+			if p.criteriaRec.Source == "none" {
+				result.Limitations = append(result.Limitations, "No criteria were supplied for this review.")
 			}
-			at := time.Now()
-			if cfg.Now != nil {
-				at = cfg.Now()
-			}
-			timeout := cfg.AttemptTimeout
-			if timeout <= 0 {
-				timeout = defaultAttemptTimeout
-			}
-			callCtx, cancel := context.WithTimeout(reviewCtx, timeout)
-			res, err := reviewer.Review(callCtx, packet, resolved.Criteria)
-			cancel()
-			lat := time.Since(at).Milliseconds()
-			a := Attempt{Number: n, LatencyMS: lat}
-			if err == nil {
-				result = res
-				if resolved.Record.Source == "none" {
-					result.Limitations = append(result.Limitations, "No criteria were supplied for this review.")
-				}
-				a.Status = "ok"
-				applyReportedUsage(&a, model, res.InputTokens, res.OutputTokens)
-				attempts = append(attempts, a)
-				status = "ok"
-				if packet.Coverage.State != "complete" || res.Coverage != "complete" {
-					status = "ok_partial"
-				}
-				break
-			}
-			a.Status = errorStatus(err)
-			var pe *ProviderError
-			if errors.As(err, &pe) {
-				if pe.UsageReported {
-					applyReportedUsage(&a, model, pe.InputTokens, pe.OutputTokens)
-				}
-				if pe.Reason != "" {
-					reason = pe.Reason
-				}
-			}
+			a.Status = "ok"
+			applyReportedUsage(&a, model, res.InputTokens, res.OutputTokens)
 			attempts = append(attempts, a)
-			status = a.Status
-			if status == "unavailable" && strings.Contains(err.Error(), "credential_rejected") {
-				reason = "credential_rejected"
+			status = "ok"
+			if p.packet.Coverage.State != "complete" || res.Coverage != "complete" {
+				status = "ok_partial"
 			}
-			if status != "timeout" && status != "api_error" {
-				break
+			break
+		}
+		a.Status = errorStatus(err)
+		var pe *ProviderError
+		if errors.As(err, &pe) {
+			if pe.UsageReported {
+				applyReportedUsage(&a, model, pe.InputTokens, pe.OutputTokens)
 			}
-			if n == 2 {
-				break
+			if pe.Reason != "" {
+				reason = pe.Reason
 			}
+		}
+		attempts = append(attempts, a)
+		status = a.Status
+		if status == "unavailable" && strings.Contains(err.Error(), "credential_rejected") {
+			reason = "credential_rejected"
+		}
+		if status != "timeout" && status != "api_error" {
+			break
+		}
+		if n == 2 {
+			break
 		}
 	}
 	if status == "" {
 		status = "api_error"
 	}
-	return persistRecord(ctx, tenant, tenantID, req, repo, id, status, reason, result, attempts, packet, resolved.Record, inputHash, cfg, controls, key, controls.store)
+	return result, attempts, status, reason
 }
 
 func validateRequest(r Request) error {
@@ -871,7 +1087,9 @@ func persistRefusal(ctx context.Context, t *store.Tenant, tenant string, r Reque
 	return persistRecord(ctx, t, tenant, r, repo, makeID(), status, reason, Result{}, nil, p, c, inputHash, cfg, ctl, "refusal", true)
 }
 
-func persistRecord(ctx context.Context, t *store.Tenant, tenant string, r Request, repo, id, status, reason string, result Result, attempts []Attempt, p Packet, c CriteriaRecord, inputHash string, cfg RunConfig, ctl callControls, key string, write bool) (Receipt, error) {
+// reviewRecord builds the persisted review_run map and its client receipt. write
+// selects the persisted shape; a read-only (store=false) call only needs the receipt.
+func reviewRecord(r Request, repo, id, status, reason string, result Result, attempts []Attempt, p Packet, c CriteriaRecord, inputHash string, cfg RunConfig, ctl callControls, key string, now time.Time, write bool) (map[string]any, Receipt) {
 	findings := map[string]int{}
 	for _, f := range result.Findings {
 		findings[f.Severity]++
@@ -896,18 +1114,9 @@ func persistRecord(ctx context.Context, t *store.Tenant, tenant string, r Reques
 		out.Result = &result
 	}
 	if !write {
-		if !ctl.store && len(attempts) > 0 {
-			if err := persistReviewUsage(ctx, t, status, result, attempts, cfg, ctl); err != nil {
-				return Receipt{}, err
-			}
-		}
-		return out, nil
+		return nil, out
 	}
 	out.ID = id
-	now := time.Now()
-	if cfg.Now != nil {
-		now = cfg.Now()
-	}
 	conv := "review:" + p.CaptureID[:min(12, len(p.CaptureID))]
 	model := cfg.Availability.EffectiveModel()
 	tags := ctl.tags
@@ -952,6 +1161,23 @@ func persistRecord(ctx context.Context, t *store.Tenant, tenant string, r Reques
 	if reason != "" {
 		rec["reason"] = reason
 	}
+	return rec, out
+}
+
+func persistRecord(ctx context.Context, t *store.Tenant, tenant string, r Request, repo, id, status, reason string, result Result, attempts []Attempt, p Packet, c CriteriaRecord, inputHash string, cfg RunConfig, ctl callControls, key string, write bool) (Receipt, error) {
+	now := time.Now()
+	if cfg.Now != nil {
+		now = cfg.Now()
+	}
+	rec, out := reviewRecord(r, repo, id, status, reason, result, attempts, p, c, inputHash, cfg, ctl, key, now, write)
+	if !write {
+		if !ctl.store && len(attempts) > 0 {
+			if err := persistReviewUsage(ctx, t, status, result, attempts, cfg, ctl); err != nil {
+				return Receipt{}, err
+			}
+		}
+		return out, nil
+	}
 	b, _ := json.Marshal(rec)
 	raw := json.RawMessage(b)
 	facts, err := ingest.IngestReviewRuns(ctx, t, []json.RawMessage{raw})
@@ -960,6 +1186,31 @@ func persistRecord(ctx context.Context, t *store.Tenant, tenant string, r Reques
 	}
 	if len(facts) != 1 || facts[0].Status != ingest.Accepted {
 		return Receipt{}, fmt.Errorf("review record rejected: %s", facts[0].Reason)
+	}
+	return out, nil
+}
+
+// finalizeRecord replaces the in-flight row created by Start with the terminal
+// result on the same review id. It never appends a second row for the attempt.
+func finalizeRecord(ctx context.Context, t *store.Tenant, tenant string, r Request, repo, id, status, reason string, result Result, attempts []Attempt, p Packet, c CriteriaRecord, inputHash string, cfg RunConfig, ctl callControls, key string) (Receipt, error) {
+	now := time.Now()
+	if cfg.Now != nil {
+		now = cfg.Now()
+	}
+	rec, out := reviewRecord(r, repo, id, status, reason, result, attempts, p, c, inputHash, cfg, ctl, key, now, true)
+	b, _ := json.Marshal(rec)
+	// Validate and precheck exactly as the append path does before the in-place
+	// update, so async persistence cannot bypass the ingest gatekeeper.
+	canon, reason := ingest.PrepareReviewRun(b)
+	if reason != "" {
+		return Receipt{}, fmt.Errorf("review record rejected: %s", reason)
+	}
+	updated, err := t.FinalizeReviewRun(ctx, id, canon)
+	if err != nil {
+		return Receipt{}, errors.New("review record persistence failed")
+	}
+	if !updated {
+		return Receipt{}, errors.New("review record finalize failed")
 	}
 	return out, nil
 }
