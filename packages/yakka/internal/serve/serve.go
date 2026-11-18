@@ -827,20 +827,46 @@ func (s *Server) reviewsPostRoute(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 503, map[string]string{"error": "tenant unavailable"})
 		return
 	}
-	job, receipt, err := review.Start(r.Context(), ts.t, res.tenant, req, review.RunConfig{
+	// Hold a shutdown slot before Start. Close waits for it so the detached
+	// attempt can record its terminal row before tenant databases close.
+	finish, ok := s.beginDetachedReview(releaseUse)
+	if !ok {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "shutting down"})
+		return
+	}
+	owned := false
+	defer func() {
+		if !owned {
+			finish()
+		}
+	}()
+	// Synchronous decisions, including store=false, use the request context.
+	// Also end them when the server is closing so Close is not stuck behind a
+	// provider call that does not watch the server lifetime.
+	callCtx, stopCall := context.WithCancel(r.Context())
+	defer stopCall()
+	go func() {
+		select {
+		case <-s.ctx.Done():
+			stopCall()
+		case <-callCtx.Done():
+		}
+	}()
+	job, receipt, err := review.Start(callCtx, ts.t, res.tenant, req, review.RunConfig{
 		Availability: s.reviewAvailability(),
 		Reservations: s.reviewReservations,
 		Endpoint:     s.opts.ReviewEndpoint,
 		Lifetime:     s.ctx,
-		OnFinish:     releaseUse,
+		OnFinish:     finish,
 	})
+	owned = job != nil
+	// A detached attempt holds the tenant's read gate until it finalizes, so a
+	// reset/delete cannot erase the row it is about to update.
+	held = job != nil
 	if err != nil {
 		writeJSON(w, 400, map[string]string{"error": err.Error()})
 		return
 	}
-	// A detached attempt holds the tenant's read gate until it finalizes, so a
-	// reset/delete cannot erase the row it is about to update.
-	held = job != nil
 	status := http.StatusOK
 	switch {
 	case job != nil:
@@ -857,6 +883,29 @@ func (s *Server) reviewsPostRoute(w http.ResponseWriter, r *http.Request) {
 		status = http.StatusAccepted
 	}
 	writeJSON(w, status, receipt)
+}
+
+// beginDetachedReview reserves one slot on the server wait group so Close can
+// wait for a review Start to finish its terminal write before closing tenant
+// databases. finish releases that slot once. after, when set, runs first and
+// is the caller's tenant-use release. ok is false once Close has started.
+func (s *Server) beginDetachedReview(after func()) (finish func(), ok bool) {
+	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
+		return nil, false
+	}
+	s.wg.Add(1)
+	s.mu.Unlock()
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			defer s.wg.Done()
+			if after != nil {
+				after()
+			}
+		})
+	}, true
 }
 
 // reviewsItemRoute is the tenant-scoped polling surface for an asynchronous

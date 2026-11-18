@@ -250,12 +250,33 @@ func (s *Server) mcpReviewChange(ctx context.Context, tenant string, ts *tenantS
 	if req.Capture.Diff == "" {
 		return nil, errors.New("capture_unsupported")
 	}
-	job, receipt, err := review.Start(ctx, ts.t, tenant, req, review.RunConfig{
+	finish, ok := s.beginDetachedReview(nil)
+	if !ok {
+		return nil, errors.New("shutting down")
+	}
+	owned := false
+	defer func() {
+		if !owned {
+			finish()
+		}
+	}()
+	callCtx, stopCall := context.WithCancel(ctx)
+	defer stopCall()
+	go func() {
+		select {
+		case <-s.ctx.Done():
+			stopCall()
+		case <-callCtx.Done():
+		}
+	}()
+	job, receipt, err := review.Start(callCtx, ts.t, tenant, req, review.RunConfig{
 		Availability: s.reviewAvailability(),
 		Reservations: s.reviewReservations,
 		Endpoint:     s.opts.ReviewEndpoint,
 		Lifetime:     s.ctx,
+		OnFinish:     finish,
 	})
+	owned = job != nil
 	if err != nil {
 		return nil, err
 	}

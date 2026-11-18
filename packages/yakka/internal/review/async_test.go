@@ -133,6 +133,38 @@ func TestStartInFlightDuplicateDoesNotSpend(t *testing.T) {
 	}
 }
 
+func TestStartPersistsTerminalStatusWhenLifetimeEnds(t *testing.T) {
+	lifetime, cancel := context.WithCancel(context.Background())
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		cancel()
+		io.WriteString(w, providerReply([]any{}, []any{}, []any{}, "complete"))
+	}))
+	defer srv.Close()
+
+	tenant := reviewTenant(t)
+	cfg := availableConfig(srv.URL)
+	cfg.Lifetime = lifetime
+	job, accepted, err := Start(context.Background(), tenant, "tenant", reviewRequest(true), cfg)
+	if err != nil || job == nil || accepted.Status != StatusRunning {
+		t.Fatalf("accepted=%+v job=%v err=%v", accepted, job, err)
+	}
+	waitCtx, stopWait := context.WithTimeout(context.Background(), 5*time.Second)
+	defer stopWait()
+	final, done := job.Wait(waitCtx)
+	if !done || final.Status == StatusRunning || final.Status == StatusPending || final.ID != accepted.ID {
+		t.Fatalf("final=%+v done=%v", final, done)
+	}
+	if calls.Load() != 1 {
+		t.Fatalf("provider calls=%d", calls.Load())
+	}
+	polled, found, err := tenant.ReviewByID(context.Background(), accepted.ID)
+	if err != nil || !found || strings.Contains(string(polled.Raw), `"status":"running"`) || strings.Contains(string(polled.Raw), `"status":"pending"`) {
+		t.Fatalf("poll found=%v err=%v raw=%s", found, err, polled.Raw)
+	}
+}
+
 func TestPersistedInFlightRowBlocksAfterRestart(t *testing.T) {
 	var calls atomic.Int32
 	release := make(chan struct{})

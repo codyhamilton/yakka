@@ -208,8 +208,9 @@ type RunConfig struct {
 	// server/process lifetime, never a request context, so a client disconnect
 	// cannot cancel the provider call. Run ignores it.
 	Lifetime context.Context
-	// OnFinish, when set, runs exactly once after a detached attempt has
-	// persisted its final row and released its reservation. It must not block.
+	// OnFinish, when set, runs exactly once after a detached attempt returns
+	// and has released its reservation, including when the attempt panics.
+	// It must not block. It is not called for synchronous completions.
 	OnFinish func()
 }
 
@@ -312,14 +313,26 @@ func Start(ctx context.Context, tenant *store.Tenant, tenantID string, req Reque
 	initial := Receipt{ID: p.id, Status: StatusRunning, Cached: boolPtr(false)}
 	job := &Job{ID: p.id, done: make(chan struct{}), receipt: initial}
 	go func() {
+		// close and OnFinish are deferred so a panic cannot skip them. OnFinish
+		// releases the caller's tenant gate; leaving it uncalled wedges reset
+		// and delete for the process lifetime.
+		defer close(job.done)
+		defer func() {
+			if cfg.OnFinish != nil {
+				cfg.OnFinish()
+			}
+		}()
+		defer func() {
+			if recover() != nil {
+				job.mu.Lock()
+				job.err = errors.New("review attempt failed")
+				job.mu.Unlock()
+			}
+		}()
 		receipt, ferr := p.finishDetached(lifetime, cfg)
 		job.mu.Lock()
 		job.receipt, job.err = receipt, ferr
 		job.mu.Unlock()
-		if cfg.OnFinish != nil {
-			cfg.OnFinish()
-		}
-		close(job.done)
 	}()
 	return job, initial, nil
 }

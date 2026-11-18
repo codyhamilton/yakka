@@ -7,12 +7,14 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/codyhamilton/yakka/packages/yakka/internal/review"
+	"github.com/codyhamilton/yakka/packages/yakka/internal/store"
 )
 
 func blockingReviewServer(t *testing.T, calls *atomic.Int32, started chan<- struct{}, release <-chan struct{}) *httptest.Server {
@@ -236,6 +238,60 @@ func TestReviewMCPTimeoutPathReturnsInFlightIDWithoutCancelling(t *testing.T) {
 	final := pollReview(t, h, "ka", rpc.Result.ID)
 	if final.Status != "ok" {
 		t.Fatalf("detached MCP review did not finish: %+v", final)
+	}
+}
+
+func TestReviewRESTClosePersistsTerminalStatus(t *testing.T) {
+	started := make(chan struct{})
+	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case started <- struct{}{}:
+		default:
+		}
+		select {
+		case <-r.Context().Done():
+		case <-time.After(5 * time.Second):
+		}
+	}))
+	defer fake.Close()
+
+	dir := t.TempDir()
+	s := New(Config{
+		Data:        dir,
+		ReviewToken: "fixture-only",
+		Keys:        []KeyPair{{Tenant: "a", Key: "ka"}},
+	}, Options{DisableWorker: true, ReviewEndpoint: fake.URL, PollInterval: time.Hour})
+	code, body := reviewPost(t, s, "ka", reviewHTTPBody(t, "repo-a"))
+	if code != http.StatusAccepted {
+		t.Fatalf("POST=%d %s", code, body)
+	}
+	var accepted review.Receipt
+	if err := json.Unmarshal([]byte(body), &accepted); err != nil || accepted.ID == "" {
+		t.Fatalf("accepted=%s", body)
+	}
+	select {
+	case <-started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("provider call did not start")
+	}
+	closed := make(chan struct{})
+	go func() {
+		_ = s.Close()
+		close(closed)
+	}()
+	select {
+	case <-closed:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Close did not finish the detached review")
+	}
+	tn, err := store.Open(filepath.Join(dir, "a"), store.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = tn.Close() })
+	row, found, err := tn.ReviewByID(context.Background(), accepted.ID)
+	if err != nil || !found || strings.Contains(string(row.Raw), `"status":"running"`) || strings.Contains(string(row.Raw), `"status":"pending"`) {
+		t.Fatalf("after close found=%v err=%v raw=%s", found, err, row.Raw)
 	}
 }
 
