@@ -190,7 +190,7 @@ func TestReviewRunStatusVocabulary(t *testing.T) {
 	tn := open(t)
 	base := map[string]any{"id": "r#0", "type": "review_run", "conversation_id": "review:abc", "repo_id": "repo",
 		"kind": "pr", "capture_id": "abc", "ts": 10}
-	for _, status := range []string{"truncated", "skipped_busy", "skipped_budget", "skipped_duplicate"} {
+	for _, status := range []string{"truncated", "input_too_large", "skipped_busy", "skipped_budget", "skipped_duplicate"} {
 		f := map[string]any{}
 		for k, v := range base {
 			f[k] = v

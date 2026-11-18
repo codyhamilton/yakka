@@ -23,9 +23,14 @@ import (
 )
 
 const (
-	MaxReviewBody         = 3 << 20
-	reviewWallTime        = 120 * time.Second
-	defaultAttemptTimeout = 60 * time.Second
+	MaxReviewBody = 3 << 20
+	// defaultAttemptTimeout bounds one provider attempt. It was raised from 60s
+	// after seven high-effort reviews timed out at exactly 60s. Tune it again
+	// once high/xhigh/max wall times have been measured.
+	defaultAttemptTimeout = 10 * time.Minute
+	// reviewWallTime covers both allowed attempts plus a little overhead so a
+	// single 10-minute attempt is never cut short by the outer deadline.
+	reviewWallTime = 2*defaultAttemptTimeout + 30*time.Second
 )
 
 type BuildModel struct {
@@ -160,23 +165,25 @@ type Attempt struct {
 }
 
 type Receipt struct {
-	ID               string          `json:"id,omitempty"`
-	Status           string          `json:"status"`
-	Reason           string          `json:"reason,omitempty"`
-	CaptureID        string          `json:"capture_id,omitempty"`
-	FindingCounts    map[string]int  `json:"finding_counts,omitempty"`
-	Coverage         Coverage        `json:"coverage,omitempty"`
-	CostUSD          float64         `json:"cost_usd,omitempty"`
-	Manifest         []ManifestEntry `json:"manifest,omitempty"`
-	Ignored          []string        `json:"ignored,omitempty"`
-	Result           *Result         `json:"result,omitempty"`
-	Cached           *bool           `json:"cached,omitempty"`
-	OriginalReviewID string          `json:"original_review_id,omitempty"`
-	OriginalStatus   string          `json:"original_status,omitempty"`
-	Model            string          `json:"model,omitempty"`
-	Effort           string          `json:"effort,omitempty"`
-	Tags             []string        `json:"tags,omitempty"`
-	Attempts         []Attempt       `json:"attempts,omitempty"`
+	ID                 string          `json:"id,omitempty"`
+	Status             string          `json:"status"`
+	Reason             string          `json:"reason,omitempty"`
+	InputTokenEstimate int             `json:"input_token_estimate,omitempty"`
+	InputTrimmed       bool            `json:"input_trimmed,omitempty"`
+	CaptureID          string          `json:"capture_id,omitempty"`
+	FindingCounts      map[string]int  `json:"finding_counts,omitempty"`
+	Coverage           Coverage        `json:"coverage,omitempty"`
+	CostUSD            float64         `json:"cost_usd,omitempty"`
+	Manifest           []ManifestEntry `json:"manifest,omitempty"`
+	Ignored            []string        `json:"ignored,omitempty"`
+	Result             *Result         `json:"result,omitempty"`
+	Cached             *bool           `json:"cached,omitempty"`
+	OriginalReviewID   string          `json:"original_review_id,omitempty"`
+	OriginalStatus     string          `json:"original_status,omitempty"`
+	Model              string          `json:"model,omitempty"`
+	Effort             string          `json:"effort,omitempty"`
+	Tags               []string        `json:"tags,omitempty"`
+	Attempts           []Attempt       `json:"attempts,omitempty"`
 }
 
 func boolPtr(b bool) *bool { return &b }
@@ -416,8 +423,13 @@ func Run(ctx context.Context, tenant *store.Tenant, tenantID string, req Request
 			}
 			a.Status = errorStatus(err)
 			var pe *ProviderError
-			if errors.As(err, &pe) && pe.UsageReported {
-				applyReportedUsage(&a, model, pe.InputTokens, pe.OutputTokens)
+			if errors.As(err, &pe) {
+				if pe.UsageReported {
+					applyReportedUsage(&a, model, pe.InputTokens, pe.OutputTokens)
+				}
+				if pe.Reason != "" {
+					reason = pe.Reason
+				}
 			}
 			attempts = append(attempts, a)
 			status = a.Status
@@ -860,7 +872,7 @@ func persistRecord(ctx context.Context, t *store.Tenant, tenant string, r Reques
 	for _, f := range result.Findings {
 		findings[f.Severity]++
 	}
-	out := Receipt{Status: status, Reason: reason, CaptureID: p.CaptureID, FindingCounts: findings, Coverage: p.Coverage}
+	out := Receipt{Status: status, Reason: reason, InputTokenEstimate: p.InputTokenEstimate, InputTrimmed: p.InputTrimmed, CaptureID: p.CaptureID, FindingCounts: findings, Coverage: p.Coverage}
 	if c.Ignored != "" {
 		out.Ignored = []string{c.Ignored}
 	}
@@ -898,7 +910,7 @@ func persistRecord(ctx context.Context, t *store.Tenant, tenant string, r Reques
 	if tags == nil {
 		tags = []string{}
 	}
-	rec := map[string]any{"id": id, "review_id": id, "type": "review_run", "repo_id": repo, "kind": r.Kind, "plan": r.Plan, "phase": r.Phase, "pr": r.PR, "capture_id": p.CaptureID, "input_hash": inputHash, "criteria": c, "configured_model": model, "returned_model": result.Model, "configured_effort": ctl.configured, "requested_effort": ctl.requested, "effective_effort": ctl.effective, "profile": ctl.profile, "tags": tags, "prompt_policy_version": p.PromptPolicyVersion, "exclusion_policy_version": p.ExclusionPolicyVersion, "status": status, "attempts": attempts, "payload": result, "build_models": r.BuildModels, "session_binding": "unbound", "session_binding_reason": "Plan 22 session resolver is unavailable", "conversation_id": conv, "coverage": p.Coverage, "manifest": p.Manifest, "key": key, "ts": float64(now.Unix())}
+	rec := map[string]any{"id": id, "review_id": id, "type": "review_run", "repo_id": repo, "kind": r.Kind, "plan": r.Plan, "phase": r.Phase, "pr": r.PR, "capture_id": p.CaptureID, "input_hash": inputHash, "input_token_estimate": p.InputTokenEstimate, "input_trimmed": p.InputTrimmed, "criteria": c, "configured_model": model, "returned_model": result.Model, "configured_effort": ctl.configured, "requested_effort": ctl.requested, "effective_effort": ctl.effective, "profile": ctl.profile, "tags": tags, "prompt_policy_version": p.PromptPolicyVersion, "exclusion_policy_version": p.ExclusionPolicyVersion, "status": status, "attempts": attempts, "payload": result, "build_models": r.BuildModels, "session_binding": "unbound", "session_binding_reason": "Plan 22 session resolver is unavailable", "conversation_id": conv, "coverage": p.Coverage, "manifest": p.Manifest, "key": key, "ts": float64(now.Unix())}
 	if status == "skipped_duplicate" && reason != "" {
 		rec["original_review_id"] = reason
 	}

@@ -44,60 +44,113 @@ type reviewerReply struct {
 	Coverage    string    `json:"coverage"`
 }
 
+// InvalidReplyError classifies why a reply failed the strict contract. It never
+// carries reply bytes. Reason is a short machine-readable value.
+type InvalidReplyError struct{ Reason string }
+
+func (e *InvalidReplyError) Error() string { return "invalid output" }
+
+func invalidReply(reason string) error { return &InvalidReplyError{Reason: reason} }
+
+// InvalidReason returns the body-free validator classification, if any.
+func InvalidReason(err error) string {
+	var ire *InvalidReplyError
+	if errors.As(err, &ire) {
+		return ire.Reason
+	}
+	return ""
+}
+
 var hunkHeader = regexp.MustCompile(`^@@ -[0-9]+(?:,([0-9]+))? \+([0-9]+)(?:,([0-9]+))? @@`)
+
+// unwrapJSONFence trims surrounding whitespace and removes one optional
+// markdown fence around the whole reply. It never salvages prose or multiple
+// JSON values: anything after the closing fence is left in place and rejected
+// as trailing data.
+func unwrapJSONFence(raw []byte) []byte {
+	s := strings.TrimSpace(string(raw))
+	if !strings.HasPrefix(s, "```") {
+		return []byte(s)
+	}
+	nl := strings.IndexByte(s, '\n')
+	if nl < 0 {
+		return []byte(s)
+	}
+	open := strings.TrimSpace(s[:nl])
+	if open != "```" && !strings.EqualFold(open, "```json") {
+		return []byte(s)
+	}
+	rest := strings.TrimRight(s[nl+1:], " \t\r\n")
+	if !strings.HasSuffix(rest, "```") {
+		return []byte(s)
+	}
+	return []byte(strings.TrimSpace(rest[:len(rest)-3]))
+}
 
 // ValidateReply parses the strict result schema, checks criterion coverage and
 // marks findings unsupported when evidence or locations lack packet support.
+// An optional single markdown fence around the object is accepted; every
+// failure returns an *InvalidReplyError with a body-free reason.
 func ValidateReply(raw []byte, packet Packet, criteria []Criterion) (Result, error) {
+	raw = unwrapJSONFence(raw)
 	redacted := secrets.Redact(string(raw))
 	wasRedacted := redacted != string(raw)
 	dec := json.NewDecoder(bytes.NewBufferString(redacted))
 	dec.DisallowUnknownFields()
 	var reply reviewerReply
 	if err := dec.Decode(&reply); err != nil {
-		return Result{}, errors.New("invalid output")
+		if strings.Contains(err.Error(), "unknown field") {
+			return Result{}, invalidReply("unknown_field")
+		}
+		return Result{}, invalidReply("json_parse")
 	}
 	var trailing any
 	if err := dec.Decode(&trailing); err != io.EOF {
-		return Result{}, errors.New("invalid output")
+		return Result{}, invalidReply("trailing_data")
 	}
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal([]byte(redacted), &fields); err != nil {
-		return Result{}, errors.New("invalid output")
+		return Result{}, invalidReply("json_parse")
 	}
 	for _, key := range []string{"outcomes", "findings", "limitations", "coverage"} {
 		if _, ok := fields[key]; !ok {
-			return Result{}, errors.New("invalid output")
+			return Result{}, invalidReply("missing_field")
 		}
 	}
-	if len(fields) != 4 || reply.Outcomes == nil || reply.Findings == nil || reply.Limitations == nil {
-		return Result{}, errors.New("invalid output")
+	if len(fields) != 4 {
+		return Result{}, invalidReply("unknown_field")
+	}
+	if reply.Outcomes == nil {
+		return Result{}, invalidReply("missing_outcomes")
+	}
+	if reply.Findings == nil || reply.Limitations == nil {
+		return Result{}, invalidReply("missing_field")
 	}
 	if reply.Coverage != "complete" && reply.Coverage != "partial" {
-		return Result{}, errors.New("invalid output")
+		return Result{}, invalidReply("schema")
 	}
 	criteriaSet := make(map[string]struct{}, len(criteria))
 	for _, criterion := range criteria {
 		if criterion.ID == "" {
-			return Result{}, errors.New("invalid criteria")
+			return Result{}, invalidReply("schema")
 		}
 		criteriaSet[criterion.ID] = struct{}{}
 	}
 	seen := make(map[string]bool, len(criteriaSet))
 	for _, outcome := range reply.Outcomes {
 		if _, exists := criteriaSet[outcome.CriterionID]; !exists || seen[outcome.CriterionID] {
-			return Result{}, errors.New("invalid output")
+			return Result{}, invalidReply("schema")
 		}
 		seen[outcome.CriterionID] = true
 		if outcome.Assessment != "met" && outcome.Assessment != "partial" && outcome.Assessment != "not met" && outcome.Assessment != "unassessable" {
-			return Result{}, errors.New("invalid output")
+			return Result{}, invalidReply("invalid_assessment")
 		}
 		if !utf8.ValidString(outcome.Evidence) {
-			return Result{}, errors.New("invalid output")
+			return Result{}, invalidReply("schema")
 		}
 	}
 	if len(seen) != len(criteriaSet) {
-		return Result{}, errors.New("invalid output")
+		return Result{}, invalidReply("missing_outcomes")
 	}
 	context, err := untrustedText(packet.Prompt)
 	if err != nil {
@@ -111,11 +164,11 @@ func ValidateReply(raw []byte, packet Packet, criteria []Criterion) (Result, err
 			(f.Severity != "blocker" && f.Severity != "high" && f.Severity != "medium" && f.Severity != "low") ||
 			(f.Lens != "outcome" && f.Lens != "intent-assumptions" && f.Lens != "correctness" && f.Lens != "security" && f.Lens != "contract" && f.Lens != "tests" && f.Lens != "other") ||
 			f.Confidence < 0 || f.Confidence > 1 || f.CriterionIDs == nil {
-			return Result{}, errors.New("invalid output")
+			return Result{}, invalidReply("invalid_finding")
 		}
 		for _, id := range f.CriterionIDs {
 			if id == "" {
-				return Result{}, errors.New("invalid output")
+				return Result{}, invalidReply("invalid_finding")
 			}
 		}
 		if !supportedFinding(*f, context, hunks, criteriaSet) {

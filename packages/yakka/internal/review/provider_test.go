@@ -35,6 +35,15 @@ func TestReviewerRequestAndReply(t *testing.T) {
 		if got["model"] != "claude-haiku-5-5" || got["max_tokens"] != float64(100000) || got["stream"] != nil || got["tools"] != nil {
 			t.Errorf("request body = %s", body)
 		}
+		if strings.Contains(string(body), "cache_control") {
+			t.Fatalf("request body carries cache_control: %s", body)
+		}
+		if _, ok := got["cache_control"]; ok {
+			t.Fatalf("request body has a cache_control field")
+		}
+		if _, ok := got["system"]; ok {
+			t.Fatalf("one-shot request unexpectedly carries a system prefix")
+		}
 		outCfg := got["output_config"].(map[string]any)
 		if outCfg["effort"] != "high" {
 			t.Errorf("output_config = %#v", outCfg)
@@ -169,6 +178,83 @@ func TestReviewerBoundsResponse(t *testing.T) {
 	_, err := NewReviewer("token", "model", "high", server.URL).Review(context.Background(), testPacket(), nil)
 	if err == nil || !strings.Contains(err.Error(), string(ProviderAPIError)) {
 		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestReviewerAcceptsSingleMarkdownFence(t *testing.T) {
+	for _, fenced := range []string{
+		"```json\n" + validReplyJSON() + "\n```",
+		"```\n" + validReplyJSON() + "\n```",
+		"\n  " + validReplyJSON() + "  \n",
+	} {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			encoded := mustJSON(t, fenced)
+			io.WriteString(w, `{"model":"claude-haiku-5-5","stop_reason":"end_turn","content":[{"type":"text","text":`+encoded+`}],"usage":{"input_tokens":12,"output_tokens":34}}`)
+		}))
+		result, err := NewReviewer("token", "claude-haiku-5-5", "high", server.URL).Review(context.Background(), testPacket(), []Criterion{{ID: "I1"}})
+		server.Close()
+		if err != nil || result.Coverage != "complete" {
+			t.Fatalf("fenced reply = %+v, %v", result, err)
+		}
+	}
+}
+
+func TestReviewerInvalidReasonIsBodyFree(t *testing.T) {
+	for name, body := range map[string]string{
+		"not json":           `{"model":"claude-haiku-5-5","content":[{"type":"text","text":"not json"}]}`,
+		"multiple text":      `{"model":"claude-haiku-5-5","content":[{"type":"text","text":"{}"},{"type":"text","text":"{}"}]}`,
+		"unknown field":      `{"model":"claude-haiku-5-5","content":[{"type":"text","text":` + mustJSON(t, strings.Replace(validReplyJSON(), `"coverage":"complete"`, `"coverage":"complete","extra":true`, 1)) + `}]}`,
+		"invalid assessment": `{"model":"claude-haiku-5-5","content":[{"type":"text","text":` + mustJSON(t, strings.Replace(validReplyJSON(), `"assessment":"met"`, `"assessment":"maybe"`, 1)) + `}]}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				io.WriteString(w, body)
+			}))
+			defer server.Close()
+			_, err := NewReviewer("token", "claude-haiku-5-5", "high", server.URL).Review(context.Background(), testPacket(), []Criterion{{ID: "I1"}})
+			var pe *ProviderError
+			if !errors.As(err, &pe) || pe.Status != ProviderInvalid || pe.Reason == "" {
+				t.Fatalf("error = %v", err)
+			}
+			if strings.Contains(pe.Reason, "not json") || strings.Contains(pe.Reason, "maybe") || strings.Contains(pe.Reason, "extra") {
+				t.Fatalf("reason leaked reply content: %q", pe.Reason)
+			}
+		})
+	}
+}
+
+func TestReviewerRefusesOverBudgetPacketWithoutCall(t *testing.T) {
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests++
+		io.WriteString(w, `{"model":"claude-haiku-5-5","content":[]}`)
+	}))
+	defer server.Close()
+	packet := testPacket()
+	packet.Prompt = []byte(strings.Repeat("x", 3*maxInputTokens+3))
+	_, err := NewReviewer("token", "claude-haiku-5-5", "high", server.URL).Review(context.Background(), packet, nil)
+	var pe *ProviderError
+	if !errors.As(err, &pe) || pe.Status != ProviderInputTooLarge {
+		t.Fatalf("error = %v", err)
+	}
+	if requests != 0 {
+		t.Fatalf("over-budget packet reached the provider: %d calls", requests)
+	}
+}
+
+func TestReviewerRequestHasNoCacheControlAnywhere(t *testing.T) {
+	var body []byte
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ = io.ReadAll(r.Body)
+		encoded := mustJSON(t, validReplyJSON())
+		io.WriteString(w, `{"model":"claude-haiku-5-5","stop_reason":"end_turn","content":[{"type":"text","text":`+encoded+`}],"usage":{"input_tokens":1,"output_tokens":1}}`)
+	}))
+	defer server.Close()
+	if _, err := NewReviewer("token", "claude-haiku-5-5", "high", server.URL).Review(context.Background(), testPacket(), []Criterion{{ID: "I1"}}); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(body), "cache") {
+		t.Fatalf("one-shot request carries a cache prefix: %s", body)
 	}
 }
 
