@@ -506,8 +506,9 @@ async function render(record) {
   root.dataset.route = path;
   setShellState('loading', 'false');
   const exempt = isAccountRoute(path);
+  const sessionExempt = ['/login', '/oauth/callback', '/settings'].includes(path);
   let me = null, meStatus = 0, hint = '';
-  if (!exempt) {
+  if (!sessionExempt) {
     const result = await loadSessionOnce(); me = result.me; meStatus = result.status;
   }
   const decision = sessionGateDecision({ path, search: record.search, meStatus });
