@@ -289,6 +289,15 @@ gated, not claimed.
 
 ## Phase 7 — Agents act on feedback
 
+### Review correction — rv-p7
+
+Phase 7 is **not verified and must remain open**. The phase outcome requires fresh Claude and
+Codex scratch-repo sessions with the transcripts described below; neither transcript is present.
+The `Yakka-Phase: 21-feedback-delivery:7` trailer on `f9d4d42f` therefore records a premature
+closure. This correction records the unmet outcome but does not remove that historical trailer;
+doing so would require rewriting history, which this run is prohibited from doing. The phase can
+close only after the two session transcripts are supplied and the closure record is corrected.
+
 Run (phase 7): tool opencode, model deepseek-v4.1-flash for refine and build, started
 2026-11-19T04:09:10+10:00; independent read-only verification by codex gpt-6-luna at 04:17:59.
 Logs: `/home/codyh/workspace/.briefs/q/21-p7-refine.log`, `21-p7-u1.log`, `21-p7-verify.log`. Run
