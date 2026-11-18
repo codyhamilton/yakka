@@ -291,12 +291,12 @@ gated, not claimed.
 
 ### Review correction — rv-p7
 
-Phase 7 is **not verified and must remain open**. The phase outcome requires fresh Claude and
-Codex scratch-repo sessions with the transcripts described below; neither transcript is present.
-The `Yakka-Phase: 21-feedback-delivery:7` trailer on `f9d4d42f` therefore records a premature
-closure. This correction records the unmet outcome but does not remove that historical trailer;
-doing so would require rewriting history, which this run is prohibited from doing. The phase can
-close only after the two session transcripts are supplied and the closure record is corrected.
+The rv-p7 review (19 Nov 2026) correctly found Phase 7 **not verified**: the
+`Yakka-Phase: 21-feedback-delivery:7` trailer on `f9d4d42f` was a premature
+closure without the required Claude and Codex transcripts. That historical
+trailer was left in place (rewriting history is prohibited). The live proof
+below is the closure record.
+
 
 Run (phase 7): tool opencode, model deepseek-v4.1-flash for refine and build, started
 2026-11-19T04:09:10+10:00; independent read-only verification by codex gpt-6-luna at 04:17:59.
@@ -339,18 +339,54 @@ The focused server test passes
 `ok ... 0.856s`), and `git grep` confirms the constant and its rejected/screen-flagged append
 sites. `git status --short` shows only the skill file and the report; `git diff --check` is clean.
 The independent codex verifier reported PASS on all five points and found no scope creep, missed
-clause or overclaim. The phase outcome proper — one fresh Claude session and one fresh Codex
-session, each in a scratch repo — is a live/egress gate and was not run; the repo evidence does
-not close it.
+clause or overclaim. The unit evidence still stands. The phase outcome proper — the two
+scratch-repo transcripts — is recorded in the live-proof section below.
+
+### Live proof — local server (2026-11-19)
+
+Status: closed.
+
+Phase 7 is now verified against a local `yakka serve` built from this branch at
+`9cf20699`, listening on `127.0.0.1:8770` with a scratch-local store (not
+`~/.local/share/yakka/serve`, not production). A fresh Claude Code session
+(haiku-5-5, `harness pick research --harness claude`, session
+`a4599859-9f95-4206-add8-6152b1fc741a`) and a fresh Codex session (gpt-6-luna,
+sandbox off, isolated `CODEX_HOME`, hooks via `--dangerously-bypass-hook-trust`,
+rollout `01a1f0f0-5c2e-73c1-8a2c-49c178a1a7fb`) each designed a small feature
+in `/home/codyh/workspace/yakka-build/21-p7-local-20261119-084124`. Each
+transcript shows `artifact_feedback` returning `queued` and then `delivered`
+with `screen: pass by jev-1.13.0` and `scoring: on` plus per-check score lines.
+On pass, each final message stated the pass and quoted those lines. The local
+serve log records the MCP `initialize` / `tools/call artifact_feedback` hits
+for both sessions (`tenant=local`). Report:
+`reports/phase7-02-local-server-proof.md`.
+
+This does **not** close the live `api.yakka.build` check. Phase 4's `scoring:`
+line and Phase 5's relative-path resolution are not on `origin/master`; that
+check is after merge and deploy.
+
+Hook/drain processes used `YAKKA_MODE=local` (no `YAKKA_ENDPOINT` / `YAKKA_KEY`).
+The MCP shim process was pointed at `http://127.0.0.1:8770` with `YAKKA_ENDPOINT`
+set and `YAKKA_KEY` / `YAKKA_MODE` unset, via a scratch-plugin wrapper, not by
+editing `client.toml`. `LoadMCP()` (`plugins/yakka/client/yakka.py:202-245`)
+ignores `YAKKA_MODE=local` and would otherwise keep using `client.toml` or
+`https://api.yakka.build` even when drain is local. That is a separate product
+gap for Solution Designer; it is not fixed in this plan.
+
+The Codex relative-path call first failed with the Phase 5 "no project
+directory was supplied" error; the absolute-path retry delivered. The Claude
+relative-path call succeeded (queued, then delivered).
 
 ### Carried
 
-- Gate: one fresh Claude session in a scratch repo asked to design a small feature, transcript
-  showing `delivered` with `screen:` and `scoring:` lines (after a repeat call if the first answer
-  was `queued`), then either an edit addressing a named flagged check followed by a second call or,
-  on `pass`, a final message stating the pass with the score lines.
-- Gate: the same fresh-session transcript on Codex. Together these two are the issue's done-when.
-- Gate: `artifact_feedback` checks on the Phase 7 brief and report (egress; not run).
+- Gate: live `artifact_feedback` on `api.yakka.build` after this branch is
+  merged and deployed (P4 scoring line and P5 path resolution are not on
+  master yet). The local-server transcripts close the designed session
+  outcome.
+- Gate: `artifact_feedback` checks on the Phase 7 brief and report (egress;
+  not run).
+- Product gap (not fixed here): `LoadMCP()` ignores `YAKKA_MODE=local`
+  (`plugins/yakka/client/yakka.py:202-245`). Bounce to Solution Designer.
 - `docs/design/08-server-mcp-contract.md` and the golden description state list still omit `not
   tracked` in their wording; that is a Phase 5 surface the design does not ask Phase 7 to reword.
 - The brief's over-budget clause and its "touch nothing else" owned paths conflict; the build kept
