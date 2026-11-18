@@ -1,7 +1,7 @@
 // Deterministic same-origin stub of the analytics API, generated from the
 // committed fixture manifest. Test-only: product code never imports this.
 
-import { makeSchema, activityProbe, activityList, summary, population, adminStatus, explorePage, COUNTS, p10Schema, p10Summary, p10Query, p10Distribution, p10Entities, p10Scores, p10ScoreSeries, p10Baselines, p11Schema, p11Scatter, p11Entities, p11Aggregate } from './fixture.mjs';
+import { makeSchema, activityProbe, activityList, summary, population, adminStatus, explorePage, COUNTS, p10Schema, p10Summary, p10Query, p10Distribution, p10Entities, p10Scores, p10ScoreSeries, p10Baselines, p11Schema, p11Scatter, p11ArtifactScatter, p11PlanScatter, p11Scores, p11Entities, p11Aggregate } from './fixture.mjs';
 
 const json = (response, status, body) => {
   response.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
@@ -86,7 +86,10 @@ export function createStubApi() {
         const mode = query.get('mode') || 'list';
         if (mode === 'scatter') {
           const fields = (query.get('fields') || '').split(',').filter(Boolean);
-          json(response, 200, p11Scatter({ fields }));
+          const body = grain === 'artifact'
+            ? p11ArtifactScatter({ fields })
+            : grain === 'plan' ? p11PlanScatter({ fields }) : p11Scatter({ fields });
+          json(response, 200, body);
           return true;
         }
         if (mode === 'aggregate') {
@@ -94,6 +97,10 @@ export function createStubApi() {
           return true;
         }
         json(response, 200, p11Entities(grain));
+        return true;
+      }
+      if (path === '/v1/analytics/scores') {
+        json(response, 200, p11Scores({ kind: query.get('kind') || 'design' }));
         return true;
       }
       // Any P11 body not handled here falls through to the P10/default

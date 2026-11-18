@@ -686,7 +686,163 @@ export function p11Scatter({ fields = [] } = {}) {
   };
 }
 
+// Artifact scatter rows: two kinds (design, brief), two checks (clarity,
+// structure), two writing-session models, one unscored row, one unpriced
+// writing session (null cost), one partial (lower-bound) cost and one
+// content_unavailable row. Identities are (repo_id, path); the hash rides in
+// the lens so the artifact destination can name it.
+export function p11ArtifactRows() {
+  const base = Math.floor(P11.start / 1000);
+  const make = (index, repo, path, kind, model, hash, clarity, structure, cost, bytes, flags) => ({
+    id: { repo_id: repo, path },
+    m: {
+      versions: 1 + (index % 3),
+      distinct_writing_sessions: 1 + (index % 2),
+      first_ts: base + index * 3600,
+      last_ts: base + index * 3600 + 900,
+      content_bytes: bytes,
+      'score:clarity': clarity,
+      'score:structure': structure,
+      writing_session_cost_usd: cost,
+      writing_session_model_calls: 4 + index,
+      writing_session_tokens_in: 400 + index * 100,
+      writing_session_tokens_out: 200 + index * 50,
+      writing_session_tokens_cache_read: index * 20,
+      writing_session_tokens_cache_write: index * 5,
+      writing_session_tokens_reasoning: index * 3,
+      writing_session_hook_events: 6 + index
+    },
+    l: {
+      kind, plan: '20', repo_id: repo, harness: index % 2 ? 'claude-code' : 'orca',
+      session_model: model, source: 'worktree', screen_verdict: 'pass', scorer: 'jev-1',
+      'band:clarity': clarity === null ? 'unscored' : (index % 2 ? 'mid' : 'top'),
+      'band:structure': structure === null ? 'unscored' : 'mid',
+      content_hash: hash
+    },
+    flags
+  });
+  return [
+    make(0, 'repo-a', 'docs/plans/20-analytics-reset/DESIGN.md', 'design', 'claude', 'hash-a', 0.82, 0.70, 1.25, 4096, { sampled: false }),
+    make(1, 'repo-a', 'docs/plans/20-analytics-reset/briefs/11-02-artifact-plan-scatter.md', 'brief', 'gpt', 'hash-b', 0.55, 0.60, 2.50, 8192, { sampled: false }),
+    make(2, 'repo-b', 'docs/plans/20-analytics-reset/briefs/11-01-scatter-foundation.md', 'brief', 'claude', 'hash-c', 0.70, null, 0.90, 2048, { lower_bound: true }),
+    make(3, 'repo-b', 'docs/plans/20-analytics-reset/briefs/11-03-time-scatter.md', 'brief', 'gpt', 'hash-d', null, 0.40, null, 1024, { unscored: true, unpriced: true, unpriced_calls: 3 }),
+    make(4, 'repo-a', 'docs/plans/20-analytics-reset/briefs/11-01-scatter-foundation.md', 'brief', 'claude', 'hash-e', 0.82, 0.70, 1.25, null, { content_unavailable: true }),
+    make(5, 'repo-b', 'docs/plans/20-analytics-reset/DESIGN.md', 'design', 'gpt', 'hash-f', 0.60, 0.65, 0.75, 3072, { sampled: false })
+  ];
+}
+
+export function p11ArtifactScatter({ fields = [] } = {}) {
+  const rows = p11ArtifactRows();
+  return {
+    grain: 'artifact',
+    mode: 'scatter',
+    fields: fields.length ? fields : ['writing_session_cost_usd', 'score:clarity'],
+    sampled: false,
+    population_n: rows.length,
+    returned_n: rows.length,
+    rows,
+    marginals: {
+      writing_session_cost_usd: {
+        unit: 'USD',
+        bins: [{ lo: 0, hi: 0.5, n: 1 }, { lo: 0.5, hi: 1, n: 2 }, { lo: 1, hi: 2, n: 2 }, { lo: 2, hi: null, n: 1 }]
+      },
+      'score:clarity': {
+        unit: 'score',
+        bins: [{ lo: 0, hi: 0.5, n: 1 }, { lo: 0.5, hi: 0.7, n: 2 }, { lo: 0.7, hi: 0.85, n: 2 }, { lo: 0.85, hi: null, n: 1 }]
+      }
+    },
+    population: {
+      grain: 'artifact', unit: 'artifact', scope_n: 6, cohort_n: 6, eligible_n: 5, returned_n: 6,
+      missing_by_reason: { unscored: 1, missing_axis: 1 }, relation: null
+    }
+  };
+}
+
+// Plan scatter rows: two plans sharing one session, complete_share present and
+// no_executions, one unpriced (null) associated cost and a design score that is
+// present on one plan and null on the other.
+export function p11PlanRows() {
+  const base = Math.floor(P11.start / 1000);
+  return [
+    {
+      id: { repo_id: 'repo-a', plan: '20' },
+      m: {
+        artifacts: 4, versions: 9, sessions: 3, shared_sessions: 1,
+        associated_cost_usd: 5.5, unpriced_calls: 2,
+        executions_complete: 3, executions_unreported: 0, executions_started: 1,
+        complete_share: 0.75, 'design_score:clarity': 0.80, 'design_score:structure': 0.70,
+        span_days: 12, first_ts: base, last_ts: base + 12 * 86400
+      },
+      l: { repo_id: 'repo-a', harness: 'orca', session_model: 'claude' },
+      flags: { shared_session: true }
+    },
+    {
+      id: { repo_id: 'repo-b', plan: '21' },
+      m: {
+        artifacts: 2, versions: 3, sessions: 2, shared_sessions: 1,
+        associated_cost_usd: null, unpriced_calls: 5,
+        executions_complete: 0, executions_unreported: 0, executions_started: 0,
+        complete_share: null, 'design_score:clarity': null, 'design_score:structure': null,
+        span_days: 4, first_ts: base + 86400, last_ts: base + 5 * 86400
+      },
+      l: { repo_id: 'repo-b', harness: 'claude-code', session_model: 'gpt' },
+      flags: { no_executions: true, unpriced: true }
+    }
+  ];
+}
+
+export function p11PlanScatter({ fields = [] } = {}) {
+  const rows = p11PlanRows();
+  return {
+    grain: 'plan',
+    mode: 'scatter',
+    fields: fields.length ? fields : ['associated_cost_usd', 'artifacts'],
+    sampled: false,
+    population_n: rows.length,
+    returned_n: rows.length,
+    rows,
+    marginals: {
+      associated_cost_usd: {
+        unit: 'USD',
+        bins: [{ lo: 0, hi: 2, n: 1 }, { lo: 2, hi: 5, n: 0 }, { lo: 5, hi: null, n: 1 }]
+      },
+      artifacts: {
+        unit: 'artifacts',
+        bins: [{ lo: 0, hi: 2, n: 1 }, { lo: 2, hi: 4, n: 0 }, { lo: 4, hi: null, n: 1 }]
+      }
+    },
+    population: {
+      grain: 'plan', unit: 'plan', scope_n: 2, cohort_n: 2, eligible_n: 1, returned_n: 2,
+      missing_by_reason: { no_executions: 1, missing_axis: 1 }, relation: null
+    }
+  };
+}
+
+export function p11Scores({ kind = 'design' } = {}) {
+  return { kind, checks: [{ name: 'clarity', n: 6 }, { name: 'structure', n: 4 }] };
+}
+
 export function p11Entities(grain = 'session') {
+  if (grain === 'artifact') {
+    const rows = p11ArtifactRows();
+    return {
+      grain, rows,
+      population: {
+        grain, unit: 'artifact', scope_n: rows.length, cohort_n: rows.length,
+        eligible_n: rows.length, returned_n: rows.length, missing_by_reason: {}, relation: null
+      }
+    };
+  }
+  if (grain === 'plan') {
+    const rows = p11PlanRows();
+    return {
+      grain, rows,
+      population: {
+        grain, unit: 'plan', scope_n: rows.length, cohort_n: rows.length,
+        eligible_n: rows.length, returned_n: rows.length, missing_by_reason: {}, relation: null
+      }
+    };
+  }
   const rows = p11SessionRows();
   return {
     grain,
@@ -714,9 +870,14 @@ export function p11Fixture() {
   return {
     schema: p11Schema(),
     scatter: p11Scatter,
+    artifactScatter: p11ArtifactScatter,
+    planScatter: p11PlanScatter,
+    scores: p11Scores,
     entities: p11Entities,
     aggregate: p11Aggregate,
     sessionRows: p11SessionRows,
+    artifactRows: p11ArtifactRows,
+    planRows: p11PlanRows,
     sessionId: p11SessionId
   };
 }

@@ -8,10 +8,22 @@
 }
 
 .p11-scatter-basis,
-.p11-scatter-caveat {
+.p11-scatter-caveat,
+.p11-scatter-note {
   margin: 0;
   font-size: 0.8125rem;
   color: var(--wk-muted, #4b5563);
+}
+
+.p11-scatter-banner {
+  margin: 0;
+  padding: 0.375rem 0.5rem;
+  border: 1px solid var(--wk-border, #d1d5db);
+  border-left: 3px solid var(--wk-warning, #b45309);
+  border-radius: 4px;
+  background: var(--wk-warning-bg, #fffbeb);
+  font-size: 0.8125rem;
+  color: var(--wk-text, #111827);
 }
 
 .p11-scatter-chart {
