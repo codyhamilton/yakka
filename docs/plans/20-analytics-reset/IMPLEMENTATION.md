@@ -26,6 +26,14 @@ Refinement commit `acd114f` (`docs: refine Plan 20 Phase 11 into five units`) re
 - Deviations / unfinished: worker reported **done**. `planAxes` takes an optional catalogue and the plan panel passes `null` because the panel requires only `entities_plan`; `session_model` is the colour lens while `model` is never numeric or a colour; `artifactMissing` prefers row flags and falls back to `population.missing_by_reason`. Browser proof of the delivered board stays 11-03. `gate: none`.
 - Verification: `node --test tests/scatter-sessions/artifact-plan.test.mjs` → 9/9; `scatter.test.mjs` 10/10; `tests/workspace/*.test.mjs` 72/72; `tests/trends-quality/*.test.mjs` sequentially 54/54; `git diff --check` clean. `artifact_feedback` unreachable (`invalid_context`).
 
+### `11-03-time-scatter.md` — over budget handoff
+
+- Done: `/b/scatter` now delivers the four-panel `scatter` preset; `scatter-day` plots two time measures on the response bucket grid, freezes `{fields,bucket,bucket_step}` and the absolute window into the cohort source, and reports contributing sessions plus source/target rejection associations in their own units. The P11 time fixture/stub scene, Phase 9 Start/acceptance expectations and the report are written. Report: `reports/11-03-time-scatter.md`.
+- Not done: none for the unit. 11-04 and 11-05 remain.
+- Learned: time selection needs the aggregate response's `population.relation`, not the scatter body's bucket population; `auto` must not be reported as coarsened when the server chose the effective unit; leap-free fixed bucket seconds are enough for half-open interval checks against the frozen window.
+- Deviation: `tests/scatter-sessions/artifact-plan.test.mjs` was outside the owned paths but asserted the preset stayed undelivered; only that final assertion was updated, with no product change to satisfy it. `gate: none` (Chromium 1243 resolved).
+- Budget: more than 40 tool turns and more than 20 files read, against 40 turns and 20 files. The overrun is the Chromium proof and its first-run fixes; no scope was added.
+
 ## Phase 10 — Trends, Compare, Quality, Cost and Tools
 
 The phase outcome is approach-known. This run uses the signed outcome, the panel catalog and preset mapping, the Interaction model, and CONTRACTS.md 17.2, 17.3, 17.3.1, 17.5, 17.6 and 17.7 as the fixed yardstick. No new grain, join, route, dependency, gesture or contract is authorized. Phase 10 has no Units list in DESIGN.md and is more than one worker's work, so `refine` is dispatched as its own context; its verdict decides the units.

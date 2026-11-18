@@ -866,18 +866,148 @@ export function p11Aggregate({ grain = 'session', stat = 'count' } = {}) {
   };
 }
 
+// ---------------------------------------------------------------------------
+// P11 time scatter: five half-open daily buckets on one shared grid. The first
+// and last are partial at the inclusive source-window edges; one bucket has a
+// null commits measure; the last bucket is all-rejection and resolves to a
+// valid, empty contributing-session selection. Adding these bodies leaves every
+// P10, default and 11-01/11-02 body byte-identical.
+// ---------------------------------------------------------------------------
+
+const P11_TIME_START = Math.floor(Date.parse('2026-09-01T00:00:00Z') / 1000);
+const P11_TIME_WINDOW = { from: '2026-09-01T00:00:00Z', to: '2026-09-05T00:00:00Z', tz: 'UTC' };
+
+export function p11TimeRows() {
+  const bucket = index => ({ t: P11_TIME_START + index * 86400, tz: 'UTC' });
+  return [
+    { id: bucket(0), m: { cost_usd: 1, commits: 2, rejections: 1 }, l: {}, flags: { partial: true } },
+    { id: bucket(1), m: { cost_usd: 2, commits: 3, rejections: 0 }, l: {}, flags: {} },
+    { id: bucket(2), m: { cost_usd: 3.5, commits: 1, rejections: 2 }, l: {}, flags: {} },
+    { id: bucket(3), m: { cost_usd: 5, commits: null, rejections: 0 }, l: {}, flags: {} },
+    { id: bucket(4), m: { cost_usd: 9.5, commits: 0, rejections: 4 }, l: {}, flags: { partial: true, all_rejections: true } }
+  ];
+}
+
+export function p11TimeScatter({ fields = [] } = {}) {
+  const rows = p11TimeRows();
+  return {
+    grain: 'time',
+    mode: 'scatter',
+    fields: fields.length ? fields : ['cost_usd', 'commits'],
+    bucket: 'day',
+    bucket_step: 1,
+    requested_bucket: 'auto',
+    coarsened: false,
+    window: { ...P11_TIME_WINDOW },
+    partial: { edge: true, buckets: [rows[0].id, rows[4].id] },
+    sampled: false,
+    population_n: rows.length,
+    returned_n: rows.length,
+    rows,
+    marginals: {
+      cost_usd: {
+        unit: 'USD',
+        bins: [{ lo: 0, hi: 2, n: 1 }, { lo: 2, hi: 4, n: 2 }, { lo: 4, hi: null, n: 2 }]
+      },
+      commits: {
+        unit: 'commits',
+        bins: [{ lo: 0, hi: 1, n: 1 }, { lo: 1, hi: 3, n: 2 }, { lo: 3, hi: null, n: 1 }]
+      }
+    },
+    population: {
+      grain: 'time', unit: 'bucket', scope_n: rows.length, cohort_n: rows.length,
+      eligible_n: 4, returned_n: rows.length, missing_by_reason: { missing_axis: 1 }, relation: null
+    }
+  };
+}
+
+function rangeLow(node, measure) {
+  if (!node || typeof node !== 'object') return null;
+  if (node.range && node.range.measure === measure) return Number(node.range.lo);
+  for (const value of Object.values(node)) {
+    if (Array.isArray(value)) {
+      for (const child of value) {
+        const found = rangeLow(child, measure);
+        if (found !== null) return found;
+      }
+    } else if (value && typeof value === 'object') {
+      const found = rangeLow(value, measure);
+      if (found !== null) return found;
+    }
+  }
+  return null;
+}
+
+function timePredicateIsAllRejections(predicate) {
+  if (!predicate) return false;
+  let node = predicate;
+  if (typeof predicate === 'string') {
+    try { node = JSON.parse(predicate); } catch { return false; }
+  }
+  const low = rangeLow(node, 'cost_usd');
+  return low !== null && low >= 9;
+}
+
+// The aggregate count behind a time region. A bucket whose only rejections are
+// unassociated is a valid empty selection: zero contributing sessions, with the
+// missing/orphan counts still reconciling and never folded into a session count.
+export function p11TimeAggregate({ predicate = '' } = {}) {
+  const empty = timePredicateIsAllRejections(predicate);
+  const target = empty
+    ? { unit: 'session', scope_n: P11.populationN, cohort_n: 0 }
+    : { unit: 'session', scope_n: P11.populationN, cohort_n: 7 };
+  return {
+    grain: 'time',
+    mode: 'aggregate',
+    stat: 'count',
+    population: {
+      grain: 'time', unit: 'bucket', scope_n: 5, cohort_n: 5, eligible_n: 5, returned_n: 1,
+      missing_by_reason: {},
+      relation: {
+        source_grain: 'time', target_grain: 'time', mapping: 'contributing_session', op: 'include',
+        resolved_n: empty ? 0 : 7, resolved_unit: 'session',
+        target_sessions: target,
+        associations: empty
+          ? [
+            {
+              side: 'source', contributor: 'rejection', unit: 'rejection', total_n: 4, associated_n: 0,
+              missing_by_reason: { no_conversation_id: 2, orphan_conversation_id: 2 }, treatment: 'selected'
+            },
+            {
+              side: 'target', contributor: 'rejection', unit: 'rejection', total_n: 5, associated_n: 0,
+              missing_by_reason: { no_conversation_id: 1, orphan_conversation_id: 4 }, treatment: 'dropped'
+            }
+          ]
+          : [
+            {
+              side: 'source', contributor: 'rejection', unit: 'rejection', total_n: 9, associated_n: 5,
+              missing_by_reason: { no_conversation_id: 2, orphan_conversation_id: 2 }, treatment: 'selected'
+            },
+            {
+              side: 'target', contributor: 'rejection', unit: 'rejection', total_n: 11, associated_n: 8,
+              missing_by_reason: { no_conversation_id: 1, orphan_conversation_id: 2 }, treatment: 'dropped'
+            }
+          ]
+      }
+    }
+  };
+}
+
 export function p11Fixture() {
   return {
     schema: p11Schema(),
     scatter: p11Scatter,
     artifactScatter: p11ArtifactScatter,
     planScatter: p11PlanScatter,
+    timeScatter: p11TimeScatter,
+    timeAggregate: p11TimeAggregate,
     scores: p11Scores,
     entities: p11Entities,
     aggregate: p11Aggregate,
     sessionRows: p11SessionRows,
     artifactRows: p11ArtifactRows,
     planRows: p11PlanRows,
+    timeRows: p11TimeRows,
     sessionId: p11SessionId
   };
 }

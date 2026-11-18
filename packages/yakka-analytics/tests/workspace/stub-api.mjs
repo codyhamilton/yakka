@@ -1,7 +1,7 @@
 // Deterministic same-origin stub of the analytics API, generated from the
 // committed fixture manifest. Test-only: product code never imports this.
 
-import { makeSchema, activityProbe, activityList, summary, population, adminStatus, explorePage, COUNTS, p10Schema, p10Summary, p10Query, p10Distribution, p10Entities, p10Scores, p10ScoreSeries, p10Baselines, p11Schema, p11Scatter, p11ArtifactScatter, p11PlanScatter, p11Scores, p11Entities, p11Aggregate } from './fixture.mjs';
+import { makeSchema, activityProbe, activityList, summary, population, adminStatus, explorePage, COUNTS, p10Schema, p10Summary, p10Query, p10Distribution, p10Entities, p10Scores, p10ScoreSeries, p10Baselines, p11Schema, p11Scatter, p11ArtifactScatter, p11PlanScatter, p11TimeScatter, p11TimeAggregate, p11Scores, p11Entities, p11Aggregate } from './fixture.mjs';
 
 const json = (response, status, body) => {
   response.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
@@ -88,12 +88,17 @@ export function createStubApi() {
           const fields = (query.get('fields') || '').split(',').filter(Boolean);
           const body = grain === 'artifact'
             ? p11ArtifactScatter({ fields })
-            : grain === 'plan' ? p11PlanScatter({ fields }) : p11Scatter({ fields });
+            : grain === 'plan'
+              ? p11PlanScatter({ fields })
+              : grain === 'time' ? p11TimeScatter({ fields }) : p11Scatter({ fields });
           json(response, 200, body);
           return true;
         }
         if (mode === 'aggregate') {
-          json(response, 200, p11Aggregate({ grain, stat: query.get('stat') || 'count' }));
+          const body = grain === 'time'
+            ? p11TimeAggregate({ predicate: query.get('predicate') || '' })
+            : p11Aggregate({ grain, stat: query.get('stat') || 'count' });
+          json(response, 200, body);
           return true;
         }
         json(response, 200, p11Entities(grain));

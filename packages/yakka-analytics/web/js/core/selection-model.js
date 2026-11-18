@@ -158,6 +158,57 @@ export function selectionObject({ grain = '', predicate = null, unit = 'row', co
   };
 }
 
+// A time cohort's frozen source: the two plotted measures (plus an optional
+// size) and the response's effective bucket grid. The client never derives a
+// different bucket or step, and never sends one the response did not report.
+export function timeCohortSource(body = {}, fields = []) {
+  const names = [...new Set((Array.isArray(fields) ? fields : []).filter(Boolean))];
+  const bucket = body?.bucket ?? body?.effective?.bucket ?? '';
+  if (!names.length || !bucket) return null;
+  const raw = body?.bucket_step ?? body?.effective?.bucket_step ?? 1;
+  const step = Number(raw);
+  return { fields: names, bucket, bucket_step: Number.isFinite(step) && step > 0 ? step : 1 };
+}
+
+// Association counts always reconcile in their own unit. `total_n` is the sum
+// of associated, missing and orphan rejections; none of them is a session.
+export function associationTotals(associations = []) {
+  const totals = {
+    total_n: 0, associated_n: 0, no_conversation_id: 0, orphan_conversation_id: 0
+  };
+  for (const item of Array.isArray(associations) ? associations : []) {
+    totals.total_n += Number(item?.total_n) || 0;
+    totals.associated_n += Number(item?.associated_n) || 0;
+    totals.no_conversation_id += Number(item?.missing_by_reason?.no_conversation_id) || 0;
+    totals.orphan_conversation_id += Number(item?.missing_by_reason?.orphan_conversation_id) || 0;
+  }
+  return totals;
+}
+
+// Each association side is its own line with its own unit and treatment. A
+// `side:"source"` line is meaningful only when the frozen source fields
+// include `rejections`; a target line is always shown beside the target
+// population. Missing and orphan rejections are never folded into a session
+// count.
+export function associationLines(associations = [], { sourceFields = [] } = {}) {
+  const lines = [];
+  for (const item of Array.isArray(associations) ? associations : []) {
+    const side = item?.side || 'target';
+    if (side === 'source' && !(sourceFields || []).includes('rejections')) continue;
+    const missing = Number(item?.missing_by_reason?.no_conversation_id) || 0;
+    const orphan = Number(item?.missing_by_reason?.orphan_conversation_id) || 0;
+    const associated = Number(item?.associated_n) || 0;
+    const total = Number(item?.total_n) || 0;
+    lines.push(
+      `${side} ${item?.contributor || 'rejection'} associations: ${associated.toLocaleString('en-US')} associated, ` +
+      `${missing.toLocaleString('en-US')} missing (no_conversation_id), ` +
+      `${orphan.toLocaleString('en-US')} orphan (orphan_conversation_id); ` +
+      `${total.toLocaleString('en-US')} ${item?.unit || 'rejection'} total; treatment ${item?.treatment || 'kept'}`
+    );
+  }
+  return lines;
+}
+
 export function canonicalScope(scope = {}) {
   return {
     exclude: scope.exclude === undefined ? [] : canonicalElements(scope.exclude),

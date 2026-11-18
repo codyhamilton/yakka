@@ -4,8 +4,8 @@
 // count. Scope is frozen to absolute bounds when promoted to a cohort.
 
 import {
-  COHORT_KEYS, canonicalPredicate, cohortDefinition, decodePick, encodeCohort, fitsViewUrl, formatSelection,
-  selectionPredicate, validateCohort
+  COHORT_KEYS, associationLines, associationTotals, canonicalPredicate, cohortDefinition, decodePick,
+  encodeCohort, fitsViewUrl, formatSelection, selectionPredicate, validateCohort
 } from './selection-model.js';
 import { stateUrl } from './chips.js';
 
@@ -76,6 +76,17 @@ function explicitSelectionText({ unit, selected, scope, sampled }) {
   return formatSelection({ unit, selected, scope, sampled });
 }
 
+// A time selection counts contributing sessions, never selected buckets. The
+// bucket population is shown elsewhere with its own unit.
+function contributingSelectionText({ selected, scope, sampled, empty }) {
+  const count = Number(selected) || 0;
+  let text = `${count.toLocaleString('en-US')} contributing ${count === 1 ? 'session' : 'sessions'}`;
+  if (scope !== null && scope !== undefined) text += ` of ${(Number(scope) || 0).toLocaleString('en-US')} in scope`;
+  if (sampled !== null && sampled !== undefined) text += `; ${(Number(sampled) || 0).toLocaleString('en-US')} sampled marks visible`;
+  if (empty) text += '; valid empty selection — the selected buckets hold only unassociated rejections';
+  return text;
+}
+
 export function selectionTrayModel({ state = {}, pick = null, grain = '', unit = 'row', population = null, selection = null } = {}) {
   const explicit = selection && selection.predicate ? selection : null;
   const keys = pick || decodePick(state.pick);
@@ -87,6 +98,19 @@ export function selectionTrayModel({ state = {}, pick = null, grain = '', unit =
   const time = grain === 'time' || Boolean(state.sel);
   const resolvedGrain = explicit?.grain || grain;
   const resolvedUnit = explicit?.unit || unit;
+  const source = explicit?.source || null;
+  const relation = explicit?.relation || null;
+  const associations = Array.isArray(explicit?.associations)
+    ? explicit.associations
+    : (Array.isArray(relation?.associations) ? relation.associations : []);
+  const sourceFields = Array.isArray(source?.fields) ? source.fields : [];
+  const contributing = Boolean(explicit?.source) && resolvedGrain === 'time';
+  const empty = contributing && selected === 0;
+  const associationText = associationLines(associations, { sourceFields });
+  const relationText = explicit?.expansion
+    || (relation?.target_sessions
+      ? `${(Number(relation.target_sessions.cohort_n) || 0).toLocaleString('en-US')} contributing sessions; the target applies its own window and expands to those sessions' other facts, artifacts and plans.`
+      : '');
   return {
     grain: resolvedGrain,
     unit: resolvedUnit,
@@ -94,9 +118,19 @@ export function selectionTrayModel({ state = {}, pick = null, grain = '', unit =
     scope,
     sampled,
     time,
+    contributing,
+    source,
+    relation,
+    associations,
+    associationTotals: associationTotals(associations),
+    associationLines: associationText,
+    relationText,
+    empty,
     predicate: explicit ? canonicalPredicate(explicit.predicate) : selectionPredicate(keys),
     text: explicit
-      ? explicitSelectionText({ unit: resolvedUnit, selected, scope, sampled })
+      ? (contributing
+        ? contributingSelectionText({ selected, scope, sampled, empty })
+        : explicitSelectionText({ unit: resolvedUnit, selected, scope, sampled }))
       : formatSelection({ unit, selected, scope, sampled })
   };
 }
@@ -257,6 +291,16 @@ export function createSelectionTray({ doc = globalThis.document, router, path = 
     predicate.className = 'selection-tray-predicate';
     predicate.textContent = model.predicate ? JSON.stringify(model.predicate) : 'no predicate';
 
+    const relationLines = [];
+    if (model.relationText) relationLines.push(model.relationText);
+    relationLines.push(...(model.associationLines || []));
+    const notes = relationLines.map(line => {
+      const note = doc.createElement('p');
+      note.className = 'selection-tray-association';
+      note.textContent = line;
+      return note;
+    });
+
     const actions = doc.createElement('div');
     actions.className = 'selection-tray-actions';
     for (const slot of ['A', 'B', 'C', 'D']) actions.append(button(`Make cohort ${slot}`, 'make-cohort', { slot }));
@@ -271,7 +315,7 @@ export function createSelectionTray({ doc = globalThis.document, router, path = 
     const status = doc.createElement('p');
     status.className = 'selection-tray-status';
     status.setAttribute('aria-live', 'polite');
-    element.append(heading, summary, grain, predicate, actions, status);
+    element.append(heading, summary, grain, predicate, ...notes, actions, status);
   }
 
   render();

@@ -158,6 +158,10 @@ test('an older or partial server disables paths with the reason and names missin
   await control(harness.origin, { scenario: 'legacy' });
   await page.goto(`${harness.origin}/b/scatter?win=all`);
   await settle(page);
-  assert.match(await page.locator('main').innerText(), /Delivered in Phase 11: Scatter/);
+  assert.equal(await page.locator('#app h1').innerText(), 'Scatter');
+  const legacyScatter = await page.locator('main').innerText();
+  assert.doesNotMatch(legacyScatter, /Delivered in Phase 11: Scatter/);
+  assert.equal(await page.locator('.workspace-panel').count(), 4);
+  assert.match(legacyScatter, /does not advertise/);
   await diagnostics.assertClean();
 });

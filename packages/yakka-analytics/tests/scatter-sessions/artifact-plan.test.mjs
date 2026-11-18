@@ -184,7 +184,7 @@ test('a plan point keeps null complete_share/design_score out of the marks and e
   assert.match(overlap.text, /unpriced/);
 });
 
-test('both panels register and the scatter preset stays undelivered', () => {
+test('both panels register and the scatter preset names all four panels', () => {
   assert.equal(SCATTER_ARTIFACT_PANEL.grain, 'artifact');
   assert.deepEqual(SCATTER_ARTIFACT_PANEL.requires, ['entities_artifact', 'scores_by_lens']);
   assert.equal(SCATTER_PLAN_PANEL.grain, 'plan');
@@ -198,8 +198,7 @@ test('both panels register and the scatter preset stays undelivered', () => {
 
   const preset = lookupPreset('scatter');
   assert.ok(preset);
-  assert.equal(preset.panels.length, 0);
-  assert.equal(presetDestination('scatter').kind, 'named');
-  assert.equal(presetDestination('scatter').phase, 11);
+  assert.deepEqual(preset.panels, ['scatter-session', 'scatter-artifact', 'scatter-plan', 'scatter-day']);
+  assert.equal(presetDestination('scatter').kind, 'board');
   assert.ok(P11.populationN > 0);
 });

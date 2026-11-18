@@ -110,3 +110,13 @@
     grid-template-columns: 1fr;
   }
 }
+
+/* Time cohorts and associations are stated in their own units beside the
+   selection, never folded into a session count. */
+.selection-tray-association {
+  margin: 0;
+  padding: 0.25rem 0.5rem;
+  border-left: 3px solid var(--wk-border, #d1d5db);
+  font-size: 0.8125rem;
+  color: var(--wk-muted, #4b5563);
+}

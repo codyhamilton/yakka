@@ -186,12 +186,12 @@ test('every Start question path opens its destination or names the missing capab
     }
     const heading = await page.evaluate(() => document.querySelector('#app h1')?.textContent || '');
     assert.notEqual(heading, 'Not found', `${link.text} (${link.href}) is not a dead link`);
-    if (/^\/b\/(scatter|workflow)$/.test(path) || path === '/plans') {
-      assert.match(heading.length ? await page.locator('main').innerText() : '', /Delivered in Phase (11|12)/, `${path} names its delivering phase`);
+    if (path === '/b/workflow' || path === '/plans') {
+      assert.match(heading.length ? await page.locator('main').innerText() : '', /Delivered in Phase 12/, `${path} names its delivering phase`);
       named.push(path);
     }
   }
-  record('every named later destination resolves through the shell', named.length, 5);
+  record('every named later destination resolves through the shell', named.length, 2);
 
   await control(harness.origin, { scenario: 'legacy' });
   await page.goto(`${harness.origin}/`);
