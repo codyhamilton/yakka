@@ -1,10 +1,16 @@
 # Plan 20 implementation
 
 Tool: opencode execute skill
-Run ID: feat/20-analytics-reset phase 12 (2026-11-18)
-Start time: 2026-11-18 21:36 Australia/Brisbane
+Run ID: feat/20-analytics-reset phase 13 retry (2026-11-19)
+Start time: 2026-11-19 08:25 Australia/Brisbane
 
-Phase 11 (below) closed at `4867fb3` with the `Yakka-Phase: 20-analytics-reset:11` trailer. This run builds Phase 12 only.
+Phase 12 (below) closed at `f225e1ec` with the `Yakka-Phase: 20-analytics-reset:12` trailer. This run builds Phase 13 only; a prior Phase 13 attempt wrote the refinement and briefs and stopped before any unit. Phase 13 is approach-known and its `Units` table is in DESIGN.md, so no further refinement is needed.
+
+## Phase 13 — Release readiness
+
+The signed outcome and CONTRACTS.md 17.6/17.7, 12 and 17.1 are the fixed yardstick. No new grain, join, route, dependency, gesture or contract is authorized; the Pages automation and ready-PR marker are external gates, not phase outcomes.
+
+Refinement commit `374357cf` (`docs: refine Plan 20 Phase 13 into five units`) records the units and briefs. Verdict **Proceed**: 13-01 browser release matrix and request-shape recorder; 13-02 server pageset smoke and p95 alignment (depends on 13-01's committed record); 13-03 Pages-faithful account and route proof; 13-04 release checks and stable documentation; 13-05 integrated acceptance last. 13-01, 13-03 and 13-04 own disjoint paths and run in parallel; 13-02 follows 13-01; 13-05 follows all four. Carried: external Pages automation acceptance of `./web`, the ready-PR `Yakka-Plan: docs/plans/20-analytics-reset` marker, the unconfirmed artifact `id` lens grammar, the short P10/P11 fixture hashes, the missing `shape-bars` harness/repo execution aggregate, the Plans-scatter `session_model` omission, the plan-timeline multi-mount load-more collision, the beyond-`page_max` artifact deep link, and the 12-04 `artifact_feedback` gap. `artifact_feedback` on all five briefs was unreachable (`local context unavailable: queue (invalid_context)`) at refinement; it is retried on the reports below and no screen verdict is claimed unless delivered.
 
 ## Phase 12 — Workflow, Plans and the artifact reader
 
