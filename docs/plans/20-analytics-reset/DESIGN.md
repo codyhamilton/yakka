@@ -695,6 +695,38 @@ Refinement verdict: **Proceed**, six units. 9-01 runs first and establishes the 
 - Approach: known.
 - Depends on: Phases 3, 4, 5, 7, 8 and 9.
 
+#### Units
+
+| Unit | Brief | Depends on | Runs alongside |
+|---|---|---|---|
+| 10-01 Trend and compare primitives, Trends and Compare presets | [briefs/10-01-trends-compare.md](briefs/10-01-trends-compare.md) | Phases 3–9 | Nothing; establishes the shared P10 request, chooser, legend and test seams, the distribution box-legend seam, the diverging slope ramp, the P10 fixture/stub scene and the later units' empty registration modules. |
+| 10-02 Quality preset | [briefs/10-02-quality.md](briefs/10-02-quality.md) | 10-01 | 10-03; owns the score panels, their registration, CSS and specs, disjoint from the cost and tool paths. |
+| 10-03 Cost preset and shared categorical cost panels | [briefs/10-03-cost.md](briefs/10-03-cost.md) | 10-01 | 10-02; owns the cost panels and the treemap/mix helpers, disjoint from the quality paths. |
+| 10-04 Tools preset | [briefs/10-04-tools.md](briefs/10-04-tools.md) | 10-01, 10-03 | Nothing; reuses 10-03's categorical panels and owns only the tool panels/registration. |
+| 10-05 Cohort and comparison wiring across the P10 presets | [briefs/10-05-cohort-compare.md](briefs/10-05-cohort-compare.md) | 10-01–10-04 | Nothing; extends the shared P10 scope/request builder after every panel exists and proves A–D cohort and finite-period behaviour. |
+| 10-06 Trends, compare, quality, cost and tools acceptance | [briefs/10-06-acceptance.md](briefs/10-06-acceptance.md) | 10-01–10-05 | Nothing; owns the phase acceptance proof and final browser suite. |
+
+**Carried from Phase 9**
+
+- Cohort forwarding to panel requests is not wired; it is absorbed into 10-05, which adds the `cohort=` parameter from the selected `ca`–`cd` slot and proves the typed relation. Every P10 panel's request builder must accept that one seam, including the panels written by 10-02 to 10-04.
+- `gate: the exact artifact id lens grammar is unconfirmed; the tray uses repo_id+path (9-04).` Quality identifies an inspected artifact by `repo_id`, `path` and `hash` and deliberately does not promote an artifact `id` lens to a cohort in this phase. The gate remains; no P10 unit consumes it.
+- Movers sparklines remain labelled daily block text inside the Pulse table. No P10 unit edits `movers.js`; this is a Pulse follow-up, not Phase 10 scope.
+- The 8-02 box-legend seam touches Phase 10 because the compare and cost distribution panels show box legends. 10-01 adds one shared seam that separates the values a tooltip reads from the series a legend lists, so a box legend names and colours the group while the tooltip still names each summary statistic; 10-03 reuses it without editing the base.
+- The unrendered diverging ramp touches Phase 10's compare panels. 10-01 renders it in the Compare preset's rank slope so an increase and a decrease are distinguishable, and proves the ramp in Chromium. The other presets use the committed status/neutral styles.
+- The shared `[data-shape]` selector scoping concerns an element that sets `data-shape` on mark groups. Phase 10 adds no chart element and composes the existing kit; no unit edits those selectors.
+- The `/schema` activity alias concerns no Phase 10 panel; Phase 10 does not consume activity.
+
+**Carried from Phase 8**
+
+- The browser-evidence gate (playwright-core 1.63.0 under `NODE_PATH` and the Chromium 1243 cache, with a named skip reason) is absorbed into every Phase 10 browser spec's done evidence, not into a unit.
+- `gate: the external Pages automation must accept ./web as its output directory (carried from Phase 1; verified only in Phase 13).`
+- The 8-02 box legend, `[data-shape]` selectors, shared base data setter/table conventions, heatmap/calendar shared keys and bars legend focus are placed above or are constraints: every P10 series carries its contract lens so the Phase 9 legend-focus mapping emits the right chip; no P10 unit edits the chart base except the two narrow 10-01 seams named here.
+- Phase 6's single top-level `content_hash` population and legacy `exclude=band:<check>` limit still bear on quality. Every quality request selects one check, so one population is sufficient; 10-05 resolves a known multi-colon lens such as `band:<check>` before splitting an exclude string and uses structured `scope` elements for a band cohort, so the legacy cut never silently changes the selected population. The content grain's lack of an `/entities` listing is not worked around: hash observations come from `/scores` and `/score-series`, file observations from artifact entities, and the two units are labelled separately.
+
+**Refinement verdict**
+
+**Proceed**, six units. 10-01 establishes the shared request, chooser, legend, chart-kit and fixture seams plus the Trends and Compare presets; 10-02 and 10-03 then run in parallel on disjoint quality and cost paths; 10-04 follows 10-03 and reuses its categorical panels for Tools; 10-05 adds cohort forwarding and comparison wiring after every panel exists; 10-06 proves the phase outcome across all five. Every unit composes existing chart elements and adds no grain, join, route, dependency, gesture or contract. All evidence uses the committed fixture manifest through the first-party test-only stub API and deterministic fixtures; no live server, production data, credential, deployment or migration is required. Browser evidence needs `playwright-core` under `NODE_PATH=/home/codyh/workspace/yakka/packages/yakka-analytics/node_modules` and the Chromium 1243 cache, both outside this worktree; a spec that cannot reach them skips with a named reason and records a gate. `artifact_feedback` on all six briefs was **unreachable** (`local context unavailable: queue (invalid_context)`), so no screen verdict was issued and none is claimed; the briefs are submitted for review on the next reachable run.
+
 ### Phase 11 — Scatter lab and Sessions
 
 - Outcome: From Scatter, numeric axes/size and categorical colour are schema-valid across session/artifact/plan/time grains; samples are labelled and marginals match whole populations. Rectangle unions/subtractions and explicit tray actions produce server-resolved cohorts; peer costs/quality/plan associations reconcile within their own units and disclose expansion. Time-cohort fixtures prove frozen source fields/resolution, half-open bucket boundaries, distinct contributing sessions, missing rejection associations and expansion into the target window. Unsupported cross-grain pairings say why. Sessions sort/page server-side and detail links to observed artifacts/plans. The timeline distinguishes priced/unpriced returned events; when the 5,000-event cap applies, displayed markers reconcile only with returned-event counts, while omitted events and whole-run unpriced totals remain separate, with a paged ledger link. A fixture puts unpriced calls beyond the cap.

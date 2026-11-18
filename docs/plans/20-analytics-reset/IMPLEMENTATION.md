@@ -1,10 +1,16 @@
 # Plan 20 implementation
 
 Tool: opencode execute skill
-Run ID: feat/20-analytics-reset phase 9 (2026-11-18)
-Start time: 2026-11-18 09:28 Australia/Brisbane
+Run ID: feat/20-analytics-reset phase 10 (2026-11-18)
+Start time: 2026-11-18 13:08 Australia/Brisbane
 
-Phase 8 (below) closed at `35195d2` with the `Yakka-Phase: 20-analytics-reset:8` trailer, after `83899d0` merged origin/master into the branch. This run builds Phase 9 only.
+Phase 9 (below) closed at `b0fe838` with the `Yakka-Phase: 20-analytics-reset:9` trailer. This run builds Phase 10 only.
+
+## Phase 10 — Trends, Compare, Quality, Cost and Tools
+
+The phase outcome is approach-known. This run uses the signed outcome, the panel catalog and preset mapping, the Interaction model, and CONTRACTS.md 17.2, 17.3, 17.3.1, 17.5, 17.6 and 17.7 as the fixed yardstick. No new grain, join, route, dependency, gesture or contract is authorized. Phase 10 has no Units list in DESIGN.md and is more than one worker's work, so `refine` is dispatched as its own context; its verdict decides the units.
+
+This refinement records six units and writes their briefs. Verdict **Proceed**: 10-01 trend/compare primitives and the Trends and Compare presets; 10-02 Quality; 10-03 Cost and the shared categorical panels; 10-04 Tools; 10-05 cohort and comparison wiring; 10-06 the phase acceptance proof. 10-01 runs first; 10-02 and 10-03 then run in parallel on disjoint paths; 10-04 follows 10-03; 10-05 follows every panel; 10-06 closes the phase. `artifact_feedback` on all six briefs was unreachable (`local context unavailable: queue (invalid_context)`), so no screen verdict was issued and none is claimed. Phase 9 and 8 carried items were placed in DESIGN.md: cohort forwarding into 10-05, the box-legend seam and diverging ramp into 10-01, the browser gate into every browser spec's evidence, and the remaining items as gates or constraints. Browser evidence needs `playwright-core` under `NODE_PATH` and the Chromium 1243 cache; a spec that cannot reach them skips with a named reason and records a gate.
 
 ## Phase 9 — Workspace engine, Start and Pulse
 
