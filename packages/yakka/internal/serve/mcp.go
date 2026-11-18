@@ -3,6 +3,7 @@ package serve
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	_ "embed"
 	"encoding/hex"
@@ -28,6 +29,14 @@ const (
 	mcpDefaultTimeout = 20
 	reviewMCPTimeoutS = int((review.AttemptTimeout + review.AttemptTimeoutHeadroom) / time.Second)
 	mcpMaxTimeout     = reviewMCPTimeoutS
+)
+
+// The only local action the v2 declaration may name. It is a fixed shape, not
+// a general local-effect mechanism.
+const (
+	mcpEnqueueAction        = "enqueue_file_snapshot"
+	mcpEnqueueActionVersion = 1
+	mcpEnqueuePathFrom      = "resolved_path"
 )
 
 // The shipped capability table is embedded so registration is independent of cwd.
@@ -69,10 +78,36 @@ type MCPTool struct {
 	Context            []MCPReader
 	Validate           func(map[string]any) string
 	Handler            func(context.Context, string, *tenantState, map[string]any, LocalContext) (any, error)
-	LocalActions       []string
+	LocalActions       []MCPLocalAction
 	DeclarationVersion int
 	declaration        map[string]any
 	bodyCap            int
+}
+
+// MCPLocalAction is the declaration of one bounded local effect. The only
+// shape registration accepts is enqueue_file_snapshot v1 from resolved_path.
+type MCPLocalAction struct {
+	Action   string `json:"action"`
+	Version  int    `json:"v"`
+	PathFrom string `json:"path_from"`
+}
+
+// MCPLocalActionRequest is returned by a handler to ask the registry to send
+// the one bound -32011 directive for this call. The registry derives the path,
+// revision, call token and action id; a handler cannot choose them.
+type MCPLocalActionRequest struct {
+	Action  string
+	Version int
+}
+
+// MCPEffect is one shim-supplied result fact from the single continuation.
+type MCPEffect struct {
+	Action   string  `json:"action"`
+	Version  int     `json:"v"`
+	ActionID string  `json:"action_id"`
+	OK       bool    `json:"ok"`
+	Outcome  string  `json:"outcome"`
+	Error    *string `json:"error"`
 }
 
 type MCPReader struct {
@@ -113,9 +148,34 @@ func (f *LocalFailure) Error() string {
 }
 
 type LocalContext struct {
-	values   map[string]json.RawMessage
-	declared map[string]bool
+	values      map[string]json.RawMessage
+	declared    map[string]bool
+	action      *MCPLocalAction
+	actionBound bool
+	call        string
+	version     int
+	effects     []MCPEffect
+	hasEffects  bool
+	invalidCall bool
 }
+
+// Action reports the one declaration-bound action this call may request, or
+// false when the shim did not negotiate it or this is already a continuation.
+func (l LocalContext) Action() (MCPLocalAction, bool) {
+	if !l.actionBound || l.action == nil {
+		return MCPLocalAction{}, false
+	}
+	return *l.action, true
+}
+
+// Effects returns the result facts supplied on the single continuation.
+func (l LocalContext) Effects() ([]MCPEffect, bool) { return l.effects, l.hasEffects }
+
+// Call returns the shim-generated call token bound to this request, if any.
+func (l LocalContext) Call() string { return l.call }
+
+// DeclarationVersion returns the carrier declaration version the shim sent.
+func (l LocalContext) DeclarationVersion() int { return l.version }
 
 func (l LocalContext) Get(name string) (map[string]any, *LocalFailure) {
 	fail := func(code string) (map[string]any, *LocalFailure) { return nil, &LocalFailure{name, code} }
@@ -161,7 +221,7 @@ func (s *Server) RegisterMCPTool(t MCPTool) error {
 	if t.TimeoutS == 0 {
 		t.TimeoutS = mcpDefaultTimeout
 	}
-	if t.TimeoutS < 1 || t.TimeoutS > s.mcpTools.maxCall || len(t.LocalActions) != 0 {
+	if t.TimeoutS < 1 || t.TimeoutS > s.mcpTools.maxCall {
 		return fmt.Errorf("invalid MCP declaration")
 	}
 	if t.DeclarationVersion == 0 {
@@ -169,6 +229,15 @@ func (s *Server) RegisterMCPTool(t MCPTool) error {
 	}
 	if t.DeclarationVersion < 1 {
 		return fmt.Errorf("invalid MCP declaration version")
+	}
+	if len(t.LocalActions) != 0 {
+		// local_actions is a v2 extension with exactly one allowed shape.
+		if t.DeclarationVersion != 2 || len(t.LocalActions) != 1 {
+			return fmt.Errorf("invalid MCP local action declaration")
+		}
+		if !validMCPLocalAction(t.LocalActions[0]) {
+			return fmt.Errorf("invalid MCP local action declaration")
+		}
 	}
 	var fixture struct {
 		Readers []mcpReaderSpec `json:"readers"`
@@ -269,6 +338,22 @@ func (s *Server) RegisterMCPTool(t MCPTool) error {
 		}
 		seen[r.Reader] = true
 	}
+	if len(t.LocalActions) != 0 {
+		// The action only targets the call's already-resolved file. Each of
+		// these readers must be present, required and at the declared version.
+		required := map[string]int{"resolved_path": 1, "file": 1, "git": 1, "queue": 2, "drain": 1}
+		for _, r := range t.Context {
+			if version, ok := required[r.Reader]; ok {
+				if r.Version != version || !r.required() {
+					return fmt.Errorf("MCP local action requires reader %q v%d", r.Reader, version)
+				}
+				delete(required, r.Reader)
+			}
+		}
+		if len(required) != 0 {
+			return fmt.Errorf("MCP local action is missing a required reader")
+		}
+	}
 	t.bodyCap = max(mcpDefaultBody, (64<<10)+budget)
 	if t.bodyCap > s.mcpTools.maxBody {
 		return fmt.Errorf("MCP bulk budget exceeds body ceiling")
@@ -278,6 +363,9 @@ func (s *Server) RegisterMCPTool(t MCPTool) error {
 	}
 	// Marshal through maps to sort every object key (including reader fields).
 	decl := map[string]any{"v": t.DeclarationVersion, "scope": t.Scope, "timeout_s": t.TimeoutS, "context": t.Context}
+	if len(t.LocalActions) != 0 {
+		decl["local_actions"] = t.LocalActions
+	}
 	raw, err := json.Marshal(decl)
 	if err != nil {
 		return fmt.Errorf("invalid MCP declaration: %w", err)
@@ -287,6 +375,10 @@ func (s *Server) RegisterMCPTool(t MCPTool) error {
 	sum := sha256.Sum256(raw)
 	decl["rev"] = hex.EncodeToString(sum[:])[:16]
 	t.declaration = decl
+	// Own immutable copies of caller-provided local action declarations.
+	raw, _ = json.Marshal(t.LocalActions)
+	t.LocalActions = nil
+	_ = json.Unmarshal(raw, &t.LocalActions)
 	// Own immutable copies of caller-provided metadata and reader declarations.
 	raw, _ = json.Marshal(t.Context)
 	t.Context = nil
@@ -314,6 +406,10 @@ func (s *Server) RegisterMCPTool(t MCPTool) error {
 	}
 	s.mcpTools.tools = append(s.mcpTools.tools, t)
 	return nil
+}
+
+func validMCPLocalAction(a MCPLocalAction) bool {
+	return a.Action == mcpEnqueueAction && a.Version == mcpEnqueueActionVersion && a.PathFrom == mcpEnqueuePathFrom
 }
 
 func validateMCPReaderParam(value any, spec mcpParamSpec) error {
@@ -545,7 +641,7 @@ func (s *Server) mcp(w http.ResponseWriter, r *http.Request) {
 	case "tools/list":
 		result = s.mcpList(scope, r)
 	case "tools/call":
-		result = s.mcpCall(r.Context(), tenant, scope, name, params)
+		result = s.mcpCall(r.Context(), tenant, scope, name, params, r.Header)
 	default:
 		s.mcpReply(w, id, map[string]any{"code": -32601, "message": "Method not found"})
 		return
@@ -588,7 +684,17 @@ func (s *Server) mcpInitialize(p map[string]json.RawMessage, scope string) any {
 			ins = append(ins, t.Instruction)
 		}
 	}
-	return map[string]any{"protocolVersion": v, "capabilities": map[string]any{"tools": map[string]any{"listChanged": false}}, "serverInfo": map[string]any{"name": "yakka", "version": s.opts.Version}, "instructions": strings.Join(ins, " ")}
+	result := map[string]any{"protocolVersion": v, "capabilities": map[string]any{"tools": map[string]any{"listChanged": false}}, "serverInfo": map[string]any{"name": "yakka", "version": s.opts.Version}, "instructions": strings.Join(ins, " ")}
+	if actions := s.mcpLocalActionCapability(scope); actions != nil {
+		result["_meta"] = map[string]any{"yakka/local-actions": actions}
+	}
+	return result
+}
+
+// mcpLocalActionCapability is the server's additive action-capability
+// advertisement. The server supports exactly this one bounded action.
+func (s *Server) mcpLocalActionCapability(_ string) any {
+	return map[string]any{"v": 1, "actions": []any{map[string]any{"action": mcpEnqueueAction, "v": mcpEnqueueActionVersion}}}
 }
 func (s *Server) mcpList(scope string, r *http.Request) any {
 	version := 1
@@ -604,7 +710,7 @@ func (s *Server) mcpList(scope string, r *http.Request) any {
 	}
 	return map[string]any{"tools": tools}
 }
-func (s *Server) mcpCall(parent context.Context, tenant, scope, name string, p map[string]json.RawMessage) any {
+func (s *Server) mcpCall(parent context.Context, tenant, scope, name string, p map[string]json.RawMessage, headers http.Header) any {
 	t := s.mcpTool(name)
 	if t == nil {
 		return map[string]any{"error": map[string]any{"code": -32602, "message": "unknown tool"}}
@@ -624,11 +730,13 @@ func (s *Server) mcpCall(parent context.Context, tenant, scope, name string, p m
 		_ = json.Unmarshal(b, &local.values)
 	}
 	delete(args, "_local")
+	revBound := false
 	if raw, present := local.values["_rev"]; present {
 		var rev string
 		if json.Unmarshal(raw, &rev) != nil || rev != t.declaration["rev"] {
 			return map[string]any{"error": map[string]any{"code": -32010, "message": "stale declaration", "data": map[string]string{"code": "stale_declaration"}}}
 		}
+		revBound = true
 	}
 	if t.Validate != nil {
 		if e := t.Validate(args); e != "" {
@@ -641,10 +749,12 @@ func (s *Server) mcpCall(parent context.Context, tenant, scope, name string, p m
 	// A carrier format the server cannot interpret cannot become successful facts.
 	if raw, present := local.values["_v"]; present {
 		var version int
-		if json.Unmarshal(raw, &version) != nil || version != 1 {
+		if json.Unmarshal(raw, &version) != nil || (version != 1 && version != 2) || version != t.DeclarationVersion {
 			for _, reader := range t.Context {
 				local.values[reader.Reader] = json.RawMessage(`{"_failed":{"code":"unsupported_declaration"}}`)
 			}
+		} else {
+			local.version = version
 		}
 	}
 	for _, reader := range t.Context {
@@ -653,6 +763,29 @@ func (s *Server) mcpCall(parent context.Context, tenant, scope, name string, p m
 				return mcpToolError(failure.Error())
 			}
 		}
+	}
+	if raw, present := local.values["_call"]; present {
+		var call string
+		if json.Unmarshal(raw, &call) != nil || call == "" || len(call) > 128 {
+			local.invalidCall = true
+		} else {
+			local.call = call
+		}
+	}
+	if raw, present := local.values["effects"]; present {
+		effects, err := parseMCPEffects(raw)
+		if err != nil || len(t.LocalActions) != 1 || !revBound || local.version != 2 || local.call == "" || local.invalidCall {
+			return mcpToolError("bad directive")
+		}
+		if !mcpEffectMatches(effects[0], t.LocalActions[0]) {
+			return mcpToolError("bad directive")
+		}
+		local.effects, local.hasEffects = effects, true
+	}
+	if len(t.LocalActions) == 1 && !local.hasEffects && !local.invalidCall && revBound &&
+		local.version == 2 && local.call != "" && mcpActionAdvertised(headers, t.LocalActions[0]) {
+		action := t.LocalActions[0]
+		local.action, local.actionBound = &action, true
 	}
 	ctx, cancel := context.WithTimeout(parent, time.Duration(t.TimeoutS)*time.Second)
 	defer cancel()
@@ -678,7 +811,92 @@ func (s *Server) mcpCall(parent context.Context, tenant, scope, name string, p m
 	if err != nil {
 		return mcpToolError(err.Error())
 	}
-	return result
+	var directive MCPLocalActionRequest
+	switch r := result.(type) {
+	case MCPLocalActionRequest:
+		directive = r
+	case *MCPLocalActionRequest:
+		if r == nil {
+			return result
+		}
+		directive = *r
+	default:
+		return result
+	}
+	// A handler cannot turn a continuation or an unnegotiated call into a
+	// directive, and a second directive never starts another round.
+	if local.hasEffects {
+		return mcpToolError("local action already supplied")
+	}
+	if !local.actionBound || local.action == nil || directive.Action != local.action.Action || directive.Version != local.action.Version {
+		return mcpToolError("local action unavailable")
+	}
+	resolved, failure := local.Get(local.action.PathFrom)
+	if failure != nil {
+		return mcpToolError(failure.Error())
+	}
+	path, ok := resolved["path"].(string)
+	if !ok || path == "" {
+		return mcpToolError("local action has no resolved path")
+	}
+	actionID, err := newMCPActionID()
+	if err != nil {
+		return mcpToolError("internal")
+	}
+	return map[string]any{"error": map[string]any{"code": -32011, "message": "local action required", "data": map[string]any{
+		"code": "local_action_required", "v": 1, "call": local.call, "rev": t.declaration["rev"],
+		"action_id": actionID, "action": local.action.Action, "action_v": local.action.Version, "path": path,
+	}}}
+}
+
+func newMCPActionID() (string, error) {
+	var b [16]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(b[:]), nil
+}
+
+func mcpActionAdvertised(headers http.Header, action MCPLocalAction) bool {
+	contextVersion, err := strconv.Atoi(headers.Get("Yakka-Context"))
+	if err != nil || contextVersion < 2 {
+		return false
+	}
+	want := action.Action + "/" + strconv.Itoa(action.Version)
+	for _, part := range strings.Split(headers.Get("Yakka-Local-Actions"), ",") {
+		if strings.TrimSpace(part) == want {
+			return true
+		}
+	}
+	return false
+}
+
+// parseMCPEffects accepts exactly the single continuation carrying one effect.
+func parseMCPEffects(raw json.RawMessage) ([]MCPEffect, error) {
+	var effects []MCPEffect
+	if json.Unmarshal(raw, &effects) != nil || len(effects) != 1 {
+		return nil, fmt.Errorf("malformed effects")
+	}
+	return effects, nil
+}
+
+func mcpEffectMatches(effect MCPEffect, action MCPLocalAction) bool {
+	if effect.Action != action.Action || effect.Version != action.Version || effect.ActionID == "" || len(effect.ActionID) > 128 {
+		return false
+	}
+	switch effect.Outcome {
+	case "enqueued", "covered":
+		return effect.OK && effect.Error == nil
+	case "failed", "unknown":
+		if effect.OK || effect.Error == nil {
+			return false
+		}
+		switch *effect.Error {
+		case "capture_off", "spool_dropped", "yakka_bin_set", "unsupported", "path_changed", "queue_unavailable", "queue_rejected", "stale_declaration", "effect_unknown":
+			return true
+		}
+	}
+	return false
 }
 func mcpToolError(msg string) any {
 	return map[string]any{"content": []any{map[string]any{"type": "text", "text": msg}}, "isError": true}

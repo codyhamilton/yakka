@@ -218,7 +218,7 @@ func TestReviewMCPReadScopeAndLocalSpoofStripping(t *testing.T) {
 	if err := s.RegisterReviewMCPTool(); err != nil {
 		t.Fatal(err)
 	}
-	result := s.mcpCall(context.Background(), "a", TokenScopeRead, "review_change", nil)
+	result := s.mcpCall(context.Background(), "a", TokenScopeRead, "review_change", nil, nil)
 	b, _ := json.Marshal(result)
 	if !strings.Contains(string(b), "insufficient_scope") {
 		t.Fatalf("read scope was not refused: %s", b)
