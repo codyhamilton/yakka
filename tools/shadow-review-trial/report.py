@@ -22,7 +22,7 @@ import matching
 
 EFFORTS = ("high", "xhigh", "max")
 RUN_ID = re.compile(r"[A-Za-z0-9_-]{1,32}")
-STATUSES = ("ok", "ok_partial", "timeout", "api_error", "invalid_output", "unavailable",
+STATUSES = ("ok", "ok_partial", "timeout", "api_error", "invalid_output", "truncated", "unavailable",
             "refused_capture", "refused_disclosure", "refused_criteria", "skipped_budget",
             "skipped_busy", "skipped_duplicate")
 HISTORICAL = ("matched", "partial", "unmatched")

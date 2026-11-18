@@ -25,16 +25,19 @@ const (
 	claudeAPIVersion  = "2023-06-01"
 	maxReplyBytes     = 2 << 20
 	maxPacketBytes    = 2 << 20
-	maxTokens         = 8000
+	// maxTokens is a temporary trial cap. Lower it once real output_tokens at
+	// high/xhigh/max have been measured.
+	maxTokens = 100000
 )
 
 // ProviderStatus is a safe, body-free provider failure classification.
 type ProviderStatus string
 
 const (
-	ProviderTimeout  ProviderStatus = "timeout"
-	ProviderAPIError ProviderStatus = "api_error"
-	ProviderInvalid  ProviderStatus = "invalid_output"
+	ProviderTimeout   ProviderStatus = "timeout"
+	ProviderAPIError  ProviderStatus = "api_error"
+	ProviderInvalid   ProviderStatus = "invalid_output"
+	ProviderTruncated ProviderStatus = "truncated"
 )
 
 // ProviderError never includes the request, credential, or provider response
@@ -121,8 +124,9 @@ type messagesUsage struct {
 }
 
 type messagesResponse struct {
-	Model   string `json:"model"`
-	Content []struct {
+	Model      string `json:"model"`
+	StopReason string `json:"stop_reason"`
+	Content    []struct {
 		Type string `json:"type"`
 		Text string `json:"text"`
 	} `json:"content"`
@@ -177,8 +181,8 @@ func (r *Reviewer) Review(ctx context.Context, packet Packet, criteria []Criteri
 	if err := json.Unmarshal(raw, &envelope); err != nil {
 		return Result{}, &ProviderError{Status: ProviderInvalid}
 	}
-	invalid := func() error {
-		pe := &ProviderError{Status: ProviderInvalid}
+	failure := func(status ProviderStatus) error {
+		pe := &ProviderError{Status: status}
 		if envelope.Usage != nil {
 			pe.InputTokens = envelope.Usage.InputTokens
 			pe.OutputTokens = envelope.Usage.OutputTokens
@@ -186,8 +190,11 @@ func (r *Reviewer) Review(ctx context.Context, packet Packet, criteria []Criteri
 		}
 		return pe
 	}
+	if envelope.StopReason == "max_tokens" {
+		return Result{}, failure(ProviderTruncated)
+	}
 	if len(envelope.Content) != 1 {
-		return Result{}, invalid()
+		return Result{}, failure(ProviderInvalid)
 	}
 	var texts []string
 	for _, block := range envelope.Content {
@@ -196,11 +203,11 @@ func (r *Reviewer) Review(ctx context.Context, packet Packet, criteria []Criteri
 		}
 	}
 	if len(texts) != 1 {
-		return Result{}, invalid()
+		return Result{}, failure(ProviderInvalid)
 	}
 	result, err := ValidateReply([]byte(texts[0]), packet, criteria)
 	if err != nil {
-		return Result{}, invalid()
+		return Result{}, failure(ProviderInvalid)
 	}
 	result.Model = envelope.Model
 	if envelope.Usage != nil {
