@@ -1,7 +1,7 @@
 // Deterministic same-origin stub of the analytics API, generated from the
 // committed fixture manifest. Test-only: product code never imports this.
 
-import { makeSchema, activityProbe, activityList, summary, population, adminStatus, explorePage, COUNTS, p10Schema, p10Summary, p10Query, p10Distribution, p10Entities, p10Scores, p10ScoreSeries, p10Baselines } from './fixture.mjs';
+import { makeSchema, activityProbe, activityList, summary, population, adminStatus, explorePage, COUNTS, p10Schema, p10Summary, p10Query, p10Distribution, p10Entities, p10Scores, p10ScoreSeries, p10Baselines, p11Schema, p11Scatter, p11Entities, p11Aggregate } from './fixture.mjs';
 
 const json = (response, status, body) => {
   response.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
@@ -21,11 +21,13 @@ export function createStubApi() {
     statusRequests: 0,
     statusAborted: 0,
     p10: false,
+    p11: false,
     requests: []
   };
   let probes = 0;
 
   function schema() {
+    if (state.p11) return p11Schema();
     if (state.p10) return p10Schema();
     if (state.scenario === 'legacy') return makeSchema({ legacy: true });
     if (state.scenario === 'missing-feature') return makeSchema({ missingFeature: state.missingFeature });
@@ -77,6 +79,26 @@ export function createStubApi() {
     }
 
     if (path.startsWith('/v1/analytics/')) state.requests.push({ path, search: url.search || '' });
+
+    if (state.p11 && path.startsWith('/v1/analytics/')) {
+      if (path === '/v1/analytics/entities') {
+        const grain = query.get('grain') || 'session';
+        const mode = query.get('mode') || 'list';
+        if (mode === 'scatter') {
+          const fields = (query.get('fields') || '').split(',').filter(Boolean);
+          json(response, 200, p11Scatter({ fields }));
+          return true;
+        }
+        if (mode === 'aggregate') {
+          json(response, 200, p11Aggregate({ grain, stat: query.get('stat') || 'count' }));
+          return true;
+        }
+        json(response, 200, p11Entities(grain));
+        return true;
+      }
+      // Any P11 body not handled here falls through to the P10/default
+      // handlers, which later units extend additively.
+    }
 
     if (state.p10 && path.startsWith('/v1/analytics/')) {
       const from = query.get('from') || '';

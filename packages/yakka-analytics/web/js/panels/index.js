@@ -26,6 +26,7 @@ import { registerComparePanels } from './p10-compare.js';
 import { registerQualityPanels } from './p10-quality.js';
 import { registerCostPanels } from './p10-cost.js';
 import { registerToolsPanels } from './p10-tools.js';
+import { registerScatterPanels } from './p11-scatter.js';
 
 export { RIVER_PANEL } from './river.js';
 export { PULSE_STRIPS_PANEL } from './pulse-strips.js';
@@ -57,3 +58,4 @@ registerComparePanels();
 registerQualityPanels();
 registerCostPanels();
 registerToolsPanels();
+registerScatterPanels();

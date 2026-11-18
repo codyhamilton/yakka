@@ -501,3 +501,222 @@ export function p10Fixture() {
     phase: p10Phase
   };
 }
+
+// ---------------------------------------------------------------------------
+// P11 scene: the scatter lab's schema and deterministic session scatter/list
+// bodies. Opt-in through the stub's `p11` flag; the default and P10 bodies
+// above stay byte-identical.
+// ---------------------------------------------------------------------------
+
+export const P11 = {
+  start: Date.parse('2026-09-01T00:00:00Z'),
+  populationN: 1880,
+  eligibleN: 1700,
+  returnedN: 38,
+  sessionModels: ['claude', 'gpt', '(mixed)', '(none)'],
+  harnesses: ['orca', 'claude-code'],
+  sessionRepos: ['repo-a', 'repo-b', '(multi)', '(none)']
+};
+
+const P11_SESSION_MEASURES = [
+  'cost_usd', 'unpriced_calls', 'model_calls', 'tokens_in', 'tokens_out', 'tokens_cache_read',
+  'tokens_cache_write', 'tokens_reasoning', 'hook_events', 'commits', 'artifact_versions',
+  'distinct_content', 'duration_s', 'first_ts', 'last_ts'
+];
+
+const P11_SESSION_LENSES = ['harness', 'session_model', 'session_repo', 'origin', 'has_artifacts', 'id'];
+
+const P11_ARTIFACT_MEASURES = [
+  'versions', 'distinct_writing_sessions', 'first_ts', 'last_ts', 'content_bytes',
+  'score:clarity', 'score:structure',
+  'writing_session_cost_usd', 'writing_session_model_calls', 'writing_session_tokens_in',
+  'writing_session_tokens_out', 'writing_session_tokens_cache_read', 'writing_session_tokens_cache_write',
+  'writing_session_tokens_reasoning', 'writing_session_hook_events'
+];
+
+const P11_ARTIFACT_LENSES = [
+  'kind', 'plan', 'repo_id', 'harness', 'session_model', 'source', 'screen_verdict',
+  'scorer', 'band:clarity', 'band:structure', 'id'
+];
+
+const P11_PLAN_MEASURES = [
+  'artifacts', 'versions', 'sessions', 'shared_sessions', 'associated_cost_usd', 'unpriced_calls',
+  'executions_complete', 'executions_unreported', 'executions_started', 'complete_share',
+  'design_score:clarity', 'design_score:structure', 'span_days', 'first_ts', 'last_ts'
+];
+
+const P11_PLAN_LENSES = ['repo_id', 'harness', 'session_model', 'id'];
+
+const P11_TIME_MEASURES = [
+  'cost_usd', 'model_calls', 'unpriced_calls', 'tokens_in', 'tokens_out', 'tokens_cache_read',
+  'tokens_cache_write', 'tokens_reasoning', 'hook_events', 'conversations', 'artifact_versions',
+  'distinct_content', 'commits', 'rejections'
+];
+
+export function p11Schema() {
+  const grain = (measures, lenses) => ({
+    measures, lenses, filters: lenses, modes: ['list', 'scatter', 'aggregate'],
+    predicate: { measures, lenses, undefined: [] }
+  });
+  return {
+    measures: P11_SESSION_MEASURES.map(name => ({ name, unit: sessionUnit(name), dims: [] })),
+    buckets: ['none', 'hour', 'day', 'week', 'month', 'year'],
+    resolutions: { auto: true, year: true, multi_year_steps: [2, 5, 10, 20, 50, 100] },
+    budgets: {
+      max_cells: 20000, deadline_s: 30, top_max: 500, page_max: 500, scatter_points: 5000,
+      content_bytes: 16777216, explore_page_max: 500, heavy_read_concurrency: 4,
+      scope_elements: 64, scope_values: 64, value_bytes: { default: 256, id: 1024 }
+    },
+    grains: {
+      session: grain(P11_SESSION_MEASURES.slice(), P11_SESSION_LENSES.slice()),
+      artifact: grain(P11_ARTIFACT_MEASURES.slice(), P11_ARTIFACT_LENSES.slice()),
+      plan: grain(P11_PLAN_MEASURES.slice(), P11_PLAN_LENSES.slice()),
+      time: grain(P11_TIME_MEASURES.slice(), ['id']),
+      execution: grain(['session_cost_usd', 'brief_score:clarity', 'report_score:clarity', 'ts'], ['shape', 'plan', 'repo_id', 'harness', 'session_model', 'id']),
+      content: grain(['score'], ['harness', 'session_model', 'repo_id', 'plan', 'scorer', 'screen_verdict', 'band', 'id'])
+    },
+    lenses: {
+      harness: { grains: ['session', 'artifact', 'plan', 'execution'] },
+      session_model: { grains: ['session', 'artifact', 'plan', 'execution'] },
+      session_repo: { grains: ['session', 'artifact', 'plan'] },
+      origin: { grains: ['session'] },
+      has_artifacts: { grains: ['session'] },
+      id: { identity: true }
+    },
+    coverage: {
+      first_ts: '2026-09-01T00:00:00Z',
+      last_ts: '2026-11-01T00:00:00Z',
+      last_received_at: '2026-11-01T00:00:00Z',
+      scorer_configured: true,
+      pending: 0,
+      compaction: 'none'
+    },
+    features: { ...FEATURES }
+  };
+}
+
+function sessionUnit(name) {
+  if (name === 'cost_usd') return 'USD';
+  if (name.startsWith('tokens_')) return 'tokens';
+  if (name === 'duration_s') return 'seconds';
+  if (name === 'first_ts' || name === 'last_ts') return 'epoch seconds';
+  if (name === 'commits') return 'commits';
+  if (name === 'artifact_versions') return 'versions';
+  if (name === 'distinct_content') return 'content hashes';
+  if (name === 'hook_events') return 'events';
+  return 'calls';
+}
+
+export function p11SessionId(index) {
+  return `conv-${String(index).padStart(3, '0')}`;
+}
+
+// 40 deterministic rows; indices 7 and 27 have a null `commits` axis, so the
+// scatter draws 38 marks and the typed population still counts them.
+export function p11SessionRows() {
+  const rows = [];
+  for (let index = 0; index < 40; index += 1) {
+    const nullY = index % 20 === 7;
+    const base = Math.floor(P11.start / 1000) + index * 60;
+    rows.push({
+      id: p11SessionId(index),
+      m: {
+        cost_usd: Number((0.5 + (index % 13) * 0.37).toFixed(4)),
+        unpriced_calls: index % 5,
+        model_calls: 3 + (index % 9),
+        tokens_in: 400 + index * 120,
+        tokens_out: 200 + index * 80,
+        tokens_cache_read: index * 40,
+        tokens_cache_write: index * 10,
+        tokens_reasoning: index * 7,
+        hook_events: 8 + ((index * 3) % 17),
+        commits: nullY ? null : index % 6,
+        artifact_versions: 1 + (index % 4),
+        distinct_content: index % 3,
+        duration_s: 600 + index * 90,
+        first_ts: base,
+        last_ts: base + 600
+      },
+      l: {
+        harness: P11.harnesses[index % 2],
+        session_model: P11.sessionModels[index % 4],
+        session_repo: P11.sessionRepos[index % 4],
+        origin: index % 3 === 0 ? 'review' : 'agent',
+        has_artifacts: index % 2 === 0 ? 'true' : 'false'
+      },
+      flags: { sampled: true }
+    });
+  }
+  return rows;
+}
+
+function fixedBins(total, edges) {
+  const bins = [];
+  let assigned = 0;
+  edges.forEach(([lo, hi], index) => {
+    const last = index === edges.length - 1;
+    const n = last ? total - assigned : Math.floor(total / edges.length) + (index % 3);
+    assigned += n;
+    bins.push({ lo, ...(hi === null ? {} : { hi }), n });
+  });
+  return bins;
+}
+
+export function p11Scatter({ fields = [] } = {}) {
+  const rows = p11SessionRows();
+  return {
+    grain: 'session',
+    mode: 'scatter',
+    fields: fields.length ? fields : ['cost_usd', 'commits', 'unpriced_calls'],
+    sampled: true,
+    sample_rule: 'sha256(conversation_id) mod 100 < 3',
+    population_n: P11.populationN,
+    returned_n: P11.returnedN,
+    rows,
+    marginals: {
+      cost_usd: { unit: 'USD', bins: fixedBins(P11.populationN, [[0, 0.5], [0.5, 1], [1, 2], [2, 5], [5, null]]) },
+      commits: { unit: 'commits', bins: fixedBins(P11.eligibleN, [[0, 1], [1, 3], [3, 5], [5, null]]) },
+      unpriced_calls: { unit: 'calls', bins: fixedBins(P11.populationN, [[0, 1], [1, 2], [2, 4], [4, null]]) }
+    },
+    population: {
+      grain: 'session', unit: 'session', scope_n: P11.populationN, cohort_n: P11.populationN,
+      eligible_n: P11.eligibleN, returned_n: P11.returnedN,
+      missing_by_reason: { missing_axis: P11.populationN - P11.eligibleN }, relation: null
+    }
+  };
+}
+
+export function p11Entities(grain = 'session') {
+  const rows = p11SessionRows();
+  return {
+    grain,
+    rows,
+    population: {
+      grain, unit: grain, scope_n: P11.populationN, cohort_n: P11.populationN,
+      eligible_n: P11.populationN, returned_n: rows.length, missing_by_reason: {}, relation: null
+    }
+  };
+}
+
+export function p11Aggregate({ grain = 'session', stat = 'count' } = {}) {
+  return {
+    grain,
+    mode: 'aggregate',
+    stat,
+    population: {
+      grain, unit: grain, scope_n: 143, cohort_n: 143, eligible_n: 143,
+      returned_n: 1, missing_by_reason: {}, relation: null
+    }
+  };
+}
+
+export function p11Fixture() {
+  return {
+    schema: p11Schema(),
+    scatter: p11Scatter,
+    entities: p11Entities,
+    aggregate: p11Aggregate,
+    sessionRows: p11SessionRows,
+    sessionId: p11SessionId
+  };
+}

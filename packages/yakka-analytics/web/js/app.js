@@ -275,7 +275,11 @@ async function renderBoard(container, record, state, schema, tenant) {
   const inspector = createInspector({ doc: document, router, onAction: detail => handleInspectorAction(detail, runtime, record) });
   activeBoardTeardown = () => inspector.destroy();
   const tray = createSelectionTray({ doc: document, router, path: record.path });
-  const clearSelection = () => router.replaceTransient(stateUrl(withPick(currentState(), ''), globalThis.location?.search || '', record.path));
+  const clearSelection = () => {
+    runtime.selection = null;
+    router.replaceTransient(stateUrl(withPick(currentState(), ''), globalThis.location?.search || '', record.path));
+    updateTray();
+  };
   const defaultGrain = board.panels.find(entry => entry.panel)?.panel?.grain || '';
 
   // A panel can name an applied filter, cohort or selection as the cause of an
@@ -358,12 +362,24 @@ async function renderBoard(container, record, state, schema, tenant) {
     updateChipsForPanel();
 
     frame.element.addEventListener('select', event => {
-      const selection = event.detail?.selection || { include: [], exclude: [] };
+      const detail = event.detail || {};
+      const selection = detail.selection || null;
       runtime.grain = entry.panel.grain;
       runtime.population = panelRuntime.population || runtime.population;
       runtime.unit = runtime.population?.unit || entry.panel.grain;
-      runtime.selection = selection;
-      const pick = encodePick({ include: selection.include || [], exclude: selection.exclude || [] });
+      // A rectangle carries an explicit Boolean predicate and the server's
+      // exact population. It is a transient selection, never URL `pick` state;
+      // the tray's buttons act on it directly.
+      if (selection && typeof selection === 'object' && selection.predicate) {
+        runtime.selection = selection;
+        updateTray();
+        return;
+      }
+      // The chart's raw rectangle event has no exact count yet; the scatter
+      // panel re-emits it after its bounded count query. Neither writes `pick`.
+      if (detail.source === 'scatter-rectangle' || detail.region) return;
+      runtime.selection = selection || { include: [], exclude: [] };
+      const pick = encodePick({ include: selection?.include || [], exclude: selection?.exclude || [] });
       router.replaceTransient(stateUrl(withPick(currentState(), pick), globalThis.location?.search || '', record.path));
     });
     frame.element.addEventListener('spec', event => {

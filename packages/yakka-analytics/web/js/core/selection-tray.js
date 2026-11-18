@@ -4,7 +4,7 @@
 // count. Scope is frozen to absolute bounds when promoted to a cohort.
 
 import {
-  COHORT_KEYS, cohortDefinition, decodePick, encodeCohort, fitsViewUrl, formatSelection,
+  COHORT_KEYS, canonicalPredicate, cohortDefinition, decodePick, encodeCohort, fitsViewUrl, formatSelection,
   selectionPredicate, validateCohort
 } from './selection-model.js';
 import { stateUrl } from './chips.js';
@@ -65,32 +65,59 @@ export function scopeElements(state = {}, { schema = null, grain = '' } = {}) {
   return { include, exclude };
 }
 
+// A ready selection object carries an explicit Boolean predicate (a scatter
+// rectangle) and the server's exact population. It takes precedence over the
+// transient `pick` keys; a key-only selection keeps the existing text exactly.
+function explicitSelectionText({ unit, selected, scope, sampled }) {
+  if (selected === null) {
+    const suffix = sampled === null || sampled === undefined ? '' : `; ${sampled.toLocaleString('en-US')} sampled marks visible`;
+    return `${unit || 'row'} selection${scope === null ? '' : ` of ${(Number(scope) || 0).toLocaleString('en-US')} in scope`}; the exact population count is unavailable${suffix}`;
+  }
+  return formatSelection({ unit, selected, scope, sampled });
+}
+
 export function selectionTrayModel({ state = {}, pick = null, grain = '', unit = 'row', population = null, selection = null } = {}) {
+  const explicit = selection && selection.predicate ? selection : null;
   const keys = pick || decodePick(state.pick);
-  const selected = (keys.include || []).length;
-  const scope = population?.scope_n ?? null;
-  const sampled = selection?.sampled ?? (population?.sampled ? population?.returned_n ?? null : null);
+  const selected = explicit
+    ? (explicit.counts?.selected === undefined || explicit.counts?.selected === null ? null : Number(explicit.counts.selected))
+    : (keys.include || []).length;
+  const scope = explicit?.counts?.scope ?? population?.scope_n ?? null;
+  const sampled = explicit?.sampled ?? (population?.sampled ? population?.returned_n ?? null : null);
   const time = grain === 'time' || Boolean(state.sel);
+  const resolvedGrain = explicit?.grain || grain;
+  const resolvedUnit = explicit?.unit || unit;
   return {
-    grain,
-    unit,
+    grain: resolvedGrain,
+    unit: resolvedUnit,
     selected,
     scope,
     sampled,
     time,
-    predicate: selectionPredicate(keys),
-    text: formatSelection({ unit, selected, scope, sampled })
+    predicate: explicit ? canonicalPredicate(explicit.predicate) : selectionPredicate(keys),
+    text: explicit
+      ? explicitSelectionText({ unit: resolvedUnit, selected, scope, sampled })
+      : formatSelection({ unit, selected, scope, sampled })
   };
 }
 
 // Promotes a selection to a cohort definition. The source scope is frozen to
 // the current absolute window and the panel's applied include/exclude elements.
-export function buildCohort({ state = {}, pick = null, grain = '', schema = null, op = 'include', now = Date.now() } = {}) {
-  const keys = pick || decodePick(state.pick);
-  const predicate = selectionPredicate(keys);
-  if (!predicate) throw new Error('a cohort needs a non-empty selection');
+// A ready Boolean `predicate` (a rectangle) is canonicalised and budget-checked
+// instead of being rebuilt from keys; an explicit `source` is carried as-is.
+export function buildCohort({ state = {}, pick = null, grain = '', schema = null, op = 'include', now = Date.now(), predicate = null, source } = {}) {
   const scope = { ...absoluteScope(state, now), ...scopeElements(state, { schema, grain }) };
-  return cohortDefinition({ grain, scope, predicate, op });
+  if (predicate) {
+    const resolved = canonicalPredicate(predicate);
+    const cohort = cohortDefinition({ grain, scope, predicate: resolved, op, source });
+    const check = validateCohort(cohort);
+    if (!check.ok) throw new Error(`over budget: ${check.reason}; choose a smaller region`);
+    return cohort;
+  }
+  const keys = pick || decodePick(state.pick);
+  const keyed = selectionPredicate(keys);
+  if (!keyed) throw new Error('a cohort needs a non-empty selection');
+  return cohortDefinition({ grain, scope, predicate: keyed, op });
 }
 
 export function nextCohortSlot(state = {}) {
@@ -144,7 +171,16 @@ export function createSelectionTray({ doc = globalThis.document, router, path = 
   function addCohort(slot, op = 'include') {
     let cohort;
     try {
-      cohort = buildCohort({ state: context.state, pick: context.pick, grain: context.grain, schema: context.schema, op, now: context.now });
+      cohort = buildCohort({
+        state: context.state,
+        pick: context.pick,
+        grain: context.grain,
+        schema: context.schema,
+        op,
+        now: context.now,
+        predicate: context.selection?.predicate || null,
+        source: context.selection?.source
+      });
     } catch (error) {
       announce(error.message);
       return;
@@ -202,7 +238,7 @@ export function createSelectionTray({ doc = globalThis.document, router, path = 
   function render() {
     element.replaceChildren();
     const model = selectionTrayModel(context);
-    if (!model.selected) { element.dataset.open = 'false'; element.hidden = true; return; }
+    if (!model.selected && !model.predicate) { element.dataset.open = 'false'; element.hidden = true; return; }
     element.hidden = false;
     element.dataset.open = 'true';
     element.dataset.grain = model.grain || '';

@@ -1,0 +1,100 @@
+/* Phase 11 scatter panel, marginal strips and the chooser. Chart-base styles
+   stay in charts.css; this file only lays out the panel composition. */
+
+.p11-scatter {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.p11-scatter-basis,
+.p11-scatter-caveat {
+  margin: 0;
+  font-size: 0.8125rem;
+  color: var(--wk-muted, #4b5563);
+}
+
+.p11-scatter-chart {
+  width: 100%;
+  min-height: 280px;
+}
+
+.p11-chooser {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 0.75rem;
+  align-items: end;
+}
+
+.p11-chooser-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+  font-size: 0.75rem;
+}
+
+.p11-chooser-field select {
+  min-height: 32px;
+}
+
+.p11-unsupported {
+  margin: 0;
+  padding-left: 1.25rem;
+  font-size: 0.75rem;
+  color: var(--wk-muted, #4b5563);
+}
+
+.scatter-marginals {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 0.75rem;
+}
+
+.scatter-marginal {
+  border: 1px solid var(--wk-border, #d1d5db);
+  border-radius: 6px;
+  padding: 0.5rem 0.625rem;
+}
+
+.scatter-marginal h3 {
+  margin: 0 0 0.25rem;
+  font-size: 0.8125rem;
+  font-weight: 600;
+}
+
+.scatter-marginal yk-ranges {
+  display: block;
+  width: 100%;
+  min-height: 140px;
+}
+
+.scatter-marginal table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.75rem;
+}
+
+.scatter-marginal caption {
+  text-align: left;
+  font-size: 0.75rem;
+  color: var(--wk-muted, #4b5563);
+}
+
+.scatter-marginal th,
+.scatter-marginal td {
+  padding: 0.125rem 0.25rem;
+  border-bottom: 1px solid var(--wk-border, #e5e7eb);
+  text-align: left;
+}
+
+.scatter-marginal td.numeric,
+.scatter-marginal th.numeric {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 900px) {
+  .scatter-marginals {
+    grid-template-columns: 1fr;
+  }
+}
