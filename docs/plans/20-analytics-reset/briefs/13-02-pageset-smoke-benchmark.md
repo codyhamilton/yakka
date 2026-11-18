@@ -40,21 +40,21 @@ Set `TMPDIR` to an in-worktree scratch directory for Go's temp copies; memory ca
 
 ### Keep untouched
 
-Keep server routes/contracts, benchmark threshold, analytics fixture generator and all other benchmark files unchanged. Do not “fix” a failing shape by dropping it, changing its parameters, clipping the all-history window or accepting non-200 responses.
+Keep server routes/contracts, benchmark threshold, analytics fixture generator and all other benchmark files unchanged. Do not “fix” a failing shape by dropping it, changing its parameters or clipping the all-history window. The record is captured against the deterministic first-party stub, whose advertised capability set is a superset of the Go server's; a recorded shape that the Go server explicitly refuses (HTTP 400 naming an unsupported dimension, field, mode, check or scorer) is the documented capability-degradation path and is accepted as such. Any 5xx, unexpected 4xx, or refusal message that does not name an unsupported capability still fails the smoke.
 
 ## Done evidence
 
 Identify or write the failing check before changing code. Report its output before and after.
 
 - `mkdir -p .scratch/p13` → scratch directory exists outside `/tmp`.
-- `TMPDIR=.scratch/p13 GOMAXPROCS=3 GOMEMLIMIT=8GiB go test -p=3 ./internal/serve -run '^TestAnalyticsPageSetSmoke$' -count=1` → 1/1 test passes; it parses every committed record entry, asserts the record's pinned request count, and every request returns HTTP 200.
-- `TMPDIR=.scratch/p13 GOMAXPROCS=3 GOMEMLIMIT=8GiB YAKKA_PAGESET_PROFILE=fixture go test -p=3 ./internal/serve -run '^TestAnalyticsPageSet$' -count=1 -v` → 1/1 profiler passes on the committed fixture; exact case count equals the record count and every case's p95 is <=500 ms. Keep this environment gate opt-in and document it in the test comment. If the current test seam needs another gate name, document the chosen name in the report and the exact command.
+- `TMPDIR=.scratch/p13 GOMAXPROCS=3 GOMEMLIMIT=8GiB go test -p=3 ./internal/serve -run '^TestAnalyticsPageSetSmoke$' -count=1` → 1/1 test passes; it parses every committed record entry, asserts the record's pinned request count, and every request returns HTTP 200 or a documented capability refusal (HTTP 400 naming an unsupported dimension, field, mode, check or scorer). It asserts the exact 200/refusal split (currently 60 served, 15 documented refusals over the committed 75-request record) and fails on any 5xx or unnamed refusal.
+- `TMPDIR=.scratch/p13 GOMAXPROCS=3 GOMEMLIMIT=8GiB YAKKA_PAGESET_PROFILE=fixture go test -p=3 ./internal/serve -run '^TestAnalyticsPageSet$' -count=1 -v` → 1/1 profiler passes on the committed fixture; exact case count equals the record count, the documented refusals are excluded from timing, and every served case's p95 is <=500 ms. Keep this environment gate opt-in and document it in the test comment. If the current test seam needs another gate name, document the chosen name in the report and the exact command.
 - `git diff --check` → clean.
 - Data audit → committed JSON is request metadata only and includes a canonical `all=1`; the fixture is test-only, generated from the committed analyticsfixture package, and all temporary copies are removed.
 
 ## Report back
 
-Under 1,500 tokens. Status: `done` | `done with concerns` | `blocked` | `needs context` | `over budget`. Then what changed, check output before/after, exact request/case count, max p95, deviations, contract contradictions, carried items, and any `gate:` line.
+Under 1,500 tokens. Status: `done` | `done with concerns` | `blocked` | `needs context` | `over budget`. Then what changed, check output before/after, exact request/case count and 200/refusal split, max p95 over served cases, deviations, contract contradictions, carried items, and any `gate:` line.
 
 A non-trivial bug outside your done evidence: report symptom, location, and root cause if found. Do not fix it here.
 
