@@ -33,7 +33,7 @@ function badgeInput(result = {}) {
   return meta;
 }
 
-export function createPanelFrame({ panel, spec = {}, scope = {}, transport, scheduler, tenant = '', doc = globalThis.document } = {}) {
+export function createPanelFrame({ panel, spec = {}, scope = {}, transport, scheduler, tenant = '', schema = null, doc = globalThis.document } = {}) {
   if (!panel || !panel.id) throw new Error('panel frame needs a registered panel');
   const element = doc.createElement('section');
   element.className = 'workspace-panel';
@@ -147,7 +147,7 @@ export function createPanelFrame({ panel, spec = {}, scope = {}, transport, sche
     setState('loading', { inFlight: 1 });
     let result;
     try {
-      result = await panel.load({ scope, spec, signal: controller.signal, scheduler, transport, tenant });
+      result = await panel.load({ scope, spec, signal: controller.signal, scheduler, transport, tenant, schema });
     } catch (error) {
       if (error?.name === 'AbortError') { setState('cancelled', { retry: load }); return; }
       setState('error', { message: error?.message || 'Panel failed to load.', retry: load });

@@ -21,6 +21,11 @@ import { PULSE_STRIPS_PANEL } from './pulse-strips.js';
 import { MOVERS_PANEL } from './movers.js';
 import { CALENDAR_PANEL } from './calendar.js';
 import { COVERAGE_PANEL } from './coverage.js';
+import { registerTrendsPanels } from './p10-trends.js';
+import { registerComparePanels } from './p10-compare.js';
+import { registerQualityPanels } from './p10-quality.js';
+import { registerCostPanels } from './p10-cost.js';
+import { registerToolsPanels } from './p10-tools.js';
 
 export { RIVER_PANEL } from './river.js';
 export { PULSE_STRIPS_PANEL } from './pulse-strips.js';
@@ -47,3 +52,8 @@ export function registerPulse() {
 }
 
 registerPulse();
+registerTrendsPanels();
+registerComparePanels();
+registerQualityPanels();
+registerCostPanels();
+registerToolsPanels();

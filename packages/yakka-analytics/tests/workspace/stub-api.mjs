@@ -1,7 +1,7 @@
 // Deterministic same-origin stub of the analytics API, generated from the
 // committed fixture manifest. Test-only: product code never imports this.
 
-import { makeSchema, activityProbe, activityList, summary, population, adminStatus, explorePage, COUNTS } from './fixture.mjs';
+import { makeSchema, activityProbe, activityList, summary, population, adminStatus, explorePage, COUNTS, p10Schema, p10Summary, p10Query, p10Distribution, p10Entities, p10Scores, p10ScoreSeries, p10Baselines } from './fixture.mjs';
 
 const json = (response, status, body) => {
   response.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
@@ -19,11 +19,14 @@ export function createStubApi() {
     statusError: false,
     statusDelayMs: 0,
     statusRequests: 0,
-    statusAborted: 0
+    statusAborted: 0,
+    p10: false,
+    requests: []
   };
   let probes = 0;
 
   function schema() {
+    if (state.p10) return p10Schema();
     if (state.scenario === 'legacy') return makeSchema({ legacy: true });
     if (state.scenario === 'missing-feature') return makeSchema({ missingFeature: state.missingFeature });
     return makeSchema();
@@ -67,6 +70,31 @@ export function createStubApi() {
       return true;
     }
     if (path === '/v1/analytics/schema') { json(response, 200, schema()); return true; }
+
+    if (path.startsWith('/v1/analytics/')) state.requests.push({ path, search: url.search || '' });
+
+    if (state.p10 && path.startsWith('/v1/analytics/')) {
+      const from = query.get('from') || '';
+      const to = query.get('to') || '';
+      const dims = query.getAll('dim').filter(Boolean);
+      if (path === '/v1/analytics/summary') { json(response, 200, p10Summary()); return true; }
+      if (path === '/v1/analytics/query') {
+        json(response, 200, p10Query({ measure: query.get('measure') || 'cost_usd', dims, bucket: query.get('bucket') || 'auto', from, to }));
+        return true;
+      }
+      if (path === '/v1/analytics/distribution') {
+        json(response, 200, p10Distribution({ measure: query.get('measure') || 'cost_usd', grain: query.get('grain') || 'call', dim: query.get('dim') || '', from, to }));
+        return true;
+      }
+      if (path === '/v1/analytics/entities') {
+        const grain = query.get('grain') || 'session';
+        json(response, 200, p10Entities(grain));
+        return true;
+      }
+      if (path === '/v1/analytics/scores') { json(response, 200, p10Scores()); return true; }
+      if (path === '/v1/analytics/score-series') { json(response, 200, p10ScoreSeries()); return true; }
+      if (path === '/v1/analytics/baselines') { json(response, 200, p10Baselines()); return true; }
+    }
 
     if (state.scenario === 'legacy' && path !== '/v1/analytics/schema') {
       json(response, 400, { error: 'range too wide', code: 'range too wide', retry: { narrow: 'choose a narrower window' } });

@@ -107,10 +107,15 @@ function buildBox({ spec, data }) {
   const hasUnpriced = rows.some(row => row.unpriced !== undefined && row.unpriced !== null);
   const extras = hasUnpriced ? [{ key: 'unpriced', label: 'Unpriced', unit: 'calls', kind: 'count' }] : [];
   const tableSeries = [...summaries, { key: 'n', label: 'n', unit: '', kind: 'count' }, ...extras];
+  // Opt-in entity legend: the legend names and colours the groups while the
+  // tooltip keeps reporting each summary statistic. Absent the option the box
+  // keeps its summary-series legend exactly.
+  const legendSeries = spec.legend === 'entities' ? rows.map(row => ({ key: row.key, label: row.label })) : undefined;
   return {
     state: 'ready',
     type: 'box',
     series: [...summaries, ...extras],
+    ...(legendSeries ? { legendSeries } : {}),
     rows,
     entityKeys: rows.map(row => row.key),
     tableRows: rows.map(row => ({ key: row.key, x: row.label, values: row.values, n: row.n, coverage: row.coverage })),
@@ -251,10 +256,11 @@ export class YkRanges extends SvgChartElement {
     if (model.type === 'histogram') return this.#histogram({ doc, group, model, plot, styleFor, hidden });
     if (model.type === 'strip') return this.#strip({ doc, group, model, spec, plot, styleFor, hidden });
     if (model.type === 'dots') return this.#dots({ doc, group, model, plot, styleFor, hidden });
-    return this.#box({ doc, group, model, plot, styleFor, hidden });
+    return this.#box({ doc, group, model, spec, plot, styleFor, hidden });
   }
 
-  #box({ doc, group, model, plot, styleFor, hidden }) {
+  #box({ doc, group, model, spec, plot, styleFor, hidden }) {
+    const entityLegend = spec?.legend === 'entities';
     const rows = model.rows;
     const measure = model.series[0] || { kind: 'number', unit: '' };
     const summaryValues = rows.flatMap(row => SUMMARY_FIELDS.map(field => row.summary[field.key]));
@@ -291,6 +297,7 @@ export class YkRanges extends SvgChartElement {
     const capWidth = Math.min(18, colWidth * 0.28);
     const p95Labels = [];
     rows.forEach((row, index) => {
+      if (entityLegend && hidden.has(row.key)) return;
       const style = styleFor(row.key);
       const centre = xToPx(index);
       const { min, q1, median, q3, max, p95 } = row.summary;

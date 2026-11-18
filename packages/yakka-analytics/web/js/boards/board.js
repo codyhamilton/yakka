@@ -11,6 +11,7 @@ export const MAX_BOARD_PANELS = 12;
 export function boardScope(state = {}) {
   const scope = {};
   for (const key of ['win', 'from', 'to', 'tz']) if (state[key]) scope[key] = state[key];
+  if (state.cmp && state.cmp !== 'off') scope.cmp = state.cmp;
   if (state.filters) for (const [key, values] of Object.entries(state.filters)) if (values?.length) scope[key] = values;
   if (state.exclude?.length) scope.exclude = state.exclude;
   if (state.cohorts) {

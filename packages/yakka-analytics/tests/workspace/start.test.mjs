@@ -33,7 +33,8 @@ test('workspace Start, routes, deep links, saved boards and Follow', { skip: env
 
   await page.goto(`${harness.origin}/b/trends`);
   await settle(page);
-  assert.match(await page.locator('main').innerText(), /Delivered in Phase 10: Trends/);
+  assert.doesNotMatch(await page.locator('main').innerText(), /Delivered in Phase 10: Trends/);
+  assert.ok(await page.locator('.workspace-panel[data-panel="trend-columns"]').count() === 1);
 
   await page.goto(`${harness.origin}/b/pulse`);
   await settle(page);
@@ -155,8 +156,8 @@ test('an older or partial server disables paths with the reason and names missin
   assert.match(await page.locator('main').innerText(), /does not advertise entities_session/);
 
   await control(harness.origin, { scenario: 'legacy' });
-  await page.goto(`${harness.origin}/b/trends?win=all`);
+  await page.goto(`${harness.origin}/b/scatter?win=all`);
   await settle(page);
-  assert.match(await page.locator('main').innerText(), /Delivered in Phase 10: Trends/);
+  assert.match(await page.locator('main').innerText(), /Delivered in Phase 11: Scatter/);
   await diagnostics.assertClean();
 });

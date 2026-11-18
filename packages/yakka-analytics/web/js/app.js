@@ -6,7 +6,11 @@ import { rememberedTenant, sessionGateDecision, shouldRecoverTenant } from '../c
 import { renderIdentity } from './identity/flows.js';
 import { createRouter, isAccountRoute, loadExplorer } from './core/router.js';
 import { createFollow } from './core/follow.js';
-import { encodePanelSpec } from './core/view-spec.js';
+import './charts/yk-chart.js';
+import './charts/yk-bars.js';
+import './charts/yk-ranges.js';
+import './charts/yk-matrix.js';
+import { encodePanelSpec, writePanelSpec } from './core/view-spec.js';
 import { assembleBoard } from './boards/board.js';
 import { createPanelFrame } from './panels/panel-frame.js';
 import './panels/index.js';
@@ -336,7 +340,7 @@ async function renderBoard(container, record, state, schema, tenant) {
         }
       }
       : entry.panel;
-    const frame = createPanelFrame({ panel: wrappedPanel, spec: entry.spec, scope: entry.scope, transport, scheduler, tenant });
+    const frame = createPanelFrame({ panel: wrappedPanel, spec: entry.spec, scope: entry.scope, transport, scheduler, tenant, schema });
     const capability = createCapabilityInspector({ doc: document, panel: entry.panel, spec: entry.spec || {}, schema });
     frame.element.append(capability.element);
 
@@ -362,8 +366,28 @@ async function renderBoard(container, record, state, schema, tenant) {
       const pick = encodePick({ include: selection.include || [], exclude: selection.exclude || [] });
       router.replaceTransient(stateUrl(withPick(currentState(), pick), globalThis.location?.search || '', record.path));
     });
+    frame.element.addEventListener('spec', event => {
+      const spec = event.detail?.spec;
+      if (!spec) return;
+      const next = writePanelSpec(currentState(), entry.key, spec);
+      router.pushScope(stateUrl(next, globalThis.location?.search || '', record.path));
+    });
+    frame.element.addEventListener('scope', event => {
+      const detail = event.detail || {};
+      const from = typeof detail.from === 'string' ? Date.parse(detail.from) : Number(detail.from);
+      const to = typeof detail.to === 'string' ? Date.parse(detail.to) : Number(detail.to);
+      if (!Number.isFinite(from) || !Number.isFinite(to) || to <= from) return;
+      const state = currentState();
+      state.from = new Date(from).toISOString();
+      state.to = new Date(to).toISOString();
+      state.win = '';
+      state.sel = '';
+      router.pushScope(stateUrl(state, globalThis.location?.search || '', record.path));
+    });
     frame.element.addEventListener('inspect', event => {
       const detail = event.detail || {};
+      const spec = event.target?.spec || {};
+      const entity = spec.entities?.[detail.key] || null;
       const series = event.target?.spec?.series || event.target?.inspect?.().series || [];
       const facts = Object.entries(detail.values || {}).map(([key, value]) => {
         const match = series.find(item => item.key === key);
@@ -374,6 +398,8 @@ async function renderBoard(container, record, state, schema, tenant) {
         key: detail.key,
         values: detail.values,
         facts,
+        entity,
+        destination: entity?.destination || '',
         unit: panelRuntime.population?.unit || entry.panel.grain,
         population: panelRuntime.population,
         selection: runtime.selection,

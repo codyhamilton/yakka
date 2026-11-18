@@ -359,9 +359,14 @@ export class YkBars extends SvgChartElement {
       const end = numeric(row.end);
       if (start === null && end === null) return;
       if (start !== null && end !== null && !hidden.has(startSeries.key) && !hidden.has(endSeries.key)) {
+        const ramp = spec.deltaRamp === true;
+        const stroke = ramp
+          ? (end > start ? 'var(--yk-div-pos-2)' : end < start ? 'var(--yk-div-neg-2)' : style.colour)
+          : style.colour;
         group.append(svgNode(doc, 'line', {
           class: 'yk-slope-line', x1: xToPx(0), y1: yToPx(start), x2: xToPx(1), y2: yToPx(end),
-          stroke: style.colour, 'stroke-width': 2
+          stroke, 'stroke-width': 2,
+          ...(ramp ? { 'data-delta': end > start ? 'up' : end < start ? 'down' : 'flat' } : {})
         }));
       }
       const endpoints = [

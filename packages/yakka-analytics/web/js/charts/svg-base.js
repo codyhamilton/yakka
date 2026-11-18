@@ -321,7 +321,11 @@ export class SvgChartElement extends (typeof HTMLElement === 'undefined' ? class
       const style = styleFor(item.key);
       return { ...style, ...item, label: item.label ?? style.label, cssVar: style.cssVar, shape: item.shape ?? style.shape, pattern: item.pattern ?? style.pattern, colour: style.colour, hidden: this.#hidden.has(item.key) };
     });
-    const styledSpec = { ...spec, ...(model.spec || {}), series, x: model.x || spec.x || { label: 'Category', kind: 'text' } };
+    const legendSeries = (model.legendSeries || []).map(item => {
+      const style = styleFor(item.key);
+      return { ...style, ...item, label: item.label ?? style.label, cssVar: style.cssVar, shape: item.shape ?? style.shape, pattern: item.pattern ?? style.pattern, colour: style.colour, hidden: this.#hidden.has(item.key) };
+    });
+    const styledSpec = { ...spec, ...(model.spec || {}), series, ...(legendSeries.length ? { legendSeries } : {}), x: model.x || spec.x || { label: 'Category', kind: 'text' } };
     this.#styledSpec = styledSpec;
     this.#styledSeries = series;
 
@@ -440,12 +444,13 @@ export class SvgChartElement extends (typeof HTMLElement === 'undefined' ? class
   }
 
   #composeLegend(root, spec) {
-    if ((spec.series || []).length < 2) return;
+    const items = spec.legendSeries || spec.series || [];
+    if (items.length < 2) return;
     const doc = this.shadowRoot.ownerDocument;
     const host = doc.createElement('div');
     host.className = 'yk-chart-legend';
     const legend = createLegend(doc, {
-      series: spec.series.map(item => ({ key: item.key, label: item.label, shape: item.shape, pattern: item.pattern, cssVar: item.cssVar })),
+      series: items.map(item => ({ key: item.key, label: item.label, shape: item.shape, pattern: item.pattern, cssVar: item.cssVar })),
       state: { hidden: [...this.#hidden] },
       onIntent: detail => {
         if (detail.type === 'focus') {
@@ -455,7 +460,7 @@ export class SvgChartElement extends (typeof HTMLElement === 'undefined' ? class
           return;
         }
         if (detail.type === 'isolate') {
-          this.#hidden = new Set(spec.series.map(item => item.key).filter(key => key !== detail.key));
+          this.#hidden = new Set(items.map(item => item.key).filter(key => key !== detail.key));
         } else {
           this.#hidden = new Set(detail.state.hidden || []);
         }
