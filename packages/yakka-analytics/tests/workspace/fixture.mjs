@@ -1468,6 +1468,294 @@ export function p12PlanEvents({ repo_id = '', plan = '', limit = 500, cursor = '
   };
 }
 
+// ---------------------------------------------------------------------------
+// P12 artifact reader scene (unit 12-03). Additive to the workflow scene: one
+// design artifact with two known bodies and four unavailable/oversized states,
+// one long multi-chunk brief, one oversized report and one integrity failure.
+// ---------------------------------------------------------------------------
+
+const P12_HASH = {
+  designV6: 'a6'.repeat(32),
+  designV5: 'a5'.repeat(32),
+  designV4: 'a4'.repeat(32),
+  designV3: 'a3'.repeat(32),
+  designV2: 'a2'.repeat(32),
+  designV1: 'a1'.repeat(32),
+  briefLong: 'b3'.repeat(32),
+  oversize: 'c4'.repeat(32),
+  integrity: 'c5'.repeat(32)
+};
+
+function p12Iso(offset) {
+  return new Date((P12.start + offset) * 1000).toISOString();
+}
+
+const P12_DESIGN_A = [
+  '# Design A',
+  '',
+  'Intro with <script>alert(1)</script> and <img src=x onerror=alert(1)> plus a [markdown link](https://example.com).',
+  '',
+  '## Phase 12',
+  '',
+  'Body A complete. This is the latest known body.'
+].join('\n');
+
+const P12_DESIGN_B = [
+  '# Design B',
+  '',
+  '## Notes',
+  '',
+  'Second known body, distinct from body A.'
+].join('\n');
+
+function p12LongBriefBody() {
+  const lines = [
+    '# Long brief',
+    '',
+    'Deterministic body with a fenced heading that must not enter the outline.',
+    '',
+    '```',
+    '# fenced not a heading',
+    '```',
+    '',
+    '## First section'
+  ];
+  for (let index = lines.length + 1; index <= 450; index += 1) lines.push(`line ${index}`);
+  lines.push('## Second section');
+  for (let index = 452; index <= 900; index += 1) lines.push(`line ${index}`);
+  return lines.join('\n');
+}
+
+const P12_LONG_BRIEF = p12LongBriefBody();
+
+function p12VersionSpec(repo, path, spec) {
+  return {
+    repo_id: repo,
+    path,
+    hash: spec.hash,
+    ts: P12.start + spec.ts,
+    received_at: p12Iso(spec.received),
+    writing_session: spec.session,
+    harness: spec.harness,
+    session_model: spec.model,
+    source: spec.source,
+    sha: spec.sha,
+    screen: spec.screen || null,
+    scores: spec.scores || {},
+    also_seen_sessions: spec.alsoSeen || 0
+  };
+}
+
+const P12_ARTIFACT_SPECS = [
+  {
+    repo_id: 'repo-a',
+    path: 'docs/plans/20-analytics-reset/DESIGN.md',
+    versions: [
+      {
+        hash: P12_HASH.designV6, received: 60000, ts: 59000, session: 'conv-20b', harness: 'orca', model: 'claude',
+        source: 'worktree', sha: 'sha-design-v6', screen: { verdict: 'unscreened', scorer: 'jev-1.13.0', at: p12Iso(60500) },
+        scores: { clarity: { score: 0.9, scorer: 'jev-1.13.0' }, structure: { score: 0.4, scorer: 'jev-1.13.0' } }
+      },
+      {
+        hash: P12_HASH.designV5, received: 50000, ts: 49000, session: 'conv-20c', harness: 'claude-code', model: 'gpt',
+        source: 'commit', sha: 'sha-design-v5', screen: { verdict: 'pass', scorer: 'jev-1.13.0', at: p12Iso(50500) },
+        scores: { clarity: { score: 0.2, scorer: 'jev-1.13.0' }, structure: { score: 0.85, scorer: 'jev-1.13.0' } }
+      },
+      {
+        hash: P12_HASH.designV4, received: 40000, ts: 39000, session: 'conv-20d', harness: 'orca', model: 'claude',
+        source: 'worktree', sha: 'sha-design-v4', screen: { verdict: 'reject', scorer: 'jev-1.13.0', at: p12Iso(40500) },
+        scores: { structure: { score: 0.6, scorer: 'jev-missing' } }
+      },
+      {
+        hash: P12_HASH.designV3, received: 30000, ts: 29000, session: 'conv-20e', harness: 'orca', model: 'claude',
+        source: 'worktree', sha: 'sha-design-v3', screen: null, scores: {}
+      },
+      {
+        hash: P12_HASH.designV2, received: 20000, ts: 19000, session: 'conv-20b', harness: 'orca', model: 'claude',
+        source: 'worktree', sha: 'sha-design-v2', screen: null, scores: {}
+      },
+      {
+        hash: P12_HASH.designV1, received: 10000, ts: 9000, session: 'conv-20b', harness: 'orca', model: 'claude',
+        source: 'worktree', sha: 'sha-design-v1', screen: null, scores: {}
+      }
+    ]
+  },
+  {
+    repo_id: 'repo-a',
+    path: 'docs/plans/20-analytics-reset/briefs/12-03.md',
+    versions: [
+      {
+        hash: P12_HASH.briefLong, received: 70000, ts: 69000, session: 'conv-20c', harness: 'claude-code', model: 'gpt',
+        source: 'worktree', sha: 'sha-brief-1203', screen: { verdict: 'pass', scorer: 'jev-1.13.0', at: p12Iso(70500) },
+        scores: { clarity: { score: 0.55, scorer: 'jev-1.13.0' }, structure: { score: 0.6, scorer: 'jev-1.13.0' } }
+      }
+    ]
+  },
+  {
+    repo_id: 'repo-a',
+    path: 'docs/plans/20-analytics-reset/reports/12-03.md',
+    versions: [
+      {
+        hash: P12_HASH.designV4, received: 80000, ts: 79000, session: 'conv-20d', harness: 'orca', model: 'claude',
+        source: 'worktree', sha: 'sha-report-removed', screen: { verdict: 'reject', scorer: 'jev-1.13.0' }, scores: {}
+      },
+      {
+        hash: P12_HASH.designV3, received: 70000, ts: 69000, session: 'conv-20d', harness: 'orca', model: 'claude',
+        source: 'worktree', sha: 'sha-report-pending', screen: null, scores: {}
+      },
+      {
+        hash: P12_HASH.designV2, received: 60000, ts: 59000, session: 'conv-20d', harness: 'orca', model: 'claude',
+        source: 'worktree', sha: 'sha-report-notstored', screen: null, scores: {}
+      },
+      {
+        hash: P12_HASH.designV1, received: 50000, ts: 49000, session: 'conv-20d', harness: 'orca', model: 'claude',
+        source: 'worktree', sha: 'sha-report-notfound', screen: null, scores: {}
+      }
+    ]
+  },
+  {
+    repo_id: 'repo-a',
+    path: 'docs/plans/20-analytics-reset/reports/12-04.md',
+    versions: [
+      {
+        hash: P12_HASH.oversize, received: 81000, ts: 80000, session: 'conv-20e', harness: 'orca', model: 'claude',
+        source: 'worktree', sha: 'sha-report-oversize', screen: null, scores: {}
+      }
+    ]
+  },
+  {
+    repo_id: 'repo-a',
+    path: 'docs/plans/20-analytics-reset/reports/12-05.md',
+    versions: [
+      {
+        hash: P12_HASH.integrity, received: 82000, ts: 81000, session: 'conv-20e', harness: 'orca', model: 'claude',
+        source: 'worktree', sha: 'sha-report-integrity', screen: null, scores: {}
+      }
+    ]
+  }
+].map(spec => ({ ...spec, versions: spec.versions.map(version => p12VersionSpec(spec.repo_id, spec.path, version)) }));
+
+const P12_CONTENT = new Map([
+  [P12_HASH.designV6, { repo_id: 'repo-a', path: 'docs/plans/20-analytics-reset/DESIGN.md', text: P12_DESIGN_A, verdict: 'unscreened' }],
+  [P12_HASH.designV5, { repo_id: 'repo-a', path: 'docs/plans/20-analytics-reset/DESIGN.md', text: P12_DESIGN_B, verdict: 'pass' }],
+  [P12_HASH.briefLong, { repo_id: 'repo-a', path: 'docs/plans/20-analytics-reset/briefs/12-03.md', text: P12_LONG_BRIEF, verdict: 'pass' }]
+]);
+
+function p12ArtifactSpec(repo_id, path) {
+  return P12_ARTIFACT_SPECS.find(spec => spec.repo_id === repo_id && spec.path === path) || null;
+}
+
+export function p12ArtifactRows(repo_id = '', path = '') {
+  const spec = p12ArtifactSpec(repo_id, path);
+  if (!spec) return [];
+  return spec.versions.slice().sort((a, b) => (b.received_at.localeCompare(a.received_at)) || a.hash.localeCompare(b.hash));
+}
+
+function p12ArtifactRow(version) {
+  return {
+    content_hash: version.hash,
+    ts: version.ts,
+    received_at: version.received_at,
+    writing_session: version.writing_session,
+    writing_session_label: 'earliest observed writing session for this version',
+    writing_session_is_captured_provenance: true,
+    also_seen_sessions: version.also_seen_sessions,
+    harness: version.harness,
+    session_model: version.session_model,
+    source: version.source,
+    sha: version.sha,
+    screen: version.screen,
+    scores: version.scores
+  };
+}
+
+export function p12ArtifactEntities({ repo_id = '', path = '', limit = 4, cursor = '' } = {}) {
+  if (!p12ArtifactSpec(repo_id, path)) return null;
+  const all = p12ArtifactRows(repo_id, path);
+  const { page, next } = p12Page(all, limit, cursor);
+  const latest = all[0] || null;
+  return {
+    grain: 'artifact',
+    id: { repo_id, path },
+    versions: all.length,
+    latest: latest ? {
+      content_hash: latest.hash,
+      received_at: latest.received_at,
+      writing_session: latest.writing_session,
+      writing_session_label: 'earliest observed writing session for this version',
+      writing_session_is_captured_provenance: true
+    } : null,
+    collection: 'versions',
+    rows: page.map(p12ArtifactRow),
+    next,
+    population: {
+      grain: 'artifact_version', unit: 'repo_id,path,content_hash', scope_n: all.length,
+      cohort_n: all.length, eligible_n: all.length, returned_n: page.length, missing_by_reason: {}
+    }
+  };
+}
+
+// Exact content-route states: 200 bytes with the contract headers, or the
+// server's JSON bodies and codes. No failure path carries a prefix.
+export function p12Content(repo_id = '', path = '', hash = '') {
+  const known = P12_ARTIFACT_SPECS.some(spec => spec.repo_id === repo_id && spec.path === path
+    && spec.versions.some(version => version.hash === hash));
+  if (!known) return { status: 404, body: { error: 'not found' } };
+  if (hash === P12_HASH.designV1) return { status: 404, body: { error: 'not found' } };
+  if (hash === P12_HASH.designV2) return { status: 404, body: { error: 'artifact content is unavailable', code: 'content_unavailable', reason: 'not_stored' } };
+  if (hash === P12_HASH.designV3) return { status: 404, body: { error: 'artifact content is unavailable', code: 'content_unavailable', reason: 'pending' } };
+  if (hash === P12_HASH.designV4) return { status: 404, body: { error: 'artifact content is unavailable', code: 'content_unavailable', reason: 'removed_by_screen' } };
+  if (hash === P12_HASH.oversize) return { status: 413, body: { error: 'content exceeds the advertised byte budget', code: 'content_too_large', size_bytes: 20000000, limit_bytes: 16777216 } };
+  if (hash === P12_HASH.integrity) return { status: 500, body: { error: 'stored content hash does not match its identity', code: 'content_integrity' } };
+  const content = P12_CONTENT.get(hash);
+  if (!content || content.repo_id !== repo_id || content.path !== path) return { status: 404, body: { error: 'not found' } };
+  return {
+    status: 200,
+    text: content.text,
+    headers: {
+      'Content-Type': 'text/plain; charset=utf-8',
+      'X-Content-Type-Options': 'nosniff',
+      'Cache-Control': 'private, no-store',
+      'X-Yakka-Screen-Verdict': content.verdict
+    }
+  };
+}
+
+const P12_CONTENT_BASELINES = {
+  design: {
+    'jev-1.13.0': {
+      clarity: { n: 12, p25: 0.4, median: 0.6, p75: 0.8 },
+      structure: { n: 12, p25: 0.5, median: 0.6, p75: 0.7 }
+    },
+    'jev-missing': {}
+  },
+  brief: {
+    'jev-1.13.0': {
+      clarity: { n: 8, p25: 0.3, median: 0.5, p75: 0.7 },
+      structure: { n: 8, p25: 0.35, median: 0.55, p75: 0.65 }
+    }
+  }
+};
+
+export function p12Baselines({ kind = 'design', check = '', scorer = '' } = {}) {
+  const base = P12_CONTENT_BASELINES[kind] || {};
+  const scorers = {};
+  for (const [name, checks] of Object.entries(base)) {
+    if (scorer && scorer !== name) continue;
+    const picked = {};
+    for (const [checkName, row] of Object.entries(checks)) {
+      if (check && check !== checkName) continue;
+      picked[checkName] = row;
+    }
+    if (Object.keys(picked).length) scorers[name] = picked;
+  }
+  if (check && scorer) {
+    if (!scorers[scorer]) scorers[scorer] = {};
+    if (!scorers[scorer][check]) scorers[scorer][check] = { n: 0, p25: null, median: null, p75: null };
+  }
+  return { kind, population: 'content', scorers };
+}
+
 export function p12Fixture() {
   return {
     schema: p12Schema(),
@@ -1475,6 +1763,10 @@ export function p12Fixture() {
     planEntities: p12PlanEntities,
     executionRows: p12ExecutionRows,
     executionEntities: p12ExecutionEntities,
-    planEvents: p12PlanEvents
+    planEvents: p12PlanEvents,
+    artifactRows: p12ArtifactRows,
+    artifactEntities: p12ArtifactEntities,
+    content: p12Content,
+    baselines: p12Baselines
   };
 }

@@ -1,0 +1,142 @@
+/* Artifact reader chrome. Body text is inert and pre-wrapped; the reader adds
+   no colours or gestures the shared workspace does not already define. */
+
+.artifact-reader {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.artifact-reader-status:empty {
+  display: none;
+}
+
+.artifact-reader[data-state="identity-required"] .artifact-reader-status,
+.artifact-reader[data-state="error"] .artifact-reader-status,
+.artifact-reader[data-state="unsupported"] .artifact-reader-status,
+.artifact-reader[data-state="cancelled"] .artifact-reader-status {
+  font-weight: 600;
+}
+
+.artifact-version-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.artifact-version-mark {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 9rem;
+  padding: 6px 8px;
+  text-align: left;
+  border: 1px solid var(--border, #d0d0d0);
+  border-radius: 6px;
+  background: var(--surface, transparent);
+  cursor: pointer;
+}
+
+.artifact-version-mark[data-selected="true"] {
+  border-color: var(--accent, #2f6feb);
+  outline: 2px solid var(--accent, #2f6feb);
+}
+
+.artifact-mark-pos,
+.artifact-mark-hash {
+  font-weight: 600;
+}
+
+.artifact-mark-ts,
+.artifact-mark-screen,
+.artifact-mark-score,
+.artifact-mark-band {
+  font-size: 0.85em;
+}
+
+.artifact-mark-band[data-band="low"],
+.artifact-mark-band[data-band="high"] {
+  font-weight: 600;
+}
+
+.artifact-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.artifact-versions-population,
+.artifact-more,
+.artifact-content-code {
+  font-size: 0.85em;
+  opacity: 0.85;
+}
+
+.artifact-version-header dl {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 2px 12px;
+  margin: 0 0 8px;
+}
+
+.artifact-version-header dt {
+  font-weight: 600;
+}
+
+.artifact-version-header dd {
+  margin: 0;
+}
+
+.artifact-hash-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.artifact-outline {
+  margin-bottom: 8px;
+}
+
+.artifact-outline-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.artifact-outline-item {
+  padding: 1px 4px;
+  background: none;
+  border: none;
+  text-align: left;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.artifact-body {
+  border: 1px solid var(--border, #d0d0d0);
+  border-radius: 6px;
+  padding: 8px;
+  max-height: 60vh;
+  overflow: auto;
+}
+
+.artifact-chunk {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.85em;
+}
+
+.artifact-chunk + .artifact-chunk {
+  border-top: 1px dashed var(--border, #d0d0d0);
+  margin-top: 8px;
+  padding-top: 8px;
+}
+
+.artifact-content-status {
+  border: 1px solid var(--border, #d0d0d0);
+  border-radius: 6px;
+  padding: 8px;
+}

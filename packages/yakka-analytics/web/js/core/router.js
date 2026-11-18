@@ -6,12 +6,11 @@ import { isPresetId, lookupPreset, presetDestination } from '../boards/presets.j
 
 export const ACCOUNT_PATHS = ['/login', '/oauth/callback', '/device', '/profile', '/settings'];
 export const START_PATH = '/';
-export const EXPLORER_PATHS = new Map([['/ledger', 'ledger'], ['/ops', 'ops'], ['/sessions', 'sessions']]);
+export const EXPLORER_PATHS = new Map([['/ledger', 'ledger'], ['/ops', 'ops'], ['/sessions', 'sessions'], ['/artifact', 'artifact']]);
 
 // Later destinations and the phase that delivers them.
 const NAMED_ROUTES = [
-  { pattern: /^\/plans(?:\/[^/]+\/[^/]+)?$/, title: 'Plans', phase: 12 },
-  { pattern: /^\/artifact$/, title: 'Artifact reader', phase: 12 }
+  { pattern: /^\/plans(?:\/[^/]+\/[^/]+)?$/, title: 'Plans', phase: 12 }
 ];
 
 export function normalizePath(pathname = '/') {
@@ -38,7 +37,7 @@ export function parseRoute(pathname = '/', search = '') {
   }
   if (EXPLORER_PATHS.has(path)) {
     const explorer = EXPLORER_PATHS.get(path);
-    const title = explorer === 'ledger' ? 'Ledger' : explorer === 'sessions' ? 'Sessions' : 'Operations';
+    const title = explorer === 'ledger' ? 'Ledger' : explorer === 'sessions' ? 'Sessions' : explorer === 'artifact' ? 'Artifact' : 'Operations';
     return { kind: 'explorer', path, search, explorer, title };
   }
   if (ACCOUNT_PATHS.includes(path)) return { kind: 'account', path, search, title: accountTitle(path) };
@@ -65,6 +64,7 @@ export async function loadExplorer(kind) {
   if (kind === 'ledger') return import('../explorers/ledger.js');
   if (kind === 'ops') return import('../ops.js');
   if (kind === 'sessions') return import('../explorers/sessions.js');
+  if (kind === 'artifact') return import('../explorers/artifact.js');
   throw new Error(`unknown explorer ${kind}`);
 }
 

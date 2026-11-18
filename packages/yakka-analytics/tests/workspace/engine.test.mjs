@@ -176,6 +176,7 @@ test('router names later destinations and keeps unknown paths in the not-found v
   assert.equal(parseRoute('/sessions/abc').kind, 'explorer');
   assert.equal(parseRoute('/sessions/abc').explorer, 'sessions');
   assert.equal(parseRoute('/sessions/abc').sessionId, 'abc');
-  assert.equal(parseRoute('/artifact').phase, 12);
+  assert.equal(parseRoute('/artifact').kind, 'explorer');
+  assert.equal(parseRoute('/artifact').explorer, 'artifact');
   assert.equal(parseRoute('/nope').kind, 'not-found');
 });

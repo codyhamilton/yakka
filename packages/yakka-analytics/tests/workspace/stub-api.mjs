@@ -1,11 +1,16 @@
 // Deterministic same-origin stub of the analytics API, generated from the
 // committed fixture manifest. Test-only: product code never imports this.
 
-import { makeSchema, activityProbe, activityList, summary, population, adminStatus, explorePage, COUNTS, p10Schema, p10Summary, p10Query, p10Distribution, p10Entities, p10Scores, p10ScoreSeries, p10Baselines, p11Schema, p11Scatter, p11ArtifactScatter, p11PlanScatter, p11TimeScatter, p11TimeAggregate, p11Scores, p11Entities, p11Aggregate, p11SessionList, p11Conversation, p11Entity, p12Schema, p12PlanEntities, p12ExecutionEntities, p12PlanEvents } from './fixture.mjs';
+import { makeSchema, activityProbe, activityList, summary, population, adminStatus, explorePage, COUNTS, p10Schema, p10Summary, p10Query, p10Distribution, p10Entities, p10Scores, p10ScoreSeries, p10Baselines, p11Schema, p11Scatter, p11ArtifactScatter, p11PlanScatter, p11TimeScatter, p11TimeAggregate, p11Scores, p11Entities, p11Aggregate, p11SessionList, p11Conversation, p11Entity, p12Schema, p12PlanEntities, p12ExecutionEntities, p12PlanEvents, p12ArtifactEntities, p12Content, p12Baselines } from './fixture.mjs';
 
 const json = (response, status, body) => {
   response.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
   response.end(JSON.stringify(body));
+};
+
+const text = (response, status, body, headers = {}) => {
+  response.writeHead(status, { 'Content-Type': 'text/plain; charset=utf-8', ...headers });
+  response.end(body);
 };
 
 export function createStubApi() {
@@ -77,6 +82,10 @@ export function createStubApi() {
     if (path === '/v1/analytics/schema') { json(response, 200, schema()); return true; }
     if (path === '/v1/baselines') {
       state.requests.push({ path, search: url.search || '' });
+      if (state.p12 && query.get('population') === 'content') {
+        json(response, 200, p12Baselines({ kind: query.get('kind') || 'design', check: query.get('check') || '', scorer: query.get('scorer') || '' }));
+        return true;
+      }
       json(response, 200, state.p10 ? p10Baselines() : { kind: query.get('kind') || 'design', checks: {} });
       return true;
     }
@@ -114,6 +123,17 @@ export function createStubApi() {
       if (path === '/v1/analytics/entity') {
         const grain = query.get('grain') || '';
         const collection = query.get('collection') || 'events';
+        if (grain === 'artifact') {
+          const body = p12ArtifactEntities({
+            repo_id: query.get('repo_id') || '',
+            path: query.get('path') || '',
+            limit: Number(query.get('limit')) || 4,
+            cursor: query.get('cursor') || ''
+          });
+          if (!body) { json(response, 404, { error: 'artifact not found' }); return true; }
+          json(response, 200, body);
+          return true;
+        }
         if (grain === 'plan' && collection === 'events') {
           json(response, 200, p12PlanEvents({
             repo_id: query.get('repo_id') || '',
@@ -124,6 +144,12 @@ export function createStubApi() {
           return true;
         }
         json(response, 400, { error: 'unsupported plan collection', code: 'unsupported' });
+        return true;
+      }
+      if (path === '/v1/analytics/content') {
+        const answer = p12Content(query.get('repo_id') || '', query.get('path') || '', query.get('hash') || '');
+        if (answer.text !== undefined) { text(response, answer.status, answer.text, answer.headers); return true; }
+        json(response, answer.status, answer.body);
         return true;
       }
     }

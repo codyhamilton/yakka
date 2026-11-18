@@ -7,5 +7,6 @@ export * from '../workspace/browser.mjs';
 // committed helpers.
 export {
   P12, p12Schema, p12Fixture, p12PlanRows, p12PlanEntities,
-  p12ExecutionRows, p12ExecutionEntities, p12PlanEvents
+  p12ExecutionRows, p12ExecutionEntities, p12PlanEvents,
+  p12ArtifactRows, p12ArtifactEntities, p12Content, p12Baselines
 } from '../workspace/fixture.mjs';
