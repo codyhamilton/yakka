@@ -113,7 +113,7 @@ export function renderDiff(doc, result) {
   section.setAttribute('aria-label', 'Artifact line diff');
   const summary = doc.createElement('p');
   summary.className = 'artifact-diff-summary';
-  summary.textContent = `${result.added} added, ${result.removed} removed; ceiling ${CEILING_TEXT} per side.`;
+  summary.textContent = `${result.added} added, ${result.removed} removed; ceiling ${CEILING_TEXT}.`;
   section.append(summary);
   for (const [index, hunk] of result.hunks.entries()) {
     const details = doc.createElement('details');
