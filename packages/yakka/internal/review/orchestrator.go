@@ -1166,7 +1166,13 @@ func finalizeRecord(ctx context.Context, t *store.Tenant, tenant string, r Reque
 	}
 	rec, out := reviewRecord(r, repo, id, status, reason, result, attempts, p, c, inputHash, cfg, ctl, key, now, true)
 	b, _ := json.Marshal(rec)
-	updated, err := t.FinalizeReviewRun(ctx, id, b)
+	// Validate and precheck exactly as the append path does before the in-place
+	// update, so async persistence cannot bypass the ingest gatekeeper.
+	canon, reason := ingest.PrepareReviewRun(b)
+	if reason != "" {
+		return Receipt{}, fmt.Errorf("review record rejected: %s", reason)
+	}
+	updated, err := t.FinalizeReviewRun(ctx, id, canon)
 	if err != nil {
 		return Receipt{}, errors.New("review record persistence failed")
 	}

@@ -816,7 +816,12 @@ func (s *Server) reviewsPostRoute(w http.ResponseWriter, r *http.Request) {
 	}
 	var releaseOnce sync.Once
 	releaseUse := func() { releaseOnce.Do(release) }
-	defer releaseUse()
+	held := false
+	defer func() {
+		if !held {
+			releaseUse()
+		}
+	}()
 	ts, err := s.tenant(res.tenant)
 	if err != nil {
 		writeJSON(w, 503, map[string]string{"error": "tenant unavailable"})
@@ -833,6 +838,9 @@ func (s *Server) reviewsPostRoute(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 400, map[string]string{"error": err.Error()})
 		return
 	}
+	// A detached attempt holds the tenant's read gate until it finalizes, so a
+	// reset/delete cannot erase the row it is about to update.
+	held = job != nil
 	status := http.StatusOK
 	switch {
 	case job != nil:

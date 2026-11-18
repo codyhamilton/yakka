@@ -266,6 +266,33 @@ func IngestReviewRuns(ctx context.Context, tenant *store.Tenant, facts []json.Ra
 	return ingestBatch(ctx, tenant, facts, true, false)
 }
 
+// PrepareReviewRun validates one server-authored review_run fact exactly as
+// IngestReviewRuns does and returns its canonical bytes without appending it.
+// The detached finalize path uses it so an in-place update cannot bypass status
+// validation or the secret precheck.
+func PrepareReviewRun(raw json.RawMessage) ([]byte, string) {
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
+	var obj map[string]any
+	if err := dec.Decode(&obj); err != nil || obj == nil {
+		return nil, invalid("not an object")
+	}
+	if typ, _ := str(obj, "type"); typ != "review_run" {
+		return nil, invalid("not a review_run")
+	}
+	if r := validate(obj); r != "" {
+		return nil, r
+	}
+	if r := Precheck(obj); r != "" {
+		return nil, r
+	}
+	canon, err := keys.Canonical(raw)
+	if err != nil {
+		return nil, invalid("cannot canonicalise fact")
+	}
+	return canon, ""
+}
+
 // IngestReviewUsage persists content-free review_usage facts from the authenticated review
 // handler. They are stored outside facts and review_runs, so no analytics measure reads them.
 func IngestReviewUsage(ctx context.Context, tenant *store.Tenant, facts []json.RawMessage) ([]Result, error) {
