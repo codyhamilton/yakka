@@ -90,9 +90,19 @@ export async function startEmbeddedBinary() {
       TYPESAFE_API_KEY: ''
     }
   });
+  let stopping;
   const stop = () => {
-    child.kill('SIGTERM');
-    rmSync(data, { recursive: true, force: true });
+    if (stopping) return stopping;
+    stopping = (async () => {
+      if (child.exitCode === null && child.signalCode === null) {
+        await new Promise(resolveExit => {
+          child.once('exit', resolveExit);
+          child.kill('SIGTERM');
+        });
+      }
+      rmSync(data, { recursive: true, force: true });
+    })();
+    return stopping;
   };
   try {
     let up = false;
@@ -110,7 +120,7 @@ export async function startEmbeddedBinary() {
     if (!app.ok) throw new Error(`embedded binary does not serve js/app.js (${app.status})`);
     return { origin, stop };
   } catch (error) {
-    stop();
+    await stop();
     throw error;
   }
 }
