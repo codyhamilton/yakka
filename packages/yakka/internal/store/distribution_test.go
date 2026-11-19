@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"runtime"
+	"sync"
 	"testing"
 	"time"
 )
@@ -158,5 +159,45 @@ func TestDistributionGoHeapDoesNotScaleWithScannedRows(t *testing.T) {
 	// per-row Go retention or accumulation in the aggregate path.
 	if large > small*4+64*1024 {
 		t.Fatalf("Go allocations scale with scanned rows: 128 rows=%d bytes, 2048 rows=%d bytes", small, large)
+	}
+}
+
+func TestDistributionConcurrentReads(t *testing.T) {
+	ctx := context.Background()
+	tn := usageFixture(t)
+	tn.rdb.SetMaxIdleConns(0)
+	measures := []string{"cost_usd", "tokens_in", "tokens_out", "tokens_cache_read", "tokens_cache_write", "tokens_reasoning"}
+	grains := []string{"call", "conversation"}
+	const workers = 4
+	const calls = 80
+
+	sem := make(chan struct{}, workers)
+	start := make(chan struct{})
+	errs := make(chan error, calls)
+	var wg sync.WaitGroup
+	for i := 0; i < calls; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			<-start
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			measure := measures[i%len(measures)]
+			params := DistributionParams{Measure: measure, Grain: grains[i%len(grains)], Dim: "model", Top: 10}
+			if _, err := tn.Distribution(ctx, distFilter(), params); err != nil {
+				errs <- fmt.Errorf("call %d (%s/%s): %w", i, params.Measure, params.Grain, err)
+			}
+		}(i)
+	}
+	close(start)
+	wg.Wait()
+	close(errs)
+
+	var failures []error
+	for err := range errs {
+		failures = append(failures, err)
+	}
+	if len(failures) > 0 {
+		t.Fatalf("%d/%d concurrent distribution calls failed; first: %v", len(failures), calls, failures[0])
 	}
 }

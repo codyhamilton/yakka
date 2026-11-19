@@ -125,10 +125,15 @@ func (t *Tenant) Distribution(ctx context.Context, f AnalyticsFilter, p Distribu
 			query = cte + ` INSERT INTO dist_samples SELECT ` + keyExpr + `,` + valueExpr + `,` + pricedExpr + `,1-` + pricedExpr + ` FROM kept`
 		}
 	}
-	if _, err := t.rdb.ExecContext(ctx, `CREATE TEMP TABLE IF NOT EXISTS dist_samples(k TEXT,value REAL,priced INTEGER,unpriced INTEGER); DELETE FROM dist_samples`); err != nil {
+	conn, err := t.rdb.Conn(ctx)
+	if err != nil {
 		return DistributionResult{}, err
 	}
-	if _, err := t.rdb.ExecContext(ctx, query, args...); err != nil {
+	defer conn.Close()
+	if _, err := conn.ExecContext(ctx, `CREATE TEMP TABLE IF NOT EXISTS dist_samples(k TEXT,value REAL,priced INTEGER,unpriced INTEGER); DELETE FROM dist_samples`); err != nil {
+		return DistributionResult{}, err
+	}
+	if _, err := conn.ExecContext(ctx, query, args...); err != nil {
 		return DistributionResult{}, err
 	}
 	top := p.Top
@@ -139,17 +144,17 @@ func (t *Tenant) Distribution(ctx context.Context, f AnalyticsFilter, p Distribu
 		top = 100
 	}
 	var groupN int
-	if err := t.rdb.QueryRowContext(ctx, `SELECT count(*) FROM (SELECT k FROM dist_samples GROUP BY k)`).Scan(&groupN); err != nil {
+	if err := conn.QueryRowContext(ctx, `SELECT count(*) FROM (SELECT k FROM dist_samples GROUP BY k)`).Scan(&groupN); err != nil {
 		return DistributionResult{}, err
 	}
 	if groupN > top {
 		res.Truncated = true
 	}
 	res.GroupN = groupN
-	if err := t.rdb.QueryRowContext(ctx, `SELECT COALESCE(SUM(priced),0),COALESCE(SUM(unpriced),0) FROM dist_samples WHERE k NOT IN (SELECT k FROM dist_samples GROUP BY k ORDER BY SUM(priced) DESC,k ASC LIMIT ?)`, top).Scan(&res.OmittedN, &res.OmittedUnpriced); err != nil {
+	if err := conn.QueryRowContext(ctx, `SELECT COALESCE(SUM(priced),0),COALESCE(SUM(unpriced),0) FROM dist_samples WHERE k NOT IN (SELECT k FROM dist_samples GROUP BY k ORDER BY SUM(priced) DESC,k ASC LIMIT ?)`, top).Scan(&res.OmittedN, &res.OmittedUnpriced); err != nil {
 		return DistributionResult{}, err
 	}
-	rows, err := t.rdb.QueryContext(ctx, `WITH groups AS (SELECT k,sum(priced) n,sum(unpriced) unpriced FROM dist_samples GROUP BY k),
+	rows, err := conn.QueryContext(ctx, `WITH groups AS (SELECT k,sum(priced) n,sum(unpriced) unpriced FROM dist_samples GROUP BY k),
 		ranked AS (SELECT d.k,d.value,ROW_NUMBER() OVER(PARTITION BY d.k ORDER BY d.value)-1 rn,g.n FROM dist_samples d JOIN groups g USING(k) WHERE d.priced=1),
 		stats AS (SELECT k,MIN(value) minv,MAX(value) maxv,MAX(n) n,
 			SUM(CASE WHEN rn=CAST((n-1)*0.25 AS INTEGER) THEN value*(1-((n-1)*0.25-CAST((n-1)*0.25 AS INTEGER))) WHEN rn=CAST((n-1)*0.25 AS INTEGER)+1 THEN value*((n-1)*0.25-CAST((n-1)*0.25 AS INTEGER)) ELSE 0 END) p25,
@@ -160,11 +165,11 @@ func (t *Tenant) Distribution(ctx context.Context, f AnalyticsFilter, p Distribu
 	if err != nil {
 		return DistributionResult{}, err
 	}
-	defer rows.Close()
 	for rows.Next() {
 		var r DistributionRow
 		var minv, p25, med, p75, p95, maxv sql.NullFloat64
 		if err := rows.Scan(&r.K, &r.N, &r.Unpriced, &minv, &p25, &med, &p75, &p95, &maxv); err != nil {
+			rows.Close()
 			return DistributionResult{}, err
 		}
 		if minv.Valid {
@@ -180,9 +185,13 @@ func (t *Tenant) Distribution(ctx context.Context, f AnalyticsFilter, p Distribu
 		res.Rows = append(res.Rows, r)
 	}
 	if err := rows.Err(); err != nil {
+		rows.Close()
 		return DistributionResult{}, err
 	}
-	binRows, err := t.rdb.QueryContext(ctx, `WITH top_keys AS (
+	if err := rows.Close(); err != nil {
+		return DistributionResult{}, err
+	}
+	binRows, err := conn.QueryContext(ctx, `WITH top_keys AS (
 		SELECT k FROM dist_samples GROUP BY k ORDER BY sum(priced) DESC,k ASC LIMIT ?
 	), counts AS (
 		SELECT d.k,`+distributionBinIndexSQL(p.Measure)+` AS bin_index,count(*) AS n
