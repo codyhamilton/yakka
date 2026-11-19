@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "populations": {
+    "hook_events": 5015,
+    "model_calls": 5,
+    "sessions_one_repo": 1,
+    "sessions_many_repos": 1,
+    "sessions_no_repo": 1,
+    "artifact_design_versions": 3,
+    "artifact_brief_versions": 5,
+    "artifact_report_versions": 5,
+    "plans": 2,
+    "execution_shapes": 3,
+    "rejections_precheck": 1,
+    "rejections_screen": 1,
+    "scored_hashes": 32767,
+    "shared_content_paths": 7,
+    "scorer_rescore_checks": 2,
+    "pre_epoch_events": 1,
+    "multi_century_events": 1,
+    "unpriced_beyond_conversation_cap": 1
+  },
+  "bounds": {
+    "min_timestamp": -14831769600,
+    "max_timestamp": 10413792000,
+    "conversation_event_cap": 5000,
+    "scored_hash_parameter_limit": 32766
+  }
+}

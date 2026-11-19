@@ -1,13 +1,19 @@
 package serve
 
 import (
+	"bytes"
+	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"math"
 	"net/http"
 	"net/url"
+	"path/filepath"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/codyhamilton/yakka/packages/yakka/internal/store"
@@ -17,10 +23,80 @@ import (
 // shared filter, calls one store query and shapes the JSON; tenant auth is the same as /v1/artifacts.
 
 const (
-	maxBuckets   = 400
+	// maxBuckets remains for the benchmark's historical search helper. Request
+	// handlers do not use it as a window or resolution cap.
+	maxBuckets   = int(^uint(0) >> 1)
 	defaultLimit = 100
 	maxLimit     = 500
 )
+
+var (
+	minAnalyticsTime = time.Unix(0, math.MinInt64).UTC()
+	maxAnalyticsTime = time.Unix(0, math.MaxInt64).UTC()
+)
+
+const analyticsHeavyConcurrency = 4
+
+// The local fixture's slowest route p95 is below 5 ms; 1 s leaves substantial tail room while
+// remaining twice the unchanged 500 ms p95 contract. The fixture result is recorded in the report.
+var analyticsDeadline = time.Second
+
+type analyticsBuffer struct {
+	header http.Header
+	status int
+	body   bytes.Buffer
+}
+
+func newAnalyticsBuffer() *analyticsBuffer     { return &analyticsBuffer{header: make(http.Header)} }
+func (b *analyticsBuffer) Header() http.Header { return b.header }
+func (b *analyticsBuffer) WriteHeader(status int) {
+	if b.status == 0 {
+		b.status = status
+	}
+}
+func (b *analyticsBuffer) Write(p []byte) (int, error) {
+	if b.status == 0 {
+		b.status = http.StatusOK
+	}
+	return b.body.Write(p)
+}
+
+func serveBoundedAnalytics(w http.ResponseWriter, r *http.Request, name string, ts *tenantState, h tenantHandler) {
+	select {
+	case ts.analyticsSlots <- struct{}{}:
+		defer func() { <-ts.analyticsSlots }()
+	default:
+		w.Header().Set("Retry-After", "1")
+		errCodeJSON(w, http.StatusServiceUnavailable, "busy", "analytics read concurrency limit reached", map[string]any{"retry": map[string]any{"after_s": 1}})
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), analyticsDeadline)
+	b := newAnalyticsBuffer()
+	h(b, r.WithContext(ctx), name, ts)
+	expired := errors.Is(ctx.Err(), context.DeadlineExceeded)
+	canceled := r.Context().Err() != nil
+	cancel()
+	if canceled {
+		return
+	}
+	if expired {
+		errCodeJSON(w, http.StatusServiceUnavailable, "query_timeout", "analytics query deadline exceeded", map[string]any{
+			"retry": map[string]any{"after_s": 1, "suggested_action": "narrow_window_or_coarsen_bucket"},
+		})
+		return
+	}
+	for k, values := range b.header {
+		for _, v := range values {
+			w.Header().Add(k, v)
+		}
+	}
+	status := b.status
+	if status == 0 {
+		status = http.StatusOK
+	}
+	w.WriteHeader(status)
+	_, _ = w.Write(b.body.Bytes())
+}
 
 // exploreCap is the most rows /explore returns. A variable so the test can lower it.
 var exploreCap = 20000
@@ -29,17 +105,40 @@ func errJSON(w http.ResponseWriter, code int, msg string) {
 	writeJSON(w, code, map[string]string{"error": msg})
 }
 
+func errCodeJSON(w http.ResponseWriter, status int, code, msg string, extra map[string]any) {
+	out := map[string]any{"error": msg, "code": code}
+	for k, v := range extra {
+		out[k] = v
+	}
+	writeJSON(w, status, out)
+}
+
 func readFailed(w http.ResponseWriter) { errJSON(w, 500, "read failed") }
+
+// refuseCohort enforces 17.3.1's accepted route set: a route that does not apply the cohort
+// answers 400 cohort_invalid/route_not_supported instead of ignoring the parameter.
+func refuseCohort(w http.ResponseWriter, r *http.Request) bool {
+	if r.URL.Query().Get("cohort") == "" {
+		return false
+	}
+	errCodeJSON(w, http.StatusBadRequest, "cohort_invalid", "cohort is not supported on this route", map[string]any{"reason": "route_not_supported"})
+	return true
+}
 
 // cursor is the opaque paging token: the route and filter it was issued for, the first page's
 // resolved window, and the sort key of the last row returned.
 type cursor struct {
-	Route  string   `json:"r"`
-	Filter string   `json:"f"`
-	From   int64    `json:"from"`
-	To     int64    `json:"to"`
-	TS     float64  `json:"ts"`
-	Key    []string `json:"k"`
+	Route              string   `json:"r"`
+	Filter             string   `json:"f"`
+	From               int64    `json:"from"`
+	To                 int64    `json:"to"`
+	TS                 float64  `json:"ts"`
+	NS                 int64    `json:"ns,omitempty"`
+	Key                []string `json:"k"`
+	FactWatermark      int64    `json:"fw,omitempty"`
+	RejectionWatermark int64    `json:"rw,omitempty"`
+	FactRowID          int64    `json:"fi,omitempty"`
+	Revision           int64    `json:"rev,omitempty"`
 }
 
 func (c cursor) encode() string {
@@ -64,7 +163,7 @@ func canonFilter(q url.Values) string {
 	out := url.Values{}
 	for _, k := range []string{"from", "to", "repo_id", "harness", "kind", "plan",
 		"norm_event", "event", "tool", "model", "source", "conversation_id", "tz", "all",
-		"shape", "bucket"} {
+		"shape", "bucket", "exclude", "sort", "mode", "grain", "field", "fields", "stat", "where"} {
 		if v, ok := q[k]; ok {
 			c := append([]string(nil), v...)
 			sort.Strings(c)
@@ -90,6 +189,23 @@ func tooWide(from, to time.Time, weeks bool) bool {
 	return int(b.Sub(a).Hours()/24)+1 > maxBuckets
 }
 
+// publishedFilterNames is the exclude dimension whitelist, derived from the same scope-filter
+// table /schema publishes (store.CohortGrainFilters). Dynamic band:<check> exclusions are parsed
+// by parseFilter because their names contain a colon. stage stays a legacy exclude dimension
+// even though no grain publishes it as an include filter.
+func publishedFilterNames() map[string]bool {
+	out := map[string]bool{"stage": true}
+	for _, grain := range []string{"session", "artifact", "content", "execution", "plan", "time"} {
+		for _, name := range store.CohortGrainFilters(grain) {
+			if strings.HasSuffix(name, ":<check>") {
+				name = strings.TrimSuffix(name, ":<check>")
+			}
+			out[name] = true
+		}
+	}
+	return out
+}
+
 type filterOpts struct {
 	weeks      bool    // count the cap in ISO weeks
 	scoresKind bool    // exactly one kind required
@@ -98,9 +214,28 @@ type filterOpts struct {
 	cur        *cursor // paged routes: the request's cursor
 }
 
+// cohortResolveOptions supplies the active check catalogue and tenant blob directory to cohort
+// resolution. Dynamic names (score:<check>, band:<check>) validate against the catalogue, and the
+// blob directory lets the artifact resolver measure content_bytes.
+func (s *Server) cohortResolveOptions(ts *tenantState) store.CohortResolveOptions {
+	var opts store.CohortResolveOptions
+	if ts != nil {
+		opts.BlobDir = filepath.Join(ts.t.Dir(), "blobs")
+	}
+	if s.opts.Checks != nil {
+		opts.Checks = map[string][]string{}
+		for _, kind := range kindOrder {
+			for _, check := range s.opts.Checks.For(kind) {
+				opts.Checks[kind] = append(opts.Checks[kind], check.Name)
+			}
+		}
+	}
+	return opts
+}
+
 // parseFilter resolves the shared filter, or writes the 400 and returns false. With a cursor it
 // must match this route and these filter parameters, and its window replaces from/to.
-func parseFilter(w http.ResponseWriter, r *http.Request, o filterOpts) (store.AnalyticsFilter, bool) {
+func (s *Server) parseFilter(w http.ResponseWriter, r *http.Request, ts *tenantState, o filterOpts) (store.AnalyticsFilter, bool) {
 	q := r.URL.Query()
 	var f store.AnalyticsFilter
 	var from, to time.Time
@@ -127,8 +262,9 @@ func parseFilter(w http.ResponseWriter, r *http.Request, o filterOpts) (store.An
 			return f, false
 		}
 	}
-	if q.Get("all") == "1" {
-		from, hasFrom = time.Unix(0, 0), true
+	all := q.Get("all") == "1"
+	if all {
+		from, hasFrom = minAnalyticsTime, true
 		if !hasTo {
 			to = time.Now().UTC()
 		}
@@ -151,12 +287,66 @@ func parseFilter(w http.ResponseWriter, r *http.Request, o filterOpts) (store.An
 		errJSON(w, 400, "from is after to")
 		return f, false
 	}
-	if !o.query && tooWide(from, to, o.weeks) {
-		errJSON(w, 400, "range too wide")
+	if from.Before(minAnalyticsTime) || from.After(maxAnalyticsTime) || to.Before(minAnalyticsTime) || to.After(maxAnalyticsTime) {
+		errCodeJSON(w, 400, "time_out_of_range", "time is outside the nanosecond-representable range", map[string]any{
+			"min": minAnalyticsTime.Format(time.RFC3339Nano), "max": maxAnalyticsTime.Format(time.RFC3339Nano),
+		})
 		return f, false
 	}
+	excludes := map[string][]string{}
+	allowedExclude := publishedFilterNames()
+	for _, item := range q["exclude"] {
+		dim, value, ok := strings.Cut(item, ":")
+		// Dynamic artifact lens names contain a colon themselves. Treat the last
+		// colon as the name/value separator for band:<check>, preserving names
+		// such as band:q.a as one published filter name.
+		if strings.HasPrefix(item, "band:") {
+			if i := strings.LastIndex(item, ":"); i > len("band:") {
+				dim, value, ok = item[:i], item[i+1:], true
+			}
+		}
+		allowed := allowedExclude[dim] || strings.HasPrefix(dim, "band:") && len(strings.TrimPrefix(dim, "band:")) > 0
+		if !ok || !allowed || value == "" {
+			errJSON(w, 400, "exclude must be <dimension>:<value>")
+			return f, false
+		}
+		excludes[dim] = append(excludes[dim], value)
+	}
 	f = store.AnalyticsFilter{From: from.UTC(), To: to.UTC(), Repos: q["repo_id"], Harnesses: q["harness"], Kinds: q["kind"], Plans: q["plan"],
-		NormEvents: q["norm_event"], Events: q["event"], Tools: q["tool"], Models: q["model"], Sources: q["source"], ConversationIDs: q["conversation_id"], TZ: loc}
+		NormEvents: q["norm_event"], Events: q["event"], Tools: q["tool"], Models: q["model"], Sources: q["source"], ConversationIDs: q["conversation_id"], TZ: loc,
+		All: all && o.cur == nil}
+	f.Excludes = excludes
+	if raw := q.Get("cohort"); raw != "" {
+		cohort, err := store.ParseCohortDefinition([]byte(raw))
+		if err != nil {
+			code := "cohort_invalid"
+			if errors.Is(err, store.ErrUnsupportedJoin) {
+				code = "unsupported_join"
+			}
+			errCodeJSON(w, 400, code, err.Error(), map[string]any{"reason": err.Error()})
+			return f, false
+		}
+		sql, args, rel, err := store.CohortSessionSubquery(cohort, s.cohortResolveOptions(ts))
+		if err != nil {
+			code := "cohort_invalid"
+			if errors.Is(err, store.ErrUnsupportedJoin) {
+				code = "unsupported_join"
+			}
+			errCodeJSON(w, 400, code, err.Error(), map[string]any{"reason": err.Error()})
+			return f, false
+		}
+		f.CohortSQL, f.CohortArgs = sql, args
+		f.CohortExclude = cohort.Definition.Op == "exclude"
+		f.CohortSourceGrain, f.CohortMapping, f.CohortOp = rel.SourceGrain, rel.Mapping, cohort.Definition.Op
+		if rel.SourceRejections {
+			assoc, aerr := ts.t.TimeCohortSourceAssociations(r.Context(), cohort)
+			if aerr != nil {
+				readFailed(w)
+				return f, false
+			}
+			f.CohortSourceAssociation = &assoc
+		}
+	}
 	if o.scoresKind && len(f.Kinds) != 1 {
 		errJSON(w, 400, "kind required")
 		return f, false
@@ -168,6 +358,51 @@ func parseFilter(w http.ResponseWriter, r *http.Request, o filterOpts) (store.An
 		}
 	}
 	return f, true
+}
+
+func plainWindow(f store.AnalyticsFilter) map[string]any {
+	bounds := map[string]string{"from": f.From.Format(time.RFC3339Nano), "to": f.To.Format(time.RFC3339Nano)}
+	return map[string]any{"requested": bounds, "effective": bounds, "clipped": false}
+}
+
+// resolveRouteWindow moves an all=1 filter's start to the earliest retained timestamp of the
+// named populations. Empty coverage returns a null effective window and empty=true. Explicit
+// from/to requests are unchanged so resolution still follows the requested span.
+func resolveRouteWindow(ctx context.Context, tn *store.Tenant, populations []string, f store.AnalyticsFilter) (store.AnalyticsFilter, map[string]any, bool, error) {
+	if !f.All {
+		return f, plainWindow(f), false, nil
+	}
+	requested := map[string]string{"from": f.From.Format(time.RFC3339Nano), "to": f.To.Format(time.RFC3339Nano)}
+	var first float64
+	found := false
+	for _, population := range populations {
+		lo, _, ok, err := tn.PopulationBounds(ctx, population, f)
+		if err != nil {
+			return f, nil, false, err
+		}
+		if !ok {
+			continue
+		}
+		if !found || lo < first {
+			first = lo
+			found = true
+		}
+	}
+	if !found {
+		return f, map[string]any{"requested": requested, "effective": map[string]any{"from": nil, "to": nil}, "clipped": nil}, true, nil
+	}
+	sec, frac := math.Modf(first)
+	start := time.Unix(int64(sec), int64(math.Round(frac*1e9))).UTC()
+	clip := any(false)
+	if start.After(f.From) {
+		f.From = start
+		clip = "before_first_data"
+	}
+	return f, map[string]any{
+		"requested": requested,
+		"effective": map[string]string{"from": f.From.Format(time.RFC3339Nano), "to": f.To.Format(time.RFC3339Nano)},
+		"clipped":   clip,
+	}, false, nil
 }
 
 // pageParams reads limit (clamped to 1..500) and cursor.
@@ -227,7 +462,10 @@ func (s *Server) catalogChecks(kinds ...string) []struct{ Kind, Name string } {
 }
 
 func (s *Server) analyticsFacets(w http.ResponseWriter, r *http.Request, _ string, ts *tenantState) {
-	f, ok := parseFilter(w, r, filterOpts{})
+	if refuseCohort(w, r) {
+		return
+	}
+	f, ok := s.parseFilter(w, r, ts, filterOpts{})
 	if !ok {
 		return
 	}
@@ -244,13 +482,15 @@ func (s *Server) analyticsFacets(w http.ResponseWriter, r *http.Request, _ strin
 	for _, c := range s.catalogChecks(kindOrder...) {
 		checks = append(checks, map[string]string{"kind": c.Kind, "name": c.Name})
 	}
-	writeJSON(w, 200, map[string]any{"repos": nz(fc.Repos), "harnesses": nz(fc.Harnesses), "kinds": nz(fc.Kinds),
+	out := map[string]any{"repos": nz(fc.Repos), "harnesses": nz(fc.Harnesses), "kinds": nz(fc.Kinds),
 		"plans": nz(fc.Plans), "events": nz(fc.Events), "models": nz(fc.Models), "norm_events": nz(fc.NormEvents),
-		"tools": tools, "checks": checks})
+		"tools": tools, "checks": checks}
+	addAnalyticsPartial(out, ts)
+	writeJSON(w, 200, out)
 }
 
 func (s *Server) analyticsSummary(w http.ResponseWriter, r *http.Request, _ string, ts *tenantState) {
-	f, ok := parseFilter(w, r, filterOpts{})
+	f, ok := s.parseFilter(w, r, ts, filterOpts{})
 	if !ok {
 		return
 	}
@@ -259,7 +499,7 @@ func (s *Server) analyticsSummary(w http.ResponseWriter, r *http.Request, _ stri
 		readFailed(w)
 		return
 	}
-	writeJSON(w, 200, map[string]any{"from": f.From.Format(time.RFC3339), "to": f.To.Format(time.RFC3339),
+	out := map[string]any{"from": f.From.Format(time.RFC3339), "to": f.To.Format(time.RFC3339),
 		"conversations": sm.Conversations, "hook_events": sm.HookEvents, "artifact_versions": sm.ArtifactVersions,
 		"distinct_content": sm.DistinctContent,
 		"by_kind":          counts(sm.ByKind, "design", "brief", "report", "other"),
@@ -269,7 +509,22 @@ func (s *Server) analyticsSummary(w http.ResponseWriter, r *http.Request, _ stri
 		"screens":          counts(sm.Screens, "pass", "unscreened"),
 		"model_calls":      sm.ModelCalls, "unpriced_calls": sm.UnpricedCalls, "cost_usd": sm.CostUSD,
 		"tokens_in": sm.TokensIn, "tokens_out": sm.TokensOut, "tokens_cache_read": sm.TokensCacheRead,
-		"tokens_cache_write": sm.TokensCacheWrite, "tokens_reasoning": sm.TokensReasoning})
+		"tokens_cache_write": sm.TokensCacheWrite, "tokens_reasoning": sm.TokensReasoning}
+	if f.CohortSQL != "" {
+		scopeN, cohortN, err := cohortSessionCounts(r.Context(), ts.t, f)
+		if err != nil {
+			readFailed(w)
+			return
+		}
+		rel, err := cohortRelation(r.Context(), ts.t, f, true, scopeN, cohortN, false)
+		if err != nil {
+			readFailed(w)
+			return
+		}
+		out["population"] = sessionPopulation(scopeN, cohortN, 0, rel)
+	}
+	addAnalyticsPartial(out, ts)
+	writeJSON(w, 200, out)
 }
 
 var seriesGroups = map[string][]string{
@@ -305,7 +560,7 @@ func (s *Server) analyticsSeries(w http.ResponseWriter, r *http.Request, _ strin
 			return
 		}
 	}
-	f, ok := parseFilter(w, r, filterOpts{weeks: bucket == "week"})
+	f, ok := s.parseFilter(w, r, ts, filterOpts{weeks: bucket == "week"})
 	if !ok {
 		return
 	}
@@ -340,16 +595,36 @@ func (s *Server) analyticsSeries(w http.ResponseWriter, r *http.Request, _ strin
 	if list == nil {
 		list = []*entry{}
 	}
-	writeJSON(w, 200, map[string]any{"bucket": bucket, "series": list})
+	out := map[string]any{"bucket": bucket, "series": list}
+	if f.CohortSQL != "" {
+		scopeN, cohortN, err := cohortSessionCounts(r.Context(), ts.t, f)
+		if err != nil {
+			readFailed(w)
+			return
+		}
+		rel, err := cohortRelation(r.Context(), ts.t, f, metric == "rejections", scopeN, cohortN, false)
+		if err != nil {
+			readFailed(w)
+			return
+		}
+		out["population"] = sessionPopulation(scopeN, cohortN, 0, rel)
+	}
+	addAnalyticsPartial(out, ts)
+	writeJSON(w, 200, out)
 }
 
 func (s *Server) analyticsScores(w http.ResponseWriter, r *http.Request, _ string, ts *tenantState) {
-	f, ok := parseFilter(w, r, filterOpts{scoresKind: true})
+	f, ok := s.parseFilter(w, r, ts, filterOpts{scoresKind: true})
 	if !ok {
 		return
 	}
 	kind := f.Kinds[0]
 	f.Kinds = nil
+	q := r.URL.Query()
+	if q.Has("dim") || q.Has("scorer") || q.Has("check") || q.Has("limit") || q.Has("offset") {
+		s.analyticsScoresByLens(w, r, ts, f, kind)
+		return
+	}
 	vals, err := ts.t.WindowScores(r.Context(), f, kind)
 	if err != nil {
 		readFailed(w)
@@ -363,7 +638,202 @@ func (s *Server) analyticsScores(w http.ResponseWriter, r *http.Request, _ strin
 			"p25": round3(percentile(v, .25)), "median": round3(percentile(v, .5)),
 			"p75": round3(percentile(v, .75)), "max": round3(percentile(v, 1))})
 	}
-	writeJSON(w, 200, map[string]any{"kind": kind, "checks": out})
+	resp := map[string]any{"kind": kind, "checks": out}
+	if f.CohortSQL != "" {
+		pop, err := contentPopulation(r.Context(), r, ts, f, kind)
+		if err != nil {
+			readFailed(w)
+			return
+		}
+		resp["population"] = pop
+	}
+	addAnalyticsPartial(resp, ts)
+	writeJSON(w, 200, resp)
+}
+
+func (s *Server) analyticsScoresByLens(w http.ResponseWriter, r *http.Request, ts *tenantState, f store.AnalyticsFilter, kind string) {
+	q := r.URL.Query()
+	dim := q.Get("dim")
+	allowed := map[string]bool{"harness": true, "session_model": true, "repo_id": true, "plan": true, "scorer": true, "screen_verdict": true}
+	if dim != "" && !allowed[dim] {
+		errJSON(w, 400, "unsupported dimension "+dim+" for scores")
+		return
+	}
+	checks := map[string]bool{}
+	for _, c := range s.catalogChecks(kind) {
+		checks[c.Name] = true
+	}
+	selectedCheck := q.Get("check")
+	if selectedCheck != "" && !checks[selectedCheck] {
+		errJSON(w, 400, "unknown check "+selectedCheck)
+		return
+	}
+	limit := 100
+	if raw := q.Get("limit"); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n < 1 {
+			errJSON(w, 400, "limit must be a positive integer")
+			return
+		}
+		limit = min(n, 500)
+	}
+	offset := 0
+	if raw := q.Get("offset"); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n < 0 {
+			errJSON(w, 400, "offset must be a non-negative integer")
+			return
+		}
+		offset = n
+	}
+	// Harness and session-model are derived lenses. Their filters run after the canonical
+	// artifact fact is selected, so they cannot change which path represents a shared hash.
+	f.Harnesses = nil
+	f.Models = nil
+	rows, err := ts.t.WindowScoreObservations(r.Context(), f, kind)
+	if err != nil {
+		readFailed(w)
+		return
+	}
+	ids := make([]string, 0, len(rows))
+	seen := map[string]bool{}
+	for _, row := range rows {
+		if !seen[row.ConversationID] {
+			seen[row.ConversationID] = true
+			ids = append(ids, row.ConversationID)
+		}
+	}
+	provenance, err := scoreSessionProvenance(r.Context(), ts.t, ids)
+	if err != nil {
+		readFailed(w)
+		return
+	}
+	type scoreGroup struct {
+		key    string
+		values []float64
+	}
+	byCheck := map[string]map[string][]float64{}
+	for _, row := range rows {
+		if selectedCheck != "" && row.Check != selectedCheck || q.Get("scorer") != "" && row.Scorer != q.Get("scorer") {
+			continue
+		}
+		if len(q["harness"]) > 0 && !containsValue(q["harness"], provenance[row.ConversationID].Harness) {
+			continue
+		}
+		if len(q["model"]) > 0 && !containsValue(q["model"], provenance[row.ConversationID].Model) {
+			continue
+		}
+		key := "all"
+		switch dim {
+		case "harness":
+			key = provenance[row.ConversationID].Harness
+		case "session_model":
+			key = provenance[row.ConversationID].Model
+		case "repo_id":
+			key = row.RepoID
+		case "plan":
+			key = planFromArtifactPath(row.Path)
+		case "scorer":
+			key = row.Scorer
+		case "screen_verdict":
+			screen, e := ts.t.ArtifactScreen(r.Context(), row.Hash)
+			if e != nil {
+				readFailed(w)
+				return
+			}
+			key = "unknown"
+			if screen != nil {
+				key = screen.Verdict
+			}
+		}
+		if byCheck[row.Check] == nil {
+			byCheck[row.Check] = map[string][]float64{}
+		}
+		byCheck[row.Check][key] = append(byCheck[row.Check][key], row.Score)
+	}
+	out := []map[string]any{}
+	for check := range checks {
+		if selectedCheck != "" && check != selectedCheck {
+			continue
+		}
+		groups := []scoreGroup{}
+		for key, values := range byCheck[check] {
+			groups = append(groups, scoreGroup{key: key, values: values})
+		}
+		sort.Slice(groups, func(i, j int) bool { return groups[i].key < groups[j].key })
+		allN := 0
+		allValues := []float64{}
+		for _, g := range groups {
+			allN += len(g.values)
+			allValues = append(allValues, g.values...)
+		}
+		start := min(offset, len(groups))
+		end := min(start+limit, len(groups))
+		page := make([]map[string]any, 0, end-start)
+		for _, g := range groups[start:end] {
+			sort.Float64s(g.values)
+			page = append(page, map[string]any{"key": g.key, "n": len(g.values), "min": round3(percentile(g.values, 0)), "p25": round3(percentile(g.values, .25)), "median": round3(percentile(g.values, .5)), "p75": round3(percentile(g.values, .75)), "max": round3(percentile(g.values, 1))})
+		}
+		var minScore, p25, median, p75, maxScore any
+		if allN > 0 {
+			sort.Float64s(allValues)
+			minScore, p25, median, p75, maxScore = round3(percentile(allValues, 0)), round3(percentile(allValues, .25)), round3(percentile(allValues, .5)), round3(percentile(allValues, .75)), round3(percentile(allValues, 1))
+		}
+		out = append(out, map[string]any{"name": check, "n": allN, "min": minScore, "p25": p25, "median": median, "p75": p75, "max": maxScore, "groups": page, "omitted_groups": len(groups) - (end - start), "omitted_n": func() int {
+			n := 0
+			for _, g := range groups[:start] {
+				n += len(g.values)
+			}
+			for _, g := range groups[end:] {
+				n += len(g.values)
+			}
+			return n
+		}()})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i]["name"].(string) < out[j]["name"].(string) })
+	resp := map[string]any{"kind": kind, "dim": dim, "checks": out, "offset": offset, "limit": limit}
+	if f.CohortSQL != "" {
+		pop, err := contentPopulation(r.Context(), r, ts, f, kind)
+		if err != nil {
+			readFailed(w)
+			return
+		}
+		resp["population"] = pop
+	}
+	addAnalyticsPartial(resp, ts)
+	writeJSON(w, 200, resp)
+}
+
+func containsValue(values []string, value string) bool {
+	for _, candidate := range values {
+		if candidate == value {
+			return true
+		}
+	}
+	return false
+}
+
+func scoreSessionProvenance(ctx context.Context, t *store.Tenant, ids []string) (map[string]store.SessionProvenance, error) {
+	out := make(map[string]store.SessionProvenance, len(ids))
+	for start := 0; start < len(ids); start += 500 {
+		end := min(start+500, len(ids))
+		batch, err := t.SessionProvenanceFor(ctx, ids[start:end])
+		if err != nil {
+			return nil, err
+		}
+		for id, provenance := range batch {
+			out[id] = provenance
+		}
+	}
+	return out, nil
+}
+
+func planFromArtifactPath(path string) string {
+	parts := strings.Split(strings.ReplaceAll(path, "\\", "/"), "/")
+	if len(parts) > 2 && parts[0] == "docs" && parts[1] == "plans" {
+		return parts[2]
+	}
+	return ""
 }
 
 func parseExecShapes(w http.ResponseWriter, q url.Values) ([]string, bool) {
@@ -395,7 +865,7 @@ func (s *Server) analyticsExecutions(w http.ResponseWriter, r *http.Request, _ s
 		errJSON(w, 400, "bucket must be day, week, or month")
 		return
 	}
-	f, ok := parseFilter(w, r, filterOpts{route: "executions", cur: cur, weeks: bucket == "week"})
+	f, ok := s.parseFilter(w, r, ts, filterOpts{route: "executions", cur: cur, weeks: bucket == "week"})
 	if !ok {
 		return
 	}
@@ -426,6 +896,22 @@ func (s *Server) analyticsExecutions(w http.ResponseWriter, r *http.Request, _ s
 		out = append(out, row{x.RepoID, x.Plan, x.ConversationID, x.BriefPath, x.Harness, x.Shape, rfc(x.TS)})
 	}
 	resp := map[string]any{"counts": cnt, "rows": out}
+	if f.CohortSQL != "" {
+		n := cnt["complete"] + cnt["unreported"] + cnt["started"]
+		scopeN, cohortN, err := cohortSessionCounts(r.Context(), ts.t, f)
+		if err != nil {
+			readFailed(w)
+			return
+		}
+		rel, err := cohortRelation(r.Context(), ts.t, f, false, scopeN, cohortN, true)
+		if err != nil {
+			readFailed(w)
+			return
+		}
+		resp["population"] = map[string]any{"grain": "execution", "unit": "repo_id,conversation_id,brief_path",
+			"scope_n": n, "cohort_n": n, "eligible_n": n, "returned_n": len(out),
+			"missing_by_reason": map[string]int{}, "relation": rel}
+	}
 	if bucket != "" {
 		series, err := ts.t.ExecutionsShapeSeries(r.Context(), f, bucket)
 		if err != nil {
@@ -448,6 +934,7 @@ func (s *Server) analyticsExecutions(w http.ResponseWriter, r *http.Request, _ s
 		resp["next"] = cursor{Route: "executions", Filter: canonFilter(r.URL.Query()), From: f.From.UnixNano(), To: f.To.UnixNano(),
 			TS: last.TS, Key: []string{last.ConversationID, last.BriefPath, last.RepoID}}.encode()
 	}
+	addAnalyticsPartial(resp, ts)
 	writeJSON(w, 200, resp)
 }
 
@@ -456,7 +943,7 @@ func (s *Server) analyticsConversations(w http.ResponseWriter, r *http.Request, 
 	if !ok {
 		return
 	}
-	f, ok := parseFilter(w, r, filterOpts{route: "conversations", cur: cur})
+	f, ok := s.parseFilter(w, r, ts, filterOpts{route: "conversations", cur: cur})
 	if !ok {
 		return
 	}
@@ -493,20 +980,50 @@ func (s *Server) analyticsConversations(w http.ResponseWriter, r *http.Request, 
 			x.ModelCalls, x.UnpricedCalls, x.CostUSD, x.TokensIn, x.TokensOut})
 	}
 	resp := map[string]any{"rows": out}
+	if f.CohortSQL != "" {
+		scopeN, cohortN, err := cohortSessionCounts(r.Context(), ts.t, f)
+		if err != nil {
+			readFailed(w)
+			return
+		}
+		rel, err := cohortRelation(r.Context(), ts.t, f, false, scopeN, cohortN, false)
+		if err != nil {
+			readFailed(w)
+			return
+		}
+		resp["population"] = sessionPopulation(scopeN, cohortN, len(out), rel)
+	}
 	if more {
 		last := rows[len(rows)-1]
 		resp["next"] = cursor{Route: "conversations", Filter: canonFilter(r.URL.Query()), From: f.From.UnixNano(), To: f.To.UnixNano(),
 			TS: last.LastTS, Key: []string{last.ConversationID}}.encode()
 	}
+	addAnalyticsPartial(resp, ts)
 	writeJSON(w, 200, resp)
 }
 
 func (s *Server) analyticsExplore(w http.ResponseWriter, r *http.Request, _ string, ts *tenantState) {
-	f, ok := parseFilter(w, r, filterOpts{})
+	limit, cur, ok := pageParams(w, r)
 	if !ok {
 		return
 	}
-	rows, truncated, err := ts.t.Explore(r.Context(), f, exploreCap)
+	if limit > exploreCap {
+		limit = exploreCap
+	}
+	f, ok := s.parseFilter(w, r, ts, filterOpts{route: "explore", cur: cur})
+	if !ok {
+		return
+	}
+	var ec *store.ExploreCursor
+	if cur != nil {
+		if len(cur.Key) != 2 {
+			errJSON(w, 400, "cursor mismatch")
+			return
+		}
+		ec = &store.ExploreCursor{TS: cur.TS, NS: cur.NS, Type: cur.Key[0], Key: cur.Key[1],
+			FactWatermark: cur.FactWatermark, RejectionWatermark: cur.RejectionWatermark}
+	}
+	rows, more, next, err := ts.t.ExplorePage(r.Context(), f, ec, limit)
 	if err != nil {
 		readFailed(w)
 		return
@@ -529,11 +1046,36 @@ func (s *Server) analyticsExplore(w http.ResponseWriter, r *http.Request, _ stri
 		ScreenVerdict  string   `json:"screen_verdict"`
 		RejectionStage string   `json:"rejection_stage"`
 		CostUSD        *float64 `json:"cost_usd,omitempty"`
+		Priced         *bool    `json:"priced,omitempty"`
 	}
 	out := make([]row, 0, len(rows))
 	for _, x := range rows {
+		var priced *bool
+		if x.Type == "hook_event" && x.NormEvent == "usage" {
+			p := x.Priced
+			priced = &p
+		}
 		out = append(out, row{x.Type, rfc(x.TS), x.Harness, x.RepoID, x.Plan, x.Kind, x.Event, x.Tool,
-			x.NormEvent, x.Model, x.Path, x.ConversationID, x.Source, x.SHA, x.ScreenVerdict, x.RejectionStage, x.CostUSD})
+			x.NormEvent, x.Model, x.Path, x.ConversationID, x.Source, x.SHA, x.ScreenVerdict, x.RejectionStage, x.CostUSD, priced})
 	}
-	writeJSON(w, 200, map[string]any{"rows": out, "truncated": truncated})
+	resp := map[string]any{"rows": out, "truncated": more}
+	if more && next != nil {
+		resp["next"] = cursor{Route: "explore", Filter: canonFilter(r.URL.Query()), From: f.From.UnixNano(), To: f.To.UnixNano(),
+			TS: next.TS, NS: next.NS, Key: []string{next.Type, next.Key}, FactWatermark: next.FactWatermark, RejectionWatermark: next.RejectionWatermark}.encode()
+	}
+	if f.CohortSQL != "" {
+		scopeN, cohortN, err := cohortSessionCounts(r.Context(), ts.t, f)
+		if err != nil {
+			readFailed(w)
+			return
+		}
+		rel, err := cohortRelation(r.Context(), ts.t, f, true, scopeN, cohortN, false)
+		if err != nil {
+			readFailed(w)
+			return
+		}
+		resp["population"] = sessionPopulation(scopeN, cohortN, 0, rel)
+	}
+	addAnalyticsPartial(resp, ts)
+	writeJSON(w, 200, resp)
 }

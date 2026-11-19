@@ -1,0 +1,61 @@
+/* P10 Cost panels. Only notes and labels: layout reuses trends.css and every
+   colour comes from the committed chart tokens, so a theme change is a re-read.
+   No chart animates and no colour value is duplicated here. */
+
+.p10-cost .p10-basis {
+  margin: 0.25rem 0 0.4rem;
+  font-size: 0.85rem;
+  color: var(--yk-chart-muted, #586579);
+}
+
+.p10-cost-chart {
+  display: block;
+  width: 100%;
+  min-height: 220px;
+}
+
+.p10-treemap .p10-cost-chart {
+  min-height: 320px;
+}
+
+.p10-pricing {
+  margin: 0.35rem 0 0.25rem;
+  padding: 0.35rem 0.5rem;
+  font-size: 0.85rem;
+  border-left: 3px solid var(--yk-chart-border, #d6dde7);
+  color: var(--yk-chart-text, #18212f);
+}
+
+.p10-pricing[data-state='lower-bound'],
+.p10-pricing[data-state='all-unpriced'] {
+  border-left-color: var(--yk-chart-warning, #b26b00);
+}
+
+.p10-pricing[data-state='priced-zero'] {
+  border-left-color: var(--yk-chart-muted, #586579);
+}
+
+.p10-cost table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+
+.p10-cost table caption {
+  text-align: left;
+  padding: 0.25rem 0;
+  color: var(--yk-chart-muted, #586579);
+}
+
+.p10-cost th,
+.p10-cost td {
+  padding: 0.2rem 0.4rem;
+  border-bottom: 1px solid var(--yk-chart-border, #d6dde7);
+  text-align: left;
+}
+
+.p10-cost th[data-numeric='true'],
+.p10-cost td[data-numeric='true'] {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}

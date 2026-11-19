@@ -226,6 +226,18 @@ func TestAdvisoryReads(t *testing.T) {
 		if m["kind"] != "design" {
 			t.Fatal(body)
 		}
+		code, content, body := getJSON(t, s, "ka", "/v1/baselines?kind=design&population=content&check=q.a")
+		if code != 200 || content["population"] != "content" {
+			t.Fatalf("content baseline: %d %s", code, body)
+		}
+		contentScorers := content["scorers"].(map[string]any)
+		if len(contentScorers) != 1 {
+			t.Fatalf("content baseline scorers=%v body=%s", contentScorers, body)
+		}
+		contentQ := contentScorers["fake"].(map[string]any)["q.a"].(map[string]any)
+		if contentQ["n"] != float64(6) || contentQ["median"] != float64(.4) {
+			t.Fatalf("content baseline q.a=%v body=%s", contentQ, body)
+		}
 		if code, _, _ := getJSON(t, s, "ka", "/v1/baselines"); code != 400 {
 			t.Fatalf("missing kind: %d", code)
 		}
@@ -235,6 +247,27 @@ func TestAdvisoryReads(t *testing.T) {
 		_, em, ebody := getJSON(t, s, "ka", "/v1/baselines?kind=report")
 		if strings.TrimSpace(ebody) != `{"checks":{},"kind":"report"}` {
 			t.Fatalf("empty kind: %v", em)
+		}
+	})
+
+	t.Run("content baseline latest scorer", func(t *testing.T) {
+		hash := keys.ContentHash([]byte("# one score=0.1 zebrafinch\n"))
+		tenant, err := s.tenant("a")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := tenant.t.Promote(context.Background(), hash, store.Screen{Verdict: "pass", Scorer: "rescored-v2"}, store.Score{Check: "q.a", Result: .1, Scorer: "rescored-v2"}); err != nil {
+			t.Fatal(err)
+		}
+		_, latest, body := getJSON(t, s, "ka", "/v1/baselines?kind=design&population=content&check=q.a&scorer=rescored-v2")
+		byScorer := latest["scorers"].(map[string]any)
+		q := byScorer["rescored-v2"].(map[string]any)["q.a"].(map[string]any)
+		if q["n"] != float64(1) || q["median"] != float64(.1) {
+			t.Fatalf("latest scorer baseline: %s", body)
+		}
+		_, old, body := getJSON(t, s, "ka", "/v1/baselines?kind=design&population=content&check=q.a&scorer=fake")
+		if old["scorers"].(map[string]any)["fake"].(map[string]any)["q.a"].(map[string]any)["n"] != float64(5) {
+			t.Fatalf("stale score revived into old scorer: %s", body)
 		}
 	})
 

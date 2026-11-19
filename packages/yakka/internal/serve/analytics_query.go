@@ -1,8 +1,11 @@
 package serve
 
 import (
+	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -11,12 +14,128 @@ import (
 )
 
 // The measure × dimension matrix and the bucket units, served verbatim (DESIGN.md plan 12).
-func (s *Server) analyticsSchema(w http.ResponseWriter, r *http.Request, _ string, _ *tenantState) {
+func (s *Server) analyticsSchema(w http.ResponseWriter, r *http.Request, _ string, ts *tenantState) {
+	if refuseCohort(w, r) {
+		return
+	}
 	measures := []map[string]any{}
 	for _, m := range store.Measures() {
 		measures = append(measures, map[string]any{"name": m.Name, "unit": m.Unit, "dims": m.Dims})
 	}
-	writeJSON(w, 200, map[string]any{"measures": measures, "buckets": store.Buckets})
+	coverage, err := ts.t.AnalyticsCoverage(r.Context())
+	if err != nil {
+		readFailed(w)
+		return
+	}
+	coverage["compaction"] = ts.t.CompactionState()
+	coverage["screen_gaps"] = ts.gaps.Load()
+	coverage["scorer_configured"] = s.screen != nil
+	if footprint, e := ts.t.Footprint(); e == nil {
+		coverage["pending"] = footprint.Pending
+	} else {
+		readFailed(w)
+		return
+	}
+	coverage["revisions"] = map[string]any{"pricing": nil, "catalogue": nil, "tool_kind": nil}
+	coverage["revision_gaps"] = map[string]string{"pricing": "embedded pricing table exposes source and fetched date but no revision identifier", "catalogue": "active catalogue is loaded as check data but has no stable revision identifier in serving configuration", "tool_kind": "tool-kind mapping is compiled from source and has no published revision identifier"}
+	artifactChecks, err := s.artifactChecks(r.Context(), ts.t)
+	if err != nil {
+		readFailed(w)
+		return
+	}
+	grains := map[string]map[string]any{
+		"artifact":  artifactGrainSchema(artifactChecks),
+		"plan":      map[string]any{"identity": []string{"repo_id", "plan"}, "modes": []string{"list"}, "measures": []string{"artifacts", "artifacts:<kind>", "versions", "sessions", "shared_sessions", "associated_cost_usd", "unpriced_calls", "executions_complete", "executions_unreported", "executions_started", "complete_share", "design_score:<check>", "span_days", "first_ts", "last_ts"}, "sort": []string{"last_ts", "first_ts", "artifacts", "artifacts:<kind>", "versions", "sessions", "shared_sessions", "associated_cost_usd", "unpriced_calls", "executions_complete", "executions_unreported", "executions_started", "complete_share", "design_score:<check>", "span_days"}, "order": []string{"<sort>:<direction>", "nulls last", "repo_id asc", "plan asc"}, "lenses": []string{"repo_id", "harness", "session_model"}, "time_basis": "in-window artifact facts; associated sessions require lifetime plan artifacts", "cost_additivity": "associated_cost_usd overlaps across plans"},
+		"execution": map[string]any{"identity": []string{"repo_id", "conversation_id", "brief_path"}, "modes": []string{"list"}, "measures": []string{"session_cost_usd", "brief_score:<check>", "report_score:<check>", "ts"}, "order": []string{"ts desc", "conversation_id asc", "brief_path asc", "repo_id asc"}, "lenses": []string{"shape", "plan", "repo_id", "harness", "session_model"}, "time_basis": "in-window brief versions", "shape": []string{"complete", "unreported", "started"}},
+		"time":      map[string]any{"identity": []string{"t", "tz"}, "modes": []string{"aggregate"}, "measures": measures, "lenses": []string{"id"}, "time_basis": "facts.ts; rejections.at", "null_rules": map[string]string{"cost_usd": "priced calls only; absent calls are zero", "session_repo": "unsupported for rejections"}},
+		"activity":  map[string]any{"identity": []string{"event_time", "type", "identity"}, "modes": []string{"list", "probe"}, "order": []string{"event_time desc", "type asc", "identity asc"}, "observations": []string{"session_start", "artifact_version", "brief_execution", "rejection"}, "probe_watermark": "receive time; includes late event-time arrivals"},
+		"session":   map[string]any{"identity": []string{"conversation_id"}, "modes": []string{"list", "scatter", "aggregate"}, "aggregate_stats": []string{"count", "sum", "percentiles", "histogram"}, "aggregate_fields": []string{"hook_events", "artifact_versions", "commits", "distinct_content", "model_calls", "unpriced_calls", "cost_usd", "tokens_in", "tokens_out", "tokens_cache_read", "tokens_cache_write", "tokens_reasoning", "first_ts", "last_ts", "duration_s"}, "aggregate_dimensions": []string{}, "measures": []string{"hook_events", "artifact_versions", "commits", "distinct_content", "model_calls", "unpriced_calls", "cost_usd", "tokens_in", "tokens_out", "tokens_cache_read", "tokens_cache_write", "tokens_reasoning", "first_ts", "last_ts", "duration_s"}, "scatter_fields": []string{"cost_usd", "tokens_in", "tokens_out", "tokens_cache_read", "tokens_cache_write", "tokens_reasoning"}, "lenses": []string{"harness", "session_model", "session_repo", "id"}, "time_basis": "in-window facts.ts; provenance is lifetime-derived", "cost_null_rules": map[string]any{"no_calls": 0, "all_unpriced": nil, "partial": "priced lower bound"}, "session_model": map[string]any{"threshold": 0.8, "mixed": "(mixed)", "none": "(none)", "unknown": "unknown"}, "session_repo": map[string]any{"single": "repo_id", "multi": "(multi)", "none": "(none)"}},
+		"content":   contentGrainSchema(),
+	}
+	for _, name := range []string{"session", "artifact", "content", "execution", "plan", "time"} {
+		grain := grains[name]
+		filters := store.CohortGrainFilters(name)
+		lensNames, undefined := grainPredicateLenses(name, filters)
+		grain["filters"] = filters
+		grain["predicate"] = map[string]any{"measures": grainMeasureNames(grain["measures"]), "lenses": lensNames, "undefined": undefined}
+	}
+	lenses := map[string]any{
+		"session_repo":  map[string]any{"grains": []string{"session"}, "cardinality": "single-valued", "values": []string{"(multi)", "(none)"}},
+		"session_model": map[string]any{"grains": []string{"session", "plan", "execution"}, "cardinality": "single-valued", "threshold": 0.8, "mixed": "(mixed)", "none": "(none)", "unknown": "unknown"},
+		"harness":       map[string]any{"grains": []string{"session", "plan", "execution"}, "cardinality": "mode", "tie": "lexicographically smallest", "observed_values": true},
+		"repo_id":       map[string]any{"grains": []string{"plan", "execution"}, "cardinality": "single-valued"},
+		"plan":          map[string]any{"grains": []string{"execution"}, "cardinality": "single-valued"},
+		"shape":         map[string]any{"grains": []string{"execution"}, "cardinality": "single-valued", "values": []string{"complete", "unreported", "started"}},
+	}
+	writeJSON(w, 200, map[string]any{
+		"measures": measures, "buckets": store.Buckets,
+		"resolutions": map[string]any{"auto": true, "year": true, "multi_year_steps": []int{2, 5, 10, 20, 50, 100, 200, 500, 1000}},
+		"budgets": map[string]any{"max_cells": 20000, "deadline_s": analyticsDeadline.Seconds(), "top_max": maxLimit,
+			"page_max": maxLimit, "scatter_points": 5000, "content_bytes": analyticsContentLimit, "explore_page_max": exploreCap, "heavy_read_concurrency": analyticsHeavyConcurrency,
+			"scope_elements": 64, "scope_values": 64, "value_bytes": map[string]int{"default": 256, "id": 1024},
+			"time_range": map[string]string{"min": minAnalyticsTime.Format(time.RFC3339Nano), "max": maxAnalyticsTime.Format(time.RFC3339Nano)}},
+		"grains": grains, "lenses": lenses, "coverage": coverage,
+		"features": map[string]bool{"bucket_auto": true, "entities_session": true, "entities_time": true, "entities_artifact": true, "entities_plan": true, "entities_execution": true, "exclude": true, "scores_by_lens": true, "artifact_content": true, "analytics_activity": true, "cohort": true},
+	})
+}
+
+// contentGrainSchema publishes the aggregate/cohort-only content grain. It is not a file
+// listing: one row is one scored-content observation for the selected kind and check.
+func contentGrainSchema() map[string]any {
+	return map[string]any{
+		"identity": []string{"content_hash"},
+		"modes":    []string{"aggregate"},
+		"routes":   map[string]string{"scores": "/v1/analytics/scores", "score_series": "/v1/analytics/score-series"},
+		"measures": []string{"score"},
+		"measure_metadata": map[string]any{"score": map[string]any{
+			"unit": "normalised score [0,1], higher better", "time_basis": "latest score per hash/check for the selected version", "null_rule": "null: unscored"}},
+		"aggregate_stats":      []string{"count", "sum", "percentiles", "histogram"},
+		"aggregate_fields":     []string{"score"},
+		"aggregate_dimensions": []string{"harness", "session_model", "repo_id", "plan", "scorer", "screen_verdict", "band"},
+		"lenses":               []string{"harness", "session_model", "repo_id", "plan", "scorer", "screen_verdict", "band", "id"},
+		"required":             map[string]string{"kind": "one selected kind", "check": "one selected check"},
+		"cohort_only":          true,
+		"time_basis":           "distinct tenant-local content hashes; the canonical representative file supplies the derived lenses",
+	}
+}
+
+// grainPredicateLenses publishes the 17.3.1 predicate lens subset from the same scope-filter
+// table the cohort resolver validates (store.CohortGrainFilters). At time grain only the bucket
+// identity is a predicate lens; every other filter is a defined-but-meaningless pair.
+func grainPredicateLenses(grain string, filters []string) ([]string, []map[string]string) {
+	if grain != "time" {
+		return append([]string{}, filters...), []map[string]string{}
+	}
+	undefined := []map[string]string{}
+	for _, name := range filters {
+		if name != "id" {
+			undefined = append(undefined, map[string]string{"name": name, "reason": "not_defined_for_grain"})
+		}
+	}
+	return []string{"id"}, undefined
+}
+
+// grainMeasureNames reads a published grain's measures, which are names for most grains and
+// name/unit objects for time.
+func grainMeasureNames(v any) []string {
+	out := []string{}
+	switch measures := v.(type) {
+	case []string:
+		out = append(out, measures...)
+	case []map[string]any:
+		for _, m := range measures {
+			if name, ok := m["name"].(string); ok {
+				out = append(out, name)
+			}
+		}
+	case []any:
+		for _, raw := range measures {
+			if name, ok := raw.(string); ok {
+				out = append(out, name)
+			}
+		}
+	}
+	return out
 }
 
 var queryBuckets = func() map[string]bool {
@@ -26,6 +145,8 @@ var queryBuckets = func() map[string]bool {
 	}
 	return m
 }()
+
+var privateYearBucket = regexp.MustCompile(`^year:(2|5|10|20|50|100|200|500|1000)$`)
 
 func knownMeasure(name string) bool {
 	for _, m := range store.Measures() {
@@ -54,12 +175,16 @@ func (s *Server) analyticsQuery(w http.ResponseWriter, r *http.Request, _ string
 		return
 	}
 	bucket := q.Get("bucket")
+	requestedBucket := bucket
 	if bucket == "" {
 		bucket = "none"
+		requestedBucket = "none"
 	}
-	if !queryBuckets[bucket] {
-		errJSON(w, 400, "unknown bucket "+bucket)
-		return
+	if !queryBuckets[bucket] && bucket != "year" && !privateYearBucket.MatchString(bucket) {
+		if bucket != "auto" {
+			errJSON(w, 400, "unknown bucket "+bucket)
+			return
+		}
 	}
 	top := 20
 	if v := q.Get("top"); v != "" {
@@ -74,15 +199,66 @@ func (s *Server) analyticsQuery(w http.ResponseWriter, r *http.Request, _ string
 		}
 		top = n
 	}
-	f, ok := parseFilter(w, r, filterOpts{query: true})
+	cellBudget := 20000
+	if v := q.Get("max_cells"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 1 {
+			errJSON(w, 400, "max_cells must be a positive integer")
+			return
+		}
+		cellBudget = min(n, cellBudget)
+	}
+	f, ok := s.parseFilter(w, r, ts, filterOpts{query: true})
 	if !ok {
 		return
 	}
-	if bucket != "none" && bucketSpan(f.From, f.To, bucket, f.TZ) > maxBuckets {
-		errJSON(w, 400, "range too wide")
+	f, window, empty, err := resolveRouteWindow(r.Context(), ts.t, []string{"measure:" + measure}, f)
+	if err != nil {
+		readFailed(w)
 		return
 	}
-	res, err := ts.t.Query(r.Context(), f, store.QueryParams{Measure: measure, Dims: dims, Bucket: bucket, Top: top})
+	if empty {
+		step := bucketStep(bucket)
+		if bucket == "auto" {
+			bucket = "none"
+			step = bucketStep(bucket)
+		}
+		out := map[string]any{"measure": measure, "bucket": bucket, "requested_bucket": requestedBucket,
+			"bucket_step": step, "coarsened": false, "cells": 0, "max_cells": cellBudget, "dims": nz(dims), "rows": []any{},
+			"window": window}
+		if f.CohortSQL != "" {
+			scopeN, cohortN, err := cohortSessionCounts(r.Context(), ts.t, f)
+			if err != nil {
+				readFailed(w)
+				return
+			}
+			rel, err := cohortRelation(r.Context(), ts.t, f, measure == "rejections", scopeN, cohortN, false)
+			if err != nil {
+				readFailed(w)
+				return
+			}
+			out["population"] = sessionPopulation(scopeN, cohortN, 0, rel)
+		}
+		addAnalyticsPartial(out, ts)
+		writeJSON(w, 200, out)
+		return
+	}
+	auto := bucket == "auto"
+	if auto {
+		bucket = resolveAutoBucket(f.From, f.To, f.TZ, cellBudget)
+	}
+	var res store.QueryResult
+	for {
+		res, err = ts.t.Query(r.Context(), f, store.QueryParams{Measure: measure, Dims: dims, Bucket: bucket, Top: top})
+		if err != nil || !auto || (!res.Truncated && len(res.Rows) <= cellBudget) || distinctSeries(res.Rows) > cellBudget {
+			break
+		}
+		next, _ := nextBucket(bucket)
+		if next == "none" {
+			break
+		}
+		bucket = next
+	}
 	if err != nil {
 		switch {
 		case errors.Is(err, store.ErrUnsupported):
@@ -94,6 +270,15 @@ func (s *Server) analyticsQuery(w http.ResponseWriter, r *http.Request, _ string
 		}
 		return
 	}
+	if res.Truncated || len(res.Rows) > cellBudget {
+		next, step := nextBucket(bucket)
+		if bucket == "none" || distinctSeries(res.Rows) > cellBudget {
+			errCodeJSON(w, 400, "too_many_series", "query exceeds the series budget", map[string]any{"max_cells": cellBudget, "suggested_top": max(1, top/2)})
+		} else {
+			errCodeJSON(w, 400, "too_many_cells", "query exceeds the cell budget", map[string]any{"max_cells": cellBudget, "suggested_bucket": next, "suggested_bucket_step": step})
+		}
+		return
+	}
 	rows := make([]map[string]any, 0, len(res.Rows))
 	for _, row := range res.Rows {
 		m := map[string]any{"k": nz(row.K), "v": row.V}
@@ -102,20 +287,95 @@ func (s *Server) analyticsQuery(w http.ResponseWriter, r *http.Request, _ string
 		}
 		rows = append(rows, m)
 	}
-	out := map[string]any{"measure": res.Measure, "bucket": res.Bucket, "dims": nz(res.Dims), "rows": rows}
+	step := bucketStep(bucket)
+	out := map[string]any{"measure": res.Measure, "bucket": res.Bucket, "requested_bucket": requestedBucket,
+		"bucket_step": step, "coarsened": requestedBucket == "auto" && res.Bucket != "hour",
+		"cells": len(rows), "max_cells": cellBudget, "dims": nz(res.Dims), "rows": rows,
+		"window": window}
 	if len(res.Ignored) > 0 {
 		out["ignored_filters"] = res.Ignored
 	}
-	if ts.t.CompactionState() != "complete" {
-		out["partial"] = true
+	if f.CohortSQL != "" {
+		scopeN, cohortN, err := cohortSessionCounts(r.Context(), ts.t, f)
+		if err != nil {
+			readFailed(w)
+			return
+		}
+		rel, err := cohortRelation(r.Context(), ts.t, f, measure == "rejections", scopeN, cohortN, false)
+		if err != nil {
+			readFailed(w)
+			return
+		}
+		out["population"] = sessionPopulation(scopeN, cohortN, 0, rel)
 	}
+	addAnalyticsPartial(out, ts)
 	if res.Truncated {
 		out["truncated"] = true
 	}
 	writeJSON(w, 200, out)
 }
 
-// bucketSpan counts the buckets a window touches for a unit; the caller caps it at maxBuckets.
+func distinctSeries(rows []store.QueryRow) int {
+	seen := make(map[string]struct{}, len(rows))
+	for _, row := range rows {
+		key, _ := json.Marshal(row.K)
+		seen[string(key)] = struct{}{}
+	}
+	return len(seen)
+}
+
+func resolveAutoBucket(from, to time.Time, loc *time.Location, budget int) string {
+	for _, bucket := range []string{"hour", "day", "week", "month"} {
+		if bucketSpan(from, to, bucket, loc) <= budget {
+			return bucket
+		}
+	}
+	if bucketSpan(from, to, "year", loc) <= budget {
+		return "year"
+	}
+	for _, step := range []int{2, 5, 10, 20, 50, 100, 200, 500, 1000} {
+		bucket := fmt.Sprintf("year:%d", step)
+		if bucketSpan(from, to, bucket, loc) <= budget {
+			return bucket
+		}
+	}
+	return "year:1000"
+}
+
+func nextBucket(bucket string) (string, int) {
+	switch bucket {
+	case "hour":
+		return "day", 1
+	case "day":
+		return "week", 1
+	case "week":
+		return "month", 1
+	case "month":
+		return "year", 1
+	case "year":
+		return "year:2", 2
+	default:
+		if n := bucketStep(bucket); n >= 2 && n < 1000 {
+			for _, step := range []int{2, 5, 10, 20, 50, 100, 200, 500, 1000} {
+				if step > n {
+					return fmt.Sprintf("year:%d", step), step
+				}
+			}
+		}
+		return "none", 1
+	}
+}
+
+func bucketStep(bucket string) int {
+	if strings.HasPrefix(bucket, "year:") {
+		n, _ := strconv.Atoi(strings.TrimPrefix(bucket, "year:"))
+		return n
+	}
+	return 1
+}
+
+// bucketSpan counts calendar buckets using civil and Unix arithmetic so multi-century
+// intervals do not overflow time.Duration.
 // Bucket boundaries follow the filter's location so the count matches the t the store emits.
 func bucketSpan(from, to time.Time, bucket string, loc *time.Location) int {
 	if loc == nil {
@@ -124,21 +384,27 @@ func bucketSpan(from, to time.Time, bucket string, loc *time.Location) int {
 	a, b := from.In(loc), to.In(loc)
 	switch bucket {
 	case "hour":
-		return int(b.Sub(a).Hours()) + 1
+		return int((b.Unix()-a.Unix())/3600) + 1
 	case "day":
-		ad := time.Date(a.Year(), a.Month(), a.Day(), 0, 0, 0, 0, loc)
-		bd := time.Date(b.Year(), b.Month(), b.Day(), 0, 0, 0, 0, loc)
-		return int(bd.Sub(ad).Hours()/24) + 1
+		return civilDayOrdinal(b) - civilDayOrdinal(a) + 1
 	case "week":
-		ad := mondayOf(a, loc)
-		bd := mondayOf(b, loc)
-		return int(bd.Sub(ad).Hours()/24)/7 + 1
+		return (civilDayOrdinal(mondayOf(b, loc))-civilDayOrdinal(mondayOf(a, loc)))/7 + 1
 	case "month":
 		am := time.Date(a.Year(), a.Month(), 1, 0, 0, 0, 0, loc)
 		bm := time.Date(b.Year(), b.Month(), 1, 0, 0, 0, 0, loc)
 		return (bm.Year()-am.Year())*12 + int(bm.Month()-am.Month()) + 1
+	case "year":
+		return b.Year() - a.Year() + 1
+	default:
+		if n := bucketStep(bucket); n >= 2 {
+			return b.Year()/n - a.Year()/n + 1
+		}
 	}
 	return 0
+}
+
+func civilDayOrdinal(t time.Time) int {
+	return int(time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, time.UTC).Unix() / 86400)
 }
 
 func mondayOf(t time.Time, loc *time.Location) time.Time {

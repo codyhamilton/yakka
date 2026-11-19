@@ -1,0 +1,123 @@
+/* Pulse preset: the five panels' presentation only. No animation or
+   transition; the shared frame and chart kit own state and focus styling. */
+
+.pulse-basis,
+.pulse-note {
+  margin: 0.35rem 0;
+  color: var(--yk-text-muted, #57606a);
+  font-size: 0.85rem;
+}
+
+.pulse-note {
+  border-left: 3px solid var(--yk-border, #d0d7de);
+  padding-left: 0.5rem;
+}
+
+.pulse-chooser {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin: 0.35rem 0.75rem 0.35rem 0;
+  font-size: 0.9rem;
+}
+
+.pulse-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0.5rem 0;
+}
+
+.pulse-table caption {
+  text-align: left;
+  color: var(--yk-text-muted, #57606a);
+  padding: 0.25rem 0;
+}
+
+.pulse-table th,
+.pulse-table td {
+  border-bottom: 1px solid var(--yk-border, #d0d7de);
+  padding: 0.35rem 0.5rem;
+  text-align: left;
+  vertical-align: top;
+}
+
+.pulse-table th.numeric,
+.pulse-table td.numeric {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.river-follow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem;
+  border: 1px solid var(--yk-border, #d0d7de);
+  border-radius: 6px;
+  margin-bottom: 0.5rem;
+}
+
+.river-follow-counts {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin: 0;
+  padding: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.river-follow-watermark,
+.river-follow-status {
+  flex-basis: 100%;
+  margin: 0.15rem 0;
+  color: var(--yk-text-muted, #57606a);
+  font-size: 0.85rem;
+}
+
+.river-lanes,
+.pulse-movers-bars,
+.pulse-calendar-matrix {
+  display: block;
+  width: 100%;
+}
+
+.pulse-movers-list {
+  display: grid;
+  gap: 1rem;
+}
+
+.pulse-mover-lens h3,
+.pulse-coverage-group h3 {
+  margin: 0.5rem 0 0.25rem;
+  font-size: 1rem;
+}
+
+.pulse-calendar-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0.5rem 0;
+}
+
+.pulse-preview[data-state="idle"] {
+  color: var(--yk-text-muted, #57606a);
+}
+
+.pulse-preview[data-state="preview"] {
+  font-weight: 600;
+}
+
+.pulse-coverage {
+  display: grid;
+  gap: 0.75rem;
+}
+
+@media (max-width: 900px) {
+  .pulse-table {
+    display: block;
+    overflow-x: auto;
+  }
+}

@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Chart foundations gallery</title>
+    <link rel="stylesheet" href="/css/charts.css">
+    <script type="module" src="/gallery/foundations.js"></script>
+  </head>
+  <body>
+    <main class="yk-foundations">
+      <h1>Chart foundations</h1>
+      <p><button id="theme-switch" type="button" aria-pressed="false">Switch to dark theme</button></p>
+
+      <section id="palette" aria-labelledby="palette-heading">
+        <h2 id="palette-heading">Palette tokens</h2>
+        <div id="hue-swatches" class="yk-swatch-grid" aria-label="Eight categorical hues"></div>
+        <div id="neutral-swatches" class="yk-swatch-grid" aria-label="Fixed neutral styles"></div>
+        <div id="cohort-swatches" class="yk-swatch-grid" aria-label="Cohort colours"></div>
+        <div id="status-swatches" class="yk-swatch-grid" aria-label="Status colours"></div>
+      </section>
+
+      <section id="registry" aria-labelledby="registry-heading">
+        <h2 id="registry-heading">Colour registry</h2>
+        <div id="registry-swatches" class="yk-swatch-grid" aria-label="Registered entity colours"></div>
+        <output id="registry-key" aria-label="Registry storage key"></output>
+      </section>
+
+      <section id="tooltip" aria-labelledby="tooltip-heading">
+        <h2 id="tooltip-heading">Tooltip</h2>
+        <div id="hitgrid" class="yk-hitgrid" aria-label="Hover or focus a key"></div>
+      </section>
+
+      <section id="legend" aria-labelledby="legend-heading">
+        <h2 id="legend-heading">Legend</h2>
+        <div id="legend-host"></div>
+      </section>
+
+      <section id="badges" aria-labelledby="badges-heading">
+        <h2 id="badges-heading">Badges</h2>
+        <div id="badges-host"></div>
+      </section>
+
+      <section id="table" aria-labelledby="table-heading">
+        <h2 id="table-heading">Accessible table</h2>
+        <div id="table-host"></div>
+      </section>
+
+      <section id="styles" aria-labelledby="styles-heading">
+        <h2 id="styles-heading">Constructable stylesheet</h2>
+        <div id="shadow-host" class="yk-chart-grid" aria-label="Shadow root host"></div>
+      </section>
+
+      <section id="frame" aria-labelledby="frame-heading">
+        <h2 id="frame-heading">Frame</h2>
+        <div class="yk-chart" data-chart="foundations" data-state="ready">
+          <p class="yk-chart-title">Daily events</p>
+          <p class="yk-chart-basis">time basis artifact/event facts.ts; scores latest known</p>
+        </div>
+      </section>
+
+      <output id="intent-log" aria-live="polite" data-last-intent="">No intent yet</output>
+    </main>
+  </body>
+</html>

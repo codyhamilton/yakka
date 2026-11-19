@@ -50,6 +50,17 @@ class Base(unittest.TestCase):
         e.update(extra)
         return e
 
+    def path_without_node(self):
+        d = os.path.join(self.tmp, "build-path")
+        os.makedirs(d)
+        tools = ("go", "git", "tr", "mktemp", "find", "cp", "mkdir", "rm",
+                 "sha256sum", "shasum", "sort", "mv", "dirname", "grep")
+        for name in tools:
+            source = os.path.join(GOBIN, name) if name == "go" else shutil.which(name)
+            if source and os.path.exists(source):
+                os.symlink(source, os.path.join(d, name))
+        return d
+
     def run_wrapper(self, args=("--version",), wrapper=WRAPPER, **kw):
         return subprocess.run(["bash", wrapper] + list(args), env=self.env(**kw),
                               capture_output=True, text=True, timeout=400)
@@ -77,14 +88,16 @@ class WrapperTests(Base):
         pydir = self.fake_python()
         r = self.run_wrapper(("drain",), go=False, PATH=pydir + ":" + SYS_PATH, YAKKA_PY_LOG=log)
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertIn("PY %s drain" % CLIENT, open(log).read())
+        with open(log) as fh:
+            self.assertIn("PY %s drain" % CLIENT, fh.read())
 
     def test_2_dispatches_mcp_to_python(self):
         log = os.path.join(self.tmp, "py.log")
         pydir = self.fake_python()
         r = self.run_wrapper(("mcp",), go=False, PATH=pydir + ":" + SYS_PATH, YAKKA_PY_LOG=log)
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertIn("PY %s mcp" % CLIENT, open(log).read())
+        with open(log) as fh:
+            self.assertIn("PY %s mcp" % CLIENT, fh.read())
 
     def test_3_version_via_python(self):
         pydir = self.fake_python()
@@ -134,12 +147,12 @@ class BuildTests(Base):
     def test_7_build_sh(self):
         out = os.path.join(self.tmp, "dist")
         sums = os.path.join(self.tmp, "SUMS")
-        npm = shutil.which("npm")
-        self.assertTrue(npm, "npm is needed to run build.sh")
         env = self.env(OUT_DIR=out, SUMS_FILE=sums)
-        env["PATH"] = os.path.dirname(npm) + ":" + env["PATH"]
-        env["npm_config_cache"] = os.environ.get("npm_config_cache") or os.path.expanduser("~/.npm")
-        r = subprocess.run(["bash", BUILD], env=env,
+        env["PATH"] = self.path_without_node()
+        env["GOMAXPROCS"] = "3"
+        self.assertIsNone(shutil.which("node", path=env["PATH"]))
+        self.assertIsNone(shutil.which("npm", path=env["PATH"]))
+        r = subprocess.run(["/bin/bash", BUILD], env=env,
                            capture_output=True, text=True, timeout=600, cwd=ROOT)
         self.assertEqual(r.returncode, 0, r.stderr)
         dirty = subprocess.run(["git", "status", "--porcelain", "packages/yakka/internal/serve/site"],
@@ -148,7 +161,8 @@ class BuildTests(Base):
         names = sorted(os.listdir(out))
         self.assertEqual(names, ["yakka-darwin-amd64", "yakka-darwin-arm64",
                                  "yakka-linux-amd64", "yakka-linux-arm64"])
-        lines = open(sums).read().splitlines()
+        with open(sums) as fh:
+            lines = fh.read().splitlines()
         self.assertEqual(len(lines), 4)
         self.assertEqual([l.split("  ")[1] for l in lines], names)
         c = subprocess.run(["sha256sum", "-c", sums], cwd=out, capture_output=True, text=True)
@@ -160,11 +174,57 @@ class BuildTests(Base):
             magic = data[:4]
             # The built site is embedded, not the placeholder (whose marker is also a Go string
             # constant, so assert on a built-asset path instead).
-            self.assertIn(b"site/_app/immutable", data, n)
+            self.assertIn(b"site/js/app.js", data, n)
+            self.assertIn(b"site/vendor/uplot-1.6.32/uPlot.esm.js", data, n)
+            self.assertNotIn(b"site/_headers", data, n)
             if "linux" in n:
                 self.assertEqual(magic, b"\x7fELF")
             else:
                 self.assertIn(magic, (b"\xcf\xfa\xed\xfe", b"\xca\xfe\xba\xbe"))
+
+    def test_8_build_sh_restores_placeholder_on_failure(self):
+        source = os.path.join(self.tmp, "bad-site")
+        os.makedirs(source)
+        with open(os.path.join(source, "index.html"), "w") as fh:
+            fh.write("<p>yakka-analytics-placeholder</p>")
+        env = self.env(SITE_SRC=source)
+        env["PATH"] = self.path_without_node()
+        self.assertIsNone(shutil.which("node", path=env["PATH"]))
+        self.assertIsNone(shutil.which("npm", path=env["PATH"]))
+        r = subprocess.run(["/bin/bash", BUILD], env=env, capture_output=True, text=True,
+                           timeout=30, cwd=ROOT)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("still the placeholder", r.stderr)
+        self.assert_placeholder_restored()
+
+        # Fail after the valid site has replaced site/: the exit trap must still restore it.
+        valid = os.path.join(self.tmp, "valid-site")
+        os.makedirs(os.path.join(valid, "js"))
+        with open(os.path.join(valid, "index.html"), "w") as fh:
+            fh.write("<!doctype html><script type=module src=/js/app.js></script>")
+        with open(os.path.join(valid, "js", "app.js"), "w") as fh:
+            fh.write("export {}")
+        fake_go = os.path.join(self.tmp, "build-path", "go")
+        os.unlink(fake_go)
+        with open(fake_go, "w") as fh:
+            fh.write("#!/bin/sh\necho 'fake go failure' >&2\nexit 1\n")
+        os.chmod(fake_go, 0o755)
+        env = self.env(SITE_SRC=valid, OUT_DIR=os.path.join(self.tmp, "dist"),
+                       SUMS_FILE=os.path.join(self.tmp, "SUMS"))
+        env["PATH"] = os.path.join(self.tmp, "build-path")
+        env["GOMAXPROCS"] = "3"
+        r = subprocess.run(["/bin/bash", BUILD], env=env, capture_output=True, text=True,
+                           timeout=30, cwd=ROOT)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("fake go failure", r.stderr)
+        self.assert_placeholder_restored()
+
+    def assert_placeholder_restored(self):
+        with open(os.path.join(ROOT, "packages/yakka/internal/serve/site/index.html")) as fh:
+            self.assertIn("yakka-analytics-placeholder", fh.read())
+        dirty = subprocess.run(["git", "status", "--porcelain", "packages/yakka/internal/serve/site"],
+                               capture_output=True, text=True, cwd=ROOT)
+        self.assertEqual(dirty.stdout, "")
 
 
 if __name__ == "__main__":

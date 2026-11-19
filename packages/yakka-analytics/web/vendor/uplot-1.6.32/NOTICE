@@ -1,0 +1,9 @@
+uPlot
+Version: 1.6.32
+Source: https://registry.npmjs.org/uplot/-/uplot-1.6.32.tgz
+License: MIT
+Reason: sole runtime chart dependency required by CONTRACTS.md 17.5; it has no transitive runtime dependencies.
+
+SHA-256:
+uPlot.esm.js  5dd9b3281aa64b461b42d9945f6adb2649d346502b12281a9ae0d46599a80eba
+uPlot.min.css df630c6a8d6f8eeaff264b50f73ce5b114f646ffd9a0bb74f049b0a00135fa04

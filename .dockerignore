@@ -14,6 +14,3 @@ bin/SHA256SUMS
 **/*_test.go
 **/*.test.ts
 **/*.spec.ts
-packages/yakka-analytics/test-results
-packages/yakka-analytics/playwright-report
-packages/yakka-analytics/.svelte-kit

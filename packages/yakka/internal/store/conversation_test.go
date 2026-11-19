@@ -74,7 +74,7 @@ func TestConversationTimeline(t *testing.T) {
 	if e := d.Events[1]; e.Tool != "Read" || e.Tokens != nil {
 		t.Errorf("event 1 = %#v", e)
 	}
-	if e := d.Events[2]; e.Tokens == nil || e.Tokens.In != 1000 || e.Tokens.Out != 50 || e.CostUSD == nil {
+	if e := d.Events[2]; e.Tokens == nil || e.Tokens.In != 1000 || e.Tokens.Out != 50 || e.CostUSD == nil || !e.Priced {
 		t.Errorf("event 2 = %#v", e)
 	} else if math.Abs(*e.CostUSD-0.00075) > 1e-12 {
 		t.Errorf("event 2 cost = %v, want 0.00075", *e.CostUSD)
@@ -88,6 +88,23 @@ func TestConversationTimeline(t *testing.T) {
 	if tot := d.Totals; tot.ModelCalls != 1 || tot.TokensIn != 1000 || tot.TokensOut != 50 ||
 		tot.UnpricedCalls != 0 || math.Abs(tot.CostUSD-0.00075) > 1e-12 {
 		t.Errorf("totals = %#v", tot)
+	}
+}
+
+func TestConversationUnpricedFlag(t *testing.T) {
+	tn := openT(t, Options{})
+	tm := float64(time.Date(2026, 9, 28, 10, 0, 0, 0, time.UTC).Unix())
+	row := cvFact(1, "hook_event", tm, FactRow{Type: "hook_event", ConversationID: "c1", Harness: "claude",
+		Event: "transcript.assistant_message", TS: tm, NormEvent: "usage", Model: "unknown-model", TokIn: 12})
+	if _, err := tn.Append(context.Background(), []FactRow{row}); err != nil {
+		t.Fatal(err)
+	}
+	d, ok, err := tn.Conversation(context.Background(), "c1", ConversationBounds{})
+	if err != nil || !ok || len(d.Events) != 1 {
+		t.Fatalf("Conversation: ok=%v n=%d err=%v", ok, len(d.Events), err)
+	}
+	if d.Events[0].CostUSD == nil || d.Events[0].Priced || d.Totals.UnpricedCalls != 1 {
+		t.Fatalf("unpriced event/totals: event=%+v totals=%+v", d.Events[0], d.Totals)
 	}
 }
 

@@ -1,0 +1,21 @@
+/* P10 Tools panels. Notes and labels only: layout and colour come from the
+   shared trends/cost styles, so this file declares no colour value. */
+
+.p10-tools .p10-basis,
+.p10-tools .p10-note {
+  margin: 0.25rem 0;
+  font-size: 0.85rem;
+  color: var(--yk-chart-muted);
+}
+
+.p10-tools .p10-tool-label {
+  font-weight: 600;
+}
+
+.p10-tools .p10-tools-note {
+  margin: 0.35rem 0 0.25rem;
+  padding: 0.3rem 0.5rem;
+  font-size: 0.85rem;
+  border-left: 3px solid var(--yk-chart-border);
+  color: var(--yk-chart-text);
+}

@@ -145,7 +145,9 @@ func (s *Server) oauthCallback(w http.ResponseWriter, r *http.Request) {
 // to pass to http.Redirect. A value that is not a path, or that contains a
 // byte net/http would drop from a cookie (backslash, controls), is "/".
 // Dropping those bytes would otherwise turn a leading slash into a
-// protocol-relative URL.
+// protocol-relative URL. Dot segments and empty segments are refused too:
+// browsers collapse "/foo/..//evil.example" and "/.//evil.example" into a
+// protocol-relative URL, which location.assign would leave this origin for.
 func oauthReturnPath(ret string) string {
 	const fallback = "/"
 	if ret == "" || cookieOctets(ret) != ret {
@@ -155,10 +157,36 @@ func oauthReturnPath(ret string) string {
 	if err != nil || u.IsAbs() || u.Host != "" {
 		return fallback
 	}
-	if !strings.HasPrefix(u.Path, "/") || strings.HasPrefix(u.Path, "//") || strings.Contains(u.Path, "\\") {
+	if !strings.HasPrefix(u.Path, "/") || strings.HasPrefix(u.Path, "//") || strings.Contains(u.Path, "\\") || returnPathCollapses(u.Path) {
 		return fallback
 	}
 	return ret
+}
+
+// returnPathCollapses reports paths a browser URL parser can turn into a
+// protocol-relative URL: empty segments ("//"), "." / ".." segments, and the
+// same forms written with percent-encoding.
+func returnPathCollapses(p string) bool {
+	if collapsingPath(p) {
+		return true
+	}
+	decoded, err := url.PathUnescape(p)
+	if err != nil {
+		return true
+	}
+	return decoded != p && (strings.Contains(decoded, "\\") || collapsingPath(decoded))
+}
+
+func collapsingPath(p string) bool {
+	if strings.Contains(p, "//") {
+		return true
+	}
+	for _, seg := range strings.Split(p, "/") {
+		if seg == "." || seg == ".." {
+			return true
+		}
+	}
+	return false
 }
 
 // cookieOctets is the subset net/http will keep in a cookie value.

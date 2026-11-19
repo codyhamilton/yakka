@@ -635,6 +635,10 @@ func TestOAuthReturnStaysOnOrigin(t *testing.T) {
 		{raw: "/\\/evil.example", want: "/"},
 		{raw: "/\t/evil.example", want: "/"},
 		{raw: "/\\evil.example", want: "/"},
+		{raw: "/foo/..//evil.example", want: "/"},
+		{raw: "/.//evil.example", want: "/"},
+		{raw: "/foo/%2e%2e//evil.example", want: "/"},
+		{raw: "/%2e%2e//evil.example", want: "/"},
 	}
 	for _, tc := range cases {
 		path := "/oauth/login"

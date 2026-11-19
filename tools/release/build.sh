@@ -15,11 +15,10 @@ else
   done
   [ -n "$GO" ] || { echo "build.sh: no Go toolchain" >&2; exit 1; }
 fi
-if command -v npm >/dev/null 2>&1; then NPM=$(command -v npm); else echo "build.sh: no Node toolchain" >&2; exit 1; fi
-PKG="$ROOT/packages/yakka-analytics"
 SITE="$ROOT/packages/yakka/internal/serve/site"
+SITE_SRC=${SITE_SRC:-$ROOT/packages/yakka-analytics/web}
 SAVE=$(mktemp -d "${TMPDIR:-/tmp}/build-site.XXXXXX")
-cp "$SITE/index.html" "$SAVE/index.html"
+git show HEAD:packages/yakka/internal/serve/site/index.html > "$SAVE/index.html"
 # Always leave site/ as the committed placeholder, whether the build succeeded or not.
 restore_site() {
   find "$SITE" -mindepth 1 -delete 2>/dev/null || true
@@ -27,18 +26,18 @@ restore_site() {
   rm -rf "$SAVE"
 }
 trap restore_site EXIT
-(cd "$PKG" && { [ -d node_modules ] || "$NPM" ci; } && "$NPM" run build) || { echo "build.sh: site build failed in $PKG" >&2; exit 1; }
-if [ ! -f "$PKG/build/index.html" ] || grep -q yakka-analytics-placeholder "$PKG/build/index.html"; then
-  echo "build.sh: $PKG/build/index.html is missing or still the placeholder" >&2; exit 1
+if [ ! -f "$SITE_SRC/index.html" ] || grep -q yakka-analytics-placeholder "$SITE_SRC/index.html"; then
+  echo "build.sh: $SITE_SRC/index.html is missing or still the placeholder" >&2; exit 1
 fi
 find "$SITE" -mindepth 1 -delete
-cp -R "$PKG/build/." "$SITE/"
+mkdir -p "$SITE"
+find "$SITE_SRC" -mindepth 1 -maxdepth 1 ! -name _headers -exec cp -R {} "$SITE/" \;
 COMMIT=$(git rev-parse --short=12 HEAD 2>/dev/null) || COMMIT=unknown
 mkdir -p "$OUT_DIR"
 OUT_ABS=$(cd "$OUT_DIR" && pwd -P)
 for os in linux darwin; do
   for arch in amd64 arm64; do
-    (cd packages/yakka && CGO_ENABLED=0 GOOS=$os GOARCH=$arch GOTOOLCHAIN=local "$GO" build -trimpath \
+    (cd packages/yakka && CGO_ENABLED=0 GOOS=$os GOARCH=$arch GOTOOLCHAIN=auto "$GO" build -trimpath \
       -ldflags "-X main.version=$VERSION -X main.commit=$COMMIT" \
       -o "$OUT_ABS/yakka-$os-$arch" ./cmd/yakka)
   done

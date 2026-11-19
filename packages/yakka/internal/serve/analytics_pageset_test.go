@@ -1,191 +1,264 @@
 package serve
 
-// TestAnalyticsPageSet is the env-gated page-load profiler for the two busiest dashboard pages.
-// Instead of the design's route x measure x dimension matrix (analytics_bench_test.go), it issues
-// exactly the request set Overview and Usage send for the 7d, 30d, 90d and All time presets against a
-// copy of the large ledger, then ranks the slowest calls and explains their query plans. It is
-// skipped unless YAKKA_BENCH_DIR names a tenant directory. The source is never opened or written:
-// openBenchCopy copies ledger.db into a temp dir and the copy is opened there.
+// TestAnalyticsPageSet and TestAnalyticsPageSetSmoke consume the request shapes recorded from the
+// shipped workspace boards (testdata/browser-request-shapes.json, written by 13-01). Each entry is
+// the exact method, path and query the browser sent for one board state, including the all-history
+// states, so the smoke can no longer rot against the deleted Overview/Usage pages.
 //
-// The request sets mirror the site as it stands (packages/yakka-analytics/src/routes/+page.svelte
-// and src/routes/usage/+page.svelte) with no filters: Overview sends one /analytics/summary, one
-// /analytics/query per spark measure (bucket picked by the site's 400-bucket rule), and one heatmap
-// /analytics/query (hook_events, weekday x hour_of_day, bucket none); Usage sends five by-model
-// /analytics/query calls (bucket none, top 20) plus cost and tokens over time. All time is the
-// 399-day clamp resolveWindow applies to both routes -- the pages do NOT send all=1 (see the report).
+// TestAnalyticsPageSetSmoke is ungated: it parses and validates the committed record, asserts its
+// pinned request count and SHA-256, generates the deterministic committed fixture ledger
+// (internal/analyticsfixture) into a temporary directory, and requires every recorded request to
+// return HTTP 200 or a documented capability refusal (HTTP 400 naming an unsupported dimension,
+// field, mode, check or scorer). The record was captured against the deterministic first-party
+// stub, whose advertised capability set is a superset of the Go server's, so a shape the Go server
+// explicitly refuses is the documented capability-degradation path, not rot. The smoke asserts the
+// exact served/refusal split and fails on any 5xx, unexpected 4xx, or refusal that does not name a
+// capability. Requests run at most four at a time, the concurrency the p95 contract was measured at.
 //
-// The site's `now` is stand-in by the ledger's max ts rounded up to the next hour, with tz=UTC, so
-// the windows are the same shape the page sends and the copied data is inside them.
+// TestAnalyticsPageSet is the opt-in profiler and is skipped unless YAKKA_PAGESET_PROFILE=fixture.
+// It selects the same committed fixture, classifies the full record, then times only the served
+// cases (one discarded warm-up plus pagesetRuns-1 samples); documented capability refusals are
+// excluded from timing. It reports the record's exact case count and the maximum p95 over the
+// served cases, and fails any case whose p95 exceeds the unchanged 500 ms contract (CONTRACTS.md
+// 12). EXPLAIN output is logged for the
+// slowest requests where it still applies; all-history requests have no explicit from/to window and
+// are reported as skipped rather than guessed. The fixture is test-only; a temporary copy is
+// generated under TMPDIR and removed with the test.
 
 import (
+	"bytes"
+	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"math"
+	"io"
 	"net/http"
 	"net/url"
 	"os"
-	"slices"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/codyhamilton/yakka/packages/yakka/internal/analyticsfixture"
+
+	_ "modernc.org/sqlite"
 )
 
 const (
-	pagesetTZ      = "UTC"
-	pagesetRuns    = 5
-	pagesetConc    = 4
-	pagesetSlowN   = 8
-	pagesetOutEnv  = "YAKKA_PAGESET_OUT"
-	pagesetMaxBuck = 400
+	pagesetRecordPath     = "testdata/browser-request-shapes.json"
+	pagesetRecordRequests = 75
+	pagesetRecordServed   = 61
+	pagesetRecordRefusals = 14
+	pagesetRecordSHA256   = "420015134d2d3ee8861ee97e449a06e7bed3268d30492e34cdcd0b74012a5c2c"
+	pagesetFixtureTenant  = "fixture-tenant"
+	pagesetRuns           = 5
+	pagesetConc           = 4
+	pagesetSlowN          = 8
+	pagesetP95MS          = 500.0
+	pagesetProfileEnv     = "YAKKA_PAGESET_PROFILE"
 )
 
-// The Overview spark tiles, in the order the page lists them (SPARKS in +page.svelte).
-var pagesetSparkMeasures = []string{
-	"conversations", "hook_events", "artifact_versions", "distinct_content",
-	"commits", "model_calls", "tokens_in", "cost_usd", "unpriced_calls",
+type recordedRequest struct {
+	Method string      `json:"method"`
+	Path   string      `json:"path"`
+	Query  [][2]string `json:"query"`
 }
 
-// The five Usage by-model measures (usage/+page.svelte).
-var pagesetUsageByModel = []string{
-	"cost_usd", "model_calls", "unpriced_calls", "tokens_in", "tokens_out",
+type recordedScenario struct {
+	Label    string            `json:"label"`
+	Route    string            `json:"route"`
+	Requests []recordedRequest `json:"requests"`
+}
+
+type recordedShapes struct {
+	Version   int                `json:"version"`
+	Note      string             `json:"note"`
+	Scenarios []recordedScenario `json:"scenarios"`
 }
 
 type pageRequest struct {
-	Page   string
-	Preset string
-	Path   string
+	Name string
+	Path string
 }
 
-func pagesetParams(path string) string {
-	if i := strings.IndexByte(path, '?'); i >= 0 {
-		return path[i+1:]
+func (r recordedRequest) urlPath() string {
+	v := url.Values{}
+	for _, kv := range r.Query {
+		v.Add(kv[0], kv[1])
 	}
-	return ""
-}
-
-type pagesetPreset struct {
-	Name     string
-	From, To time.Time
-}
-
-// pagesetPresets mirrors the four presets the site resolves against `now`, rounded up to the next
-// full hour (presetWindow). The brief cites 7d, 30d, 90d and All time; All time is the same 399-day
-// clamp both pages substitute for all=1 on /query.
-func pagesetPresets(to time.Time) []pagesetPreset {
-	to = to.UTC().Truncate(time.Hour).Add(time.Hour)
-	return []pagesetPreset{
-		{"7d", to.Add(-7 * 24 * time.Hour), to},
-		{"30d", to.Add(-30 * 24 * time.Hour), to},
-		{"90d", to.Add(-90 * 24 * time.Hour), to},
-		{"all", to.Add(-399 * 24 * time.Hour), to},
+	if len(v) == 0 {
+		return r.Path
 	}
+	return r.Path + "?" + v.Encode()
 }
 
-// pagesetRequests is every request one Overview load and one Usage load issues for a preset.
-func pagesetRequests(to time.Time) []pageRequest {
-	var out []pageRequest
-	for _, p := range pagesetPresets(to) {
-		out = append(out, pagesetOverview(p)...)
-		out = append(out, pagesetUsage(p)...)
+// loadPagesetRecord reads the committed browser record with a strict parser, verifies the pinned
+// digest and request count, and validates every entry before any request is issued.
+func loadPagesetRecord(t *testing.T) recordedShapes {
+	t.Helper()
+	b, err := os.ReadFile(pagesetRecordPath)
+	if err != nil {
+		t.Fatalf("read committed browser record: %v", err)
 	}
-	return out
-}
-
-func pagesetWindow(v url.Values, p pagesetPreset) {
-	v.Set("tz", pagesetTZ)
-	v.Set("from", p.From.Format(time.RFC3339))
-	v.Set("to", p.To.Format(time.RFC3339))
-}
-
-func pagesetOverview(p pagesetPreset) []pageRequest {
-	var out []pageRequest
-	sv := url.Values{}
-	pagesetWindow(sv, p)
-	out = append(out, pageRequest{"overview", p.Name, "/v1/analytics/summary?" + sv.Encode()})
-	b := pagesetBucket(p.From, p.To, []string{"hour", "day", "week", "month"})
-	for _, m := range pagesetSparkMeasures {
-		q := url.Values{}
-		pagesetWindow(q, p)
-		q.Set("measure", m)
-		q.Set("bucket", b)
-		out = append(out, pageRequest{"overview", p.Name, "/v1/analytics/query?" + q.Encode()})
+	sum := sha256.Sum256(b)
+	if got := hex.EncodeToString(sum[:]); got != pagesetRecordSHA256 {
+		t.Fatalf("browser record digest %s, want %s", got, pagesetRecordSHA256)
 	}
-	h := url.Values{}
-	pagesetWindow(h, p)
-	h.Set("measure", "hook_events")
-	h.Add("dim", "weekday")
-	h.Add("dim", "hour_of_day")
-	h.Set("bucket", "none")
-	out = append(out, pageRequest{"overview", p.Name, "/v1/analytics/query?" + h.Encode()})
-	return out
-}
-
-func pagesetUsage(p pagesetPreset) []pageRequest {
-	var out []pageRequest
-	b := pagesetBucket(p.From, p.To, nil)
-	for _, m := range pagesetUsageByModel {
-		q := url.Values{}
-		pagesetWindow(q, p)
-		q.Set("measure", m)
-		q.Set("dim", "model")
-		q.Set("top", "20")
-		q.Set("bucket", "none")
-		out = append(out, pageRequest{"usage", p.Name, "/v1/analytics/query?" + q.Encode()})
+	dec := json.NewDecoder(bytes.NewReader(b))
+	dec.DisallowUnknownFields()
+	var rec recordedShapes
+	if err := dec.Decode(&rec); err != nil {
+		t.Fatalf("parse committed browser record: %v", err)
 	}
-	c := url.Values{}
-	pagesetWindow(c, p)
-	c.Set("measure", "cost_usd")
-	c.Set("dim", "model")
-	c.Set("bucket", b)
-	out = append(out, pageRequest{"usage", p.Name, "/v1/analytics/query?" + c.Encode()})
-	tk := url.Values{}
-	pagesetWindow(tk, p)
-	tk.Set("measure", "tokens_out")
-	tk.Set("bucket", b)
-	out = append(out, pageRequest{"usage", p.Name, "/v1/analytics/query?" + tk.Encode()})
-	return out
-}
-
-// pagesetBucket mirrors the site's pickBucket: the finest bucket whose upper-bound count fits 400.
-func pagesetBucket(from, to time.Time, allowed []string) string {
-	for _, b := range []string{"hour", "day", "week", "month"} {
-		if allowed != nil && !slices.Contains(allowed, b) {
-			continue
+	var extra any
+	if err := dec.Decode(&extra); !errors.Is(err, io.EOF) {
+		t.Fatalf("browser record has trailing data: %v", err)
+	}
+	if rec.Version != 1 {
+		t.Fatalf("browser record version %d, want 1", rec.Version)
+	}
+	if len(rec.Scenarios) == 0 {
+		t.Fatal("browser record has no scenarios")
+	}
+	total, allHistory := 0, 0
+	for _, s := range rec.Scenarios {
+		if s.Label == "" || !strings.HasPrefix(s.Route, "/b/") {
+			t.Fatalf("scenario %q has bad label or route %q", s.Label, s.Route)
 		}
-		if pagesetBucketCount(b, from, to) <= pagesetMaxBuck {
-			return b
+		if len(s.Requests) == 0 {
+			t.Fatalf("scenario %q has no requests", s.Label)
+		}
+		for _, r := range s.Requests {
+			if r.Method != http.MethodGet {
+				t.Fatalf("%s: method %q, want GET", s.Label, r.Method)
+			}
+			if !strings.HasPrefix(r.Path, "/v1/analytics/") {
+				t.Fatalf("%s: path %q is not an analytics route", s.Label, r.Path)
+			}
+			for _, kv := range r.Query {
+				if kv[0] == "" {
+					t.Fatalf("%s: empty query key", s.Label)
+				}
+				if kv[0] == "all" && kv[1] == "1" {
+					allHistory++
+				}
+			}
+			total++
 		}
 	}
-	return "month"
+	if total != pagesetRecordRequests {
+		t.Fatalf("browser record has %d requests, want pinned %d", total, pagesetRecordRequests)
+	}
+	if allHistory == 0 {
+		t.Fatal("browser record has no canonical all=1 request")
+	}
+	t.Logf("browser record: %d scenarios, %d requests, %d all=1", len(rec.Scenarios), total, allHistory)
+	return rec
 }
 
-func pagesetBucketCount(bucket string, from, to time.Time) int {
-	ms := to.Sub(from)
-	switch bucket {
-	case "hour":
-		return int(math.Ceil(float64(ms)/float64(time.Hour))) + 2
-	case "day":
-		return int(math.Ceil(float64(ms)/float64(24*time.Hour))) + 2
-	case "week":
-		return int(math.Ceil(float64(ms)/float64(7*24*time.Hour))) + 2
-	case "month":
-		am := time.Date(from.Year(), from.Month(), 1, 0, 0, 0, 0, from.Location())
-		bm := time.Date(to.Year(), to.Month(), 1, 0, 0, 0, 0, to.Location())
-		return (bm.Year()-am.Year())*12 + int(bm.Month()-am.Month()) + 3
+func pagesetCases(rec recordedShapes) []pageRequest {
+	var out []pageRequest
+	for _, s := range rec.Scenarios {
+		for i, r := range s.Requests {
+			out = append(out, pageRequest{
+				Name: fmt.Sprintf("%s#%d", s.Label, i),
+				Path: r.urlPath(),
+			})
+		}
 	}
-	return 0
+	return out
+}
+
+// pagesetFixtureServer generates the deterministic committed fixture into a temporary directory and
+// returns a handler whose only tenant is fixture-tenant, the tenant the recorded shapes name.
+func pagesetFixtureServer(t *testing.T) *benchHarness {
+	t.Helper()
+	data := t.TempDir()
+	dst := filepath.Join(data, pagesetFixtureTenant)
+	if _, err := analyticsfixture.Create(context.Background(), dst); err != nil {
+		t.Fatalf("generate analytics fixture: %v", err)
+	}
+	s := New(Config{Data: data, Keys: []KeyPair{{pagesetFixtureTenant, benchKey}}}, Options{DisableWorker: true})
+	t.Cleanup(func() { s.Close() })
+	ts, err := s.tenant(pagesetFixtureTenant)
+	if err != nil {
+		t.Fatal(err)
+	}
+	db, err := sql.Open("sqlite", "file:"+filepath.Join(dst, "ledger.db")+
+		"?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	db.SetMaxOpenConns(1)
+	t.Cleanup(func() { db.Close() })
+	return &benchHarness{srv: s, h: s.Handler(), ts: ts, db: db}
 }
 
 type pagesetResult struct {
+	name string
 	path string
 	d    time.Duration
 	code int
+	body string
 }
 
-// pagesetRunOnce issues every request of one page load with the site's concurrency of 4.
+// pagesetCapabilityRefusal reports whether a response is the documented capability-degradation
+// path: HTTP 400 whose error names an unsupported dimension, field, mode, check or scorer (or an
+// unknown check/scorer, which the score routes use). Any other status, or a 400 whose message does
+// not name a capability, is a failure rather than a refusal.
+func pagesetCapabilityRefusal(status int, body string) bool {
+	if status != http.StatusBadRequest {
+		return false
+	}
+	var payload struct {
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal([]byte(body), &payload); err != nil {
+		return false
+	}
+	msg := strings.ToLower(payload.Error)
+	if strings.Contains(msg, "unsupported") {
+		for _, cap := range []string{"dimension", "field", "mode", "check", "scorer"} {
+			if strings.Contains(msg, cap) {
+				return true
+			}
+		}
+	}
+	if strings.Contains(msg, "unknown") {
+		for _, cap := range []string{"check", "scorer"} {
+			if strings.Contains(msg, cap) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// pagesetClassify issues the full recorded set once and separates served (200) cases from
+// documented capability refusals. It fails on any 5xx, unexpected 4xx, or unnamed refusal. The
+// served slice preserves record order.
+func pagesetClassify(t *testing.T, h *benchHarness, reqs []pageRequest) (served []pageRequest, refused int) {
+	t.Helper()
+	for _, r := range pagesetRunOnce(t, h, reqs) {
+		switch {
+		case r.code == http.StatusOK:
+			served = append(served, pageRequest{Name: r.name, Path: r.path})
+		case pagesetCapabilityRefusal(r.code, r.body):
+			refused++
+		default:
+			t.Errorf("%s %s: status %d: %s", r.name, r.path, r.code, r.body)
+		}
+	}
+	return served, refused
+}
+
+// pagesetRunOnce issues every request with the p95 contract's concurrency of 4.
 func pagesetRunOnce(t *testing.T, h *benchHarness, reqs []pageRequest) []pagesetResult {
 	res := make([]pagesetResult, len(reqs))
 	var wg sync.WaitGroup
@@ -197,8 +270,8 @@ func pagesetRunOnce(t *testing.T, h *benchHarness, reqs []pageRequest) []pageset
 			sem <- struct{}{}
 			defer func() { <-sem }()
 			start := time.Now()
-			code, _ := do(t, h.h, http.MethodGet, reqs[i].Path, benchKey, "")
-			res[i] = pagesetResult{reqs[i].Path, time.Since(start), code}
+			code, body := do(t, h.h, http.MethodGet, reqs[i].Path, benchKey, "")
+			res[i] = pagesetResult{reqs[i].Name, reqs[i].Path, time.Since(start), code, body}
 		}(i)
 	}
 	wg.Wait()
@@ -206,147 +279,135 @@ func pagesetRunOnce(t *testing.T, h *benchHarness, reqs []pageRequest) []pageset
 }
 
 type pagesetTiming struct {
-	page, preset, path string
-	status             int
-	p50, max           time.Duration
-	samples            int
+	name, path string
+	status     int
+	p95, max   time.Duration
+	samples    int
+	body       string
 }
 
-// pagesetMeasure runs a page's set pagesetRuns times, discards the first run and ranks by p50.
+// pagesetMeasure times each case pagesetRuns times, discards the first run and ranks by p95.
+// Cases are keyed by their recorded position, so duplicate request paths stay distinct cases.
 func pagesetMeasure(t *testing.T, h *benchHarness, reqs []pageRequest) []pagesetTiming {
-	byPath := map[string][]time.Duration{}
-	status := map[string]int{}
+	times := make([][]time.Duration, len(reqs))
+	status := make([]int, len(reqs))
+	bodies := make([]string, len(reqs))
 	for run := 0; run < pagesetRuns; run++ {
-		for _, r := range pagesetRunOnce(t, h, reqs) {
+		for i, r := range pagesetRunOnce(t, h, reqs) {
 			if run == 0 {
 				continue
 			}
-			byPath[r.path] = append(byPath[r.path], r.d)
-			status[r.path] = r.code
+			times[i] = append(times[i], r.d)
+			status[i] = r.code
+			bodies[i] = r.body
 		}
 	}
-	meta := map[string]pageRequest{}
-	for _, r := range reqs {
-		meta[r.Path] = r
-	}
-	out := make([]pagesetTiming, 0, len(byPath))
-	for path, ds := range byPath {
-		sort.Slice(ds, func(i, j int) bool { return ds[i] < ds[j] })
+	out := make([]pagesetTiming, 0, len(reqs))
+	for i := range reqs {
+		sort.Slice(times[i], func(a, b int) bool { return times[i][a] < times[i][b] })
 		out = append(out, pagesetTiming{
-			page: meta[path].Page, preset: meta[path].Preset, path: path,
-			status: status[path], p50: nearestRank(ds, 0.5), max: ds[len(ds)-1], samples: len(ds),
+			name: reqs[i].Name, path: reqs[i].Path, status: status[i],
+			p95: nearestRank(times[i], 0.95), max: times[i][len(times[i])-1],
+			samples: len(times[i]), body: bodies[i],
 		})
 	}
 	sort.Slice(out, func(i, j int) bool {
-		if out[i].p50 != out[j].p50 {
-			return out[i].p50 > out[j].p50
+		if out[i].p95 != out[j].p95 {
+			return out[i].p95 > out[j].p95
 		}
-		return out[i].path < out[j].path
+		return out[i].name < out[j].name
 	})
 	return out
 }
 
 func pagesetMS(d time.Duration) float64 { return float64(d) / float64(time.Millisecond) }
 
-// TestAnalyticsPageSet is the env-gated profiler (skipped unless YAKKA_BENCH_DIR is set).
+// TestAnalyticsPageSet is the opt-in profiler (skipped unless YAKKA_PAGESET_PROFILE=fixture).
 func TestAnalyticsPageSet(t *testing.T) {
-	src := os.Getenv("YAKKA_BENCH_DIR")
-	if src == "" {
-		t.Skip("set YAKKA_BENCH_DIR to a tenant directory to profile the page request sets")
+	if os.Getenv(pagesetProfileEnv) != "fixture" {
+		t.Skip("set YAKKA_PAGESET_PROFILE=fixture to profile the recorded page request shapes")
 	}
-	if err := benchLiveRefused(src); err != nil {
-		t.Fatal(err)
+	rec := loadPagesetRecord(t)
+	all := pagesetCases(rec)
+	if len(all) != pagesetRecordRequests {
+		t.Fatalf("record has %d cases, want the recorded request count %d", len(all), pagesetRecordRequests)
 	}
-	h := openBenchCopy(t, src)
-	to := benchMaxTS(t, h.db)
-	if to.IsZero() {
-		t.Skip("ledger has no facts")
+	h := pagesetFixtureServer(t)
+	served, refused := pagesetClassify(t, h, all)
+	if len(served)+refused != len(all) {
+		t.Fatalf("classified %d served + %d refused, want %d recorded cases", len(served), refused, len(all))
 	}
-	reqs := pagesetRequests(to)
-	timings := pagesetMeasure(t, h, reqs)
+	timings := pagesetMeasure(t, h, served)
+	if len(timings) != len(served) {
+		t.Fatalf("profiled %d cases, want %d served cases", len(timings), len(served))
+	}
+	t.Logf("page request-set profile: %d recorded cases across %d scenarios; %d served cases timed, %d documented capability refusals excluded; %d timed runs each, concurrency %d, bound p95<=%.0fms, fixture %s",
+		len(all), len(rec.Scenarios), len(served), refused, pagesetRuns-1, pagesetConc, pagesetP95MS, pagesetFixtureTenant)
 
-	t.Logf("page request-set profile: %d distinct requests, %d timed runs each, concurrency %d, source %s",
-		len(timings), pagesetRuns-1, pagesetConc, src)
+	maxP95 := 0.0
 	for _, tm := range timings {
-		t.Logf("%-8s %-4s p50=%7.1fms max=%7.1fms status=%d %s",
-			tm.page, tm.preset, pagesetMS(tm.p50), pagesetMS(tm.max), tm.status, tm.path)
+		ms := pagesetMS(tm.p95)
+		if ms > maxP95 {
+			maxP95 = ms
+		}
+		t.Logf("%-24s p95=%7.1fms max=%7.1fms status=%d %s",
+			tm.name, ms, pagesetMS(tm.max), tm.status, tm.path)
 		if tm.status != 200 {
-			t.Errorf("%s %s returned %d: %s", tm.page, tm.preset, tm.status, tm.path)
+			t.Errorf("%s returned %d: %s", tm.name, tm.status, tm.body)
+		}
+		if ms > pagesetP95MS {
+			t.Errorf("%s p95 %.1f ms over %.0f ms", tm.name, ms, pagesetP95MS)
 		}
 	}
+	t.Logf("max p95 %.1f ms across %d cases (bound %.0f ms)", maxP95, len(timings), pagesetP95MS)
 
-	type pagesetJSON struct {
-		Path   string   `json:"path"`
-		Params string   `json:"params"`
-		Page   string   `json:"page"`
-		Preset string   `json:"preset"`
-		P50MS  float64  `json:"p50_ms"`
-		MaxMS  float64  `json:"max_ms"`
-		Status int      `json:"status"`
-		Plan   []string `json:"explain_query_plan,omitempty"`
-	}
-	base := make([]pagesetJSON, 0, len(timings))
-	for _, tm := range timings {
-		base = append(base, pagesetJSON{tm.path, pagesetParams(tm.path), tm.page, tm.preset, pagesetMS(tm.p50), pagesetMS(tm.max), tm.status, nil})
-	}
 	n := pagesetSlowN
-	if n > len(base) {
-		n = len(base)
+	if n > len(timings) {
+		n = len(timings)
 	}
-	slowest := make([]pagesetJSON, n)
-	copy(slowest, base[:n])
-	for i := range slowest {
-		plan, err := pagesetExplain(h.db, slowest[i].Path)
-		if err != nil {
-			t.Errorf("explain %s: %v", slowest[i].Path, err)
+	for i := 0; i < n; i++ {
+		tm := timings[i]
+		if !pagesetExplainable(tm.path) {
+			t.Logf("plan %s: skipped (no explicit from/to window or route)", tm.path)
 			continue
 		}
-		slowest[i].Plan = plan
-		t.Logf("plan %s:\n  %s", slowest[i].Path, strings.Join(plan, "\n  "))
-	}
-
-	if out := os.Getenv(pagesetOutEnv); out != "" {
-		doc := struct {
-			Generated string        `json:"generated"`
-			Presets   []string      `json:"presets"`
-			Requests  []pagesetJSON `json:"requests"`
-			Slowest   []pagesetJSON `json:"slowest"`
-		}{
-			Generated: time.Now().UTC().Format(time.RFC3339),
-			Presets:   []string{"7d", "30d", "90d", "all"},
-			Requests:  base,
-			Slowest:   slowest,
-		}
-		b, err := json.MarshalIndent(doc, "", "  ")
+		plan, err := pagesetExplain(h.db, tm.path)
 		if err != nil {
-			t.Fatal(err)
+			t.Errorf("explain %s: %v", tm.name, err)
+			continue
 		}
-		if err := os.WriteFile(out, append(b, '\n'), 0o644); err != nil {
-			t.Fatalf("write %s: %v", pagesetOutEnv, err)
-		}
-		t.Logf("wrote %s", out)
+		t.Logf("plan %s:\n  %s", tm.path, strings.Join(plan, "\n  "))
 	}
 }
 
-// TestAnalyticsPageSetSmoke is the ungated self-test: on the small bench fixture it asserts the
-// request list is non-empty and every request the pages send returns 200, so this file cannot rot.
+// TestAnalyticsPageSetSmoke is the ungated self-test: on the deterministic committed fixture it
+// requires every recorded request to return 200 or a documented capability refusal and asserts the
+// exact served/refusal split, so the record cannot rot unnoticed.
 func TestAnalyticsPageSetSmoke(t *testing.T) {
-	src := benchFixtureSource(t)
-	h := openBenchCopy(t, src)
-	to := benchMaxTS(t, h.db)
-	if to.IsZero() {
-		t.Fatal("fixture has no facts")
+	rec := loadPagesetRecord(t)
+	reqs := pagesetCases(rec)
+	if len(reqs) != pagesetRecordRequests {
+		t.Fatalf("built %d cases, want the recorded request count %d", len(reqs), pagesetRecordRequests)
 	}
-	reqs := pagesetRequests(to)
-	if len(reqs) == 0 {
-		t.Fatal("page request set is empty")
+	h := pagesetFixtureServer(t)
+	served, refused := pagesetClassify(t, h, reqs)
+	if len(served) != pagesetRecordServed || refused != pagesetRecordRefusals {
+		t.Errorf("200/refusal split = %d/%d, want %d/%d over %d recorded requests",
+			len(served), refused, pagesetRecordServed, pagesetRecordRefusals, len(reqs))
 	}
-	for _, r := range reqs {
-		code, body := do(t, h.h, http.MethodGet, r.Path, benchKey, "")
-		if code != 200 {
-			t.Errorf("%s %s: status %d: %s", r.Page, r.Path, code, body)
-		}
+	t.Logf("browser record smoke: %d requests across %d scenarios = %d served (200) + %d documented capability refusals (400)",
+		len(reqs), len(rec.Scenarios), len(served), refused)
+}
+
+func pagesetExplainable(path string) bool {
+	u, err := url.Parse(path)
+	if err != nil {
+		return false
 	}
+	if u.Query().Get("from") == "" || u.Query().Get("to") == "" {
+		return false
+	}
+	return strings.HasSuffix(u.Path, "/query") || strings.HasSuffix(u.Path, "/summary")
 }
 
 // The EXPLAIN helpers reproduce, for the slowest requests only, the SQL the store runs so its plan
