@@ -478,7 +478,9 @@ export class YkChart extends HTMLElement {
       },
       onLeave: () => tooltip.hide(),
       onInspect: (point, index) => this.#inspectScatterPoint(point, index),
-      onSelection: detail => this.#onScatterSelection(detail)
+      onSelection: detail => this.#onScatterSelection(detail),
+      onMarkSelection: detail => this.#onSelectionIntent(detail),
+      onSelectMode: value => { this.#selectMode = value; }
     });
 
     this.#composeScatterLegend(root, groups);

@@ -344,3 +344,48 @@ func TestArtifactBandPrecisionAndSupportedOperations(t *testing.T) {
 		t.Errorf("revived score=%v", out)
 	}
 }
+
+func TestArtifactBandCheckExcludeChangesPopulation(t *testing.T) {
+	s, ts := queryTenant(t)
+	at := time.Now().UTC().Truncate(time.Second)
+	for i, score := range []float64{.1, .2, .3, .4, .9} {
+		repo := fmt.Sprintf("band-%d", i)
+		hash := keys.ContentHash([]byte(repo))
+		qadd(t, ts, store.FactRow{Type: "artifact_version", ConversationID: repo, RepoID: repo, Path: "docs/plans/p/DESIGN.md", ContentHash: hash, TS: float64(at.Unix())}, fx{"content_hash": hash})
+		if err := ts.t.AppendScores(t.Context(), hash, []store.Score{{Check: "q.a", Result: score, Scorer: "v1"}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	base := "/v1/analytics/entities?grain=artifact&all=1"
+	all := aok(t, s, base)
+	var high []string
+	for _, row := range rowsOf(all, "rows") {
+		lens := row["l"].(map[string]any)
+		if lens["band:q.a"] == "high" {
+			high = append(high, lens["repo_id"].(string))
+		}
+	}
+	if len(high) == 0 {
+		t.Fatalf("fixture did not produce a high q.a band: %v", all)
+	}
+	filters := strs(aok(t, s, "/v1/analytics/schema")["grains"].(map[string]any)["artifact"].(map[string]any)["filters"])
+	published := false
+	for _, name := range filters {
+		if name == "band:<check>" {
+			published = true
+		}
+	}
+	if !published {
+		t.Fatalf("band:q.a is absent from published artifact filters: %v", filters)
+	}
+	filtered := aok(t, s, base+"&exclude=band:q.a:high")
+	rows := rowsOf(filtered, "rows")
+	if len(rows) != len(rowsOf(all, "rows"))-len(high) {
+		t.Fatalf("exclude=band:q.a:high left population unchanged: all=%d high=%d filtered=%d", len(rowsOf(all, "rows")), len(high), len(rows))
+	}
+	for _, row := range rows {
+		if row["l"].(map[string]any)["band:q.a"] == "high" {
+			t.Fatalf("excluded high row remained: %v", row)
+		}
+	}
+}

@@ -73,7 +73,7 @@ func artifactPopulation(ctx context.Context, t *store.Tenant, f store.AnalyticsF
 	memberFilter.Models = nil
 	memberFilter.Excludes = map[string][]string{}
 	for dim, values := range f.Excludes {
-		if dim != "harness" && dim != "model" {
+		if dim != "harness" && dim != "model" && !strings.HasPrefix(dim, "band:") {
 			memberFilter.Excludes[dim] = values
 		}
 	}
@@ -354,6 +354,12 @@ func (s *Server) analyticsArtifactEntities(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	allowed := artifactAllowedFields(checks)
+	for lens := range f.Excludes {
+		if strings.HasPrefix(lens, "band:") && !allowed["score:"+strings.TrimPrefix(lens, "band:")] {
+			errJSON(w, 400, "unsupported artifact exclude dimension "+lens)
+			return
+		}
+	}
 	selectedCheck := q.Get("check")
 	if selectedCheck != "" {
 		allowed["lens:scorer"] = true
@@ -422,6 +428,13 @@ func (s *Server) analyticsArtifactEntities(w http.ResponseWriter, r *http.Reques
 			return nil, loadErr
 		}
 		for i := range loaded {
+			for lens := range f.Excludes {
+				if strings.HasPrefix(lens, "band:") {
+					if _, exists := loaded[i].lenses[lens]; !exists {
+						loaded[i].lenses[lens] = "unscored"
+					}
+				}
+			}
 			if selectedCheck != "" {
 				scorer, scored := loaded[i].measures["score_scorer:"+selectedCheck]
 				loaded[i].lenses["scorer"] = scorer
@@ -434,6 +447,12 @@ func (s *Server) analyticsArtifactEntities(w http.ResponseWriter, r *http.Reques
 		selected := loaded[:0]
 		for _, x := range loaded {
 			keep := q.Get("scorer") == "" || x.lenses["scorer"] == q.Get("scorer")
+			for lens, excluded := range f.Excludes {
+				if strings.HasPrefix(lens, "band:") && containsValue(excluded, fmt.Sprint(x.lenses[lens])) {
+					keep = false
+					break
+				}
+			}
 			for _, v := range ranges {
 				n, valid := artifactNumber(x, v.Measure)
 				if !valid || v.Lo != nil && n < *v.Lo || v.Hi != nil && n > *v.Hi {

@@ -343,7 +343,7 @@ func TestCohortInvariantFrozenScope(t *testing.T) {
 			if panelN != cohortN {
 				t.Errorf("%s filter %s include: panel scope_n %v != cohort scope_n %v", grain, published, panelN, cohortN)
 			}
-			if strings.Contains(name, ":") {
+			if strings.Contains(name, ":") && !strings.HasPrefix(name, "band:") {
 				continue
 			}
 			exclude := "exclude=" + url.QueryEscape(name) + ":" + url.QueryEscape(value)

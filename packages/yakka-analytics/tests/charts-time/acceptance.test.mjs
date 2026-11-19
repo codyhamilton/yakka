@@ -594,6 +594,43 @@ test('scatter gallery proves the 5,000-point reference, the declared canvas fall
     const added = await drag(secondBounds, ['Shift']);
     assert.deepEqual(added.selectionKeys, [...new Set([...firstKeys, ...secondKeys])].sort(), 'Shift-drag unions the rectangles');
 
+    const markAt = mark => ({ x: live.plot.left + mark.px, y: live.plot.top + mark.py });
+    const clickMark = async (mark, modifiers) => {
+      const point = markAt(mark);
+      for (const key of modifiers) await page.keyboard.down(key);
+      await page.mouse.click(point.x, point.y);
+      for (const key of modifiers) await page.keyboard.up(key);
+      return inspectChart(page, 'scatter');
+    };
+    const clickTargets = live.marks.map(mark => ({
+      mark,
+      key: referenceNearest(live.marks, mark.px, mark.py),
+      spacing: Math.min(...live.marks.filter(other => other !== mark).map(other => Math.hypot(other.px - mark.px, other.py - mark.py)))
+    })).filter(item => !added.selectionKeys.includes(item.key))
+      .sort((a, b) => b.spacing - a.spacing)
+      .filter((item, index, all) => all.findIndex(other => other.key === item.key) === index)
+      .slice(0, 3);
+    const shiftSelected = await clickMark(clickTargets[0].mark, ['Shift']);
+    assert.ok(shiftSelected.selection?.include.includes(clickTargets[0].key), 'Shift-click adds a mark to selection');
+    const ctrlSelected = await clickMark(clickTargets[1].mark, ['Control']);
+    assert.ok(ctrlSelected.selection.include.includes(clickTargets[1].key), 'Ctrl-click adds a mark to selection');
+    const metaSelected = await clickMark(clickTargets[2].mark, ['Meta']);
+    assert.ok(metaSelected.selection.include.includes(clickTargets[2].key), 'Cmd-click adds a mark to selection');
+    const altExcluded = await clickMark(clickTargets[0].mark, ['Alt']);
+    assert.ok(altExcluded.selection.exclude.includes(clickTargets[0].key), 'Alt-click toggles a mark as an exclusion');
+
+    const keyboardTarget = live.marks.find(mark => !altExcluded.selectionKeys.includes(mark.key)
+      && referenceNearest(live.marks, mark.px, mark.py) === mark.key);
+    const keyboardPoint = markAt(keyboardTarget);
+    await page.mouse.move(keyboardPoint.x, keyboardPoint.y);
+    await page.locator('yk-chart#scatter .yk-scatter-overlay').focus();
+    await page.keyboard.press('Space');
+    let keyboardSelection = await inspectChart(page, 'scatter');
+    assert.ok(keyboardSelection.selection.include.includes(keyboardTarget.key), 'Space toggles the focused mark into selection');
+    await page.keyboard.press('x');
+    keyboardSelection = await inspectChart(page, 'scatter');
+    assert.ok(keyboardSelection.selection.exclude.includes(keyboardTarget.key), 'x toggles the focused mark as an exclusion');
+
     const ecdf = await page.evaluate(() => {
       const element = document.getElementById('ecdf');
       const result = element.inspect();
@@ -634,6 +671,29 @@ test('scatter gallery proves the 5,000-point reference, the declared canvas fall
     assert.equal(motion, 'none');
 
     assert.ok(harness.stats.maxInFlight <= 4);
+    await diagnostics.assertClean();
+  } finally {
+    await context.close();
+  }
+});
+
+test('scatter touch Select mode turns a tap into selection while ordinary touch remains inspection', async t => {
+  if (!needsBrowser(t)) return;
+  const { context, page, diagnostics } = await openPage({ hasTouch: true, viewport: { width: 1280, height: 3200 } });
+  try {
+    await page.goto(`${harness.origin}/gallery/scatter.html`);
+    await waitForSettled(page);
+    const chart = await inspectChart(page, 'scatter');
+    const mark = chart.marks[0];
+    const x = chart.plot.left + mark.px;
+    const y = chart.plot.top + mark.py;
+    await page.touchscreen.tap(x, y);
+    assert.equal((await inspectChart(page, 'scatter')).selectionKeys?.length || 0, 0, 'touch tap inspects without selecting by default');
+    await page.locator('yk-chart#scatter [data-gesture="select-mode"]').click();
+    assert.equal((await inspectChart(page, 'scatter')).selectMode, true, 'the Select control enters selection mode');
+    await page.touchscreen.tap(x, y);
+    const selected = await inspectChart(page, 'scatter');
+    assert.ok(selected.selection.include.includes(mark.key), 'touch tap selects a mark in Select mode');
     await diagnostics.assertClean();
   } finally {
     await context.close();

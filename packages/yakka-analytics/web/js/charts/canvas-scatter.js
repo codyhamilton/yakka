@@ -26,7 +26,8 @@ function formatTick(value) {
 
 export function createCanvasScatter({
   doc, frame, spec, points, tokens = {}, styleFor = null,
-  onHover = null, onLeave = null, onInspect = null, onSelection = null
+  onHover = null, onLeave = null, onInspect = null, onSelection = null,
+  onMarkSelection = null, onSelectMode = null
 } = {}) {
   const stack = doc.createElement('div');
   stack.className = 'yk-scatter-stack';
@@ -39,6 +40,24 @@ export function createCanvasScatter({
   overlay.setAttribute('aria-label', spec.title || 'Scatter plot');
   stack.append(base, overlay);
   frame.append(stack);
+  const controls = doc.createElement('div');
+  controls.className = 'yk-gesture-controls';
+  const select = doc.createElement('button');
+  select.type = 'button';
+  select.className = 'yk-gesture-button';
+  select.dataset.gesture = 'select-mode';
+  select.dataset.active = 'false';
+  select.setAttribute('aria-pressed', 'false');
+  select.textContent = 'Select';
+  controls.append(select);
+  frame.parentElement.insertBefore(controls, frame);
+  let selectMode = false;
+  select.addEventListener('click', () => {
+    selectMode = !selectMode;
+    select.dataset.active = String(selectMode);
+    select.setAttribute('aria-pressed', String(selectMode));
+    onSelectMode?.(selectMode);
+  });
 
   const baseCtx = base.getContext('2d');
   const overlayCtx = overlay.getContext('2d');
@@ -47,6 +66,9 @@ export function createCanvasScatter({
   let hovered = null;
   let drag = null;
   let pointer = null;
+  let lastClickTouch = false;
+  let lastClickModifiers = null;
+  let suppressClick = false;
   let hidden = new Set();
   let selected = new Set();
   const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(() => resize());
@@ -209,8 +231,10 @@ export function createCanvasScatter({
       region: { x0: position.x, y0: position.y, x1: position.x, y1: position.y },
       additive: Boolean(event.shiftKey || event.ctrlKey || event.metaKey),
       exclude: Boolean(event.altKey),
+      touch: event.pointerType === 'touch',
       moved: false
     };
+    lastClickModifiers = { shift: Boolean(event.shiftKey), ctrl: Boolean(event.ctrlKey), meta: Boolean(event.metaKey), alt: Boolean(event.altKey) };
     try { overlay.setPointerCapture(event.pointerId); } catch {}
   }
 
@@ -237,7 +261,10 @@ export function createCanvasScatter({
     if (!drag || drag.pointerId !== event.pointerId) return;
     const finished = drag;
     drag = null;
+    lastClickTouch = finished.touch;
     if (finished.moved) {
+      suppressClick = true;
+      if (finished.touch && !selectMode) { drawOverlay(); return; }
       const bounds = {
         left: Math.min(finished.region.x0, finished.region.x1),
         right: Math.max(finished.region.x0, finished.region.x1),
@@ -259,7 +286,24 @@ export function createCanvasScatter({
       return;
     }
     drawOverlay();
-    if (hovered) onInspect?.(hovered, hovered.index);
+  }
+
+  function onClick(event) {
+    if (suppressClick) { suppressClick = false; lastClickModifiers = null; lastClickTouch = false; return; }
+    const hit = nearestAt(localPoint(event));
+    if (hit) {
+      hovered = hit.point;
+      pointer = { left: hit.px - layout.plot.left, top: hit.py - layout.plot.top, idx: hit.index, x: hit.point.x, y: hit.point.y, values: hit.point.values };
+      const touch = event.pointerType === 'touch' || lastClickTouch;
+      const modifiers = lastClickModifiers || { shift: event.shiftKey, ctrl: event.ctrlKey, meta: event.metaKey, alt: event.altKey };
+      lastClickTouch = false;
+      lastClickModifiers = null;
+      if (touch && selectMode) onMarkSelection?.({ key: hovered.key, additive: true, source: 'touch' });
+      else if (modifiers.shift || modifiers.ctrl || modifiers.meta || modifiers.alt) {
+        onMarkSelection?.({ key: hovered.key, additive: true, exclude: Boolean(modifiers.alt), source: 'pointer' });
+      } else onInspect?.(hovered, hovered.index);
+    }
+    drawOverlay();
   }
 
   function onPointerLeave() {
@@ -271,13 +315,17 @@ export function createCanvasScatter({
   }
 
   function onKeyDown(event) {
-    if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Enter', 'Escape'].includes(event.key)) return;
+    if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Enter', 'Escape', ' ', 'Spacebar', 'x', 'X'].includes(event.key)) return;
     event.preventDefault();
     if (event.key === 'Escape') {
       hovered = null;
       pointer = null;
       drawOverlay();
       onLeave?.();
+      return;
+    }
+    if (event.key === ' ' || event.key === 'Spacebar' || event.key.toLowerCase() === 'x') {
+      if (hovered) onMarkSelection?.({ key: hovered.key, additive: true, exclude: event.key.toLowerCase() === 'x', source: 'keyboard' });
       return;
     }
     if (!marks.length) return;
@@ -299,6 +347,7 @@ export function createCanvasScatter({
   overlay.addEventListener('pointermove', onPointerMove);
   overlay.addEventListener('pointerup', onPointerUp);
   overlay.addEventListener('pointercancel', onPointerUp);
+  overlay.addEventListener('click', onClick);
   overlay.addEventListener('pointerleave', onPointerLeave);
   overlay.addEventListener('keydown', onKeyDown);
   if (observer) observer.observe(frame);
@@ -314,8 +363,10 @@ export function createCanvasScatter({
       overlay.removeEventListener('pointermove', onPointerMove);
       overlay.removeEventListener('pointerup', onPointerUp);
       overlay.removeEventListener('pointercancel', onPointerUp);
+      overlay.removeEventListener('click', onClick);
       overlay.removeEventListener('pointerleave', onPointerLeave);
       overlay.removeEventListener('keydown', onKeyDown);
+      controls.remove();
       stack.remove();
     },
     setHighlight(key) {
@@ -345,6 +396,7 @@ export function createCanvasScatter({
         yToData: position => yToData(position, layout),
         cursor: pointer ? { ...pointer } : null,
         hoveredKey: hovered?.key ?? null,
+        selectMode,
         marks: marks.map(mark => ({
           key: mark.key,
           index: mark.index,

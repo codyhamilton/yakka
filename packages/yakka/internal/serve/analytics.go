@@ -190,9 +190,9 @@ func tooWide(from, to time.Time, weeks bool) bool {
 }
 
 // publishedFilterNames is the exclude dimension whitelist, derived from the same scope-filter
-// table /schema publishes (store.CohortGrainFilters). A dynamic band:<check> lens contributes
-// its base band dimension because exclude=<name>:<value> cuts at the first colon. stage stays a
-// legacy exclude dimension even though no grain publishes it as an include filter.
+// table /schema publishes (store.CohortGrainFilters). Dynamic band:<check> exclusions are parsed
+// by parseFilter because their names contain a colon. stage stays a legacy exclude dimension
+// even though no grain publishes it as an include filter.
 func publishedFilterNames() map[string]bool {
 	out := map[string]bool{"stage": true}
 	for _, grain := range []string{"session", "artifact", "content", "execution", "plan", "time"} {
@@ -297,7 +297,16 @@ func (s *Server) parseFilter(w http.ResponseWriter, r *http.Request, ts *tenantS
 	allowedExclude := publishedFilterNames()
 	for _, item := range q["exclude"] {
 		dim, value, ok := strings.Cut(item, ":")
-		if !ok || !allowedExclude[dim] || value == "" {
+		// Dynamic artifact lens names contain a colon themselves. Treat the last
+		// colon as the name/value separator for band:<check>, preserving names
+		// such as band:q.a as one published filter name.
+		if strings.HasPrefix(item, "band:") {
+			if i := strings.LastIndex(item, ":"); i > len("band:") {
+				dim, value, ok = item[:i], item[i+1:], true
+			}
+		}
+		allowed := allowedExclude[dim] || strings.HasPrefix(dim, "band:") && len(strings.TrimPrefix(dim, "band:")) > 0
+		if !ok || !allowed || value == "" {
 			errJSON(w, 400, "exclude must be <dimension>:<value>")
 			return f, false
 		}
