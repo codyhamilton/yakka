@@ -817,3 +817,60 @@ Conversation-grain distribution histograms and the no-call count now apply the s
 - Learned: the shared panel frame has no body renderer, so an explorer with a table must render its own body while reusing frame state/idle/basis; the registry cannot describe a table-only panel without a chart name; the committed stub's `adminStatus()` is minimal, so full-shape browser proof needs an intercepted status response until the harness owner extends it.
 - Gates: extend the workspace stub/fixture status shape and add status error/delay scenes; give the registry a table-only representation. Both are outside this brief's owned paths.
 - Budget: 885 changed lines and more than 12 files read, against ~500 lines and 12 files. The overrun is the table renderer plus the pure and Chromium checks. No scope was added.
+
+### `13-01-browser-matrix-recorder.md`
+
+- Outcome: committed as `d3306cb9` (`Add release matrix and browser request-shape recorder`). Added `tests/release-matrix/origins.mjs`, `matrix.test.mjs`, `recorder.mjs` and `record.test.mjs`, plus the committed `internal/serve/testdata/browser-request-shapes.json` (SHA-256 `420015134d2d3ee8861ee97e449a06e7bed3268d30492e34cdcd0b74012a5c2c`; 12 scenarios, 75 requests, 9 `all=1`) and a 16-line opt-in `YAKKA_RELEASE_STATIC_ORIGIN` seam in `tests/workspace/harness.mjs`.
+- Surfaces: the brief's owned paths plus `tests/workspace/harness.mjs`, which the brief's "add only the origin/fixture seam" clause requires and the owned-path line omits; the seam is env-gated and leaves the default Pages path unchanged.
+- Deviations / unfinished: worker reported **done with departures**. The brief's baseline file counts (4/4, 4/4, 5/5, 4/4) do not match this branch (5/6/5/4 = 20); the matrix pins the measured baseline. The record is request metadata only, deterministic across two runs. `gate: none`.
+- Verification: baseline 20/20; matrix 2/2 (both `pages` and `embedded` targets 20/20, 40 total, zero skips); record 1/1; embedded smoke `/js/app.js` 200 `text/javascript` and `/b/trends` 200 `text/html`; `git diff --check` clean; no deploy, secret, tenant or migration action. `artifact_feedback` delivered / screen pass.
+
+### `13-02-pageset-smoke-benchmark.md`
+
+- Outcome: committed as `596c673e` (`Consume recorded browser request shapes in pageset smoke and profiler`), after brief amendment `da8d91bd` and distribution fix `ceb7e915`. `analytics_pageset_test.go` strictly parses the committed record (75 requests, pinned SHA, canonical `all=1`), replays exact URLs at concurrency 4, and the opt-in `YAKKA_PAGESET_PROFILE=fixture` profiler times only served cases against the unchanged 500 ms p95 bound.
+- Surfaces: the brief's owned paths; no route, contract, threshold, fixture generator or other benchmark change.
+- Deviations / unfinished: worker reported **done**. The amended brief accepts a recorded shape whose request returns HTTP 400 naming an unsupported dimension/field/mode/check/scorer as the documented capability-degradation path, because the record was captured against the first-party stub's superset schema; any 5xx or unnamed refusal still fails. Measured split is 61 served / 14 documented refusals (the earlier 500 was fixed), not the amendment's provisional 60/15. Profiler gate renamed from `YAKKA_BENCH_DIR` to `YAKKA_PAGESET_PROFILE=fixture` as the brief permits. `gate: none`.
+- Verification: smoke 1/1 (`75 requests across 12 scenarios = 61 served (200) + 14 documented capability refusals (400)`); profiler 1/1 (`max p95 283.7 ms across 61 cases`, bound 500 ms); `git diff --check` clean; record is request metadata only. `artifact_feedback` delivered / screen pass (2 versions).
+
+### `13-02b-distribution-concurrency-fixer.md`
+
+- Outcome: committed as `ceb7e915` (`Fix concurrent analytics distribution reads`). `Tenant.Distribution` now leases one `*sql.Conn` for the whole call, so the per-connection `TEMP TABLE dist_samples` sequence cannot interleave across pooled connections; the first row set is closed before the bin query. Query text, response shape, ordering, percentiles and bins are unchanged.
+- Verification: `TestDistributionConcurrentReads` (80 calls, 6 measures, both grains, 4 workers, `SetMaxIdleConns(0)`) failed 80/80 before and passed 5/5 after; `go test ./internal/store` 13.014s ok; `go test ./internal/serve` now 500-free on the previously failing shape. `artifact_feedback` delivered / screen pass.
+
+### `13-03-identity-and-routes.md`
+
+- Outcome: committed as `ae68afbe` (`Prove Pages-faithful identity flows and full-mux account routes`). Added `tests/identity/browser.test.mjs` (host-mapped `yakka.build`/`api.yakka.build` Chromium rig on one ephemeral TLS port, eight named account-flow subtests) and expanded `TestOAuthCallbackRouteIsShellLocallyAndJSONRemotely` to assert the full local mux shell for `/device`, `/oauth/callback`, `/login`, `/profile`, `/settings` while the remote callback stays API JSON.
+- Surfaces: the brief's owned paths plus `web/js/app.js`. One-line departure: `sessionExempt` now lists `/login,/oauth/callback,/settings`, restoring CONTRACTS 5.2.1; without it five `me`-dependent subtests fail. No identity flow, OAuth/device contract or route policy changed.
+- Deviations / unfinished: worker reported **done with one departure** (the `app.js` session-exempt fix). Eight subtests, zero skips, `maxInFlight <= 4`; only the fixture's exact 401/403/500 resource entries are allowed. No uncommitted work remains. `gate: none`.
+- Verification: Node identity suite 15/15 (7 contract + 8 browser); focused Go `TestSiteBuiltMode` and `TestOAuthCallbackRouteIsShellLocallyAndJSONRemotely` 2/2; `git diff --check` clean. `artifact_feedback` delivered / screen pass.
+
+### `13-04-release-docs.md`
+
+- Outcome: committed as `b4bbef8e` (`Refresh release docs and narrow residual-name scan`). Narrowed `tools/release/scan_residual_names.py` to exempt only the exact Phase 12 identifiers on word boundaries, added its regression test, and refreshed README/design-03/CONTRACTS 14 (`Current (landed in Phase 1)`) so the documented release is Pages serving `./web`, `build.sh` embedding without upload, and API on Fly with capability from `/v1/analytics/schema`.
+- Surfaces: the brief's owned paths.
+- Deviations / unfinished: worker reported **done**. `wrangler.toml` already names `pages_build_output_dir = "./web"`; the external Pages automation itself is not verified here. `gate: external Pages automation must accept ./web as its output directory`.
+- Verification: release 11/11; layout 7/7; residual-name scan 5/5; static-shell 3/3; `git diff --check` clean; no deploy, secret or tenant action. `artifact_feedback` delivered / screen pass.
+
+### `13-05-acceptance.md`
+
+- Outcome: committed as `c92c159a` (`Add Phase 13 integrated acceptance test and record`). `tests/release-matrix/acceptance.test.mjs` reads the committed artifacts and pins the matrix's two targets and four suites (5/6/5/4 = 20), zero skips, the record hash and 75/12/9 counts, the Go pins (75, same SHA, 500 ms, concurrency 4), eight identity subtests with `maxInFlight <= 4`, six identity contract tests, the full-mux account routes, the release and secret checks, `pages_build_output_dir = "./web"`, the README/design-03 facts, CONTRACTS 14, and the ready-PR marker gate.
+- Surfaces: the brief's owned paths only.
+- Deviations / unfinished: worker reported **done with concerns**. The mandated in-worktree `TMPDIR=.scratch/p13` makes `internal/keys TestRepoPath` fail its "outside repo" negative case; the same test passes with an outside-repo `TMPDIR`, so this is an environment contradiction, not a product defect, and no test was changed, skipped or weakened. The acceptance test pins artifacts rather than re-spawning the heavy suites, which were run separately. `gate: external Pages automation must accept ./web as its output directory`; `gate: the ready implementation PR body must carry Yakka-Plan: docs/plans/20-analytics-reset`.
+- Verification: matrix 2/2 across `pages` and `embedded` (40 acceptance tests, zero skips); smoke 61 served/14 refusals and profiler max p95 282.5 ms; identity 15/15 plus the two Go route tests; release/static/scan checks 11/11, 7/7, 3/3, 5/5; full `go test ./...` 16/17 packages ok with only the environment-induced `internal/keys` failure above; `git diff --check` clean. `artifact_feedback` delivered / screen pass.
+
+### Phase 13 integrated verification — closed
+
+- Independent check on this closing tree (worker reports not trusted for the closing verdict): `acceptance.test.mjs` 1/1; committed record SHA `42001513…a5c2c` with 12 scenarios / 75 requests / 9 `all=1`; `test_release.py` 11/11; `test_layout.py` 7/7; `test_scan_residual_names.py` 5/5; focused Go `TestSiteBuiltMode` and `TestOAuthCallbackRouteIsShellLocallyAndJSONRemotely` pass; `internal/keys TestRepoPath` fails only under the in-worktree `TMPDIR` and passes with an outside-repo `TMPDIR` (environment, not product); `git diff --check` clean. Entry point → action → result on the signed outcome: both release topologies serve every acceptance suite; the recorded browser request set is replayed by the Go server at concurrency 4 with 61 served and 14 documented capability refusals, max p95 282.5–283.7 ms under 500 ms; the Pages-faithful account flows and local full-mux routes pass; release docs/config state `./web` and the separate-API model. Phase-outcome-met: **yes**, with the external gates below.
+- Before closure, `artifact_feedback` on all five briefs and all six reports returned **delivered / screen pass** (`jev-1.13.0`); no checks flagged.
+
+Carried:
+
+- `gate: the external Pages automation must accept ./web as its output directory; not verifiable from this worktree.`
+- `gate: the ready implementation PR body must carry Yakka-Plan: docs/plans/20-analytics-reset.`
+- `gate: the exact artifact id lens grammar is unconfirmed; artifacts are identified by repo_id+path+hash only.`
+- The 14 recorded request shapes the Go server refuses (session-model `/query` dimensions, `mode=scatter`, artifact `kind`, jev check/scorer catalog) stay documented server capability gaps; implementing them is a server-contract change outside Phase 13.
+- The P10/P11 fixture short hashes still reach `/artifact` and render `identity-required`; the `shape-bars` harness/repo execution aggregate is still not served; the Plans-scatter seam still omits `session_model`; `plan-timeline` still repaints the first matching panel; a deep link beyond the first `page_max` versions still shows "version not found" until Load more.
+- CONTRACTS 10.1/10.2/11.2 still carry stale `Current`/`Target` labels.
+- `reports/12-04-artifact-diff.md` remains undelivered to `artifact_feedback` (no version, nothing queued); it does not block Phase 13.
+- Process: unit commits `d3306cb9` (13-01) and `b4bbef8e` (13-04) carry the `Yakka-Phase: 20-analytics-reset:13` trailer even though the phase closes at the commit below; history is not rewritten on this branch, and the final phase-closing commit is authoritative. 13-02 required an amended brief (`da8d91bd`) and a server concurrency fix (`ceb7e915`) after the record exposed a real `/distribution` 500.
+- The full-suite command's `internal/keys` failure is a `TMPDIR`-location contradiction between the shared brief rule (in-worktree) and that test's "outside repo" assumption; it passes with an external `TMPDIR` and needs no code change.
