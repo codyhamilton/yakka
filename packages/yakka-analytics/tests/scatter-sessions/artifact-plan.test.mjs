@@ -10,7 +10,7 @@ import {
   artifactPoint, SCATTER_ARTIFACT_PANEL
 } from '../../web/js/panels/scatter-artifact.js';
 import {
-  planAxes, planColours, planIdentity, planOverlap, planPoint, SCATTER_PLAN_PANEL
+  planAxes, planColours, planIdentity, planListPageCoverage, planOverlap, planPoint, SCATTER_PLAN_PANEL
 } from '../../web/js/panels/scatter-plan.js';
 import { scatterParams } from '../../web/js/panels/scatter-shared.js';
 import { registerScatterPanels } from '../../web/js/panels/p11-scatter.js';
@@ -182,6 +182,21 @@ test('a plan point keeps null complete_share/design_score out of the marks and e
   assert.match(overlap.text, /not plan-exact spend/);
   assert.match(overlap.text, /shared/);
   assert.match(overlap.text, /unpriced/);
+});
+
+test('a plan list page is not described as every plan or as a scatter sample', () => {
+  assert.equal(planListPageCoverage({ mode: 'scatter', rows: [{}], population: { returned_n: 1, scope_n: 40 } }), null);
+  assert.equal(planListPageCoverage({ rows: [{}, {}], population: { returned_n: 2, scope_n: 2 }, sort: 'last_ts:desc' }), null);
+  const page = planListPageCoverage({
+    rows: [{}, {}], next: 'cursor', sort: 'last_ts:desc',
+    population: { returned_n: 2, scope_n: 40 }
+  });
+  assert.equal(page.returned, 2);
+  assert.equal(page.scope, 40);
+  assert.match(page.text, /list page of 2 of 40/);
+  assert.match(page.text, /last_ts:desc/);
+  assert.match(page.text, /not a scatter sample/);
+  assert.match(page.text, /not every plan/);
 });
 
 test('both panels register and the scatter preset names all four panels', () => {

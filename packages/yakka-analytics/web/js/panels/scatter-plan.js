@@ -127,6 +127,23 @@ export function planOverlap(rows = []) {
   };
 }
 
+// Plan entities publish list mode only. A scatter request comes back as one
+// sorted page (default 100) with no sampled flag. A short page is not the
+// population, and it is not the hash sample the scatter contract describes.
+export function planListPageCoverage(body = {}) {
+  if (body?.mode === 'scatter' || body?.sampled === true) return null;
+  const rows = Array.isArray(body?.rows) ? body.rows.length : 0;
+  const returned = Number(body?.population?.returned_n ?? body?.returned_n ?? rows);
+  const scope = Number(body?.population?.scope_n ?? body?.population_n ?? returned);
+  if (!Number.isFinite(returned) || !Number.isFinite(scope)) return null;
+  if (!body?.next && returned >= scope) return null;
+  const sort = typeof body?.sort === 'string' && body.sort ? body.sort : 'the server default sort';
+  return {
+    returned, scope, sort,
+    text: `list page of ${formatNumber(returned)} of ${formatNumber(scope)} plans (${sort}), not a scatter sample and not every plan`
+  };
+}
+
 export function planNullText(points = []) {
   const notDrawn = points.filter(point => !point.drawn).length;
   if (!notDrawn) return '';
@@ -203,6 +220,8 @@ export async function load(context = {}) {
       return emptyState([{ kind: 'scope', label: `no plan has both ${x} and ${y} in window ${scope.win || 'all'}`, clear: null }]);
     }
     const caveat = scatterCaveat(sandbox, body);
+    const pageCoverage = planListPageCoverage(body);
+    if (pageCoverage) caveat.text = `${pageCoverage.text}. The plans list pages the rest. ${caveat.association}.`;
     const populationText = scatterPopulationText(body);
     const overlap = planOverlap(body.rows || []);
     const nullText = planNullText(points);
@@ -234,7 +253,9 @@ export async function load(context = {}) {
         ...(size ? [{ key: size, label: sizeMeta.label, unit: sizeMeta.unit, kind: sizeMeta.kind }] : [])
       ],
       series: [{ key: colour || 'plan', label: colour || 'Plans', unit: 'plans', kind: 'count' }],
-      sample: body.sampled === true ? { n: body.returned_n ?? drawn.length, total: body.population_n ?? population?.scope_n ?? drawn.length, rule: body.sample_rule || '' } : null,
+      sample: pageCoverage
+        ? { n: pageCoverage.returned, total: pageCoverage.scope, rule: `first list page by ${pageCoverage.sort}, not a hash sample` }
+        : (body.sampled === true ? { n: body.returned_n ?? drawn.length, total: body.population_n ?? population?.scope_n ?? drawn.length, rule: body.sample_rule || '' } : null),
       entities,
       empty: 'no eligible plan has both axes'
     };
