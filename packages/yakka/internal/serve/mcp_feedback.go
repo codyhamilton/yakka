@@ -14,6 +14,42 @@ import (
 
 const mcpFeedbackFix = "Fix: rewrite the file; the new write is the repair."
 const mcpFeedbackNoDrainFix = "Fix: start the plugin drain at the next hook event, or run the plugin's bin/yakka drain"
+const mcpFeedbackDeliveryFix = "Fix: save the file again with the Write tool or make a real Edit (a no-op edit may be refused and fires no event); otherwise the sweep delivers it at turn end, and a session killed before its Stop or SessionEnd hook runs loses the write."
+const mcpFeedbackUnconfirmed = "the enqueue was acknowledged but delivery is unconfirmed; call artifact_feedback again to re-read delivery and coverage"
+const mcpFeedbackOldShimFix = "local enqueue is unsupported by this shim; deliver the file with a Write-tool edit or the end-of-turn sweep."
+
+// feedbackPendingWindow is how long a delivered version may wait for its screen before a
+// scoring value of pending no longer applies.
+const feedbackPendingWindow = 30 * time.Second
+
+// feedbackScreenWait bounds how long a delivered answer waits for the screen when scoring
+// is configured and the version is still inside feedbackPendingWindow.
+var feedbackScreenWait = 10 * time.Second
+
+// feedbackScoring is the scoring value a delivered answer reports: off unless the server has
+// a scorer and its checks loaded; pending while no screen is recorded and the version arrived
+// under feedbackPendingWindow ago; otherwise on.
+func feedbackScoring(configured, screened bool, received, now time.Time) string {
+	switch {
+	case !configured:
+		return "off"
+	case !screened && now.Sub(received) < feedbackPendingWindow:
+		return "pending"
+	default:
+		return "on"
+	}
+}
+
+// feedbackScreened reports whether the screen step has recorded its outcome for the latest version.
+func feedbackScreened(a *store.Artifact) bool {
+	return a.Latest.Screen != nil || (a.Latest.Rejection != nil && a.Latest.Rejection.Stage == "screen")
+}
+
+// scoringConfigured is true when the server has both a scorer and checks loaded.
+func (s *Server) scoringConfigured() bool {
+	scorer, checks := s.scoring()
+	return scorer && checks
+}
 
 type feedbackLocal struct {
 	resolved map[string]any
@@ -38,6 +74,84 @@ func feedbackBool(m map[string]any, key string) bool {
 	return v
 }
 
+// feedbackCoverage reads queue reader v2's complete-set coverage. A missing or
+// malformed object is not evidence of absence and stays a reader failure.
+func feedbackCoverage(queue map[string]any) (pending, rejected int, oldest float64, ok bool) {
+	value, present := queue["coverage"]
+	if !present {
+		return 0, 0, 0, false
+	}
+	coverage, isObject := value.(map[string]any)
+	if !isObject {
+		return 0, 0, 0, false
+	}
+	if complete, okComplete := coverage["complete"].(bool); !okComplete || !complete {
+		return 0, 0, 0, false
+	}
+	p, okPending := coverage["pending_covering"].(float64)
+	r, okRejected := coverage["rejected_covering"].(float64)
+	if !okPending || !okRejected {
+		return 0, 0, 0, false
+	}
+	age, present := coverage["oldest_covering_age_s"]
+	if !present {
+		return 0, 0, 0, false
+	}
+	if age != nil {
+		oldest, ok = age.(float64)
+		if !ok {
+			return 0, 0, 0, false
+		}
+	}
+	return int(math.Round(p)), int(math.Round(r)), oldest, true
+}
+
+// feedbackEffectLine is the visible fact and fix for one enqueue result.
+func feedbackEffectLine(effect *MCPEffect) string {
+	if effect == nil {
+		return ""
+	}
+	if effect.Outcome == "enqueued" || effect.Outcome == "covered" {
+		return mcpFeedbackUnconfirmed
+	}
+	code := ""
+	if effect.Error != nil {
+		code = *effect.Error
+	}
+	switch code {
+	case "capture_off":
+		return "local enqueue did not run: capture is off (YAKKA_HOOKLOG=off); nothing was queued. Fix: enable capture, then rewrite the file or call again."
+	case "spool_dropped":
+		return "local enqueue did not complete: the queue write failed; nothing may have been queued. Fix: check the queue directory and call again."
+	case "yakka_bin_set":
+		return "local enqueue is unavailable while YAKKA_BIN is set; nothing was queued. Fix: unset YAKKA_BIN for the plugin and call again."
+	case "unsupported":
+		return "local enqueue is not supported by this shim; nothing was queued. Fix: update the plugin and call again."
+	case "path_changed":
+		return "the file changed during the call, so nothing was queued for it. Fix: call again for the current file."
+	case "queue_unavailable":
+		return "the local queue could not be read or written; nothing was queued. Fix: check the queue directory and call again."
+	case "queue_rejected":
+		return "a covering rejection is already queued for this file, so nothing new was queued. Fix: rewrite the file; the new write is the repair."
+	case "stale_declaration":
+		return "the tool declaration changed during the call; nothing was queued. Fix: call again."
+	case "effect_unknown":
+		return "the local enqueue outcome is unknown; an entry may have been written. Fix: call artifact_feedback again to read current coverage and delivery."
+	}
+	return ""
+}
+
+func feedbackShort(hash string) string {
+	if len(hash) > 12 {
+		return hash[:12]
+	}
+	return hash
+}
+
+func feedbackStaleLine(a *store.Artifact, current string) string {
+	return fmt.Sprintf("current content not yet delivered (service has %s from %s; local file is %s)", feedbackShort(a.Latest.ContentHash), a.Latest.ReceivedAt.UTC().Format(time.RFC3339), feedbackShort(current))
+}
+
 func (l LocalContext) feedbackFacts() (feedbackLocal, *LocalFailure) {
 	read := func(name string) (map[string]any, *LocalFailure) { return l.Get(name) }
 	var facts feedbackLocal
@@ -60,6 +174,25 @@ func (l LocalContext) feedbackFacts() (feedbackLocal, *LocalFailure) {
 	return facts, nil
 }
 
+// feedbackRelativeError names why a relative path has no resolved location. The
+// path resolves only under the project directory, so a missing or unreadable
+// project directory is the cause; the shim's working directory is named only
+// when it was supplied, and only to say it is not the project.
+func feedbackRelativeError(path string, local LocalContext) any {
+	msg := "path is relative and cannot be resolved: " + path + "; "
+	if _, fail := local.Get("project_dir"); fail != nil && fail.Code != "missing" {
+		msg += "the project directory could not be read (" + fail.Code + ")"
+	} else {
+		msg += "no project directory was supplied"
+	}
+	if cwd, fail := local.Get("cwd"); fail == nil {
+		if dir := feedbackString(cwd, "path"); dir != "" {
+			msg += "; the shim ran in " + dir + ", which is not the project, so the path was not resolved there"
+		}
+	}
+	return mcpToolError(msg + "; pass the absolute path of the file")
+}
+
 func (s *Server) mcpArtifactFeedback(ctx context.Context, _ string, ts *tenantState, args map[string]any, local LocalContext) (any, error) {
 	f, failure := local.feedbackFacts()
 	if failure != nil {
@@ -69,7 +202,7 @@ func (s *Server) mcpArtifactFeedback(ctx context.Context, _ string, ts *tenantSt
 	argPath := args["path"].(string)
 	if path == "" {
 		if !strings.HasPrefix(argPath, "/") {
-			return mcpToolError("cannot resolve the working directory"), nil
+			return feedbackRelativeError(argPath, local), nil
 		}
 		path = argPath
 	}
@@ -106,80 +239,112 @@ func (s *Server) mcpArtifactFeedback(ctx context.Context, _ string, ts *tenantSt
 		return mcpText("state: " + name + "\n" + head + "\n" + strings.Join(lines, "\n"))
 	}
 	mtime := feedbackNumber(f.file, "mtime")
-	pending, _ := f.queue["pending"].([]any)
-	if len(pending) != 0 {
-		waited := time.Duration(0)
-		if feedbackBool(f.drain, "running") {
-			started := time.Now()
-			deadline := time.Now().Add(1500 * time.Millisecond)
-			for time.Now().Before(deadline) {
-				a, err := ts.t.Artifact(ctx, repo, rel)
-				if err != nil {
-					return nil, fmt.Errorf("artifact read failed")
-				}
-				if a != nil && a.Latest.ContentHash == contentHash {
-					return s.feedbackDelivered(ctx, ts, a, keys.Kind(rel), state, nil)
-				}
-				select {
-				case <-ctx.Done():
-					return nil, ctx.Err()
-				case <-time.After(100 * time.Millisecond):
-				}
-			}
-			waited = time.Since(started)
-		}
-		oldest := 0.0
-		for _, item := range pending {
-			m, _ := item.(map[string]any)
-			age := feedbackNumber(m, "age_s")
-			age += waited.Seconds()
-			if age > oldest {
-				oldest = age
-			}
-		}
-		why := "draining"
-		lines := []string{fmt.Sprintf("%d events for this file still queued, oldest %ds, %s", len(pending), int(math.Round(oldest)), why)}
-		if !feedbackBool(f.drain, "running") {
-			lines[0] = fmt.Sprintf("%d events for this file still queued, oldest %ds, no drain running", len(pending), int(math.Round(oldest)))
-			lines = append(lines, mcpFeedbackNoDrainFix)
-		}
-		return state("queued", lines...), nil
+	pendingCovering, rejectedCovering, oldestAge, coverageOK := feedbackCoverage(f.queue)
+	if !coverageOK {
+		return mcpToolError("local context unavailable: queue (invalid_context)"), nil
 	}
-	rejected, _ := f.queue["rejected"].([]any)
-	rejectionLines := []string{}
-	superseded := false
-	for _, item := range rejected {
-		m, _ := item.(map[string]any)
-		if feedbackNumber(m, "mtime") < mtime {
-			superseded = true
-			continue
-		}
-		if reason := feedbackString(m, "reason"); reason != "" {
-			rejectionLines = append(rejectionLines, strings.Split(strings.TrimRight(reason, "\n"), "\n")...)
-		}
-	}
-	if len(rejectionLines) != 0 {
-		return state("rejected", append(rejectionLines, mcpFeedbackFix)...), nil
-	}
-	note := []string{}
-	if superseded {
-		note = append(note, "note: earlier rejection superseded by a later write")
-	}
+
+	// The service read comes before any pending or rejected entry, so a
+	// delivered hash wins whatever the queue holds.
 	a, err := ts.t.Artifact(ctx, repo, rel)
 	if err != nil {
 		return nil, fmt.Errorf("artifact read failed")
 	}
-	if a == nil {
-		return state("not delivered", append([]string{"the service has no version of this file and nothing is queued; if it was just written, wait for the hook or rewrite the file"}, note...)...), nil
+	if a != nil && a.Latest.ContentHash == contentHash {
+		return s.feedbackDelivered(ctx, ts, a, repo, rel, contentHash, state, nil)
 	}
-	if a.Latest.ContentHash != contentHash {
-		short := a.Latest.ContentHash
-		if len(short) > 12 {
-			short = short[:12]
+
+	// A covering rejection outranks a covering pending entry: that pending
+	// version will be refused too.
+	if rejectedCovering > 0 {
+		rejected, _ := f.queue["rejected"].([]any)
+		reasons := []string{}
+		for _, item := range rejected {
+			m, _ := item.(map[string]any)
+			if feedbackNumber(m, "mtime") < mtime {
+				continue
+			}
+			if reason := feedbackString(m, "reason"); reason != "" {
+				reasons = append(reasons, strings.Split(strings.TrimRight(reason, "\n"), "\n")...)
+			}
 		}
-		return state("stale", append([]string{fmt.Sprintf("current content not yet delivered (service has %s from %s); normally a write still in the batch window", short, a.Latest.ReceivedAt.UTC().Format(time.RFC3339))}, note...)...), nil
+		if len(reasons) == 0 {
+			reasons = append(reasons, fmt.Sprintf("the queue holds %d rejected entries for this file at or after its mtime; read queue/rejected for the reason", rejectedCovering))
+		}
+		return state("rejected", append(reasons, mcpFeedbackFix)...), nil
 	}
-	return s.feedbackDelivered(ctx, ts, a, keys.Kind(rel), state, note)
+
+	effects, hasEffects := local.Effects()
+	var effect *MCPEffect
+	if hasEffects && len(effects) == 1 {
+		effect = &effects[0]
+	}
+
+	if pendingCovering > 0 {
+		age := int(math.Round(oldestAge))
+		drainRunning := feedbackBool(f.drain, "running")
+		drainWord := "no drain running"
+		if drainRunning {
+			drainWord = "draining"
+		}
+		if oldestAge <= 300 {
+			lines := []string{
+				fmt.Sprintf("%d events for this file still queued, oldest %ds, %s", pendingCovering, age, drainWord),
+				"the version is on its way; call again in a few seconds",
+			}
+			if !drainRunning {
+				lines = append(lines, mcpFeedbackNoDrainFix)
+			}
+			if effect != nil && (effect.Outcome == "failed" || effect.Outcome == "unknown") {
+				if line := feedbackEffectLine(effect); line != "" {
+					lines = append(lines, line)
+				}
+			}
+			return state("queued", lines...), nil
+		}
+		// Past the bound a covering entry is not waiting; a dead drain or a
+		// refused key must not read as queued forever.
+		lines := []string{fmt.Sprintf("a queued event for this file is %ds old, over the 300 s bound; %s; run yakka status", int(math.Ceil(oldestAge)), drainWord)}
+		if a != nil {
+			lines = append(lines, feedbackStaleLine(a, contentHash))
+		}
+		if effect != nil && (effect.Outcome == "failed" || effect.Outcome == "unknown") {
+			if line := feedbackEffectLine(effect); line != "" {
+				lines = append(lines, line)
+			}
+		}
+		lines = append(lines, mcpFeedbackDeliveryFix)
+		if a == nil {
+			return state("not delivered", lines...), nil
+		}
+		return state("stale", lines...), nil
+	}
+
+	if !hasEffects {
+		if action, bound := local.Action(); bound {
+			return MCPLocalActionRequest{Action: action.Action, Version: action.Version}, nil
+		}
+		// An old shim binds no action: say so instead of stalling.
+		lines := []string{mcpFeedbackOldShimFix, mcpFeedbackDeliveryFix}
+		if a == nil {
+			return state("not delivered", lines...), nil
+		}
+		lines = append([]string{feedbackStaleLine(a, contentHash)}, lines...)
+		return state("stale", lines...), nil
+	}
+
+	lines := []string{}
+	if a != nil {
+		lines = append(lines, feedbackStaleLine(a, contentHash))
+	}
+	if line := feedbackEffectLine(effect); line != "" {
+		lines = append(lines, line)
+	}
+	lines = append(lines, mcpFeedbackDeliveryFix)
+	if a == nil {
+		return state("not delivered", lines...), nil
+	}
+	return state("stale", lines...), nil
 }
 
 func feedbackState(name, path, repo, hash string, lines ...string) any {
@@ -191,7 +356,38 @@ func feedbackState(name, path, repo, hash string, lines ...string) any {
 	return mcpText(strings.Join(parts, "\n"))
 }
 
-func (s *Server) feedbackDelivered(ctx context.Context, ts *tenantState, a *store.Artifact, kind string, state func(string, ...string) any, note []string) (any, error) {
+// awaitScreen waits, while the version is pending, for the screen step to record its outcome.
+// It polls the store every 100 ms for at most feedbackScreenWait and stops early when the
+// screen is recorded or the latest version is no longer this hash.
+func (s *Server) awaitScreen(ctx context.Context, ts *tenantState, repo, rel, hash string, a *store.Artifact) (*store.Artifact, error) {
+	deadline := time.Now().Add(feedbackScreenWait)
+	for !feedbackScreened(a) && time.Since(a.Latest.ReceivedAt) < feedbackPendingWindow && time.Now().Before(deadline) {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(100 * time.Millisecond):
+		}
+		cur, err := ts.t.Artifact(ctx, repo, rel)
+		if err != nil {
+			return nil, fmt.Errorf("artifact read failed")
+		}
+		if cur == nil || cur.Latest.ContentHash != hash {
+			return a, nil
+		}
+		a = cur
+	}
+	return a, nil
+}
+
+func (s *Server) feedbackDelivered(ctx context.Context, ts *tenantState, a *store.Artifact, repo, rel, hash string, state func(string, ...string) any, note []string) (any, error) {
+	configured := s.scoringConfigured()
+	if configured && !feedbackScreened(a) {
+		var err error
+		if a, err = s.awaitScreen(ctx, ts, repo, rel, hash, a); err != nil {
+			return nil, err
+		}
+	}
+	kind := keys.Kind(rel)
 	lines := []string{}
 	screen, rejection := a.Latest.Screen, a.Latest.Rejection
 	switch {
@@ -208,6 +404,14 @@ func (s *Server) feedbackDelivered(ctx context.Context, ts *tenantState, a *stor
 		if rejection != nil && rejection.Stage != "" {
 			lines = append(lines, fmt.Sprintf("rejection at %s: %s", rejection.Stage, rejection.Reason))
 		}
+	}
+	switch feedbackScoring(configured, feedbackScreened(a), a.Latest.ReceivedAt, time.Now()) {
+	case "off":
+		lines = append(lines, "scoring: off; scoring is not configured on the service, and stored content is scored by an admin rescore once it is")
+	case "pending":
+		lines = append(lines, "scoring: pending; the screen has not run yet, so call again in a few seconds")
+	default:
+		lines = append(lines, "scoring: on")
 	}
 	if len(a.Latest.Scores) != 0 {
 		rows, err := ts.t.LatestScores(ctx)

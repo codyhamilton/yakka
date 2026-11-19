@@ -28,6 +28,30 @@ def _spool_file(dir_path: str, name: str) -> None:
     os.rename(tmp, os.path.join(dir_path, name + ".evt"))
 
 
+def _spool_event(
+    dir_path: str,
+    name: str,
+    harness: str,
+    event: str,
+    payload: dict,
+    ts: float,
+) -> None:
+    body = (
+        json.dumps(
+            {"ts": ts, "harness": harness, "event": event},
+            separators=(",", ":"),
+        )
+        + "\n"
+        + json.dumps(payload, separators=(",", ":"))
+    )
+    tmp_dir = os.path.join(dir_path, "tmp")
+    os.makedirs(tmp_dir, mode=0o700, exist_ok=True)
+    tmp = os.path.join(tmp_dir, name)
+    with open(tmp, "w", encoding="utf-8") as f:
+        f.write(body)
+    os.rename(tmp, os.path.join(dir_path, name + ".evt"))
+
+
 def _count(dir_path: str, suffix: str) -> int:
     try:
         names = os.listdir(dir_path)
@@ -37,11 +61,14 @@ def _count(dir_path: str, suffix: str) -> int:
 
 
 class _Call:
-    def __init__(self, n: int, auth: str, seq_no: int) -> None:
+    def __init__(
+        self, n: int, auth: str, seq_no: int, facts: Optional[list] = None
+    ) -> None:
         self.at = time.time()
         self.n = n
         self.auth = auth
         self.seq_no = seq_no
+        self.facts = facts or []
 
 
 class _FakeState:
@@ -67,10 +94,11 @@ class _FakeHandler(BaseHTTPRequestHandler):
         length = int(self.headers.get("Content-Length", "0"))
         raw = self.rfile.read(length)
         req = json.loads(raw)
-        ids = [x["id"] for x in req.get("facts", [])]
+        facts = req.get("facts", [])
+        ids = [x["id"] for x in facts]
         auth = self.headers.get("Authorization", "")
         with self.state.lock:
-            c = _Call(len(ids), auth, len(self.state.calls))
+            c = _Call(len(ids), auth, len(self.state.calls), facts)
             self.state.calls.append(c)
         if self.state.h is not None and self.state.h(c, self, ids):
             return
@@ -595,6 +623,138 @@ class DrainTests(unittest.TestCase):
         resp, err = sink.Send(yakka.DrainContext(), [b'{"a":1}'])
         self.assertIsNone(err)
         self.assertEqual(seen.get("kept"), "Bearer supersecretkey")
+
+    def _git_repo(self) -> tuple[str, str]:
+        repo = os.path.join(self._tmpdir, "repo")
+        os.makedirs(repo)
+
+        def g(*args: str) -> None:
+            subprocess.run(
+                ["git", "-C", repo, "-c", "user.name=t", "-c", "user.email=t@x", *args],
+                check=True,
+                capture_output=True,
+            )
+
+        g("init", "-q")
+        for rel, body in (
+            ("docs/plans/x/DESIGN.md", "# old\n"),
+            ("docs/plans/z/DESIGN.md", "# gone\n"),
+            ("other.txt", "old\n"),
+        ):
+            p = os.path.join(repo, rel)
+            os.makedirs(os.path.dirname(p), exist_ok=True)
+            with open(p, "w", encoding="utf-8") as f:
+                f.write(body)
+        g("add", ".")
+        g("commit", "-qm", "init")
+        with open(os.path.join(repo, "docs/plans/x/DESIGN.md"), "w", encoding="utf-8") as f:
+            f.write("# new\n")
+        os.remove(os.path.join(repo, "docs/plans/z/DESIGN.md"))
+        with open(os.path.join(repo, "other.txt"), "w", encoding="utf-8") as f:
+            f.write("new\n")
+        brief = os.path.join(repo, "docs/plans/y/briefs/new.md")
+        os.makedirs(os.path.dirname(brief), exist_ok=True)
+        with open(brief, "w", encoding="utf-8") as f:
+            f.write("# New brief\n")
+        repo_id, err = yakka.RepoID(repo)
+        if err:
+            raise err
+        return repo, repo_id
+
+    def _snapshot_facts(self, state: _FakeState) -> List[dict]:
+        out: List[dict] = []
+        for call in state.calls:
+            for fact in call.facts:
+                if fact.get("event") == "artifact_snapshot":
+                    out.append(fact)
+        return out
+
+    def test_stop_sweep_writes_scored_snapshots(self) -> None:
+        repo, repo_id = self._git_repo()
+        queue = os.path.join(self._tmpdir, "queue")
+        _spool_event(
+            queue,
+            "conv-sweep",
+            "claude",
+            "Stop",
+            {"session_id": "conv-sweep", "cwd": repo},
+            time.time(),
+        )
+        url, state, srv = _start_fake()
+        try:
+            self.assertEqual(_run(_opts(queue, url)), yakka.ReasonIdle)
+            facts = self._snapshot_facts(state)
+            by_path = {f["path"]: f for f in facts}
+            self.assertEqual(
+                set(by_path),
+                {"docs/plans/x/DESIGN.md", "docs/plans/y/briefs/new.md"},
+            )
+            for rel, f in by_path.items():
+                st = os.stat(os.path.join(repo, rel))
+                self.assertEqual(f["type"], "artifact_version")
+                self.assertEqual(f["event"], "artifact_snapshot")
+                self.assertEqual(f["source"], "worktree")
+                self.assertEqual(f["conversation_id"], "feedback-" + repo_id)
+                self.assertEqual(f["ts"], st.st_mtime)
+                self.assertNotIn("hook_event", f)
+            self.assertEqual(_count(queue, ".evt"), 0)
+        finally:
+            srv.shutdown()
+            srv.server_close()
+
+    def test_old_stop_event_writes_no_snapshot(self) -> None:
+        repo, _ = self._git_repo()
+        queue = os.path.join(self._tmpdir, "queue")
+        _spool_event(
+            queue,
+            "conv-old",
+            "claude",
+            "Stop",
+            {"session_id": "conv-old", "cwd": repo},
+            time.time() - 7200.0,
+        )
+        url, state, srv = _start_fake()
+        try:
+            self.assertEqual(_run(_opts(queue, url)), yakka.ReasonIdle)
+            self.assertEqual(self._snapshot_facts(state), [])
+            self.assertEqual(_count(queue, ".evt"), 0)
+            self.assertEqual(_count(os.path.join(queue, "rejected"), ".evt"), 0)
+        finally:
+            srv.shutdown()
+            srv.server_close()
+
+    def test_snapshot_unreadable_is_rejected_with_reason(self) -> None:
+        repo, repo_id = self._git_repo()
+        queue = os.path.join(self._tmpdir, "queue")
+        path = os.path.join(repo, "docs/plans/x/briefs/bin.md")
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "wb") as f:
+            f.write(b"\xff\xfe\x00")
+        _spool_event(
+            queue,
+            "conv-bin",
+            "claude",
+            "artifact_snapshot",
+            {
+                "session_id": "feedback-" + repo_id,
+                "cwd": repo,
+                "path": path,
+            },
+            time.time(),
+        )
+        url, state, srv = _start_fake()
+        try:
+            self.assertEqual(_run(_opts(queue, url)), yakka.ReasonIdle)
+            rej = os.path.join(queue, "rejected")
+            self.assertEqual(_count(rej, ".evt"), 1)
+            self.assertEqual(self._snapshot_facts(state), [])
+            reason = os.path.join(rej, "conv-bin.evt.reason")
+            with open(reason, encoding="utf-8") as f:
+                self.assertIn("unreadable", f.read())
+            self.assertFalse(os.path.exists(os.path.join(queue, "conv-bin.evt")))
+        finally:
+            srv.shutdown()
+            srv.server_close()
 
 
 if __name__ == "__main__":

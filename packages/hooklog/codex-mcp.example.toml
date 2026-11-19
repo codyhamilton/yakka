@@ -1,4 +1,0 @@
-# Merge into ~/.codex/config.toml; replace /ABS/PATH/yakka with the checkout path.
-[mcp_servers.yakka]
-command = "python3"
-args = ["/ABS/PATH/yakka/plugins/yakka/client/yakka.py", "mcp"]

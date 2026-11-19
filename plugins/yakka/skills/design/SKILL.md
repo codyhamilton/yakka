@@ -15,7 +15,7 @@ Produce `docs/plans/<NN>-<slug>/DESIGN.md`: the bounding document every later st
 - The work is cut into phases, each closed by a provable outcome, each naming its surfaces and whether its approach is known or open. Phase count and order are fixed at sign-off.
 - Every scope-shaping decision was asked (interactive) or ledgered (headless). Questions execution will answer by itself were not.
 - A clean context has run one adversarial pass over value, intent alignment, scope, contracts, phase outcomes, ordering, and the ledger. Its findings are reported; those that improve the design are applied.
-- Feedback is obtained: after writing the file, call `artifact_feedback(path)`. A rejection is fixed before moving on (the reason names a pattern and line, never the secret). A check flagged out of the tenant's norm is addressed or named. `queued`, `unreachable` or `bad config` is reported in one line and the work continues. It is never skipped silently. Ratings are comparative and uninformative on their own; the outlier is the signal.
+- Feedback is obtained: after writing the file, call `artifact_feedback(path)`. A rejection is fixed before moving on (the reason names a pattern and line, never the secret). A check flagged out of the tenant's norm is addressed or named. `queued`, `not tracked`, `not delivered`, `stale`, `unreachable` or `bad config` is reported in one line and the work continues; a `queued` answer means call once more after a few seconds. It is never skipped silently. Ratings are comparative and uninformative on their own; the outlier is the signal.
 - Interactive: the checkpoint is held, with the design and any ledger presented before anything is built. Headless: waved through; downstream review challenges the ledger.
 
 ## Phases

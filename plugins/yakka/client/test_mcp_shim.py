@@ -317,7 +317,7 @@ class RelayTests(unittest.TestCase):
         self.assertEqual(section.count("subprocess.run("), 2)
         self.assertNotIn("shell=True", section)
         self.assertIn('[git, "-C", os.path.dirname(path), *args]', section)
-        self.assertIn('"--harness", "codex", "--event", "PostToolUse"', section)
+        self.assertIn('"--harness", "codex", "--event", "artifact_snapshot"', section)
 
     def test_reader_withholds_external_symlink_and_content(self) -> None:
         repo = os.path.join(self.temp.name, "repo")
@@ -337,6 +337,40 @@ class RelayTests(unittest.TestCase):
         facts, _ = yakka._mcp_readers(request, declaration, self.queue, getwd=lambda: (repo, None))
         self.assertEqual(facts["file"]["withheld"], "symlink_out")
         self.assertNotIn("private file contents", json.dumps(facts))
+
+    def test_relative_path_resolves_only_under_project_dir(self) -> None:
+        project = os.path.join(self.temp.name, "project")
+        os.makedirs(os.path.join(project, "docs"))
+        Path(os.path.join(project, "docs", "DESIGN.md")).write_text("design")
+        plugin_cwd = os.path.join(self.temp.name, "plugin")
+        os.makedirs(plugin_cwd)
+        declaration = {"v": 1, "rev": "0123456789abcdef", "context": [
+            {"reader": "cwd", "v": 1, "params": {}},
+            {"reader": "project_dir", "v": 1, "params": {}},
+            {"reader": "resolved_path", "v": 1, "params": {"path_arg": "path", "bases": ["project_dir"]}},
+        ]}
+        request = {"params": {"arguments": {"path": "docs/DESIGN.md"}}}
+        harness_vars = ("CLAUDE_PROJECT_DIR", "CODEX_PROJECT_DIR", "CURSOR_PROJECT_DIR")
+        saved = {name: os.environ.get(name) for name in harness_vars}
+        try:
+            for name in harness_vars:
+                os.environ.pop(name, None)
+            facts, _ = yakka._mcp_readers(request, declaration, self.queue, getwd=lambda: (plugin_cwd, None))
+            self.assertEqual(facts["cwd"], {"path": plugin_cwd})
+            self.assertEqual(facts["project_dir"], {"path": None})
+            self.assertEqual(facts["resolved_path"], {"path": None, "base": None})
+
+            os.environ["CODEX_PROJECT_DIR"] = project
+            facts, _ = yakka._mcp_readers(request, declaration, self.queue, getwd=lambda: (plugin_cwd, None))
+            self.assertEqual(facts["project_dir"], {"path": project})
+            self.assertEqual(facts["resolved_path"], {"path": os.path.join(project, "docs", "DESIGN.md"), "base": project})
+            self.assertNotIn(plugin_cwd, json.dumps(facts["resolved_path"]))
+        finally:
+            for name, value in saved.items():
+                if value is None:
+                    os.environ.pop(name, None)
+                else:
+                    os.environ[name] = value
 
     def test_timeout_and_cancel_close_slow_http_call(self) -> None:
         self.server.close()
@@ -392,6 +426,58 @@ class RelayTests(unittest.TestCase):
         self.assertEqual(str(raised.exception), "incomplete queue")
         self.assertTrue(git.called)
 
+    def _repo_with_design(self, name: str) -> tuple[str, str, str]:
+        repo = os.path.join(self.temp.name, name)
+        os.makedirs(os.path.join(repo, "docs", "plans", "a"))
+        path = os.path.join(repo, "docs", "plans", "a", "DESIGN.md")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write("# " + name + "\n")
+        subprocess.run(["git", "-C", repo, "init", "-q"], check=True)
+        subprocess.run(["git", "-C", repo, "-c", "user.name=t", "-c", "user.email=t@x", "add", "."], check=True)
+        subprocess.run(["git", "-C", repo, "-c", "user.name=t", "-c", "user.email=t@x", "commit", "-qm", "fixture"], check=True)
+        repo_id, err = yakka.RepoID(repo)
+        if err:
+            raise err
+        return repo, repo_id, path
+
+    def _write_snapshot_entry(self, name: str, cwd: str, path: str) -> None:
+        payload = {"session_id": "feedback-x", "cwd": cwd, "path": path}
+        raw = (
+            b'{"ts":1,"harness":"claude","event":"artifact_snapshot"}\n'
+            + json.dumps(payload).encode()
+        )
+        with open(os.path.join(self.queue, name), "wb") as fh:
+            fh.write(raw)
+
+    def test_snapshot_entry_counts_in_v2_coverage(self) -> None:
+        repo1, repo_id1, path1 = self._repo_with_design("repo1")
+        repo2, repo_id2, path2 = self._repo_with_design("repo2")
+        rel = "docs/plans/a/DESIGN.md"
+        self._write_snapshot_entry("s1.evt", repo1, rel)
+        self._write_snapshot_entry("s2.evt", repo2, path2)
+        deadline = time.monotonic() + 5
+
+        pending, rejected, cov = yakka._mcp_queue_entries(
+            self.queue, repo_id1, rel, path1, 0, deadline
+        )
+        self.assertEqual(len(pending), 1)
+        self.assertEqual(rejected, [])
+        self.assertTrue(cov["complete"])
+        self.assertEqual(cov["pending_covering"], 1)
+        self.assertIsNotNone(cov["oldest_covering_age_s"])
+
+        pending, _, cov = yakka._mcp_queue_entries(
+            self.queue, repo_id2, rel, path2, 0, deadline
+        )
+        self.assertEqual(len(pending), 1)
+        self.assertEqual(cov["pending_covering"], 1)
+
+        pending, _, cov = yakka._mcp_queue_entries(
+            self.queue, "another-repo", rel, path1, 0, deadline
+        )
+        self.assertEqual(len(pending), 1)
+        self.assertEqual(cov["pending_covering"], 1)
+
     def test_cancel_does_not_collapse_string_and_number_ids(self) -> None:
         self.assertNotEqual(yakka._mcp_id_key(1), yakka._mcp_id_key("1"))
         number_conn = mock.Mock()
@@ -436,7 +522,7 @@ class RelayTests(unittest.TestCase):
         def spool(argv, *args, **kwargs):
             nonlocal spool_calls
             if argv[0] == os.path.realpath(os.path.join(os.path.dirname(yakka.__file__), "..", "script", "spool.sh")):
-                self.assertEqual(argv, [os.path.realpath(os.path.join(os.path.dirname(yakka.__file__), "..", "script", "spool.sh")), "--harness", "codex", "--event", "PostToolUse"])
+                self.assertEqual(argv, [os.path.realpath(os.path.join(os.path.dirname(yakka.__file__), "..", "script", "spool.sh")), "--harness", "codex", "--event", "artifact_snapshot"])
                 spool_calls += 1
                 return subprocess.CompletedProcess(argv, 0, b"entry.evt\n", b"")
             return real_run(argv, *args, **kwargs)
@@ -445,7 +531,7 @@ class RelayTests(unittest.TestCase):
         outcomes = []
         def run() -> None:
             gate.wait()
-            outcomes.append(yakka._mcp_enqueue(guards, target, self.queue, "call", threading.Event(), time.monotonic() + 3, "action"))
+            outcomes.append(yakka._mcp_enqueue(guards, target, self.queue, threading.Event(), time.monotonic() + 3, "action"))
         with mock.patch.object(yakka, "_mcp_queue_entries", side_effect=coverage), mock.patch.object(yakka.subprocess, "run", side_effect=spool):
             threads = [threading.Thread(target=run) for _ in range(2)]
             for thread in threads: thread.start()
@@ -453,6 +539,49 @@ class RelayTests(unittest.TestCase):
             for thread in threads: thread.join(timeout=4)
             self.assertEqual(spool_calls, 1)
         self.assertEqual(sorted(item["outcome"] for item in outcomes), ["covered", "enqueued"])
+
+    def test_changed_file_can_be_enqueued_again_within_spool_dedupe_window(self) -> None:
+        repo = os.path.join(self.temp.name, "dedupe-enqueue-repo")
+        os.makedirs(repo)
+        target = os.path.join(repo, "design.md")
+        Path(target).write_text("first version\n")
+        subprocess.run(["git", "-C", repo, "init", "-q"], check=True)
+        subprocess.run(["git", "-C", repo, "-c", "user.name=t", "-c", "user.email=t@x", "add", "design.md"], check=True)
+        subprocess.run(["git", "-C", repo, "-c", "user.name=t", "-c", "user.email=t@x", "commit", "-qm", "fixture"], check=True)
+        request = {"params": {"arguments": {"path": target}}}
+
+        def current_guards() -> dict:
+            _, _, guards, _ = yakka._mcp_context_call(
+                json.dumps(request).encode(), "tools/call", request, action_declaration(),
+                self.queue, getwd=lambda: (repo, None),
+            )
+            return guards
+
+        env_patch = mock.patch.dict(os.environ, {"YAKKA_HOOKLOG_KICK": "0"})
+        with env_patch:
+            first = yakka._mcp_enqueue(current_guards(), target, self.queue, threading.Event(), time.monotonic() + 5, "first")
+            self.assertEqual(first["outcome"], "enqueued")
+
+            entries = [name for name in os.listdir(self.queue) if name.endswith(".evt")]
+            self.assertEqual(len(entries), 1)
+            entry_mtime = os.stat(os.path.join(self.queue, entries[0])).st_mtime
+            Path(target).write_text("second version, with a different hash\n")
+            target_stat = os.stat(target)
+            new_mtime = max(time.time_ns(), int((entry_mtime + 1) * 1_000_000_000))
+            os.utime(target, ns=(target_stat.st_atime_ns, new_mtime))
+
+            second = yakka._mcp_enqueue(current_guards(), target, self.queue, threading.Event(), time.monotonic() + 5, "second")
+        self.assertEqual(second["outcome"], "enqueued")
+        queued = []
+        for name in os.listdir(self.queue):
+            if not name.endswith(".evt"):
+                continue
+            with open(os.path.join(self.queue, name), "rb") as fh:
+                parsed = yakka._parse_file(yakka.File(Name=name, Data=fh.read()))
+            if not parsed.bad and parsed.event == "artifact_snapshot":
+                queued.append(parsed)
+        self.assertEqual(len(queued), 2)
+        self.assertEqual([item.event for item in queued], ["artifact_snapshot", "artifact_snapshot"])
 
 
 def action_declaration() -> dict:
@@ -580,12 +709,14 @@ class LocalActionDirectiveTests(unittest.TestCase):
             "name": "fixture", "arguments": {"path": str(self.path)}}}
         self.relay.writer = io.BytesIO()
         spool_calls = 0
+        spool_packets: list[tuple[list[str], bytes]] = []
         real_run = subprocess.run
 
         def spool(argv, *args, **kwargs):
             nonlocal spool_calls
             if argv[0] == os.path.realpath(os.path.join(os.path.dirname(yakka.__file__), "..", "script", "spool.sh")):
                 spool_calls += 1
+                spool_packets.append((argv, kwargs["input"]))
                 return subprocess.CompletedProcess(argv, spool_returncode, spool_stdout, b"")
             return real_run(argv, *args, **kwargs)
 
@@ -599,6 +730,7 @@ class LocalActionDirectiveTests(unittest.TestCase):
         finally:
             for patch in reversed(patches):
                 patch.stop()
+        self.spool_packets = spool_packets
         return json.loads(self.relay.writer.getvalue()), spool_calls
 
     def continuation_effects(self, reply: dict) -> list:
@@ -609,6 +741,13 @@ class LocalActionDirectiveTests(unittest.TestCase):
     def test_directive_and_continuation_round_trip_once(self) -> None:
         reply, spool_calls = self.run_call()
         self.assertEqual(spool_calls, 1)
+        self.assertEqual(len(self.spool_packets), 1)
+        argv, packet = self.spool_packets[0]
+        self.assertEqual(argv[-2:], ["--event", "artifact_snapshot"])
+        pointer = json.loads(packet)
+        _, repo_id, _ = yakka._mcp_real_repo(str(self.path), time.monotonic() + 3)
+        self.assertEqual(pointer, {"session_id": "feedback-" + repo_id, "cwd": str(self.repo), "path": str(self.path)})
+        self.assertNotIn("reviewed", packet.decode())
         self.assertEqual(reply["result"]["result"], "final")
         effects = self.continuation_effects(reply)
         self.assertEqual(effects, [{"action": "enqueue_file_snapshot", "v": 1, "action_id": "action-1", "ok": True, "outcome": "enqueued", "error": None}])

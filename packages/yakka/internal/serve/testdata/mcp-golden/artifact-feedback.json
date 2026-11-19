@@ -2,13 +2,13 @@
   "tools": [
     {
       "name": "artifact_feedback",
-      "description": "State of one design, brief or report file: queued, rejected (with the reason), delivered (screen verdict, scores against the tenant baseline), stale or not delivered.",
+      "description": "State of one design, brief or report file: queued, rejected (with the reason), delivered (screen verdict, scores against the tenant baseline), stale or not delivered. After writing or changing a design, brief or report, call artifact_feedback with the file's absolute path, then fix a flagged check or record the pass.",
       "inputSchema": {
         "type": "object",
         "properties": {
           "path": {
             "type": "string",
-            "description": "path of the file, absolute or relative to the working directory"
+            "description": "path of the file: absolute, or relative to the project directory the harness supplies"
           }
         },
         "required": [
@@ -53,9 +53,12 @@
         "cwd": {
           "path": "/work"
         },
+        "project_dir": {
+          "path": "/work"
+        },
         "resolved_path": {
           "path": "/work/docs/plans/x/DESIGN.md",
-          "base": "cwd"
+          "base": "project_dir"
         },
         "file": {
           "exists": false,
@@ -66,13 +69,96 @@
         },
         "queue": {
           "pending": [],
-          "rejected": []
+          "rejected": [],
+          "coverage": {
+            "complete": true,
+            "pending_covering": 0,
+            "rejected_covering": 0,
+            "oldest_covering_age_s": null
+          }
         },
         "drain": {
           "running": false
         }
       },
       "text": "path does not exist: /work/docs/plans/x/DESIGN.md",
+      "isError": true
+    },
+    {
+      "name": "artifact_feedback",
+      "arguments": {
+        "path": "docs/plans/x/DESIGN.md"
+      },
+      "local": {
+        "cwd": {
+          "path": "/work"
+        },
+        "project_dir": {
+          "path": null
+        },
+        "resolved_path": {
+          "path": null,
+          "base": null
+        },
+        "file": {
+          "skipped": "no_input"
+        },
+        "git": {
+          "skipped": "no_input"
+        },
+        "queue": {
+          "pending": [],
+          "rejected": [],
+          "coverage": {
+            "complete": true,
+            "pending_covering": 0,
+            "rejected_covering": 0,
+            "oldest_covering_age_s": null
+          }
+        },
+        "drain": {
+          "running": false
+        }
+      },
+      "text": "path is relative and cannot be resolved: docs/plans/x/DESIGN.md; no project directory was supplied; the shim ran in /work, which is not the project, so the path was not resolved there; pass the absolute path of the file",
+      "isError": true
+    },
+    {
+      "name": "artifact_feedback",
+      "arguments": {
+        "path": "docs/plans/x/DESIGN.md"
+      },
+      "local": {
+        "project_dir": {
+          "_failed": {
+            "code": "io_error"
+          }
+        },
+        "resolved_path": {
+          "path": null,
+          "base": null
+        },
+        "file": {
+          "skipped": "no_input"
+        },
+        "git": {
+          "skipped": "no_input"
+        },
+        "queue": {
+          "pending": [],
+          "rejected": [],
+          "coverage": {
+            "complete": true,
+            "pending_covering": 0,
+            "rejected_covering": 0,
+            "oldest_covering_age_s": null
+          }
+        },
+        "drain": {
+          "running": false
+        }
+      },
+      "text": "path is relative and cannot be resolved: docs/plans/x/DESIGN.md; the project directory could not be read (io_error); pass the absolute path of the file",
       "isError": true
     },
     {
@@ -98,7 +184,13 @@
         },
         "queue": {
           "pending": [],
-          "rejected": []
+          "rejected": [],
+          "coverage": {
+            "complete": true,
+            "pending_covering": 0,
+            "rejected_covering": 0,
+            "oldest_covering_age_s": null
+          }
         },
         "drain": {
           "running": false
@@ -132,7 +224,13 @@
         },
         "queue": {
           "pending": [],
-          "rejected": []
+          "rejected": [],
+          "coverage": {
+            "complete": true,
+            "pending_covering": 0,
+            "rejected_covering": 0,
+            "oldest_covering_age_s": null
+          }
         },
         "drain": {
           "running": false
@@ -166,7 +264,13 @@
         },
         "queue": {
           "pending": [],
-          "rejected": []
+          "rejected": [],
+          "coverage": {
+            "complete": true,
+            "pending_covering": 0,
+            "rejected_covering": 0,
+            "oldest_covering_age_s": null
+          }
         },
         "drain": {
           "running": false
@@ -209,13 +313,19 @@
               "mtime": 1700000002
             }
           ],
-          "rejected": []
+          "rejected": [],
+          "coverage": {
+            "complete": true,
+            "pending_covering": 2,
+            "rejected_covering": 0,
+            "oldest_covering_age_s": 4
+          }
         },
         "drain": {
           "running": false
         }
       },
-      "text": "state: queued\npath: docs/plans/x/DESIGN.md\nrepo: root:repo\ncontent_hash: abc\n\n2 events for this file still queued, oldest 4s, no drain running\nFix: start the plugin drain at the next hook event, or run the plugin's bin/yakka drain",
+      "text": "state: queued\npath: docs/plans/x/DESIGN.md\nrepo: root:repo\ncontent_hash: abc\n\n2 events for this file still queued, oldest 4s, no drain running\nthe version is on its way; call again in a few seconds\nFix: start the plugin drain at the next hook event, or run the plugin's bin/yakka drain",
       "isError": false
     },
     {
@@ -248,7 +358,13 @@
               "reason": "secret: aws_access_key at line 3 in docs/plans/x/DESIGN.md",
               "mtime": 1700000000
             }
-          ]
+          ],
+          "coverage": {
+            "complete": true,
+            "pending_covering": 0,
+            "rejected_covering": 1,
+            "oldest_covering_age_s": null
+          }
         },
         "drain": {
           "running": false
@@ -282,13 +398,19 @@
         },
         "queue": {
           "pending": [],
-          "rejected": []
+          "rejected": [],
+          "coverage": {
+            "complete": true,
+            "pending_covering": 0,
+            "rejected_covering": 0,
+            "oldest_covering_age_s": null
+          }
         },
         "drain": {
           "running": false
         }
       },
-      "text": "state: not delivered\npath: docs/plans/x/DESIGN.md\nrepo: root:repo\ncontent_hash: abc\n\nthe service has no version of this file and nothing is queued; if it was just written, wait for the hook or rewrite the file",
+      "text": "state: not delivered\npath: docs/plans/x/DESIGN.md\nrepo: root:repo\ncontent_hash: abc\n\nlocal enqueue is unsupported by this shim; deliver the file with a Write-tool edit or the end-of-turn sweep.\nFix: save the file again with the Write tool or make a real Edit (a no-op edit may be refused and fires no event); otherwise the sweep delivers it at turn end, and a session killed before its Stop or SessionEnd hook runs loses the write.",
       "isError": false
     },
     {
@@ -316,7 +438,13 @@
         },
         "queue": {
           "pending": [],
-          "rejected": []
+          "rejected": [],
+          "coverage": {
+            "complete": true,
+            "pending_covering": 0,
+            "rejected_covering": 0,
+            "oldest_covering_age_s": null
+          }
         },
         "drain": {
           "running": false

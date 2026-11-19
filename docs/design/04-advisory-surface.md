@@ -125,6 +125,16 @@ context unavailable rather than a clean delivery state. Matching is by repositor
 content hash, not conversation. The shim computes repository identity using the same rules as the
 drain (design 1).
 
+The order of checks is fixed: a matching service hash for the current content means `delivered`
+before any rejection or coverage answer; otherwise a covering queue entry (its mtime at or after
+the file's mtime) answers `queued` with the count, oldest age and drain status, and becomes
+`not delivered` or `stale`, naming the age and the `yakka status` fix, once the oldest covering
+entry is older than 300 s; a covering rejected entry answers `rejected` with its pattern and line. Coverage
+is computed over the full matching set under queue v2, so a truncated diagnostic sample is never
+proof of absence and an incomplete scan is the `local context unavailable` failure. An enqueue
+acknowledgment alone proves neither `queued` nor `delivered`: only refreshed covering evidence or a
+matching service hash does.
+
 ## API
 
 Service reads behind the original advisory tools. All need the key, all are scoped to the key's tenant.

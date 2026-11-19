@@ -29,7 +29,7 @@ User request, verbatim:
 >    - plugins/yakka/client/yakka.py: Load(), ErrPartialEnv, cmd_mcp, _McpRelay._post
 >    - packages/yakka/internal/serve/mcp.go: mcpAuth, mcpList, mcpInitialize
 >    - packages/yakka/internal/serve/session.go: authorizeBearer
->    - docs/plans/21-feedback-delivery/DESIGN.md: Resolve contract (conflict to resolve explicitly)
+>    - docs/plans/21-feedback-delivery.md: Resolve contract (conflict to resolve explicitly)
 >    - docs/plans/24-server-mcp-shim.md, docs/design/08-server-mcp-contract.md if present
 >    - plugins/yakka/.cursor-mcp.json
 >
