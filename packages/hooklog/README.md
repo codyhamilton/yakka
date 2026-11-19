@@ -64,12 +64,14 @@ example a cloud worker). `YAKKA_CLIENT_CONFIG` overrides only the file path.
 ## MCP
 
 The advisory shim is the stdio command `python3 plugins/yakka/client/yakka.py mcp`. Claude Code picks it up from the
-repo's [`plugins/yakka/claude-mcp.json`](../../plugins/yakka/claude-mcp.json) (`${CLAUDE_PLUGIN_ROOT}`, declared in `.claude-plugin/plugin.json`). The Cursor plugin uses
+The advisory shim is the stdio command `python3 plugins/yakka/client/yakka.py mcp`. Claude Code picks it up from the
+repo's [`plugins/yakka/claude-mcp.json`](../../plugins/yakka/claude-mcp.json) (`${CLAUDE_PLUGIN_ROOT}`, declared in `.claude-plugin/plugin.json`). Codex reads the plugin's
+[`plugins/yakka/.codex-mcp.json`](../../plugins/yakka/.codex-mcp.json) (`python3 ./client/yakka.py mcp`,
+`cwd` `.`), so no manual `~/.codex/config.toml` entry is needed. The Cursor plugin uses
 [`plugins/yakka/mcp.json`](../../plugins/yakka/mcp.json) (`python3` + `${CURSOR_PLUGIN_ROOT}/client/yakka.py` in `args`, no `cwd` or `env` block; inherited `YAKKA_*` from the parent process when set). For a manual Cursor
 setup (no plugin), merge
-[`cursor-mcp.example.json`](cursor-mcp.example.json) into `~/.cursor/mcp.json`; for Codex, merge
-[`codex-mcp.example.toml`](codex-mcp.example.toml) into `~/.codex/config.toml`. Replace
-`/ABS/PATH/yakka` with the checkout path.
+[`cursor-mcp.example.json`](cursor-mcp.example.json) into `~/.cursor/mcp.json`. Replace
+`/ABS/PATH/yakka` in the Cursor example with the checkout path.
 
 ## Claude Code
 

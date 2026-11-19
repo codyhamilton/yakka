@@ -159,12 +159,16 @@ func TestSyntheticTenantIsolationStoredActivity(t *testing.T) {
 	realSummaryBefore := f.get(summaryPath, f.realKey)
 
 	code, body := f.postJSON("/v1/reviews", f.synthKey, isolationReviewBody(t, "repo-a", []string{"trial:iso"}, true))
-	if code != 200 {
+	if code != 202 {
 		t.Fatalf("stored synthetic review: %d %s", code, body)
 	}
-	var receipt review.Receipt
-	if err := json.Unmarshal([]byte(body), &receipt); err != nil || receipt.ID == "" || receipt.Status != "ok" {
-		t.Fatalf("synthetic receipt %s: %v", body, err)
+	var accepted review.Receipt
+	if err := json.Unmarshal([]byte(body), &accepted); err != nil || accepted.ID == "" || accepted.Status != "running" {
+		t.Fatalf("synthetic accepted receipt %s: %v", body, err)
+	}
+	receipt := pollReview(f.t, f.h, f.synthKey, accepted.ID)
+	if receipt.ID == "" || receipt.Status != "ok" {
+		t.Fatalf("synthetic receipt %+v", receipt)
 	}
 
 	if got := reviewConvsFrom(t, f.get("/v1/reviews?repo_id=repo-a&tag=trial:iso", f.synthKey)); len(got) != 1 {
