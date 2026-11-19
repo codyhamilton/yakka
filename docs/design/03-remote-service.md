@@ -153,7 +153,7 @@ the signed `UnixNano` interval, 1677-09-21T00:12:43.145224192Z through
 `bucket=auto`, which preserves the requested dates while selecting calendar resolution. Explicit output
 budgets return machine-readable `too_many_cells` or `too_many_series` errors with suggestions instead of
 silently dropping the newest buckets. The complete range, resolution, paging and runtime contract is
-maintained in [Plan 20, section 17.1](../plans/20-analytics-reset/CONTRACTS.md#171-range-resolution-and-budgets).
+maintained in [the analytics workspace contract](09-analytics-workspace-contracts.md#range-resolution-and-budgets).
 
 ### Ingest
 

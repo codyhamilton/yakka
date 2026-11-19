@@ -27,7 +27,7 @@
 ## Agent Decisions
 
 - **Advisory surface amendment**: Extend [docs/design/04-advisory-surface.md](../../design/04-advisory-surface.md) and register new tools on the server per [docs/design/08-server-mcp-contract.md](../../design/08-server-mcp-contract.md); the shim gains no new local behaviour beyond existing `git` / `cwd` readers.
-- **Phase closure honesty**: Phase-level execution history comes from stored `review_runs` (`list_reviews` filters) and artifact timestamps; git `Yakka-Phase` trailers are still not first-class facts (see [docs/plans/20-analytics-reset/DESIGN.md](../20-analytics-reset/DESIGN.md)) — the design documents that gap instead of inventing ingest here.
+- **Phase closure honesty**: Phase-level execution history comes from stored `review_runs` (`list_reviews` filters) and artifact timestamps; git `Yakka-Phase` trailers are still not first-class facts (see the [Plan 20 record](../20-analytics-reset.md)) — the record documents that gap instead of inventing ingest here.
 - **Separation from Plan 20**: The analytics workspace UI and its new pages stay in Plan 20; this plan only adds agent-facing MCP reads and search fixes on existing store queries.
 
 ### Turn 2

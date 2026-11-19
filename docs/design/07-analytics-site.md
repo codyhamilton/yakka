@@ -1,10 +1,9 @@
 # Design Intent 7: Analytics Site
 
-> **Replacement designed; Phase 1 shell and serving are built.** [plans/20-analytics-reset](../plans/20-analytics-reset/DESIGN.md)
-> designs a static, no-build analytics workspace replacing the SvelteKit site described below, and
-> removes the 399-day reporting-window cap. The sections below describe master `b2094eb`; each implementation phase updates the sections it
-> changes. The proposed server/UI contracts are in that plan's `CONTRACTS.md` section 17 and are
-> promoted here at close-out; this design-only publication changes no serving behavior.
+> **Analytics workspace delivered.** [Plan 20 record](../plans/20-analytics-reset.md) summarizes
+> the implementation and [the analytics workspace contract](09-analytics-workspace-contracts.md)
+> holds the durable server and release contracts. Historical sections below describe the earlier
+> SvelteKit implementation and its original endpoint inventory.
 
 Historically, the person-facing view of one tenant's yakka ledger was a static Svelte site rendering
 read-only aggregate routes on `yakka serve`. Plan 20 replaces it with a static, no-build workspace;

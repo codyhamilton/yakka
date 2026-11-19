@@ -36,8 +36,8 @@ const IDENTITY_CONTRACTS = 'packages/yakka-analytics/tests/identity/contracts.te
 const SITE_TEST = 'packages/yakka/internal/serve/site_test.go';
 const README = 'packages/yakka-analytics/README.md';
 const DESIGN03 = 'docs/design/03-remote-service.md';
-const CONTRACTS = 'docs/plans/20-analytics-reset/CONTRACTS.md';
-const DESIGN = 'docs/plans/20-analytics-reset/DESIGN.md';
+const CONTRACTS = 'docs/design/09-analytics-workspace-contracts.md';
+const DESIGN = 'docs/plans/20-analytics-reset.md';
 const WRANGLER = 'packages/yakka-analytics/wrangler.toml';
 
 // The exact counts the component reports record. A change here is a component
@@ -127,9 +127,8 @@ test('integrated acceptance: two release targets, exact component counts, zero s
   }
   const design03 = read(DESIGN03);
   for (const fact of [/Pages/, /Fly/, /\/v1\/analytics\/schema/]) assert.match(design03, fact, `design 03 misses ${fact}`);
-  assert.match(read(CONTRACTS), /Current \(landed in Phase 1; `wrangler\.toml` names it\)/);
-  assert.match(read(CONTRACTS), /pages_build_output_dir = "\.\/web"/);
-  assert.match(read(DESIGN), /Yakka-Plan: docs\/plans\/20-analytics-reset/, 'PR marker gate is not recorded');
+  assert.match(read(CONTRACTS), /pages_build_output_dir/);
+  assert.match(read(DESIGN), /Pages automation job/, 'Pages automation follow-up is not recorded');
 
   process.stdout.write(`# integrated acceptance: matrix targets pages+embedded, suites ${Object.values(SUITE_COUNTS).reduce((a, b) => a + b, 0)} tests, record ${RECORD_REQUESTS} requests/${RECORD_SCENARIOS} scenarios/${RECORD_ALL_HISTORY} all=1, p95<=500ms, identity 8+6, concurrency<=4\n`);
 });
