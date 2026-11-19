@@ -250,7 +250,7 @@ test('the time scatter offers published time measures and one shared bucket requ
 
   const params = timeScatterParams({ scope: { win: '7d', tz: 'UTC' }, spec: { grain: 'time' }, fields: ['cost_usd', 'commits'] });
   assert.equal(params.get('grain'), 'time');
-  assert.equal(params.get('mode'), 'scatter');
+  assert.equal(params.get('mode'), 'aggregate');
   assert.equal(params.get('fields'), 'cost_usd,commits');
   assert.equal(params.get('bucket'), 'auto');
   assert.equal(params.get('measure'), null);
@@ -545,7 +545,7 @@ test('the delivered Scatter board proves the four panels, rectangles, time cohor
 
   await page.route('**/v1/analytics/entities*', route => {
     const url = new URL(route.request().url());
-    if (url.searchParams.get('grain') === 'time' && url.searchParams.get('mode') === 'scatter' && (url.searchParams.get('fields') || '').includes('rejections')) {
+    if (url.searchParams.get('grain') === 'time' && url.searchParams.get('mode') === 'aggregate' && (url.searchParams.get('fields') || '').includes('rejections')) {
       return route.fulfill({
         status: 400,
         contentType: 'application/json',

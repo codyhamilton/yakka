@@ -234,13 +234,21 @@ export function createStubApi() {
       if (path === '/v1/analytics/entities') {
         const grain = query.get('grain') || 'session';
         const mode = query.get('mode') || 'list';
+        // The server's time grid is mode=aggregate with measured fields. mode=scatter
+        // is the shared client seam's old name; both answer the bucket rows. stat=count
+        // stays the rectangle population below.
+        if (grain === 'time' && (mode === 'scatter' || mode === 'aggregate') && query.get('stat') !== 'count') {
+          const fields = (query.get('fields') || '').split(',').filter(Boolean);
+          json(response, 200, p11TimeScatter({ fields }));
+          return true;
+        }
         if (mode === 'scatter') {
           const fields = (query.get('fields') || '').split(',').filter(Boolean);
           const body = grain === 'artifact'
             ? p11ArtifactScatter({ fields })
             : grain === 'plan'
               ? p11PlanScatter({ fields })
-              : grain === 'time' ? p11TimeScatter({ fields }) : p11Scatter({ fields });
+              : p11Scatter({ fields });
           json(response, 200, body);
           return true;
         }

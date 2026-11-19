@@ -93,6 +93,9 @@ export function timeBucketInfo(body = {}) {
 // published grain, mode and measured fields.
 export function timeScatterParams({ scope = {}, spec = {}, grain = 'time', fields = [] } = {}) {
   const params = scatterParams({ scope, spec, grain, fields });
+  // Time entities publish mode=aggregate. mode=scatter is refused as
+  // "unsupported time mode" even though the bucket grid is the scatter's data.
+  params.set('mode', 'aggregate');
   const unit = scope?.bucket || spec?.scope?.bucket || 'auto';
   params.set('bucket', String(unit));
   return params;
@@ -353,7 +356,7 @@ export const SCATTER_DAY_PANEL = {
   requires: ['entities_time'],
   caveats: 'Both measures share one server bucket grid; a partial bucket covers only part of the source window. Selecting buckets means contributing sessions, never a causal pairing of calls with commits, and bucket counts are never session counts. Marginals are the whole population.',
   measureBasis: 'the response bucket grid; each bucket aggregates its in-window facts',
-  requests: () => [{ route: '/v1/analytics/entities', method: 'GET', params: { grain: 'time', mode: 'scatter', fields: 'cost_usd,commits', bucket: 'auto' } }],
+  requests: () => [{ route: '/v1/analytics/entities', method: 'GET', params: { grain: 'time', mode: 'aggregate', fields: 'cost_usd,commits', bucket: 'auto' } }],
   load
 };
 

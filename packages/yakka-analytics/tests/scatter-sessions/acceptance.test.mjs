@@ -308,7 +308,7 @@ test('the Scatter board proves schema choices, exact grain selections, peer coho
 
   await page.route('**/v1/analytics/entities*', route => {
     const url = new URL(route.request().url());
-    if (url.searchParams.get('grain') === 'time' && url.searchParams.get('mode') === 'scatter' && (url.searchParams.get('fields') || '').includes('rejections')) {
+    if (url.searchParams.get('grain') === 'time' && url.searchParams.get('mode') === 'aggregate' && (url.searchParams.get('fields') || '').includes('rejections')) {
       return route.fulfill({
         status: 400,
         contentType: 'application/json',
