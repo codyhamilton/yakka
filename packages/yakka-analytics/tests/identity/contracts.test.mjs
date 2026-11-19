@@ -10,9 +10,11 @@ function installStorage(values = {}) {
 }
 
 test('return paths reject unsafe destinations and callback only accepts safe success', () => {
-  for (const value of ['//evil.test', '/\\evil', '/bad\npath', 'https://evil.test', '/'.repeat(4097)]) assert.equal(safeReturnPath(value), null);
+  for (const value of ['//evil.test', '/\\evil', '/bad\npath', 'https://evil.test', '/'.repeat(4097), '/foo/..//evil.test', '/.//evil.test', '/foo/%2e%2e//evil.test', '/%2e%2e//evil.test']) assert.equal(safeReturnPath(value), null);
   assert.equal(safeReturnPath('/device?user_code=ABCD-EFGH#step'), '/device?user_code=ABCD-EFGH#step');
+  assert.equal(safeReturnPath('/plans/p/../other'), '/plans/other');
   assert.equal(oauthCallbackTarget({ ok: true, return: '//evil.test' }), '/');
+  assert.equal(oauthCallbackTarget({ ok: true, return: '/foo/..//evil.test' }), '/');
   assert.equal(oauthCallbackTarget({ ok: false, error: 'denied' }), null);
 });
 

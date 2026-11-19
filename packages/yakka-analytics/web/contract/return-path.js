@@ -4,6 +4,9 @@ export function safeReturnPath(value) {
   try {
     const parsed = new URL(value, 'https://return.invalid');
     if (parsed.origin !== 'https://return.invalid' || parsed.username || parsed.password) return null;
+    // Path normalization can leave a protocol-relative pathname ("/foo/..//host"
+    // and "/.//host" both become "//host"). location.assign would leave this origin.
+    if (!parsed.pathname.startsWith('/') || parsed.pathname.startsWith('//')) return null;
     return `${parsed.pathname}${parsed.search}${parsed.hash}`;
   } catch { return null; }
 }
