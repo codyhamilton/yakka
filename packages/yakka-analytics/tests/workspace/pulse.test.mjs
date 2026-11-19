@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 
 import {
   currentWindow, previousWindow, stripModel, qualityMedian, formatStripCost, rejectionTotal,
-  emptyCausesFor, summaryIsEmpty
+  emptyCausesFor, summaryIsEmpty, whenPanelBody
 } from '../../web/js/panels/pulse-strips.js';
 import { moverLenses, repoLensOffered, offeredMeasures, buildMoverModel, groupTotals, sparkline } from '../../web/js/panels/movers.js';
 import { coverageModel } from '../../web/js/panels/coverage.js';
@@ -18,6 +18,26 @@ import { watchPage } from '../gallery/harness.mjs';
 
 const DAY = 86400e3;
 const NOW = Date.parse('2026-10-01T00:00:00Z');
+
+test('a panel paint after a newer route generation does not write into the new body', async () => {
+  const hosts = new Map();
+  const doc = {
+    documentElement: { dataset: { renderGeneration: '1' } },
+    querySelector(selector) { return hosts.get(selector) || null; }
+  };
+  const host = { painted: 0 };
+  let calls = 0;
+  whenPanelBody('pulse', doc, node => { calls += 1; node.painted += 1; });
+  assert.equal(calls, 0);
+  doc.documentElement.dataset.renderGeneration = '2';
+  hosts.set('[data-panel="pulse"] .workspace-panel-body', host);
+  await new Promise(resolve => queueMicrotask(resolve));
+  assert.equal(calls, 0);
+  assert.equal(host.painted, 0);
+  whenPanelBody('pulse', doc, node => { calls += 1; node.painted += 1; });
+  assert.equal(calls, 1);
+  assert.equal(host.painted, 1);
+});
 
 test('the previous window is the equal length immediately before the current one, and all-history has none', () => {
   assert.equal(previousWindow({ win: 'all' }, NOW), null);

@@ -144,15 +144,18 @@ export function createPanelFrame({ panel, spec = {}, scope = {}, transport, sche
     }
     controller?.abort();
     controller = new AbortController();
+    const signal = controller.signal;
     setState('loading', { inFlight: 1 });
     let result;
     try {
-      result = await panel.load({ scope, spec, signal: controller.signal, scheduler, transport, tenant, schema });
+      result = await panel.load({ scope, spec, signal, scheduler, transport, tenant, schema });
     } catch (error) {
+      if (signal.aborted) return;
       if (error?.name === 'AbortError') { setState('cancelled', { retry: load }); return; }
       setState('error', { message: error?.message || 'Panel failed to load.', retry: load });
       return;
     }
+    if (signal.aborted) return;
     const classified = classifyResult(result);
     const withRetry = (classified.state === 'error' || classified.state === 'cancelled') && typeof classified.retry !== 'function'
       ? { ...classified, retry: load }

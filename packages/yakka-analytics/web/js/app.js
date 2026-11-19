@@ -33,6 +33,25 @@ const scheduler = createScheduler({ onChange: ({ inFlight }) => {
 const transport = createTransport(scheduler);
 let activeBoardTeardown = null;
 let activeRouteTeardown = null;
+let boardFrameTeardown = [];
+let renderGeneration = 0;
+
+function beginRender() {
+  renderGeneration += 1;
+  document.documentElement.dataset.renderGeneration = String(renderGeneration);
+  return renderGeneration;
+}
+
+function renderIsCurrent(generation) {
+  return generation === renderGeneration;
+}
+
+function teardownActiveRoute() {
+  if (activeRouteTeardown) { activeRouteTeardown(); activeRouteTeardown = null; }
+  if (activeBoardTeardown) { activeBoardTeardown(); activeBoardTeardown = null; }
+  for (const destroy of boardFrameTeardown) destroy();
+  boardFrameTeardown = [];
+}
 let sessionPromise;
 function loadSessionOnce() {
   if (!sessionPromise) sessionPromise = transport.request('me').then(result => {
@@ -345,6 +364,7 @@ async function renderBoard(container, record, state, schema, tenant) {
       }
       : entry.panel;
     const frame = createPanelFrame({ panel: wrappedPanel, spec: entry.spec, scope: entry.scope, transport, scheduler, tenant, schema });
+    boardFrameTeardown.push(() => frame.destroy());
     const capability = createCapabilityInspector({ doc: document, panel: entry.panel, spec: entry.spec || {}, schema });
     frame.element.append(capability.element);
 
@@ -498,10 +518,10 @@ async function renderExplorer(container, record) {
 }
 
 async function render(record) {
+  const generation = beginRender();
   const path = record.path;
   const state = decodeUrlState(record.search);
-  if (activeRouteTeardown) { activeRouteTeardown(); activeRouteTeardown = null; }
-  if (activeBoardTeardown) { activeBoardTeardown(); activeBoardTeardown = null; }
+  teardownActiveRoute();
   root.replaceChildren();
   root.dataset.route = path;
   setShellState('loading', 'false');
@@ -509,8 +529,11 @@ async function render(record) {
   const sessionExempt = ['/login', '/oauth/callback', '/settings'].includes(path);
   let me = null, meStatus = 0, hint = '';
   if (!sessionExempt) {
-    const result = await loadSessionOnce(); me = result.me; meStatus = result.status;
+    const result = await loadSessionOnce();
+    if (!renderIsCurrent(generation)) return;
+    me = result.me; meStatus = result.status;
   }
+  if (!renderIsCurrent(generation)) return;
   const decision = sessionGateDecision({ path, search: record.search, meStatus });
   if (!decision.stay) { location.replace(decision.redirect); return; }
   if (!exempt && meStatus !== 200) hint = decision.hint || '';
@@ -524,7 +547,8 @@ async function render(record) {
 
   if (exempt) {
     root.append(element('h1', '', record.title));
-    await renderIdentity(root, path, transport, me);
+    await renderIdentity(root, path, transport, me, () => renderIsCurrent(generation));
+    if (!renderIsCurrent(generation)) return;
     setShellState('ready', 'true');
     return;
   }
@@ -533,6 +557,7 @@ async function render(record) {
   let schema = null;
   try {
     const result = await transport.schema(tenant);
+    if (!renderIsCurrent(generation)) return;
     if (result.response.ok) schema = result.body;
     else if (shouldRecoverTenant({ status: result.response.status, error: result.body?.error, me, path }) && path !== '/profile') { location.assign('/profile'); return; }
     else {
@@ -541,8 +566,10 @@ async function render(record) {
     }
     if (schema) document.querySelector('#schema-status').textContent = `${Object.keys(schema.features || {}).length} server capabilities detected`;
   } catch {
+    if (!renderIsCurrent(generation)) return;
     document.querySelector('#schema-status').textContent = 'Connection failed. Check the API base and bearer in Settings.';
   }
+  if (!renderIsCurrent(generation)) return;
 
   if (record.kind === 'start') {
     root.append(element('h1', '', 'Start'));
@@ -559,6 +586,7 @@ async function render(record) {
   } else {
     renderNotFound(root, record);
   }
+  if (!renderIsCurrent(generation)) return;
   setShellState('ready', 'true');
 }
 

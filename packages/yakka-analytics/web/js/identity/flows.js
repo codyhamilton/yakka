@@ -15,9 +15,9 @@ export function deviceApprovalPayload({ user_code, tenant, scope, lifetime, name
 }
 export const deviceDenialPayload = userCode => ({ user_code: normalizeUserCode(userCode), action: 'deny' });
 
-export async function renderIdentity(root, path, api, me) {
+export async function renderIdentity(root, path, api, me, isCurrent = () => true) {
   if (path === '/login') return login(root);
-  if (path === '/oauth/callback') return callback(root, api);
+  if (path === '/oauth/callback') return callback(root, api, isCurrent);
   if (path === '/settings') return settings(root, api);
   if (path === '/device') return device(root, api, me);
   if (path === '/profile') return profile(root, api, me);
@@ -28,15 +28,16 @@ function login(root) {
   root.append(node('a', 'Continue with GitHub', { href: oauthLoginPath(ret), 'data-testid': 'identity-login' }));
   const error = new URLSearchParams(location.search).get('error'); if (error) status(root, error, true);
 }
-async function callback(root, api) {
+async function callback(root, api, isCurrent = () => true) {
   root.append(node('p', 'Completing sign in…'));
   try {
     const { response, body, requestUrl } = await api.callback(new URLSearchParams(location.search));
+    if (!isCurrent()) return;
     if (response.redirected || (response.url && response.url !== requestUrl) || response.type === 'opaqueredirect') throw new Error('The sign-in callback redirected unexpectedly.');
     const target = oauthCallbackTarget(body);
     if (!response.ok || !target) throw new Error(body?.error || 'Sign in failed. Please try again.');
     location.assign(target);
-  } catch (error) { status(root, error.message || 'Sign in failed. Please try again.', true); }
+  } catch (error) { if (isCurrent()) status(root, error.message || 'Sign in failed. Please try again.', true); }
 }
 function settings(root, api) {
   const heading = node('p', 'Connection settings'); root.append(heading);

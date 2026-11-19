@@ -132,12 +132,23 @@ export function panelBody(panelId, doc = globalThis.document) {
 // A board appends its panel frames only after starting their loads, so a panel
 // renders on the microtask after the frame is in the document. This is plain
 // scheduling, not a timing assertion or a test branch.
+function renderToken(doc) {
+  return doc?.documentElement?.dataset?.renderGeneration ?? '';
+}
+
 export function whenPanelBody(panelId, doc, paint) {
+  // A later route bumps documentElement.dataset.renderGeneration. Painting by
+  // panel id after that would write this response into the new destination.
+  const generation = renderToken(doc);
+  const paintIfCurrent = host => {
+    if (renderToken(doc) !== generation) return;
+    paint(host);
+  };
   const host = panelBody(panelId, doc);
-  if (host) { paint(host); return; }
+  if (host) { paintIfCurrent(host); return; }
   queueMicrotask(() => {
     const later = panelBody(panelId, doc);
-    if (later) paint(later);
+    if (later) paintIfCurrent(later);
   });
 }
 
