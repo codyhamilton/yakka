@@ -1235,7 +1235,9 @@ def _read_file(abs_path: str) -> _ReadResult:
         with open(abs_path, "rb") as rf:
             b = rf.read()
         mtime = os.stat(abs_path).st_mtime
-    except OSError:
+    except (OSError, ValueError):
+        # ValueError is an embedded NUL in the path. A queue entry can carry one;
+        # it must be unreadable, not a drain crash.
         return _ReadResult()
     try:
         text = b.decode("utf-8")

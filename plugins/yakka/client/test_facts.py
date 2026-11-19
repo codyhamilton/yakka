@@ -494,6 +494,15 @@ class TestArtifactSnapshot(unittest.TestCase):
         self.assertIsNone(e2)
         self.assertEqual(h1, h2)
 
+    def test_nul_path_is_unreadable(self) -> None:
+        out = yakka.Build(
+            None,
+            [self._snap("s.evt", "/tmp", "feedback-x", "docs/plans/x/DESIGN.md\x00")],
+        )[0]
+        self.assertEqual(len(out.Facts), 0)
+        self.assertEqual(len(out.Reasons), 1)
+        self.assertIn("unreadable", out.Reasons[0])
+
     def test_non_utf8_is_unreadable(self) -> None:
         rdir, _, repo_id = _new_repo()
         path = os.path.join(rdir, "docs/plans/x/briefs/bin.md")
