@@ -238,6 +238,10 @@ func (s *Server) analyticsPlanEntities(w http.ResponseWriter, r *http.Request, t
 			return
 		}
 	}
+	if !store.PlanSortValid(p[0]) {
+		errJSON(w, 400, "unsupported plan sort "+p[0])
+		return
+	}
 	limit, cur, ok := pageParams(w, r)
 	if !ok {
 		return
@@ -260,7 +264,7 @@ func (s *Server) analyticsPlanEntities(w http.ResponseWriter, r *http.Request, t
 	}
 	page, more, err := ts.t.PlanEntitiesPage(r.Context(), f, p[0], p[1] == "desc", sc, limit)
 	if err != nil {
-		errJSON(w, 400, "unsupported plan sort "+p[0])
+		readFailed(w)
 		return
 	}
 	n, err := ts.t.PlanEntityCount(r.Context(), f)
@@ -276,14 +280,41 @@ func (s *Server) analyticsPlanEntities(w http.ResponseWriter, r *http.Request, t
 			return
 		}
 	}
+	keys := make([]store.PlanIdentity, len(page))
+	for i := range page {
+		keys[i] = store.PlanIdentity{RepoID: page[i].RepoID, Plan: page[i].Plan}
+	}
+	costs, err := ts.t.PlanAssociatedCosts(r.Context(), f, keys)
+	if err != nil {
+		readFailed(w)
+		return
+	}
+	sessionIDs, err := ts.t.PlanSessionIDsByPlan(r.Context(), f, keys)
+	if err != nil {
+		readFailed(w)
+		return
+	}
+	allIDs := []string{}
+	seenID := map[string]bool{}
+	for _, ids := range sessionIDs {
+		for _, id := range ids {
+			if !seenID[id] {
+				seenID[id] = true
+				allIDs = append(allIDs, id)
+			}
+		}
+	}
+	prov, err := ts.t.SessionProvenanceFor(r.Context(), allIDs)
+	if err != nil {
+		readFailed(w)
+		return
+	}
 	rows := make([]map[string]any, 0, len(page))
 	for _, x := range page {
+		key := store.PlanIdentity{RepoID: x.RepoID, Plan: x.Plan}
+		pc := costs[key]
+		cost, unpriced, calls := pc.CostUSD, pc.UnpricedCalls, pc.Calls
 		execN := x.ExecutionsComplete + x.ExecutionsUnreported + x.ExecutionsStarted
-		cost, unpriced, calls, costErr := ts.t.PlanAssociatedCost(r.Context(), f, x.RepoID, x.Plan)
-		if costErr != nil {
-			readFailed(w)
-			return
-		}
 		var share any
 		if execN > 0 {
 			share = float64(x.ExecutionsComplete) / float64(execN)
@@ -302,16 +333,7 @@ func (s *Server) analyticsPlanEntities(w http.ResponseWriter, r *http.Request, t
 		if execN == 0 {
 			flags["complete_share_null_reason"] = "no_executions"
 		}
-		ids, idsErr := ts.t.PlanSessionIDs(r.Context(), f, x.RepoID, x.Plan)
-		if idsErr != nil {
-			readFailed(w)
-			return
-		}
-		prov, provErr := ts.t.SessionProvenanceFor(r.Context(), ids)
-		if provErr != nil {
-			readFailed(w)
-			return
-		}
+		ids := sessionIDs[key]
 		harnesses, models := map[string]int{}, map[string]int{}
 		for _, id := range ids {
 			harnesses[prov[id].Harness]++
