@@ -24,6 +24,7 @@ type PlanEntity struct {
 func (t *Tenant) PlanAssociatedCost(ctx context.Context, f AnalyticsFilter, repo, plan string) (*float64, int, int, error) {
 	usageFilter := f
 	usageFilter.Plans = nil
+	usageFilter.Repos = nil
 	uq, uargs := usageRowsWhere(usageFilter)
 	w, wargs := f.factWhere()
 	args := append([]any{}, uargs...)
@@ -123,6 +124,7 @@ func (t *Tenant) PlanEntitiesPage(ctx context.Context, f AnalyticsFilter, sortBy
 	w, args := f.factWhere()
 	usageFilter := f
 	usageFilter.Plans = nil
+	usageFilter.Repos = nil
 	usageQ, usageArgs := usageRowsWhere(usageFilter)
 	usageCTE := strings.TrimPrefix(usageQ, "WITH ")
 	col = strings.ReplaceAll(col, "__PLAN_SORT_WINDOW__", w)
@@ -303,10 +305,12 @@ type PlanDetailRow struct {
 func (t *Tenant) PlanDetailCount(ctx context.Context, f AnalyticsFilter, repo, plan, collection string) (int, error) {
 	w, args := f.factWhere()
 	if collection == "events" {
-		args = append(args, repo, repo, plan)
-	} else {
-		args = append(args, repo, plan)
+		eventFilter := f
+		eventFilter.Repos = nil
+		eventFilter.Plans = nil
+		w, args = eventFilter.factWhere()
 	}
+	args = append(args, repo, plan)
 	var q string
 	switch collection {
 	case "artifacts":
@@ -316,7 +320,7 @@ func (t *Tenant) PlanDetailCount(ctx context.Context, f AnalyticsFilter, repo, p
 	case "executions":
 		q = `SELECT COUNT(*) FROM (SELECT repo_id,conversation_id,path FROM facts WHERE type='artifact_version' AND kind='brief' AND ` + w + ` AND repo_id=? AND plan=? GROUP BY repo_id,conversation_id,path)`
 	case "events":
-		q = `SELECT COUNT(*) FROM facts WHERE ` + w + ` AND repo_id=? AND conversation_id IN (SELECT DISTINCT conversation_id FROM facts a WHERE a.type='artifact_version' AND a.repo_id=? AND a.plan=?)`
+		q = `SELECT COUNT(*) FROM facts WHERE ` + w + ` AND conversation_id IN (SELECT DISTINCT conversation_id FROM facts a WHERE a.type='artifact_version' AND a.repo_id=? AND a.plan=?)`
 	default:
 		return 0, fmt.Errorf("unsupported plan collection")
 	}
@@ -330,10 +334,12 @@ func (t *Tenant) PlanDetailCount(ctx context.Context, f AnalyticsFilter, repo, p
 func (t *Tenant) PlanDetailPage(ctx context.Context, f AnalyticsFilter, repo, plan, collection string, after string, afterTS float64, limit int) ([]PlanDetailRow, bool, error) {
 	w, args := f.factWhere()
 	if collection == "events" {
-		args = append(args, repo, repo, plan)
-	} else {
-		args = append(args, repo, plan)
+		eventFilter := f
+		eventFilter.Repos = nil
+		eventFilter.Plans = nil
+		w, args = eventFilter.factWhere()
 	}
+	args = append(args, repo, plan)
 	var q string
 	switch collection {
 	case "artifacts":
@@ -343,7 +349,7 @@ func (t *Tenant) PlanDetailPage(ctx context.Context, f AnalyticsFilter, repo, pl
 	case "executions":
 		q = `SELECT repo_id,plan,path,conversation_id,'','brief',MIN(ts) FROM facts WHERE type='artifact_version' AND kind='brief' AND ` + w + ` AND repo_id=? AND plan=? GROUP BY repo_id,plan,path,conversation_id`
 	case "events":
-		q = `SELECT repo_id,plan,path,conversation_id,event,type,ts,rowid FROM facts WHERE ` + w + ` AND repo_id=? AND conversation_id IN (SELECT DISTINCT conversation_id FROM facts a WHERE a.type='artifact_version' AND a.repo_id=? AND a.plan=?)`
+		q = `SELECT repo_id,plan,path,conversation_id,event,type,ts,rowid FROM facts WHERE ` + w + ` AND conversation_id IN (SELECT DISTINCT conversation_id FROM facts a WHERE a.type='artifact_version' AND a.repo_id=? AND a.plan=?)`
 	default:
 		return nil, false, fmt.Errorf("unsupported plan collection")
 	}
