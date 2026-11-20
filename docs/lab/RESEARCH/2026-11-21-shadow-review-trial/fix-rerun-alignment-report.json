@@ -1,0 +1,472 @@
+{
+  "arms": {
+    "high": {
+      "attempted_records": 33,
+      "completed": 21,
+      "completion_shortfall": 339,
+      "cost_usd": null,
+      "eligible": 360,
+      "eligible_shortfall": 0,
+      "floor": 300,
+      "input_tokens": null,
+      "known_cost_usd": 0.3706833,
+      "latency_ms": {
+        "count": 27,
+        "max": 140460,
+        "min": 4780,
+        "p50": 89376,
+        "p90": 108992
+      },
+      "missing_usage_fields": {
+        "cost_usd": 0,
+        "input_tokens": 2,
+        "output_tokens": 2
+      },
+      "output_tokens": null,
+      "partial_records": 15,
+      "shortfall": 339,
+      "shortfall_against_floor": 279,
+      "target": 360,
+      "unknown_cost_entries": 4
+    }
+  },
+  "attempts_by_status": {
+    "ok": 21
+  },
+  "comparisons": {
+    "corroboration": {
+      "by_effort": {
+        "high": {
+          "corroborated": 0,
+          "findings": 115,
+          "invalid": 0,
+          "rate": 0.0,
+          "unadjudicated": 115,
+          "unknown": 0,
+          "valid": 0
+        }
+      }
+    },
+    "finding_recall": {
+      "by_effort": {
+        "high": {
+          "matched": 0,
+          "null": {
+            "matched": 0,
+            "recall": 0.0,
+            "recorded": 49
+          },
+          "recall": 0.0,
+          "recorded": 75
+        }
+      },
+      "by_tier": {
+        "phase": {
+          "matched": 0,
+          "null": {
+            "matched": 0,
+            "recall": 0.0,
+            "recorded": 28
+          },
+          "recall": 0.0,
+          "recorded": 47
+        },
+        "unit": {
+          "matched": 0,
+          "null": {
+            "matched": 0,
+            "recall": 0.0,
+            "recorded": 21
+          },
+          "recall": 0.0,
+          "recorded": 28
+        }
+      }
+    },
+    "fix_recall": {
+      "by_effort": {
+        "high": {
+          "hunks": 176,
+          "matched": 0,
+          "null": {
+            "hunks": 12,
+            "matched": 0,
+            "recall": 0.0
+          },
+          "recall": 0.0
+        }
+      },
+      "by_tier": {
+        "phase": {
+          "hunks": 176,
+          "matched": 0,
+          "null": {
+            "hunks": 12,
+            "matched": 0,
+            "recall": 0.0
+          },
+          "recall": 0.0
+        },
+        "unit": {
+          "hunks": 0,
+          "matched": 0,
+          "null": {
+            "hunks": 0,
+            "matched": 0,
+            "recall": null
+          },
+          "recall": null
+        }
+      },
+      "censored_excluded": 7,
+      "uncensored_cases": 14
+    },
+    "paired_deltas": {
+      "corroboration_rate": {},
+      "finding_recall": {},
+      "fix_recall": {},
+      "severity_agreement_rate": {}
+    },
+    "severity_agreement": {
+      "by_effort": {
+        "high": {
+          "agree": 0,
+          "pairs": 0,
+          "rate": null
+        }
+      }
+    },
+    "verdict_agreement": {
+      "by_effort": {
+        "high": {
+          "agreement": 0.6,
+          "cases": 15,
+          "matrix": {
+            "fail": {
+              "fail": 1,
+              "pass": 5
+            },
+            "pass": {
+              "fail": 1,
+              "pass": 8
+            }
+          }
+        }
+      }
+    }
+  },
+  "cost_latency": {
+    "by_effort": {
+      "high": {
+        "cost_usd": null,
+        "known_cost_usd": 0.3706833,
+        "latency_ms": {
+          "count": 27,
+          "max": 140460,
+          "min": 4780,
+          "p50": 89376,
+          "p90": 108992
+        },
+        "reviews": 21,
+        "unknown_cost_entries": 4
+      }
+    },
+    "cost_basis": "ledger_run_receipts"
+  },
+  "denominators": {
+    "adjudicated_findings": 0,
+    "attempted_records": 33,
+    "canonical_records": 23,
+    "completed_valid_records": 21,
+    "eligible_cases": 360,
+    "historical_findings": 0,
+    "new_findings": 115,
+    "required_adjudications": 79,
+    "unadjudicated_required": 79
+  },
+  "excluded_records": {
+    "duplicate_receipt": 2,
+    "non_canonical_record": 8,
+    "non_completed_status": 2
+  },
+  "historical_findings": {
+    "by_category": {
+      "matched": 0,
+      "partial": 0,
+      "unadjudicated": 0,
+      "unmatched": 0
+    }
+  },
+  "manifest_sha256": "10f8d4d3e0c08a1e2a4883fc8f653f37cc61fefe54e8effe824f285f896d482f",
+  "metric_only": true,
+  "new_findings": {
+    "by_category": {
+      "disputed": 0,
+      "matched": 0,
+      "new-valid": 0,
+      "partial": 0,
+      "unadjudicated": 115
+    },
+    "low_sample_rate": 0.2,
+    "sampling_seed": 28
+  },
+  "outcomes": {
+    "available_cases": {
+      "high": {
+        "case_count": 21,
+        "finding_categories": {
+          "disputed": 0,
+          "matched": 0,
+          "new-valid": 0,
+          "partial": 0,
+          "unadjudicated": 115
+        },
+        "findings": 115,
+        "partial_records": 15,
+        "records": 21
+      }
+    },
+    "by_build_model": {
+      "unknown": {
+        "case_count": 21,
+        "categories": {},
+        "findings": 115,
+        "partial_records": 15,
+        "records": 21
+      }
+    },
+    "by_effective_effort": {
+      "high": {
+        "case_count": 21,
+        "categories": {},
+        "findings": 115,
+        "partial_records": 15,
+        "records": 21
+      }
+    },
+    "by_reviewer_model": {
+      "claude-haiku-5-5": {
+        "case_count": 21,
+        "categories": {},
+        "findings": 115,
+        "partial_records": 15,
+        "records": 21
+      }
+    },
+    "common_completed_cases": {
+      "by_effort": {
+        "high": {
+          "finding_categories": {
+            "disputed": 0,
+            "matched": 0,
+            "new-valid": 0,
+            "partial": 0,
+            "unadjudicated": 0
+          },
+          "findings": 0,
+          "partial_records": 0,
+          "records": 0
+        }
+      },
+      "case_count": 0
+    }
+  },
+  "owner_dropped_arms": [
+    {
+      "attempted": 0,
+      "completed": 0,
+      "counted_as_failure": false,
+      "effort": "xhigh",
+      "eligible": 360,
+      "reason": "owner_dropped"
+    },
+    {
+      "attempted": 0,
+      "completed": 0,
+      "counted_as_failure": false,
+      "effort": "max",
+      "eligible": 360,
+      "reason": "owner_dropped"
+    }
+  ],
+  "paired_intersection": {
+    "completed_cases": 0
+  },
+  "population": {
+    "by_effort": {
+      "high": {
+        "attempted": 33,
+        "by_tier": {
+          "phase": {
+            "attempted": 21,
+            "completed": 14
+          },
+          "pr": {
+            "attempted": 0,
+            "completed": 0
+          },
+          "unit": {
+            "attempted": 12,
+            "completed": 7
+          }
+        },
+        "censored": 10,
+        "completed": 21,
+        "eligible": 360,
+        "exclusions": {
+          "duplicate_receipt": 2,
+          "non_canonical_record": 8,
+          "non_completed_status": 2
+        },
+        "failed": 12,
+        "shortfall_against_floor": 279
+      }
+    },
+    "by_tier": {
+      "phase": {
+        "eligible": 193,
+        "frozen": 193
+      },
+      "pr": {
+        "eligible": 2,
+        "frozen": 0
+      },
+      "unit": {
+        "eligible": 339,
+        "frozen": 167
+      }
+    },
+    "censored": 100,
+    "eligible": 360,
+    "exclusions": {
+      "manifest": {
+        "criteria_unavailable": 2,
+        "empty_capture": 8,
+        "no_code_change": 88,
+        "no_recorded_outcome": 69,
+        "no_tier": 3114
+      },
+      "run": {
+        "duplicate_receipt": 2,
+        "non_canonical_record": 8,
+        "non_completed_status": 2
+      }
+    },
+    "floor": 300,
+    "frozen": 360,
+    "shortfall_against_floor": 0,
+    "target": 360
+  },
+  "provenance": {
+    "canonical_records": 23,
+    "complete": true,
+    "completed_records": 21,
+    "detail": "full",
+    "filters": {
+      "tags": [
+        "manifest:10f8d4d3e0c08a1e2a4883fc8f653f37cc61fefe54e8effe824f285f896d482f",
+        "trial:plan28-p5-20261121f"
+      ]
+    },
+    "limit": 500,
+    "manifest_sha256": "10f8d4d3e0c08a1e2a4883fc8f653f37cc61fefe54e8effe824f285f896d482f",
+    "page_count": 1,
+    "row_count": 33,
+    "run_id": "plan28-p5-20261121f",
+    "schema_version": 1,
+    "tenant_id": "t-60d108478da4",
+    "terminal": {
+      "complete": true,
+      "cursor_out": null
+    }
+  },
+  "reconciliation": {
+    "canonical_records": 23,
+    "completed_records": 21,
+    "completed_without_canonical_id": 0,
+    "completed_without_cost": 0,
+    "cost_basis": "ledger_run_receipts",
+    "missing_from_export": 0,
+    "unknown_cost_entries": 4
+  },
+  "records_by_status": {
+    "api_error": 2,
+    "invalid_output": 2,
+    "ok": 6,
+    "ok_partial": 15,
+    "refused_capture": 0,
+    "refused_criteria": 0,
+    "refused_disclosure": 6,
+    "skipped_budget": 0,
+    "skipped_busy": 0,
+    "skipped_duplicate": 2,
+    "timeout": 0,
+    "truncated": 0,
+    "unavailable": 0
+  },
+  "reported_efforts": [
+    "high"
+  ],
+  "reproducibility": {
+    "export_sha256": "58e87a79adf79e2e2eb09d5de6c93e8cb5a836a72e992acc6e5a1e70c44a5788",
+    "ledger_sha256": "c9e9545d4fb037dc34a14eff0820054c1691c6d62365abb506b2bdbd9ae07b2b",
+    "manifest_sha256": "10f8d4d3e0c08a1e2a4883fc8f653f37cc61fefe54e8effe824f285f896d482f",
+    "metric_only_sha256": "8f59a74637f7e02ffa3efd189afd77f8eeed8ba8023b05fa2e26f7343a5ab7fe",
+    "report_sha256": "176d8fa3a0e040fb84a8e53dc9eb87a3507b9b3e09e250b9a753e1386c25d535",
+    "seed": 28
+  },
+  "schema_version": 1,
+  "usage": {
+    "cost_basis": "ledger_run_receipts",
+    "cost_usd": null,
+    "input_tokens": null,
+    "known_cost_usd": 0.3706833,
+    "latency_ms": {
+      "count": 27,
+      "max": 140460,
+      "min": 4780,
+      "p50": 89376,
+      "p90": 108992
+    },
+    "missing_data": {
+      "attempt_records": 0,
+      "cost_fields": 0,
+      "input_token_fields": 2,
+      "latency_fields": 0,
+      "output_token_fields": 2
+    },
+    "output_tokens": null,
+    "unknown_cost_entries": 4
+  },
+  "validation": {
+    "adjudication": {
+      "double_labelled": 0,
+      "kappa": null,
+      "labeler_model": null,
+      "second_labeler_model": null
+    },
+    "leak_check": {
+      "foreign_plan_document_captures": 54,
+      "min_excerpt_words": 5,
+      "outcome_text_hits": 0,
+      "own_plan_document_hits": 0,
+      "pass": true,
+      "request_errors": [],
+      "requests_checked": 1080,
+      "scope": "case_plan_and_outcome_excerpts",
+      "short_excerpts_skipped": 1458
+    },
+    "matching": {
+      "matches": 0,
+      "method_counts": {
+        "adjudicated": 0,
+        "structural": 0
+      },
+      "uncertain_band": 3
+    },
+    "shuffled_null": {
+      "method": "shuffled_case_map",
+      "seed": 28
+    }
+  }
+}
