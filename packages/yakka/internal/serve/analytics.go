@@ -630,11 +630,16 @@ func (s *Server) analyticsScores(w http.ResponseWriter, r *http.Request, _ strin
 		readFailed(w)
 		return
 	}
+	names, err := s.retainedChecks(r.Context(), ts.t, kind)
+	if err != nil {
+		readFailed(w)
+		return
+	}
 	out := []map[string]any{}
-	for _, c := range s.catalogChecks(kind) {
-		v := vals[c.Name]
+	for _, name := range names {
+		v := vals[name]
 		sort.Float64s(v)
-		out = append(out, map[string]any{"name": c.Name, "n": len(v), "min": round3(percentile(v, 0)),
+		out = append(out, map[string]any{"name": name, "n": len(v), "min": round3(percentile(v, 0)),
 			"p25": round3(percentile(v, .25)), "median": round3(percentile(v, .5)),
 			"p75": round3(percentile(v, .75)), "max": round3(percentile(v, 1))})
 	}
@@ -660,8 +665,13 @@ func (s *Server) analyticsScoresByLens(w http.ResponseWriter, r *http.Request, t
 		return
 	}
 	checks := map[string]bool{}
-	for _, c := range s.catalogChecks(kind) {
-		checks[c.Name] = true
+	names, err := s.retainedChecks(r.Context(), ts.t, kind)
+	if err != nil {
+		readFailed(w)
+		return
+	}
+	for _, name := range names {
+		checks[name] = true
 	}
 	selectedCheck := q.Get("check")
 	if selectedCheck != "" && !checks[selectedCheck] {

@@ -1076,7 +1076,7 @@ func (s *Server) analyticsSessionScatter(w http.ResponseWriter, r *http.Request,
 		errJSON(w, 400, "session scatter requires two to four fields")
 		return
 	}
-	allowed := map[string]bool{"cost_usd": true, "tokens_in": true, "tokens_out": true, "tokens_cache_read": true, "tokens_cache_write": true, "tokens_reasoning": true}
+	allowed := map[string]bool{"cost_usd": true, "commits": true, "unpriced_calls": true, "tokens_in": true, "tokens_out": true, "tokens_cache_read": true, "tokens_cache_write": true, "tokens_reasoning": true}
 	seen := map[string]bool{}
 	for _, f := range fields {
 		if !allowed[f] || seen[f] {
