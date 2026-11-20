@@ -7,7 +7,7 @@
 //   13-01  the matrix runs both release targets (Pages-style and embedded)
 //          over the same four shipped acceptance suites, with the measured
 //          per-file test counts and a zero-skip assertion;
-//   13-02  the committed browser record (75 requests, 12 scenarios, 9 all=1)
+//   13-02  the committed browser record (75 requests, 12 scenarios, 20 all=1)
 //          and the Go smoke/profiler pins (75 requests, the record SHA-256,
 //          the unchanged 500 ms p95 bound, concurrency 4);
 //   13-03  the eight Pages-faithful account subtests, the at-most-4-in-flight

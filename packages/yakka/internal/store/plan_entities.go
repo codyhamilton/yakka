@@ -81,7 +81,8 @@ func (t *Tenant) PlanCostsAll(ctx context.Context, f AnalyticsFilter) (map[PlanI
 	}
 	rows.Close()
 
-	w, wargs := f.factWhere()
+	membership := f.withoutIdentity()
+	w, wargs := membership.factWhere()
 	rows, err = t.rdb.QueryContext(ctx, `SELECT DISTINCT a.repo_id,a.plan,a.conversation_id FROM facts a
 		WHERE a.type='artifact_version' AND a.plan<>''
 		AND EXISTS(SELECT 1 FROM facts wf WHERE wf.conversation_id=a.conversation_id AND `+w+`)`, wargs...)
@@ -131,7 +132,8 @@ type planAssociation struct {
 
 // planAssociations reads lifetime plan artifacts intersected with the in-window conversation set.
 func (t *Tenant) planAssociations(ctx context.Context, f AnalyticsFilter, plans []PlanIdentity) ([]planAssociation, error) {
-	w, wargs := f.factWhere()
+	membership := f.withoutIdentity()
+	w, wargs := membership.factWhere()
 	q := `SELECT DISTINCT a.repo_id,a.plan,a.conversation_id FROM facts a
 		WHERE a.type='artifact_version' AND a.plan<>''
 		AND EXISTS(SELECT 1 FROM facts wf WHERE wf.conversation_id=a.conversation_id AND ` + w + `)`
@@ -267,7 +269,8 @@ func (t *Tenant) PlanSessionIDsByPlan(ctx context.Context, f AnalyticsFilter, pl
 		return out, nil
 	}
 	values, pageArgs := planKeyValues(plans)
-	w, wargs := f.factWhere()
+	membership := f.withoutIdentity()
+	w, wargs := membership.factWhere()
 	args := append([]any{}, pageArgs...)
 	args = append(args, wargs...)
 	rows, err := t.rdb.QueryContext(ctx, `WITH page(repo_id,plan) AS (VALUES `+values+`), associated AS (
