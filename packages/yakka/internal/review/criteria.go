@@ -4,6 +4,7 @@ import (
 	"context"
 	"path"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/codyhamilton/yakka/packages/yakka/internal/keys"
@@ -32,8 +33,9 @@ type CriteriaRecord struct {
 	Ignored     string `json:"ignored,omitempty"`
 }
 
-// CriteriaResolution is directly consumable by Build. CriteriaText is used
-// for explicit text and the no-criteria marker; stored sources use Criteria.
+// CriteriaResolution is directly consumable by Build. Stored sources use
+// Criteria; explicit text carries both synthetic X ids in Criteria and the
+// joined text in CriteriaText; the no-criteria marker carries only text.
 type CriteriaResolution struct {
 	Criteria     []Criterion
 	CriteriaText string
@@ -81,7 +83,15 @@ func ResolveCriteria(ctx context.Context, tenant *store.Tenant, req CriteriaRequ
 	}
 	if len(req.CriteriaText) > 0 {
 		text := strings.Join(req.CriteriaText, "\n")
+		// Explicit text has no stored ids, so give each entry a stable
+		// synthetic id in supplied order. The record still hashes the joined
+		// text so existing explicit records and dedupe are unchanged.
+		criteria := make([]Criterion, len(req.CriteriaText))
+		for i, entry := range req.CriteriaText {
+			criteria[i] = Criterion{ID: "X" + strconv.Itoa(i+1), Text: entry}
+		}
 		return CriteriaResolution{
+			Criteria:     criteria,
 			CriteriaText: text,
 			Record:       CriteriaRecord{Source: "explicit", RepoID: req.RepoID, ContentHash: keys.ContentHash([]byte(text))},
 		}, nil

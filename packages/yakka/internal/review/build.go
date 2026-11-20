@@ -376,7 +376,10 @@ func normalizeCriteria(in Input) string {
 	cs := append([]Criterion(nil), in.Criteria...)
 	sort.SliceStable(cs, func(i, j int) bool { return cs[i].ID < cs[j].ID })
 	var b strings.Builder
-	if in.CriteriaText != "" {
+	// Criteria wins when present: explicit text is resolved to synthetic ids so
+	// the prompt renders it exactly like stored criteria. CriteriaText alone is
+	// the no-criteria marker.
+	if len(cs) == 0 && in.CriteriaText != "" {
 		b.WriteString(in.CriteriaText)
 		return b.String()
 	}
