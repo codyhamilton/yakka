@@ -248,6 +248,15 @@ func (f AnalyticsFilter) factWhere() (string, []any) {
 	return w, args
 }
 
+// withoutIdentity drops plan/repo identity filters. A plan's associated sessions are established by
+// the explicit lifetime artifact association, and its in-window membership must not also require the
+// session's usage facts to carry the plan's raw repo/plan: those are often empty (D18).
+func (f AnalyticsFilter) withoutIdentity() AnalyticsFilter {
+	f.Repos = nil
+	f.Plans = nil
+	return f
+}
+
 // matchWithoutTime is factWhere without the time bounds, so coverage can see every retained row.
 func (f AnalyticsFilter) matchWithoutTime() (string, []any) {
 	w, args := f.factWhere()

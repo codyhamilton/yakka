@@ -37,7 +37,14 @@ function iso(value) {
 
 // Absolute window. `from`/`to` in the URL take precedence over `win`; a relative
 // window is frozen to absolute bounds so every cursor page sends the same filter.
-export function resolveWindow(state = {}, now = Date.now()) {
+export function resolveWindow(state = {}, now = Date.now(), resolved = null) {
+  if (resolved && typeof resolved === 'object') {
+    return {
+      from: resolved.all ? '' : (resolved.from ? iso(resolved.from) : ''),
+      to: resolved.to ? iso(resolved.to) : iso(now),
+      all: resolved.all === true
+    };
+  }
   const from = state.from ? iso(state.from) : '';
   const to = state.to ? iso(state.to) : '';
   if (from || to) {
@@ -54,12 +61,12 @@ export function resolveWindow(state = {}, now = Date.now()) {
 
 // Shared filter -> `/explore` query parameters. Only the declared filters are
 // sent; an exclude on another lens is left out (and named by the explorer).
-export function filterToParameters(state = {}, { now = Date.now() } = {}) {
+export function filterToParameters(state = {}, { now = Date.now(), window = null } = {}) {
   const params = new URLSearchParams();
-  const window = resolveWindow(state, now);
-  if (window.all) params.set('all', '1');
-  if (window.from) params.set('from', window.from);
-  if (window.to) params.set('to', window.to);
+  const resolved = resolveWindow(state, now, window);
+  if (resolved.all) params.set('all', '1');
+  if (resolved.from) params.set('from', resolved.from);
+  if (resolved.to) params.set('to', resolved.to);
   const tz = state.tz || Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
   params.set('tz', tz);
   for (const key of DECLARED_FILTERS) {

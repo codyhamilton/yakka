@@ -238,6 +238,10 @@ func (s *Server) analyticsPlanEntities(w http.ResponseWriter, r *http.Request, t
 			return
 		}
 	}
+	if !store.PlanSortValid(p[0]) {
+		errJSON(w, 400, "unsupported plan sort "+p[0])
+		return
+	}
 	limit, cur, ok := pageParams(w, r)
 	if !ok {
 		return
@@ -258,9 +262,18 @@ func (s *Server) analyticsPlanEntities(w http.ResponseWriter, r *http.Request, t
 	if cur != nil && (len(cur.Key) == 2 || len(cur.Key) == 3) {
 		sc = &store.PlanCursor{TS: cur.TS, RepoID: cur.Key[0], Plan: cur.Key[1], Null: len(cur.Key) == 3 && cur.Key[2] == "null"}
 	}
-	page, more, err := ts.t.PlanEntitiesPage(r.Context(), f, p[0], p[1] == "desc", sc, limit)
+	needsCost := p[0] == "associated_cost_usd" || p[0] == "unpriced_calls"
+	var costs map[store.PlanIdentity]store.PlanCost
+	if needsCost {
+		costs, err = ts.t.PlanCostsAll(r.Context(), f)
+		if err != nil {
+			readFailed(w)
+			return
+		}
+	}
+	page, more, err := ts.t.PlanEntitiesPageWithCosts(r.Context(), f, p[0], p[1] == "desc", sc, limit, costs)
 	if err != nil {
-		errJSON(w, 400, "unsupported plan sort "+p[0])
+		readFailed(w)
 		return
 	}
 	n, err := ts.t.PlanEntityCount(r.Context(), f)
@@ -276,14 +289,43 @@ func (s *Server) analyticsPlanEntities(w http.ResponseWriter, r *http.Request, t
 			return
 		}
 	}
-	rows := make([]map[string]any, 0, len(page))
-	for _, x := range page {
-		execN := x.ExecutionsComplete + x.ExecutionsUnreported + x.ExecutionsStarted
-		cost, unpriced, calls, costErr := ts.t.PlanAssociatedCost(r.Context(), f, x.RepoID, x.Plan)
-		if costErr != nil {
+	keys := make([]store.PlanIdentity, len(page))
+	for i := range page {
+		keys[i] = store.PlanIdentity{RepoID: page[i].RepoID, Plan: page[i].Plan}
+	}
+	if !needsCost {
+		costs, err = ts.t.PlanAssociatedCosts(r.Context(), f, keys)
+		if err != nil {
 			readFailed(w)
 			return
 		}
+	}
+	sessionIDs, err := ts.t.PlanSessionIDsByPlan(r.Context(), f, keys)
+	if err != nil {
+		readFailed(w)
+		return
+	}
+	allIDs := []string{}
+	seenID := map[string]bool{}
+	for _, ids := range sessionIDs {
+		for _, id := range ids {
+			if !seenID[id] {
+				seenID[id] = true
+				allIDs = append(allIDs, id)
+			}
+		}
+	}
+	prov, err := ts.t.SessionProvenanceFor(r.Context(), allIDs)
+	if err != nil {
+		readFailed(w)
+		return
+	}
+	rows := make([]map[string]any, 0, len(page))
+	for _, x := range page {
+		key := store.PlanIdentity{RepoID: x.RepoID, Plan: x.Plan}
+		pc := costs[key]
+		cost, unpriced, calls := pc.CostUSD, pc.UnpricedCalls, pc.Calls
+		execN := x.ExecutionsComplete + x.ExecutionsUnreported + x.ExecutionsStarted
 		var share any
 		if execN > 0 {
 			share = float64(x.ExecutionsComplete) / float64(execN)
@@ -302,16 +344,7 @@ func (s *Server) analyticsPlanEntities(w http.ResponseWriter, r *http.Request, t
 		if execN == 0 {
 			flags["complete_share_null_reason"] = "no_executions"
 		}
-		ids, idsErr := ts.t.PlanSessionIDs(r.Context(), f, x.RepoID, x.Plan)
-		if idsErr != nil {
-			readFailed(w)
-			return
-		}
-		prov, provErr := ts.t.SessionProvenanceFor(r.Context(), ids)
-		if provErr != nil {
-			readFailed(w)
-			return
-		}
+		ids := sessionIDs[key]
 		harnesses, models := map[string]int{}, map[string]int{}
 		for _, id := range ids {
 			harnesses[prov[id].Harness]++
@@ -1076,7 +1109,7 @@ func (s *Server) analyticsSessionScatter(w http.ResponseWriter, r *http.Request,
 		errJSON(w, 400, "session scatter requires two to four fields")
 		return
 	}
-	allowed := map[string]bool{"cost_usd": true, "tokens_in": true, "tokens_out": true, "tokens_cache_read": true, "tokens_cache_write": true, "tokens_reasoning": true}
+	allowed := map[string]bool{"cost_usd": true, "commits": true, "unpriced_calls": true, "tokens_in": true, "tokens_out": true, "tokens_cache_read": true, "tokens_cache_write": true, "tokens_reasoning": true}
 	seen := map[string]bool{}
 	for _, f := range fields {
 		if !allowed[f] || seen[f] {
@@ -1103,6 +1136,7 @@ func (s *Server) analyticsSessionScatter(w http.ResponseWriter, r *http.Request,
 	var population int
 	var page []store.SessionEntityRow
 	var prov map[string]store.SessionProvenance
+	var marginalBins map[string][]store.DistributionBin
 	if lens.active() {
 		members, memberProv, err := sessionLensPopulation(r.Context(), ts.t, filter, lens)
 		if err != nil {
@@ -1122,18 +1156,21 @@ func (s *Server) analyticsSessionScatter(w http.ResponseWriter, r *http.Request,
 		}
 		filter = sessionMemberFilter(filter, lens)
 		filter.ConversationIDs = ids
+		// The lens scan already holds every matching session. Bin those rows instead of
+		// rebinding every conversation id into another query.
+		marginalBins, err = ts.t.SessionScatterMarginalsFromRows(fields, members)
+		if err != nil {
+			readFailed(w)
+			return
+		}
 	} else {
-		var err error
-		population, err = ts.t.ConversationCount(r.Context(), filter)
+		page, population, marginalBins, err = ts.t.SessionScatterPopulation(r.Context(), filter, fields, 5000)
 		if err != nil {
 			readFailed(w)
 			return
 		}
-		page, _, err = ts.t.SessionEntitiesPage(r.Context(), filter, "sample_hash", false, nil, min(population, 5000))
-		if err != nil {
-			readFailed(w)
-			return
-		}
+		// Provenance is only attached to the returned sample. The sample is at most
+		// 5000 ids; binding the whole window exceeds SQLite's variable limit.
 		ids := make([]string, len(page))
 		for i := range page {
 			ids[i] = page[i].ID
@@ -1160,45 +1197,16 @@ func (s *Server) analyticsSessionScatter(w http.ResponseWriter, r *http.Request,
 	marginals := map[string]any{}
 	eligible := map[string]int{}
 	missing := map[string]int{}
-	callSessions, err := ts.t.SessionCallConversationCount(r.Context(), filter)
-	if err != nil {
-		readFailed(w)
-		return
-	}
-	noCalls := max(0, population-callSessions)
 	for _, f := range fields {
-		d, err := ts.t.Distribution(r.Context(), filter, store.DistributionParams{Measure: f, Grain: "conversation", Top: 100})
-		if err != nil {
-			readFailed(w)
-			return
-		}
-		bins := []store.DistributionBin{}
-		for _, g := range d.Rows {
-			if g.K == "all" {
-				bins = g.Bins
-				break
-			}
-		}
-		if noCalls > 0 {
-			if len(bins) == 0 {
-				// Distribution has no row when the population has no model calls;
-				// represent the no-call sessions in the zero-value marginal bin.
-				bins = append(bins, store.DistributionBin{Lo: 0})
-			}
-			// The first distribution bin is the zero-value bin for the supported
-			// non-negative session usage and cost measures.
-			bins[0].N += noCalls
-		}
+		bins := marginalBins[f]
 		marginals[f] = bins
 		total := 0
 		for _, b := range bins {
 			total += b.N
 		}
+		eligible[f] = total
 		if f == "cost_usd" {
-			eligible[f] = total
 			missing["unpriced_cost"] += max(0, population-total)
-		} else {
-			eligible[f] = total
 		}
 	}
 	sampled := population > len(points)

@@ -19,6 +19,18 @@ function publishedMeasures(grain) {
   return new Set([...(grain?.measures || []), ...(grain?.predicate?.measures || [])]);
 }
 
+// Scatter is its own mode. When the grain publishes `scatter_fields`, those are
+// the only permitted numeric axes; the general measure list is not a scatter
+// capability. Older schemas without the list fall back to the grain measures.
+function scatterNumericFields(grain) {
+  const mode = Array.isArray(grain?.scatter_fields)
+    ? grain.scatter_fields.filter(name => typeof name === 'string' && name)
+    : [];
+  if (!mode.length) return publishedMeasures(grain);
+  const measures = new Set(grain?.measures || []);
+  return new Set(mode.filter(name => !measures.size || measures.has(name)));
+}
+
 function publishedLenses(grain) {
   return new Set([...(grain?.lenses || []), ...(grain?.predicate?.lenses || [])]);
 }
@@ -29,10 +41,11 @@ function publishedLenses(grain) {
 // identity lens and `model` is categorical; neither is a numeric axis.
 export function scatterAxes(panel, schema) {
   const grain = schemaGrain(schema, panel?.grain);
-  const measures = publishedMeasures(grain);
+  const measures = scatterNumericFields(grain);
   const lenses = publishedLenses(grain);
   const axes = [];
   const unsupported = [];
+  const modeFields = Array.isArray(grain?.scatter_fields) && grain.scatter_fields.length > 0;
   for (const name of panel?.measures || []) {
     const nearest = () => axes[0] || 'a numeric measure the server publishes';
     if (CATEGORICAL.has(name) || lenses.has(name)) {
@@ -43,8 +56,12 @@ export function scatterAxes(panel, schema) {
       unsupported.push({ kind: 'axis', name, reason: 'the grain is not published by /schema', try: nearest() });
       continue;
     }
-    if (!measures.has(name) || !(grain?.measures || []).includes(name)) {
-      unsupported.push({ kind: 'axis', name, reason: `${name} is not a published ${panel?.grain} measure`, try: nearest() });
+    if (!measures.has(name)) {
+      unsupported.push({
+        kind: 'axis', name,
+        reason: modeFields ? `${name} is not a published ${panel?.grain} scatter field` : `${name} is not a published ${panel?.grain} measure`,
+        try: nearest()
+      });
       continue;
     }
     if (grain?.predicate && Array.isArray(grain.predicate.measures) && !grain.predicate.measures.includes(name)) {
@@ -88,7 +105,7 @@ export function scatterSpecFields(spec = {}, schema = null) {
   const scope = spec.scope || {};
   const measures = Array.isArray(spec.measures) ? spec.measures : [];
   const grain = schemaGrain(schema, spec.grain);
-  const numeric = grain ? publishedMeasures(grain) : null;
+  const numeric = grain ? scatterNumericFields(grain) : null;
   const pick = (candidate, fallback) => {
     if (candidate && (!numeric || numeric.has(candidate))) return candidate;
     if (fallback && (!numeric || numeric.has(fallback))) return fallback;

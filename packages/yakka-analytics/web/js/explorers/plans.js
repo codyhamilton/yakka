@@ -133,13 +133,13 @@ export function cohortParam(scope = {}) {
 
 // Only contract filter names, the frozen window, sort, paging and the first
 // valid cohort are sent.
-export function planListParams({ state = {}, filters = PLAN_FILTERS, measures = PLAN_MEASURES, sort = DEFAULT_SORT, limit = null, cursor = '', now = Date.now() } = {}) {
+export function planListParams({ state = {}, filters = PLAN_FILTERS, measures = PLAN_MEASURES, sort = DEFAULT_SORT, limit = null, cursor = '', now = Date.now(), window = null } = {}) {
   const scope = readScope(state, filters);
   const params = new URLSearchParams();
-  const window = resolveWindow(scope, now);
-  if (window.all) params.set('all', '1');
-  if (window.from) params.set('from', window.from);
-  if (window.to) params.set('to', window.to);
+  const resolved = resolveWindow(scope, now, window);
+  if (resolved.all) params.set('all', '1');
+  if (resolved.from) params.set('from', resolved.from);
+  if (resolved.to) params.set('to', resolved.to);
   const tz = scope.tz || Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
   params.set('tz', tz);
   params.set('grain', 'plan');
@@ -464,12 +464,12 @@ export function parsePlanDetailPath(pathname = '') {
   } catch { return null; }
 }
 
-function windowParams(state = {}, now = Date.now()) {
+function windowParams(state = {}, now = Date.now(), window = null) {
   const params = new URLSearchParams();
-  const window = resolveWindow(state, now);
-  if (window.all) params.set('all', '1');
-  if (window.from) params.set('from', window.from);
-  if (window.to) params.set('to', window.to);
+  const resolved = resolveWindow(state, now, window);
+  if (resolved.all) params.set('all', '1');
+  if (resolved.from) params.set('from', resolved.from);
+  if (resolved.to) params.set('to', resolved.to);
   params.set('tz', state.tz || Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC');
   return params;
 }
@@ -490,38 +490,38 @@ function withPaging(params, { limit = null, cursor = '' } = {}) {
 // The plan row is named by repo and plan, not by position; `plan` is a shared
 // filter the entities route applies even though the plan lens contract names
 // repo_id/harness/session_model/id.
-export function planRowParams(identity = {}, { state = {}, limit = 1 } = {}) {
-  const params = windowParams(state);
+export function planRowParams(identity = {}, { state = {}, window = null, limit = 1 } = {}) {
+  const params = windowParams(state, Date.now(), window);
   params.set('grain', 'plan');
   for (const [key, value] of identityParams(identity)) params.set(key, value);
   return withPaging(params, { limit });
 }
 
-export function planArtifactsParams(identity = {}, { state = {}, limit = null, cursor = '' } = {}) {
-  const params = windowParams(state);
+export function planArtifactsParams(identity = {}, { state = {}, window = null, limit = null, cursor = '' } = {}) {
+  const params = windowParams(state, Date.now(), window);
   params.set('grain', 'artifact');
   for (const [key, value] of identityParams(identity)) params.set(key, value);
   return withPaging(params, { limit, cursor });
 }
 
-export function planExecutionsParams(identity = {}, { state = {}, limit = null, cursor = '' } = {}) {
-  const params = windowParams(state);
+export function planExecutionsParams(identity = {}, { state = {}, window = null, limit = null, cursor = '' } = {}) {
+  const params = windowParams(state, Date.now(), window);
   params.set('grain', 'execution');
   for (const [key, value] of identityParams(identity)) params.set(key, value);
   return withPaging(params, { limit, cursor });
 }
 
 // `/entity?grain=plan` refuses `cohort=`; the builder never emits it.
-export function planCollectionParams(identity = {}, collection = '', { state = {}, limit = null, cursor = '' } = {}) {
-  const params = windowParams(state);
+export function planCollectionParams(identity = {}, collection = '', { state = {}, window = null, limit = null, cursor = '' } = {}) {
+  const params = windowParams(state, Date.now(), window);
   params.set('grain', 'plan');
   params.set('collection', collection);
   for (const [key, value] of identityParams(identity)) params.set(key, value);
   return withPaging(params, { limit, cursor });
 }
 
-export function planSessionResolveParams(ids = [], { state = {}, limit = null } = {}) {
-  const params = windowParams(state);
+export function planSessionResolveParams(ids = [], { state = {}, window = null, limit = null } = {}) {
+  const params = windowParams(state, Date.now(), window);
   params.set('grain', 'session');
   const seen = new Set();
   for (const raw of ids) {
@@ -763,7 +763,7 @@ function detailTimestamp(value) {
   return new Date(number * 1000).toISOString().replace('T', ' ').replace('.000Z', ' UTC');
 }
 
-async function renderDetail(root, doc, { signal, identity } = {}) {
+async function renderDetail(root, doc, { signal, identity, tenant = '', readContext = null } = {}) {
   ensurePlansStyles(doc);
   root.replaceChildren();
   const state = readScope(decodeUrlState(globalThis.location?.search || ''));
@@ -791,10 +791,13 @@ async function renderDetail(root, doc, { signal, identity } = {}) {
     else signal.addEventListener('abort', () => controller.abort(), { once: true });
   }
   let disposed = false;
-  let tenant = '';
   let schema = null;
   let timelineFrame = null;
-  const baselineCache = createBaselineCache({ transport, tenant: '', signal: controller.signal });
+  let baselineCache = null;
+  function baselineFor() {
+    if (!baselineCache) baselineCache = createBaselineCache({ transport, tenant, signal: controller.signal });
+    return baselineCache;
+  }
   const artifactsState = { rows: [], next: '', population: null, bands: new Map() };
   const executionsState = { rows: [], next: '', population: null };
   const sessionsState = { rows: [], next: '', population: null, resolved: new Map() };
@@ -814,11 +817,11 @@ async function renderDetail(root, doc, { signal, identity } = {}) {
       const path = String(row?.id?.path || '');
       const kind = row?.l?.kind || artifactKind(path);
       for (const entry of artifactScoreEntries(row)) {
-        const key = `${path}\u001f${entry.check}`;
+        const key = `${tenant}\u001f${path}\u001f${entry.check}`;
         if (entry.band) { bands.set(key, entry.band); continue; }
         if (entry.score === null || entry.score === undefined) { bands.set(key, 'unscored'); continue; }
         if (!entry.scorer) { bands.set(key, 'baseline_unavailable'); continue; }
-        const baseline = await baselineCache.get(kind, entry.check, entry.scorer).catch(() => null);
+        const baseline = await baselineFor().get(kind, entry.check, entry.scorer).catch(() => null);
         bands.set(key, bandFor(entry.score, baseline));
       }
     }
@@ -856,7 +859,7 @@ async function renderDetail(root, doc, { signal, identity } = {}) {
     const rows = artifactsState.rows.map(row => {
       const path = String(row.id?.path || '');
       const scores = artifactScoreEntries(row).map(entry => {
-        const band = artifactsState.bands.get(`${path}\u001f${entry.check}`) || entry.band || 'baseline_unavailable';
+        const band = artifactsState.bands.get(`${tenant}\u001f${path}\u001f${entry.check}`) || entry.band || 'baseline_unavailable';
         const value = entry.score === null || entry.score === undefined ? 'unscored' : Number(entry.score).toFixed(2);
         const scorer = entry.scorer || 'scorer not served';
         return `${entry.check} ${value} · ${scorer} · ${band}`;
@@ -1035,7 +1038,12 @@ async function renderDetail(root, doc, { signal, identity } = {}) {
     timelineFrame = createPanelFrame({
       panel: PLAN_TIMELINE_PANEL,
       spec: { plan: { repo_id: identity.repo_id, plan: identity.plan } },
-      scope: { ...(state.win ? { win: state.win } : {}), ...(state.from ? { from: state.from } : {}), ...(state.to ? { to: state.to } : {}), ...(state.tz ? { tz: state.tz } : {}) },
+      scope: {
+        ...(state.win ? { win: state.win } : {}),
+        ...(readContext?.window?.from ? { from: readContext.window.from } : (state.from ? { from: state.from } : {})),
+        ...(readContext?.window?.to ? { to: readContext.window.to } : (state.to ? { to: state.to } : {})),
+        ...(state.tz ? { tz: state.tz } : {})
+      },
       transport, scheduler, tenant, schema, doc
     });
     timeline.body.append(timelineFrame.element);
@@ -1043,7 +1051,7 @@ async function renderDetail(root, doc, { signal, identity } = {}) {
   }
 
   async function loadArtifacts(cursor = '') {
-    const { response, body } = await get('entities', planArtifactsParams(identity, { state, limit: pageLimit, cursor }), 'plan-detail-artifacts');
+    const { response, body } = await get('entities', planArtifactsParams(identity, { state, window: readContext?.window || null, limit: pageLimit, cursor }), 'plan-detail-artifacts');
     if (!response.ok) { artifacts.state('error', errorText(response, body, 'The artifacts request failed.')); return; }
     const incoming = Array.isArray(body.rows) ? body.rows : [];
     artifactsState.rows = cursor ? mergeByIdentity(artifactsState.rows, incoming) : incoming;
@@ -1055,7 +1063,7 @@ async function renderDetail(root, doc, { signal, identity } = {}) {
   }
 
   async function loadExecutions(cursor = '') {
-    const { response, body } = await get('entities', planExecutionsParams(identity, { state, limit: pageLimit, cursor }), 'plan-detail-executions');
+    const { response, body } = await get('entities', planExecutionsParams(identity, { state, window: readContext?.window || null, limit: pageLimit, cursor }), 'plan-detail-executions');
     if (!response.ok) { executions.state('error', errorText(response, body, 'The executions request failed.')); return; }
     const incoming = Array.isArray(body.rows) ? body.rows : [];
     executionsState.rows = cursor ? mergeByIdentity(executionsState.rows, incoming, true) : incoming;
@@ -1065,7 +1073,7 @@ async function renderDetail(root, doc, { signal, identity } = {}) {
   }
 
   async function loadSessions(cursor = '') {
-    const { response, body } = await get('entity', planCollectionParams(identity, 'sessions', { state, limit: pageLimit, cursor }), 'plan-detail-sessions');
+    const { response, body } = await get('entity', planCollectionParams(identity, 'sessions', { state, window: readContext?.window || null, limit: pageLimit, cursor }), 'plan-detail-sessions');
     if (!response.ok) { sessions.state('error', errorText(response, body, 'The sessions collection failed.')); return; }
     const incoming = Array.isArray(body.rows) ? body.rows : [];
     sessionsState.rows = cursor ? mergeConversationRows(sessionsState.rows, incoming) : incoming;
@@ -1073,7 +1081,7 @@ async function renderDetail(root, doc, { signal, identity } = {}) {
     sessionsState.population = body.population || sessionsState.population;
     const ids = [...new Set(sessionsState.rows.map(row => String(row.conversation_id || '')).filter(Boolean))];
     if (ids.length) {
-      const resolved = await get('entities', planSessionResolveParams(ids, { state, limit: pageLimit }), 'plan-detail-session-rows');
+      const resolved = await get('entities', planSessionResolveParams(ids, { state, window: readContext?.window || null, limit: pageLimit }), 'plan-detail-session-rows');
       if (resolved.response.ok) {
         for (const row of resolved.body.rows || []) {
           const id = String(row.id?.conversation_id || row.id || '');
@@ -1085,7 +1093,7 @@ async function renderDetail(root, doc, { signal, identity } = {}) {
   }
 
   async function loadEvents(cursor = '') {
-    const { response, body } = await get('entity', planCollectionParams(identity, 'events', { state, limit: pageLimit, cursor }), 'plan-detail-events');
+    const { response, body } = await get('entity', planCollectionParams(identity, 'events', { state, window: readContext?.window || null, limit: pageLimit, cursor }), 'plan-detail-events');
     if (!response.ok) { events.state('error', errorText(response, body, 'The events collection failed.')); return; }
     const incoming = Array.isArray(body.rows) ? body.rows : [];
     eventsState.rows = cursor ? mergeEventRows(eventsState.rows, incoming) : incoming;
@@ -1137,12 +1145,14 @@ async function renderDetail(root, doc, { signal, identity } = {}) {
   let pageLimit = null;
 
   async function start() {
-    try {
-      const me = await transport.request('me', { signal: controller.signal, stateKey: 'plans-detail-me' });
-      tenant = rememberedTenant(me?.body || {});
-    } catch (error) {
-      if (error?.name === 'AbortError') return;
-      tenant = '';
+    if (!tenant) {
+      try {
+        const me = await transport.request('me', { signal: controller.signal, stateKey: 'plans-detail-me' });
+        tenant = rememberedTenant(me?.body || {});
+      } catch (error) {
+        if (error?.name === 'AbortError') return;
+        tenant = '';
+      }
     }
     if (disposed) return;
     try {
@@ -1162,7 +1172,7 @@ async function renderDetail(root, doc, { signal, identity } = {}) {
 
     let rowResult;
     try {
-      rowResult = await get('entities', planRowParams(identity, { state, limit: 1 }), 'plan-detail-row');
+      rowResult = await get('entities', planRowParams(identity, { state, window: readContext?.window || null, limit: 1 }), 'plan-detail-row');
     } catch (error) {
       if (error?.name === 'AbortError') return;
       header.state('error', error?.message || 'The plan request failed.');
@@ -1249,15 +1259,15 @@ function detailContentFailure(result = {}) {
   return result.message || 'The content request failed.';
 }
 
-export function render(root, doc = globalThis.document, { signal } = {}) {
+export function render(root, doc = globalThis.document, { signal, tenant = '', readContext = null } = {}) {
   const route = parseRoute(globalThis.location?.pathname || '/', globalThis.location?.search || '');
   if (route?.kind === 'explorer' && route.explorer === 'plans' && route.plan) {
-    return renderDetail(root, doc, { signal, identity: route.plan });
+    return renderDetail(root, doc, { signal, identity: route.plan, tenant, readContext });
   }
-  return renderList(root, doc, { signal });
+  return renderList(root, doc, { signal, tenant, readContext });
 }
 
-export function renderList(root, doc = globalThis.document, { signal } = {}) {
+export function renderList(root, doc = globalThis.document, { signal, tenant = '', readContext = null } = {}) {
   ensurePlansStyles(doc);
   register();
   root.replaceChildren();
@@ -1288,7 +1298,6 @@ export function renderList(root, doc = globalThis.document, { signal } = {}) {
   root.append(scatterSection);
 
   let schema = null;
-  let tenant = '';
   let measures = PLAN_MEASURES.slice();
   let filters = PLAN_FILTERS.slice();
   let sort = parseSort(new URLSearchParams(globalThis.location?.search || '').get('sort'), measures);
@@ -1425,8 +1434,10 @@ export function renderList(root, doc = globalThis.document, { signal } = {}) {
       return;
     }
     if (scatterNote) scatterSection.append(el(doc, 'p', 'plans-scatter-not-applied', scatterNote));
+    const frozen = readContext?.window || null;
+    const scatterScope = { ...flatScope(scope), ...(frozen ? { from: frozen.from || '', to: frozen.to || '' } : {}) };
     scatterFrame = createPanelFrame({
-      panel: SCATTER_PLAN_PANEL, spec: planScatterSpec(), scope: flatScope(scope),
+      panel: SCATTER_PLAN_PANEL, spec: planScatterSpec(), scope: scatterScope,
       transport, scheduler, tenant, schema, doc
     });
     scatterSection.append(scatterFrame.element);
@@ -1474,7 +1485,7 @@ export function renderList(root, doc = globalThis.document, { signal } = {}) {
     if (signal?.aborted) controller.abort();
     else signal?.addEventListener('abort', () => controller.abort(), { once: true });
     frame.setState('loading', { inFlight: 1 });
-    base = planListParams({ state: currentScope(), filters, measures, sort: sort.raw, limit: pageLimit });
+    base = planListParams({ state: currentScope(), filters, measures, sort: sort.raw, limit: pageLimit, window: readContext?.window || null });
     try {
       const { response, body: payload } = await transport.get('entities', base, { tenant, signal: controller.signal, stateKey: 'plans' });
       if (disposed || id !== runId) return;
@@ -1509,7 +1520,7 @@ export function renderList(root, doc = globalThis.document, { signal } = {}) {
     const id = ++runId;
     frame.setState('loading', { inFlight: 1 });
     try {
-      const { response, body: payload } = await transport.get('entities', planPageParams(base, { cursor, limit: pageLimit }), { signal: controller.signal, stateKey: 'plans' });
+      const { response, body: payload } = await transport.get('entities', planPageParams(base, { cursor, limit: pageLimit }), { tenant, signal: controller.signal, stateKey: 'plans' });
       if (disposed || id !== runId) return;
       const result = mapPlanListResponse({ status: response.status, body: payload });
       if (result.state !== 'ready') { result.retry = loadMore; frame.setState(result.state, result); return; }
@@ -1536,12 +1547,14 @@ export function renderList(root, doc = globalThis.document, { signal } = {}) {
   }
 
   async function start() {
-    try {
-      const me = await transport.request('me', { signal: controller.signal, stateKey: 'plans-me' });
-      tenant = rememberedTenant(me?.body || {});
-    } catch (error) {
-      if (error?.name === 'AbortError') { if (!disposed) frame.setState('cancelled', { retry: start }); return; }
-      tenant = '';
+    if (!tenant) {
+      try {
+        const me = await transport.request('me', { signal: controller.signal, stateKey: 'plans-me' });
+        tenant = rememberedTenant(me?.body || {});
+      } catch (error) {
+        if (error?.name === 'AbortError') { if (!disposed) frame.setState('cancelled', { retry: start }); return; }
+        tenant = '';
+      }
     }
     if (disposed) return;
     let body = null;

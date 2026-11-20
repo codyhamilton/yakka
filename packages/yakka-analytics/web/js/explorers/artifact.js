@@ -509,7 +509,7 @@ export function render(root, doc = globalThis.document, { signal } = {}) {
       return;
     }
     const head = renderHeader(row);
-    const cached = textCache.get(row.content_hash);
+    const cached = textCache.get(`${tenant}\u001f${row.content_hash}`);
     if (cached) {
       versionSlot.dataset.state = 'ready';
       versionSlot.dataset.contentState = 'ready';
@@ -540,7 +540,7 @@ export function render(root, doc = globalThis.document, { signal } = {}) {
     });
     if (disposed || run !== contentRun || !result) return;
     if (!result.ok) { renderContentState(result); return; }
-    textCache.set(row.content_hash, result.text);
+    textCache.set(`${tenant}\u001f${row.content_hash}`, result.text);
     versionSlot.dataset.state = 'ready';
     versionSlot.dataset.contentState = 'ready';
     const model = chunkText(result.text, { lines: CHUNK_LINES });

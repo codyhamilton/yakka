@@ -68,29 +68,42 @@ func artifactScoreBand(score map[string]any, baseline []float64) string {
 	return "mid"
 }
 
-// Historical score names remain queryable after catalogue changes. Names absent
-// from both the active catalogue and retained scores are never advertised.
+// retainedChecks is the one retained-plus-active per-kind check catalogue used by
+// discovery (/schema), /scores and /score-series reads and selected-check
+// validation. Historical names remain queryable after catalogue changes and
+// without a configured scorer. Names absent from both the active catalogue and
+// retained scores are never advertised.
+func (s *Server) retainedChecks(ctx context.Context, t *store.Tenant, kind string) ([]string, error) {
+	names := map[string]bool{}
+	if s.opts.Checks != nil {
+		for _, check := range s.opts.Checks.For(kind) {
+			names[check.Name] = true
+		}
+	}
+	rows, err := t.LatestContentScores(ctx, kind)
+	if err != nil {
+		return nil, err
+	}
+	for _, row := range rows {
+		names[row.Check] = true
+	}
+	out := make([]string, 0, len(names))
+	for name := range names {
+		out = append(out, name)
+	}
+	sort.Strings(out)
+	return out, nil
+}
+
+// artifactChecks is the same union for every kind, shaped for /schema.
 func (s *Server) artifactChecks(ctx context.Context, t *store.Tenant) (map[string][]string, error) {
 	out := map[string][]string{}
 	for _, kind := range kindOrder {
-		names := map[string]bool{}
-		if s.opts.Checks != nil {
-			for _, check := range s.opts.Checks.For(kind) {
-				names[check.Name] = true
-			}
-		}
-		rows, err := t.LatestContentScores(ctx, kind)
+		names, err := s.retainedChecks(ctx, t, kind)
 		if err != nil {
 			return nil, err
 		}
-		for _, row := range rows {
-			names[row.Check] = true
-		}
-		out[kind] = []string{}
-		for name := range names {
-			out[kind] = append(out[kind], name)
-		}
-		sort.Strings(out[kind])
+		out[kind] = names
 	}
 	return out, nil
 }

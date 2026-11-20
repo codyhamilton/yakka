@@ -45,15 +45,6 @@ func init() {
 	})
 	sqlite.RegisterDeterministicScalarFunction("wf_usage_priced", 8, func(_ *sqlite.FunctionContext, a []driver.Value) (driver.Value, error) {
 		str := func(i int) string { v, _ := a[i].(string); return v }
-		integer := func(i int) int64 {
-			switch v := a[i].(type) {
-			case int64:
-				return v
-			case float64:
-				return int64(v)
-			}
-			return 0
-		}
 		var reported *float64
 		if v, ok := a[7].(float64); ok {
 			reported = &v
@@ -61,8 +52,10 @@ func init() {
 			x := float64(v)
 			reported = &x
 		}
-		_, ok := Cost(str(0), str(1), Tokens{In: integer(2), Out: integer(3), CacheRead: integer(4), CacheWrite: integer(5), Reasoning: integer(6)}, reported)
-		if ok {
+		if reported != nil && *reported > 0 {
+			return int64(1), nil
+		}
+		if PricedModel(str(1)) {
 			return int64(1), nil
 		}
 		return int64(0), nil
@@ -82,13 +75,14 @@ func init() {
 func usageRowsWhere(f AnalyticsFilter) (string, []any) {
 	where, args := f.factWhere()
 	mid := "CASE WHEN harness = 'claude' THEN json_extract(raw, '$.backfill.ref') END"
-	q := "WITH usage_u AS (SELECT row_hash, harness, repo_id, model, conversation_id, ts, tok_in, tok_out, " +
+	q := "WITH usage_u AS MATERIALIZED (SELECT row_hash, harness, repo_id, model, conversation_id, ts, tok_in, tok_out, " +
 		"tok_cache_read, tok_cache_write, tok_reasoning, cost_reported, " + mid + " AS _mid FROM facts " +
 		"WHERE type = 'hook_event' AND norm_event = 'usage' AND " + where + "), " +
-		"kept AS (SELECT * FROM (" +
+		"kept AS (SELECT *, NULL AS _rn FROM usage_u WHERE _mid IS NULL OR _mid = '' " +
+		"UNION ALL SELECT * FROM (" +
 		"SELECT *, ROW_NUMBER() OVER (PARTITION BY conversation_id, _mid " +
-		"ORDER BY tok_out DESC, row_hash ASC) AS _rn FROM usage_u) " +
-		"WHERE _mid IS NULL OR _mid = '' OR _rn = 1)"
+		"ORDER BY tok_out DESC, row_hash ASC) AS _rn FROM usage_u WHERE _mid IS NOT NULL AND _mid <> '') " +
+		"WHERE _rn = 1)"
 	return q, args
 }
 
@@ -183,7 +177,6 @@ func usageQueryImpl(ctx context.Context, t *Tenant, f AnalyticsFilter, p QueryPa
 		top = 100
 	}
 	f2, ignored := def.applyFilters(f)
-	where, args := def.whereClause(AnalyticsFilter{From: f2.From, To: f2.To})
 	cte, sourceArgs := usageRowsWhere(f2)
 	value := "count(*)"
 	switch p.Measure {
@@ -202,12 +195,26 @@ func usageQueryImpl(ctx context.Context, t *Tenant, f AnalyticsFilter, p QueryPa
 	case "unpriced_calls":
 		value = "sum(1-wf_usage_priced(harness,model,tok_in,tok_out,tok_cache_read,tok_cache_write,tok_reasoning,cost_reported))"
 	}
-	qdef := measureDef{table: "facts", value: value, dims: []string{"harness", "repo_id", "model", "conversation_id"}, sourceSQL: "(" + cte + " SELECT harness,repo_id,model,conversation_id,ts,tok_in,tok_out,tok_cache_read,tok_cache_write,tok_reasoning,cost_reported FROM kept)", sourceArgs: sourceArgs}
-	// The source CTE already applied the usage-specific filter and message dedupe. The outer time
-	// predicate is neutral, retaining queryMeasure's rank/fold/bucket SQL without materializing calls.
-	_ = where
-	_ = args
-	res, err := t.queryMeasure(ctx, AnalyticsFilter{From: f.From, To: f.To, TZ: f.TZ}, p, qdef, top, bucket)
+	// Evaluate the deduplicated/priced source once on this request's connection, then reuse the
+	// materialized kept rows for every independent dimension rank and the final folded query. The
+	// source CTE already applied the usage-specific filter and message dedupe, so the outer time
+	// predicate is all queryMeasure needs to add.
+	conn, err := t.rdb.Conn(ctx)
+	if err != nil {
+		return QueryResult{}, err
+	}
+	defer conn.Close()
+	if _, err := conn.ExecContext(ctx, `CREATE TEMP TABLE IF NOT EXISTS usage_kept(
+		harness TEXT, repo_id TEXT, model TEXT, conversation_id TEXT, ts REAL,
+		tok_in INTEGER, tok_out INTEGER, tok_cache_read INTEGER, tok_cache_write INTEGER,
+		tok_reasoning INTEGER, cost_reported REAL); DELETE FROM usage_kept`); err != nil {
+		return QueryResult{}, err
+	}
+	if _, err := conn.ExecContext(ctx, cte+" INSERT INTO usage_kept SELECT harness,repo_id,model,conversation_id,ts,tok_in,tok_out,tok_cache_read,tok_cache_write,tok_reasoning,cost_reported FROM kept", sourceArgs...); err != nil {
+		return QueryResult{}, err
+	}
+	qdef := measureDef{table: "facts", value: value, dims: []string{"harness", "repo_id", "model", "conversation_id"}, sourceSQL: "usage_kept"}
+	res, err := t.queryMeasureOn(ctx, conn, AnalyticsFilter{From: f.From, To: f.To, TZ: f.TZ}, p, qdef, top, bucket)
 	if err != nil {
 		return QueryResult{}, err
 	}

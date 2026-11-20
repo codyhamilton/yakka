@@ -83,6 +83,14 @@ async function fetchCatalogue(transport, kind, options) {
   return { response, body, checks: catalogueChecks(body) };
 }
 
+// The same-kind check catalogue the artifact grain advertises. Older schemas
+// without it fall back to the `/scores?kind=` read, never to another kind.
+export function kindChecks(schema, kind = '') {
+  const byKind = schemaGrain(schema, 'artifact')?.checks_by_kind;
+  const list = byKind && Array.isArray(byKind[kind]) ? byKind[kind] : [];
+  return list.filter(name => typeof name === 'string' && name);
+}
+
 export async function load(context = {}) {
   const { scope = {}, spec = {}, transport, tenant = '', signal } = context;
   const doc = context.doc || globalThis.document;
@@ -93,13 +101,17 @@ export async function load(context = {}) {
     const panel = context.panel || SCORE_STRIPS_PANEL;
     const requested = qualityScope(spec);
     const kind = QUALITY_KINDS.includes(requested.kind) ? requested.kind : 'design';
-    const catalogue = await fetchCatalogue(transport, kind, { tenant, signal, stateKey: 'score-strips-catalogue' });
-    if (!catalogue.response.ok) return errorState({ message: catalogue.body?.error || `The server returned ${catalogue.response.status}.`, code: catalogue.body?.code || String(catalogue.response.status || '') });
-    if (!catalogue.checks.length) return emptyState([{ kind: 'scope', label: `no checks are catalogued for ${kind}`, clear: null }]);
-    if (requested.check && !catalogue.checks.includes(requested.check)) {
-      return unsupportedState({ measure: `check ${requested.check}`, reason: 'not in the score catalogue for this kind', source: 'server /scores', nearest: catalogue.checks[0] });
+    let checks = kindChecks(schema, kind);
+    if (!checks.length) {
+      const catalogue = await fetchCatalogue(transport, kind, { tenant, signal, stateKey: 'score-strips-catalogue' });
+      if (!catalogue.response.ok) return errorState({ message: catalogue.body?.error || `The server returned ${catalogue.response.status}.`, code: catalogue.body?.code || String(catalogue.response.status || '') });
+      checks = catalogue.checks;
     }
-    const check = requested.check || catalogue.checks[0];
+    if (!checks.length) return emptyState([{ kind: 'scope', label: `no checks are catalogued for ${kind}`, clear: null }]);
+    if (requested.check && !checks.includes(requested.check)) {
+      return unsupportedState({ measure: `check ${requested.check}`, reason: 'not in the score catalogue for this kind', source: 'server /schema', nearest: checks[0] });
+    }
+    const check = requested.check || checks[0];
     const splits = artifactSplits(schema);
     const lens = defaultArtifactSplit(splits, spec.split || '');
     if (spec.split && !splits.includes(spec.split)) {
@@ -110,7 +122,7 @@ export async function load(context = {}) {
       scope, spec: { ...spec, split: '' }, measure: '',
       extra: {
         grain: 'artifact', check,
-        fields: [`score:${check}`, ...(lens ? [lens] : [])],
+        fields: [`score:${check}`],
         sort: `score:${check}:asc`,
         ...(pageMax ? { limit: String(pageMax) } : {})
       }
@@ -155,7 +167,7 @@ export async function load(context = {}) {
     whenPanelSlot(panel.id, 'chooser', doc, slot => {
       const rendered = renderQualityChooser({
         panelId: panel.id, panel, spec, doc, kind, check, scorer: requested.scorer,
-        checks: catalogue.checks, scorers: [], includeScorer: false,
+        checks, scorers: [], includeScorer: false,
         lens, lenses: splits, chart: 'strip'
       });
       slot.replaceChildren(rendered.element);
@@ -184,7 +196,7 @@ export const SCORE_STRIPS_PANEL = {
   requires: ['entities_artifact', 'scores_by_lens'],
   caveats: 'File-weighted; one mark per returned artifact file. The identity (repo_id, path) opens the artifact reader. Files are never counted as content hashes.',
   measureBasis: 'the selected artifact version’s latest score',
-  requests: () => [{ route: '/v1/analytics/entities', method: 'GET', params: { grain: 'artifact', check: 'clarity', fields: ['score:clarity', 'kind'] } }],
+  requests: () => [{ route: '/v1/analytics/entities', method: 'GET', params: { grain: 'artifact', check: 'clarity', fields: ['score:clarity'] } }],
   load
 };
 

@@ -4,7 +4,7 @@ These durable contracts govern the analytics API, workspace, chart elements, rel
 
 ## Read context, density and theme
 
-[Plan 29](../plans/29-analytics-ui-rework/DESIGN.md) defines the repair and presentation contract against locally reproduced Plan 20 failures; [its evidence](../plans/29-analytics-ui-rework/EVIDENCE.md) distinguishes defects from stale history and permission states. The design PR changes no product behavior.
+[Plan 29](../plans/29-analytics-ui-rework.md) defines the repair and presentation contract against locally reproduced Plan 20 failures; [its evidence](../plans/29-analytics-ui-rework.md) distinguishes defects from stale history and permission states. The design PR changes no product behavior.
 
 - Tenant-bound reads share the selected API/auth/tenant and resolved scope, including schema, cursor continuations, conversation/content and `/v1/baselines`. Remote cookie reads always carry `tenant`; local and bearer rules stay unchanged. Resolve browser `win` into absolute bounds or `all=1` before sending it. Scope changes restart paging.
 - The current wire schema is heterogeneous: time measures are named objects; artifact lenses are keyed metadata. Normalize names and retain metadata in one client adapter. Choosers respect per-mode fields and per-measure dimensions; general session measures do not imply scatter support. Failed reads are explicit errors/refusals, never empty observations.

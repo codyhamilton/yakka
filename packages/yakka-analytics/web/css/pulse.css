@@ -1,16 +1,21 @@
 /* Pulse preset: the five panels' presentation only. No animation or
    transition; the shared frame and chart kit own state and focus styling. */
 
+.workspace-panel[data-chart="table"] .workspace-panel-body {
+  overflow: auto;
+  max-height: 70vh;
+}
+
 .pulse-basis,
 .pulse-note {
   margin: 0.35rem 0;
-  color: var(--yk-text-muted, #57606a);
-  font-size: 0.85rem;
+  color: var(--yk-muted);
+  font-size: 0.92rem;
 }
 
 .pulse-note {
-  border-left: 3px solid var(--yk-border, #d0d7de);
-  padding-left: 0.5rem;
+  border-left: 3px solid var(--yk-border);
+  padding-left: 8px;
 }
 
 .pulse-chooser {
@@ -18,27 +23,36 @@
   align-items: center;
   gap: 0.35rem;
   margin: 0.35rem 0.75rem 0.35rem 0;
-  font-size: 0.9rem;
+  font-size: 0.92rem;
 }
 
 .pulse-table {
   width: 100%;
   border-collapse: collapse;
   margin: 0.5rem 0;
+  font-size: 12px;
+  line-height: 1.5;
 }
 
 .pulse-table caption {
   text-align: left;
-  color: var(--yk-text-muted, #57606a);
-  padding: 0.25rem 0;
+  color: var(--yk-muted);
+  padding: 4px 0;
 }
 
 .pulse-table th,
 .pulse-table td {
-  border-bottom: 1px solid var(--yk-border, #d0d7de);
-  padding: 0.35rem 0.5rem;
+  border-bottom: 1px solid var(--yk-border);
+  padding: 5px 8px;
   text-align: left;
   vertical-align: top;
+}
+
+.pulse-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--yk-surface);
 }
 
 .pulse-table th.numeric,
@@ -52,9 +66,9 @@
   flex-wrap: wrap;
   align-items: center;
   gap: 0.5rem;
-  padding: 0.5rem;
-  border: 1px solid var(--yk-border, #d0d7de);
-  border-radius: 6px;
+  padding: 6px 8px;
+  border: 1px solid var(--yk-border);
+  border-radius: 2px;
   margin-bottom: 0.5rem;
 }
 
@@ -72,8 +86,8 @@
 .river-follow-status {
   flex-basis: 100%;
   margin: 0.15rem 0;
-  color: var(--yk-text-muted, #57606a);
-  font-size: 0.85rem;
+  color: var(--yk-muted);
+  font-size: 0.92rem;
 }
 
 .river-lanes,
@@ -103,7 +117,7 @@
 }
 
 .pulse-preview[data-state="idle"] {
-  color: var(--yk-text-muted, #57606a);
+  color: var(--yk-muted);
 }
 
 .pulse-preview[data-state="preview"] {
@@ -113,6 +127,20 @@
 .pulse-coverage {
   display: grid;
   gap: 0.75rem;
+}
+
+.pulse-chooser select,
+.pulse-calendar-controls select,
+.pulse-calendar-controls button {
+  min-height: 26px;
+}
+
+@media (pointer: coarse) {
+  .pulse-chooser select,
+  .pulse-calendar-controls select,
+  .pulse-calendar-controls button {
+    min-height: 44px;
+  }
 }
 
 @media (max-width: 900px) {

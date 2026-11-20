@@ -111,6 +111,9 @@ export async function record() {
   const browser = await launchBrowser(environment);
   try {
     const page = await browser.newPage({ viewport: { width: 1280, height: 2200 } });
+    // All-history requests carry the frozen `to` instant resolved from the
+    // browser clock. Pin it so the record holds shapes, not the run's wall time.
+    await page.clock.setFixedTime(new Date(TO));
     const scenarios = await collect(harness.origin, { page });
     return {
       version: 1,

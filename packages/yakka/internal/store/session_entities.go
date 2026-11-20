@@ -7,6 +7,7 @@ import (
 	"math"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -34,7 +35,7 @@ func sessionAggregateCTE(f AnalyticsFilter) (string, []any) {
 	 SUM(CASE WHEN type='artifact_version' THEN 1 ELSE 0 END) artifact_versions,
 	 SUM(CASE WHEN type='commit' THEN 1 ELSE 0 END) commits,
 	 COUNT(DISTINCT CASE WHEN type='artifact_version' THEN content_hash END) distinct_content
-	 FROM facts WHERE ` + factWhere + ` GROUP BY conversation_id
+	 FROM facts INDEXED BY facts_conv WHERE ` + factWhere + ` GROUP BY conversation_id
 	), result AS (SELECT base.*,COALESCE(usage.model_calls,0) model_calls,COALESCE(usage.unpriced_calls,0) unpriced_calls,
 	 COALESCE(usage.cost_usd,0) cost_usd,COALESCE(usage.tokens_in,0) tokens_in,COALESCE(usage.tokens_out,0) tokens_out,
 	 COALESCE(usage.tokens_cache_read,0) tokens_cache_read,COALESCE(usage.tokens_cache_write,0) tokens_cache_write,COALESCE(usage.tokens_reasoning,0) tokens_reasoning
@@ -145,7 +146,7 @@ func (t *Tenant) SessionEntitiesPage(ctx context.Context, f AnalyticsFilter, sor
 	 SUM(CASE WHEN type='artifact_version' THEN 1 ELSE 0 END) artifact_versions,
 	 SUM(CASE WHEN type='commit' THEN 1 ELSE 0 END) commits,
 	 COUNT(DISTINCT CASE WHEN type='artifact_version' THEN content_hash END) distinct_content
-	 FROM facts WHERE ` + factWhere + ` GROUP BY conversation_id
+	 FROM facts INDEXED BY facts_conv WHERE ` + factWhere + ` GROUP BY conversation_id
 	), result AS (SELECT base.*,COALESCE(usage.model_calls,0) model_calls,COALESCE(usage.unpriced_calls,0) unpriced_calls,
 	 COALESCE(usage.cost_usd,0) cost_usd,COALESCE(usage.tokens_in,0) tokens_in,COALESCE(usage.tokens_out,0) tokens_out,
 	 COALESCE(usage.tokens_cache_read,0) tokens_cache_read,COALESCE(usage.tokens_cache_write,0) tokens_cache_write,COALESCE(usage.tokens_reasoning,0) tokens_reasoning
@@ -199,6 +200,7 @@ func (t *Tenant) SessionEntitiesPage(ctx context.Context, f AnalyticsFilter, sor
 
 // SessionProvenanceFor returns lifetime-derived repo, model and harness lenses for only the
 // supplied page of conversation identities. The caller must keep the identity page bounded.
+// The independent harness, repo and model reads run concurrently because the page is bounded.
 func (t *Tenant) SessionProvenanceFor(ctx context.Context, ids []string) (map[string]SessionProvenance, error) {
 	out := make(map[string]SessionProvenance, len(ids))
 	if len(ids) == 0 {
@@ -207,97 +209,105 @@ func (t *Tenant) SessionProvenanceFor(ctx context.Context, ids []string) (map[st
 	for _, id := range ids {
 		out[id] = SessionProvenance{ModelShares: map[string]float64{}}
 	}
-	rows, err := t.rdb.QueryContext(ctx, `SELECT conversation_id,COALESCE(NULLIF(harness,''),'unknown'),COUNT(*) FROM facts WHERE conversation_id IN (`+placeholders(len(ids))+`) GROUP BY conversation_id,COALESCE(NULLIF(harness,''),'unknown')`, stringsToAny(ids)...)
-	if err != nil {
-		return nil, err
-	}
-	type counts struct {
-		harness map[string]int
-		repos   map[string]bool
-	}
-	all := make(map[string]*counts, len(ids))
-	for _, id := range ids {
-		all[id] = &counts{harness: map[string]int{}, repos: map[string]bool{}}
-	}
-	for rows.Next() {
-		var id, h string
-		var n int
-		if err := rows.Scan(&id, &h, &n); err != nil {
-			rows.Close()
+	harnessCounts := make(map[string]map[string]int, len(ids))
+	repos := make(map[string]map[string]bool, len(ids))
+	modelCounts := map[string]map[string]int{}
+	totalCalls := map[string]int{}
+	var wg sync.WaitGroup
+	var harnessErr, repoErr, modelErr error
+	wg.Add(3)
+	go func() {
+		defer wg.Done()
+		rows, err := t.rdb.QueryContext(ctx, `SELECT conversation_id,COALESCE(NULLIF(harness,''),'unknown'),COUNT(*) FROM facts INDEXED BY facts_conv_harness WHERE conversation_id IN (`+placeholders(len(ids))+`) GROUP BY conversation_id,COALESCE(NULLIF(harness,''),'unknown')`, stringsToAny(ids)...)
+		if err != nil {
+			harnessErr = err
+			return
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var id, h string
+			var n int
+			if err := rows.Scan(&id, &h, &n); err != nil {
+				harnessErr = err
+				return
+			}
+			if harnessCounts[id] == nil {
+				harnessCounts[id] = map[string]int{}
+			}
+			harnessCounts[id][h] = n
+		}
+		harnessErr = rows.Err()
+	}()
+	go func() {
+		defer wg.Done()
+		rows, err := t.rdb.QueryContext(ctx, `SELECT DISTINCT conversation_id,repo_id FROM facts INDEXED BY facts_conv_type_repo WHERE type IN ('artifact_version','commit') AND repo_id!='' AND conversation_id IN (`+placeholders(len(ids))+`) ORDER BY conversation_id,repo_id`, stringsToAny(ids)...)
+		if err != nil {
+			repoErr = err
+			return
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var id, repo string
+			if err := rows.Scan(&id, &repo); err != nil {
+				repoErr = err
+				return
+			}
+			if repos[id] == nil {
+				repos[id] = map[string]bool{}
+			}
+			repos[id][repo] = true
+		}
+		repoErr = rows.Err()
+	}()
+	go func() {
+		defer wg.Done()
+		f := AnalyticsFilter{From: time.Unix(0, -1<<63).UTC(), To: time.Unix(0, 1<<63-1).UTC(), ConversationIDs: ids}
+		usageCTE, usageArgs := usageRowsWhere(f)
+		rows, err := t.rdb.QueryContext(ctx, usageCTE+` SELECT conversation_id,model,COUNT(*) FROM kept GROUP BY conversation_id,model`, usageArgs...)
+		if err != nil {
+			modelErr = err
+			return
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var id, name string
+			var n int
+			if err := rows.Scan(&id, &name, &n); err != nil {
+				modelErr = err
+				return
+			}
+			totalCalls[id] += n
+			if name != "" {
+				if modelCounts[id] == nil {
+					modelCounts[id] = map[string]int{}
+				}
+				modelCounts[id][name] = n
+			}
+		}
+		modelErr = rows.Err()
+	}()
+	wg.Wait()
+	for _, err := range []error{harnessErr, repoErr, modelErr} {
+		if err != nil {
 			return nil, err
 		}
-		c := all[id]
-		c.harness[h] = n
 	}
-	if err := rows.Err(); err != nil {
-		rows.Close()
-		return nil, err
-	}
-	rows.Close()
-	rows, err = t.rdb.QueryContext(ctx, `SELECT DISTINCT conversation_id,repo_id FROM facts WHERE type IN ('artifact_version','commit') AND repo_id!='' AND conversation_id IN (`+placeholders(len(ids))+`) ORDER BY conversation_id,repo_id`, stringsToAny(ids)...)
-	if err != nil {
-		return nil, err
-	}
-	for rows.Next() {
-		var id, repo string
-		if err := rows.Scan(&id, &repo); err != nil {
-			rows.Close()
-			return nil, err
-		}
-		all[id].repos[repo] = true
-	}
-	if err := rows.Err(); err != nil {
-		rows.Close()
-		return nil, err
-	}
-	rows.Close()
-	for id, c := range all {
-		var hs []string
+	for id := range out {
+		x := out[id]
 		bestN := -1
-		for h, n := range c.harness {
+		var hs []string
+		for h, n := range harnessCounts[id] {
 			hs = append(hs, h)
-			if n > bestN || (n == bestN && h < out[id].Harness) {
-				out[id] = setHarness(out[id], h)
+			if n > bestN || (n == bestN && h < x.Harness) {
+				x = setHarness(x, h)
 				bestN = n
 			}
 		}
 		sort.Strings(hs)
-		out[id] = setHarnesses(out[id], hs)
-		for repo := range c.repos {
-			out[id] = setRepoValue(out[id], repo)
+		x = setHarnesses(x, hs)
+		for repo := range repos[id] {
+			x = setRepoValue(x, repo)
 		}
-	}
-
-	f := AnalyticsFilter{From: time.Unix(0, -1<<63).UTC(), To: time.Unix(0, 1<<63-1).UTC(), ConversationIDs: ids}
-	usageCTE, usageArgs := usageRowsWhere(f)
-	rows, err = t.rdb.QueryContext(ctx, usageCTE+` SELECT conversation_id,model,COUNT(*) FROM kept GROUP BY conversation_id,model`, usageArgs...)
-	if err != nil {
-		return nil, err
-	}
-	modelCounts := map[string]map[string]int{}
-	totalCalls := map[string]int{}
-	for rows.Next() {
-		var id, name string
-		var n int
-		if err := rows.Scan(&id, &name, &n); err != nil {
-			rows.Close()
-			return nil, err
-		}
-		totalCalls[id] += n
-		if name != "" {
-			if modelCounts[id] == nil {
-				modelCounts[id] = map[string]int{}
-			}
-			modelCounts[id][name] = n
-		}
-	}
-	if err := rows.Err(); err != nil {
-		rows.Close()
-		return nil, err
-	}
-	rows.Close()
-	for id := range out {
-		x := out[id]
 		if len(x.Repos) == 0 {
 			x.Repo = "(none)"
 			x.RepoAttribution = "none"
@@ -345,7 +355,9 @@ func (t *Tenant) ConversationCount(ctx context.Context, f AnalyticsFilter) (int,
 	}
 	w, args := f.factWhere()
 	var n int
-	err := t.rdb.QueryRowContext(ctx, `SELECT count(DISTINCT conversation_id) FROM facts WHERE `+w, args...).Scan(&n)
+	// Grouping over the covering conversation index avoids the planner's non-covering ts
+	// index plus distinct temp b-tree for an all-history window.
+	err := t.rdb.QueryRowContext(ctx, `SELECT COUNT(*) FROM (SELECT conversation_id FROM facts INDEXED BY facts_conv WHERE `+w+` GROUP BY conversation_id)`, args...).Scan(&n)
 	return n, err
 }
 
@@ -420,7 +432,7 @@ func sessionPredicateSQL(f AnalyticsFilter, perAlias string, args *[]any) string
 					SUM(CASE WHEN type='artifact_version' THEN 1 ELSE 0 END) artifact_versions,
 					SUM(CASE WHEN type='commit' THEN 1 ELSE 0 END) commits,
 					COUNT(DISTINCT CASE WHEN type='artifact_version' THEN content_hash END) distinct_content
-				FROM facts WHERE ` + factWhere + ` GROUP BY conversation_id
+				FROM facts INDEXED BY facts_conv WHERE ` + factWhere + ` GROUP BY conversation_id
 			) base
 			LEFT JOIN (
 				SELECT conversation_id, COUNT(*) model_calls,
@@ -487,11 +499,30 @@ func (t *Tenant) AnalyticsCoverage(ctx context.Context) (map[string]any, error) 
 	}
 	kr.Close()
 	var sessions, withRepo, withoutRepo int
-	err = t.rdb.QueryRowContext(ctx, `WITH repos AS (SELECT conversation_id,COUNT(DISTINCT repo_id) n FROM facts WHERE type IN ('artifact_version','commit') AND repo_id!='' GROUP BY conversation_id), sessions AS (SELECT DISTINCT conversation_id FROM facts) SELECT COUNT(*),SUM(CASE WHEN coalesce(r.n,0)>0 THEN 1 ELSE 0 END),SUM(CASE WHEN coalesce(r.n,0)=0 THEN 1 ELSE 0 END) FROM sessions s LEFT JOIN repos r USING(conversation_id)`).Scan(&sessions, &withRepo, &withoutRepo)
+	err = t.rdb.QueryRowContext(ctx, `WITH repos AS (SELECT conversation_id,COUNT(DISTINCT repo_id) n FROM facts WHERE type IN ('artifact_version','commit') AND repo_id!='' GROUP BY conversation_id), sessions AS (SELECT DISTINCT conversation_id FROM facts) SELECT COUNT(*),COALESCE(SUM(CASE WHEN coalesce(r.n,0)>0 THEN 1 ELSE 0 END),0),COALESCE(SUM(CASE WHEN coalesce(r.n,0)=0 THEN 1 ELSE 0 END),0) FROM sessions s LEFT JOIN repos r USING(conversation_id)`).Scan(&sessions, &withRepo, &withoutRepo)
 	if err != nil {
 		return nil, err
 	}
-	return map[string]any{"facts": firstLast, "sessions": map[string]int{"total": sessions, "with_session_repo": withRepo, "without_session_repo": withoutRepo}, "scored_content_by_kind": scoredByKind}, nil
+	var usage any
+	var uLo, uHi sql.NullFloat64
+	var uRecv sql.NullInt64
+	if err := t.rdb.QueryRowContext(ctx, `SELECT MIN(ts),MAX(ts),MAX(received_at) FROM facts WHERE type='hook_event' AND norm_event='usage'`).Scan(&uLo, &uHi, &uRecv); err != nil {
+		return nil, err
+	}
+	if uLo.Valid || uHi.Valid || uRecv.Valid {
+		u := map[string]any{}
+		if uLo.Valid {
+			u["first_ts"] = uLo.Float64
+		}
+		if uHi.Valid {
+			u["last_ts"] = uHi.Float64
+		}
+		if uRecv.Valid {
+			u["last_received_at"] = uRecv.Int64
+		}
+		usage = u
+	}
+	return map[string]any{"facts": firstLast, "usage": usage, "sessions": map[string]int{"total": sessions, "with_session_repo": withRepo, "without_session_repo": withoutRepo}, "scored_content_by_kind": scoredByKind, "units": map[string]any{"ts": "unix_seconds", "received_at": "unix_nanoseconds"}}, nil
 }
 
 func placeholders(n int) string {

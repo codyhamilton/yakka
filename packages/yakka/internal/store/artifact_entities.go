@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"math"
 	"os"
 	"sort"
 	"strings"
@@ -378,6 +379,228 @@ func (t *Tenant) ArtifactEntityCount(ctx context.Context, f AnalyticsFilter, ran
 	var n int
 	err := t.rdb.QueryRowContext(ctx, `SELECT COUNT(*) FROM (SELECT repo_id,path,COUNT(DISTINCT content_hash) versions,COUNT(DISTINCT conversation_id) writing_sessions,MIN(ts) first_ts,MAX(ts) last_ts FROM facts WHERE type='artifact_version' AND `+w+` GROUP BY repo_id,path`+having+`)`, args...).Scan(&n)
 	return n, err
+}
+
+// ArtifactGroupCount is one observed combination of the requested artifact lenses.
+type ArtifactGroupCount struct {
+	Values []string
+	N      int
+}
+
+// ArtifactGroupedCount computes file-weighted counts directly in SQLite from the selected latest
+// version per file, the selected check's latest score and the all-time content/scorer band
+// baseline. Unlike the population path it never materialises or enriches every artifact file.
+// Supported lenses are repo_id, kind, plan, source, scorer and band:<check>; check must name the
+// band/scorer check. It returns the observed groups, the distinct-value cardinality per lens (for
+// the output-cell budget) and the total selected-file population.
+func (t *Tenant) ArtifactGroupedCount(ctx context.Context, f AnalyticsFilter, check string, dims []string, scorerFilter string, thresholds map[string]map[string][2]float64) ([]ArtifactGroupCount, []int, int, error) {
+	needBand, needSource, needScore := false, false, false
+	for _, dim := range dims {
+		switch {
+		case dim == "repo_id" || dim == "kind" || dim == "plan":
+		case dim == "source":
+			needSource = true
+		case dim == "scorer":
+			if check == "" {
+				return nil, nil, 0, fmt.Errorf("artifact scorer lens requires a selected check")
+			}
+			needScore = true
+		case strings.HasPrefix(dim, "band:"):
+			if check == "" || strings.TrimPrefix(dim, "band:") != check {
+				return nil, nil, 0, fmt.Errorf("artifact band lens requires the selected check")
+			}
+			needBand, needScore = true, true
+		default:
+			return nil, nil, 0, fmt.Errorf("unsupported grouped artifact lens %s", dim)
+		}
+	}
+	if scorerFilter != "" {
+		if check == "" {
+			return nil, nil, 0, fmt.Errorf("artifact scorer filter requires a selected check")
+		}
+		needScore = true
+	}
+	w, args := f.factWhere()
+	// kind/plan come from the path, exactly as the population path derives them per file, so a
+	// legacy row with an empty extracted kind still groups like keys.Kind.
+	ctes := `WITH members AS (
+	 SELECT repo_id,path,COUNT(DISTINCT content_hash) versions,COUNT(DISTINCT conversation_id) writing_sessions,
+	  MIN(ts) first_ts,MAX(ts) last_ts,wf_kind(path) kind,wf_plan(path) plan
+	 FROM facts WHERE type='artifact_version' AND ` + w + ` GROUP BY repo_id,path
+	), latest AS (
+	 SELECT m.repo_id,m.path,m.kind,m.plan,
+	  (SELECT content_hash FROM facts x WHERE x.type='artifact_version' AND x.repo_id=m.repo_id AND x.path=m.path ORDER BY x.received_at DESC,x.rowid DESC LIMIT 1) hash`
+	if needSource {
+		ctes += `,
+	  (SELECT source FROM facts x WHERE x.type='artifact_version' AND x.repo_id=m.repo_id AND x.path=m.path ORDER BY x.received_at DESC,x.rowid DESC LIMIT 1) source`
+	}
+	ctes += `
+	 FROM members m)`
+	source := "latest"
+	if needScore {
+		// Thresholds are each kind/scorer's all-time distinct-content quartiles, loaded once for
+		// the request as a small VALUES relation rather than per file.
+		if needBand {
+			ctes += `, thresholds(kind,scorer,p25,p75) AS (`
+			values := []string{}
+			kinds := make([]string, 0, len(thresholds))
+			for kind := range thresholds {
+				kinds = append(kinds, kind)
+			}
+			sort.Strings(kinds)
+			for _, kind := range kinds {
+				scorers := make([]string, 0, len(thresholds[kind]))
+				for scorer := range thresholds[kind] {
+					scorers = append(scorers, scorer)
+				}
+				sort.Strings(scorers)
+				for _, scorer := range scorers {
+					bands := thresholds[kind][scorer]
+					values = append(values, "(?,?,?,?)")
+					args = append(args, kind, scorer, bands[0], bands[1])
+				}
+			}
+			if len(values) == 0 {
+				ctes += `SELECT NULL,NULL,NULL,NULL WHERE 0`
+			} else {
+				ctes += `VALUES ` + strings.Join(values, ",")
+			}
+			ctes += `)`
+		}
+		ctes += `, scored AS (SELECT l.*,sc.result score,sc.scorer scorer`
+		if needBand {
+			ctes += `,th.p25 p25,th.p75 p75`
+		}
+		ctes += ` FROM latest l LEFT JOIN (
+		  SELECT content_hash,result,scorer FROM (
+		   SELECT content_hash,result,scorer,ROW_NUMBER() OVER(PARTITION BY content_hash ORDER BY id DESC) rn
+		   FROM scores WHERE check_name=?
+		  ) WHERE rn=1
+		 ) sc ON sc.content_hash=l.hash`
+		args = append(args, check)
+		if needBand {
+			ctes += ` LEFT JOIN thresholds th ON th.kind=l.kind AND th.scorer=sc.scorer`
+		}
+		if scorerFilter != "" {
+			ctes += ` WHERE (CASE WHEN sc.result IS NULL THEN 'unscored' ELSE sc.scorer END)=?`
+			args = append(args, scorerFilter)
+		}
+		ctes += `)`
+		source = "scored"
+	}
+	exprs := make([]string, len(dims))
+	for i, dim := range dims {
+		switch {
+		case dim == "repo_id" || dim == "kind" || dim == "plan" || dim == "source":
+			exprs[i] = dim
+		case dim == "scorer":
+			exprs[i] = "CASE WHEN score IS NULL THEN 'unscored' ELSE scorer END"
+		case strings.HasPrefix(dim, "band:"):
+			exprs[i] = "CASE WHEN score IS NULL THEN 'unscored' WHEN p25 IS NULL THEN 'baseline_unavailable' WHEN score<p25 THEN 'low' WHEN score>p75 THEN 'high' ELSE 'mid' END"
+		}
+	}
+	if len(dims) == 0 {
+		var n int
+		if err := t.rdb.QueryRowContext(ctx, ctes+` SELECT COUNT(*) FROM `+source, args...).Scan(&n); err != nil {
+			return nil, nil, 0, err
+		}
+		return []ArtifactGroupCount{{N: n}}, nil, n, nil
+	}
+	sel := strings.Join(exprs, ",")
+	rows, err := t.rdb.QueryContext(ctx, ctes+` SELECT `+sel+`,COUNT(*) FROM `+source+` GROUP BY `+sel, args...)
+	if err != nil {
+		return nil, nil, 0, err
+	}
+	defer rows.Close()
+	out := []ArtifactGroupCount{}
+	total := 0
+	for rows.Next() {
+		values := make([]string, len(dims))
+		dest := make([]any, len(dims)+1)
+		for i := range values {
+			dest[i] = &values[i]
+		}
+		var n int
+		dest[len(dims)] = &n
+		if err := rows.Scan(dest...); err != nil {
+			return nil, nil, 0, err
+		}
+		out = append(out, ArtifactGroupCount{Values: values, N: n})
+		total += n
+	}
+	if err := rows.Err(); err != nil {
+		return nil, nil, 0, err
+	}
+	cardinality := make([]int, len(dims))
+	counts := make([]string, len(dims))
+	dest := make([]any, len(dims))
+	for i, expr := range exprs {
+		counts[i] = "COUNT(DISTINCT " + expr + ")"
+		dest[i] = &cardinality[i]
+	}
+	if err := t.rdb.QueryRowContext(ctx, ctes+` SELECT `+strings.Join(counts, ",")+` FROM `+source, args...).Scan(dest...); err != nil {
+		return nil, nil, 0, err
+	}
+	return out, cardinality, total, nil
+}
+
+// ArtifactBandThresholds returns each recognised artifact kind's all-time distinct-content
+// p25/p75 for the selected check, partitioned by the score's scorer. It is the same per-kind
+// content population loadArtifactBaselines builds for the population path, collapsed to the two
+// thresholds the band rule compares against. Unrecognised kinds are absent, so their files stay
+// baseline_unavailable.
+func (t *Tenant) ArtifactBandThresholds(ctx context.Context, check string) (map[string]map[string][2]float64, error) {
+	rows, err := t.rdb.QueryContext(ctx, `
+	WITH hashes AS (
+		SELECT DISTINCT content_hash,wf_kind(path) kind FROM facts
+		WHERE type='artifact_version' AND content_hash!=''
+	), latest AS (
+		SELECT s.content_hash,s.scorer,s.result,
+			ROW_NUMBER() OVER(PARTITION BY s.content_hash ORDER BY s.id DESC) rn
+		FROM scores s JOIN hashes h USING(content_hash)
+		WHERE s.check_name=?
+	)
+	SELECT h.kind,l.scorer,l.result FROM latest l JOIN hashes h USING(content_hash)
+	WHERE l.rn=1 AND h.kind IN ('design','brief','report')
+	ORDER BY h.kind,l.scorer,l.result`, check)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	grouped := map[string]map[string][]float64{}
+	for rows.Next() {
+		var kind, scorer string
+		var value float64
+		if err := rows.Scan(&kind, &scorer, &value); err != nil {
+			return nil, err
+		}
+		if grouped[kind] == nil {
+			grouped[kind] = map[string][]float64{}
+		}
+		grouped[kind][scorer] = append(grouped[kind][scorer], value)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	out := map[string]map[string][2]float64{}
+	for kind, scorers := range grouped {
+		out[kind] = map[string][2]float64{}
+		for scorer, values := range scorers {
+			out[kind][scorer] = [2]float64{artifactPercentile(values, .25), artifactPercentile(values, .75)}
+		}
+	}
+	return out, nil
+}
+
+// artifactPercentile is the linear interpolation between closest ranks of sorted values.
+func artifactPercentile(sorted []float64, q float64) float64 {
+	if len(sorted) == 0 {
+		return 0
+	}
+	pos := float64(len(sorted)-1) * q
+	lo := int(math.Floor(pos))
+	hi := int(math.Ceil(pos))
+	return sorted[lo] + (sorted[hi]-sorted[lo])*(pos-float64(lo))
 }
 
 // ArtifactVersionHistory returns versions ordered received_at DESC, content_hash ASC. The

@@ -7,7 +7,7 @@
 //   13-01  the matrix runs both release targets (Pages-style and embedded)
 //          over the same four shipped acceptance suites, with the measured
 //          per-file test counts and a zero-skip assertion;
-//   13-02  the committed browser record (75 requests, 12 scenarios, 9 all=1)
+//   13-02  the committed browser record (75 requests, 12 scenarios, 20 all=1)
 //          and the Go smoke/profiler pins (75 requests, the record SHA-256,
 //          the unchanged 500 ms p95 bound, concurrency 4);
 //   13-03  the eight Pages-faithful account subtests, the at-most-4-in-flight
@@ -48,10 +48,10 @@ const SUITE_COUNTS = {
   'packages/yakka-analytics/tests/scatter-sessions/acceptance.test.mjs': 5,
   'packages/yakka-analytics/tests/plans-artifacts/acceptance.test.mjs': 4
 };
-const RECORD_SHA256 = '420015134d2d3ee8861ee97e449a06e7bed3268d30492e34cdcd0b74012a5c2c';
+const RECORD_SHA256 = '47dfc1e3ee74d64cb18839592e6068c513553e511ee0556fae789ce3ddcae6e4';
 const RECORD_REQUESTS = 75;
 const RECORD_SCENARIOS = 12;
-const RECORD_ALL_HISTORY = 9;
+const RECORD_ALL_HISTORY = 20;
 
 function topLevelTests(source) {
   return (source.match(/^test\(/gm) || []).length;

@@ -115,7 +115,7 @@ export function createCanvasScatter({
     ctx.strokeStyle = tokens.grid || '#e6ebf2';
     ctx.fillStyle = tokens.muted || '#586579';
     ctx.lineWidth = 1;
-    ctx.font = '11px system-ui, sans-serif';
+    ctx.font = '12px system-ui, sans-serif';
     const ticks = 5;
     for (let i = 0; i <= ticks; i += 1) {
       const x = plot.left + (plot.width * i) / ticks;
@@ -151,7 +151,7 @@ export function createCanvasScatter({
   function drawBase() {
     if (!layout) return;
     const ctx = ctxFor(base, baseCtx);
-    ctx.fillStyle = tokens.surface || '#ffffff';
+    ctx.fillStyle = tokens.surface || 'transparent';
     ctx.fillRect(0, 0, layout.width, layout.height);
     drawAxes(ctx);
     for (const mark of marks) {

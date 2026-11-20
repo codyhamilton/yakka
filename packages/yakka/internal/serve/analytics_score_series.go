@@ -2,11 +2,20 @@ package serve
 
 import (
 	"net/http"
+	"net/url"
 	"sort"
 	"strconv"
+	"time"
 
 	"github.com/codyhamilton/yakka/packages/yakka/internal/store"
 )
+
+// scoreSeriesBuckets is the route's own resolution set. It takes precedence over
+// the global auto/year flags published at /schema.resolutions.
+var scoreSeriesBuckets = []string{"day", "week", "month"}
+
+// scoreSeriesMaxCells matches /schema.budgets.max_cells and is never raised.
+const scoreSeriesMaxCells = 20000
 
 func (s *Server) analyticsScoreSeries(w http.ResponseWriter, r *http.Request, _ string, ts *tenantState) {
 	q := r.URL.Query()
@@ -25,19 +34,20 @@ func (s *Server) analyticsScoreSeries(w http.ResponseWriter, r *http.Request, _ 
 		return
 	}
 	if bucket != "day" && bucket != "week" && bucket != "month" {
-		errJSON(w, 400, "bucket must be day, week, or month")
+		errCodeJSON(w, 400, "unsupported_resolution", "bucket must be day, week, or month",
+			map[string]any{"supported_buckets": scoreSeriesBuckets})
+		return
+	}
+	budget, ok := scoreSeriesCellBudget(w, q)
+	if !ok {
 		return
 	}
 	f, ok := s.parseFilter(w, r, ts, filterOpts{weeks: bucket == "week"})
 	if !ok {
 		return
 	}
-	if bucketSpan(f.From, f.To, bucket, f.TZ) > maxBuckets {
-		errJSON(w, 400, "range too wide")
-		return
-	}
 	if q.Has("dim") || q.Has("scorer") || q.Has("check") || q.Has("limit") || q.Has("offset") {
-		s.analyticsScoreSeriesByLens(w, r, ts, f, kind, bucket)
+		s.analyticsScoreSeriesByLens(w, r, ts, f, kind, bucket, budget)
 		return
 	}
 	checks, err := ts.t.ScoreSeries(r.Context(), f, kind, bucket)
@@ -46,6 +56,8 @@ func (s *Server) analyticsScoreSeries(w http.ResponseWriter, r *http.Request, _ 
 		return
 	}
 	outChecks := []map[string]any{}
+	pct := 0
+	labels := []string{}
 	for _, c := range checks {
 		pts := make([]map[string]any, len(c.Points))
 		for i, p := range c.Points {
@@ -53,8 +65,13 @@ func (s *Server) analyticsScoreSeries(w http.ResponseWriter, r *http.Request, _ 
 				"t": p.T, "n": p.N,
 				"p25": p.P25, "median": p.Median, "p75": p.P75,
 			}
+			labels = append(labels, p.T)
 		}
+		pct += len(pts)
 		outChecks = append(outChecks, map[string]any{"name": c.Name, "points": pts})
+	}
+	if scoreSeriesCellRefusal(w, f, bucket, budget, pct, len(outChecks), labels) {
+		return
 	}
 	resp := map[string]any{"kind": kind, "bucket": bucket, "checks": outChecks}
 	if f.CohortSQL != "" {
@@ -69,7 +86,7 @@ func (s *Server) analyticsScoreSeries(w http.ResponseWriter, r *http.Request, _ 
 	writeJSON(w, 200, resp)
 }
 
-func (s *Server) analyticsScoreSeriesByLens(w http.ResponseWriter, r *http.Request, ts *tenantState, f store.AnalyticsFilter, kind, bucket string) {
+func (s *Server) analyticsScoreSeriesByLens(w http.ResponseWriter, r *http.Request, ts *tenantState, f store.AnalyticsFilter, kind, bucket string, budget int) {
 	q := r.URL.Query()
 	dim := q.Get("dim")
 	allowed := map[string]bool{"harness": true, "session_model": true, "repo_id": true, "plan": true, "scorer": true, "screen_verdict": true}
@@ -78,8 +95,13 @@ func (s *Server) analyticsScoreSeriesByLens(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	checks := map[string]bool{}
-	for _, c := range s.catalogChecks(kind) {
-		checks[c.Name] = true
+	names, err := s.retainedChecks(r.Context(), ts.t, kind)
+	if err != nil {
+		readFailed(w)
+		return
+	}
+	for _, name := range names {
+		checks[name] = true
 	}
 	check := q.Get("check")
 	if check != "" && !checks[check] {
@@ -219,6 +241,26 @@ func (s *Server) analyticsScoreSeriesByLens(w http.ResponseWriter, r *http.Reque
 		}
 		checkOut = append(checkOut, map[string]any{"name": name, "points": points})
 	}
+	cellCount, groups := 0, 0
+	labels := []string{}
+	for _, c := range checkOut {
+		for _, p := range c["points"].([]map[string]any) {
+			labels = append(labels, p["t"].(string))
+			if dim == "" {
+				cellCount++
+				continue
+			}
+			n := len(p["groups"].([]map[string]any))
+			cellCount += n
+			groups = max(groups, n)
+		}
+	}
+	if dim == "" {
+		groups = len(checkOut)
+	}
+	if scoreSeriesCellRefusal(w, f, bucket, budget, cellCount, groups, labels) {
+		return
+	}
 	resp := map[string]any{"kind": kind, "bucket": bucket, "checks": checkOut}
 	if dim != "" {
 		resp["dim"] = dim
@@ -235,4 +277,78 @@ func (s *Server) analyticsScoreSeriesByLens(w http.ResponseWriter, r *http.Reque
 	}
 	addAnalyticsPartial(resp, ts)
 	writeJSON(w, 200, resp)
+}
+
+// scoreSeriesCellBudget reads the explicit output cell budget. The default is
+// /schema.budgets.max_cells and an explicit value may only lower it.
+func scoreSeriesCellBudget(w http.ResponseWriter, q url.Values) (int, bool) {
+	budget := scoreSeriesMaxCells
+	if v := q.Get("max_cells"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 1 {
+			errJSON(w, 400, "max_cells must be a positive integer")
+			return 0, false
+		}
+		budget = min(budget, n)
+	}
+	return budget, true
+}
+
+// scoreSeriesCellRefusal enforces the cell budget as returned buckets × returned
+// check/series groups. It never clips the series or buckets; a breach names the
+// next supported coarser bucket that fits, or an explicit action when none does.
+func scoreSeriesCellRefusal(w http.ResponseWriter, f store.AnalyticsFilter, bucket string, budget, cells, groups int, labels []string) bool {
+	if cells <= budget || groups <= 0 {
+		return false
+	}
+	extra := map[string]any{"max_cells": budget}
+	if next := scoreSeriesFittingBucket(f, bucket, budget, groups, labels); next != "" {
+		extra["suggested_bucket"] = next
+	} else {
+		extra["suggested_action"] = "reduce_splits_checks_or_choose_window"
+	}
+	errCodeJSON(w, 400, "too_many_cells", "score series exceeds the cell budget", extra)
+	return true
+}
+
+// scoreSeriesFittingBucket returns the next supported coarser bucket whose
+// returned span fits the budget, or "" when none does.
+func scoreSeriesFittingBucket(f store.AnalyticsFilter, bucket string, budget, groups int, labels []string) string {
+	start := -1
+	for i, b := range scoreSeriesBuckets {
+		if b == bucket {
+			start = i
+			break
+		}
+	}
+	from, to, ok := scoreSeriesLabelSpan(labels)
+	if start < 0 || !ok {
+		return ""
+	}
+	for _, b := range scoreSeriesBuckets[start+1:] {
+		if bucketSpan(from, to, b, f.TZ)*groups <= budget {
+			return b
+		}
+	}
+	return ""
+}
+
+func scoreSeriesLabelSpan(labels []string) (time.Time, time.Time, bool) {
+	var lo, hi time.Time
+	for _, label := range labels {
+		ts, err := time.Parse(time.RFC3339, label)
+		if err != nil {
+			continue
+		}
+		if lo.IsZero() || ts.Before(lo) {
+			lo = ts
+		}
+		if hi.IsZero() || ts.After(hi) {
+			hi = ts
+		}
+	}
+	if lo.IsZero() {
+		return time.Time{}, time.Time{}, false
+	}
+	return lo, hi.Add(time.Second), true
 }

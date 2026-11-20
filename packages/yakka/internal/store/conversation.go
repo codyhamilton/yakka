@@ -24,6 +24,7 @@ type ConversationEvent struct {
 	NormEvent string
 	Event     string
 	Tool      string
+	ToolKind  string
 	Model     string
 	Path      string
 	Kind      string
@@ -172,10 +173,11 @@ func (t *Tenant) Conversation(ctx context.Context, id string, bounds Conversatio
 		}
 		d.WindowTotals = &wt
 	}
-	rows, err := t.rdb.QueryContext(ctx, fmt.Sprintf(conversationDedupeCTE+`
-		SELECT ts, type, harness, norm_event, event, tool, model, path, kind, source, sha,
+	q := fmt.Sprintf(conversationDedupeCTE, "") + `
+		SELECT ts, type, harness, norm_event, event, tool, ` + toolKindExpr + `, model, path, kind, source, sha,
 			tok_in, tok_out, tok_cache_read, tok_cache_write, tok_reasoning, cost_reported, _mid, _rn
-		FROM c ORDER BY ts, row_hash LIMIT ?`, ""), id, conversationEventCap+1)
+		FROM c ORDER BY ts, row_hash LIMIT ?`
+	rows, err := t.rdb.QueryContext(ctx, q, id, conversationEventCap+1)
 	if err != nil {
 		return ConversationDetail{}, false, err
 	}
@@ -187,7 +189,7 @@ func (t *Tenant) Conversation(ctx context.Context, id string, bounds Conversatio
 		var cost sql.NullFloat64
 		var mid sql.NullString
 		var rn int
-		if err := rows.Scan(&e.TS, &typ, &harness, &norm, &e.Event, &e.Tool, &e.Model, &e.Path,
+		if err := rows.Scan(&e.TS, &typ, &harness, &norm, &e.Event, &e.Tool, &e.ToolKind, &e.Model, &e.Path,
 			&e.Kind, &e.Source, &e.SHA, &tok.In, &tok.Out, &tok.CacheRead, &tok.CacheWrite, &tok.Reasoning,
 			&cost, &mid, &rn); err != nil {
 			return ConversationDetail{}, false, err

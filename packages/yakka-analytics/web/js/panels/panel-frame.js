@@ -65,7 +65,10 @@ export function createPanelFrame({ panel, spec = {}, scope = {}, transport, sche
   basis.className = 'workspace-panel-basis';
   const inspectorSlot = doc.createElement('div');
   inspectorSlot.className = 'workspace-panel-inspector';
-  element.append(chipSlot, chooserSlot, body, status, population, basis, inspectorSlot);
+  const meta = doc.createElement('div');
+  meta.className = 'workspace-panel-meta';
+  meta.append(status, population, basis);
+  element.append(chipSlot, chooserSlot, body, meta, inspectorSlot);
 
   let controller = null;
   let state = 'loading';
@@ -103,6 +106,24 @@ export function createPanelFrame({ panel, spec = {}, scope = {}, transport, sche
     }
     if (next === 'error') {
       status.append(text(doc, 'strong', '', options.message || 'The server did not answer.'));
+      if (options.code) status.append(doc.createTextNode(` (${options.code})`));
+      addRetry(options.retry);
+      return;
+    }
+    if (next === 'unauthorized') {
+      status.append(text(doc, 'strong', '', options.message || 'This read is not authorized.'));
+      if (options.code) status.append(doc.createTextNode(` (${options.code})`));
+      addRetry(options.retry);
+      return;
+    }
+    if (next === 'busy') {
+      status.append(text(doc, 'strong', '', options.message || 'The server is busy; retry shortly.'));
+      if (options.code) status.append(doc.createTextNode(` (${options.code})`));
+      addRetry(options.retry);
+      return;
+    }
+    if (next === 'timeout') {
+      status.append(text(doc, 'strong', '', options.message || 'The read timed out; narrow the window or retry.'));
       if (options.code) status.append(doc.createTextNode(` (${options.code})`));
       addRetry(options.retry);
       return;

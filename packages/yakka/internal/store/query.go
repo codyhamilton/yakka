@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"math"
@@ -10,6 +11,12 @@ import (
 	"strings"
 	"time"
 )
+
+// rowQueryer is the read surface shared by *sql.DB and a pinned *sql.Conn, so a request can run
+// every rank and the final query against one materialized source on one connection.
+type rowQueryer interface {
+	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
+}
 
 // MeasureSpec is one row of the measure × dimension matrix.
 type MeasureSpec struct {
@@ -299,6 +306,12 @@ func (t *Tenant) Query(ctx context.Context, f AnalyticsFilter, p QueryParams) (Q
 }
 
 func (t *Tenant) queryMeasure(ctx context.Context, f AnalyticsFilter, p QueryParams, def measureDef, top int, bucket string) (QueryResult, error) {
+	return t.queryMeasureOn(ctx, t.rdb, f, p, def, top, bucket)
+}
+
+// queryMeasureOn is queryMeasure with every read run through q. Usage requests pass a pinned
+// connection holding the request-scoped deduplicated/priced source so the source is evaluated once.
+func (t *Tenant) queryMeasureOn(ctx context.Context, q rowQueryer, f AnalyticsFilter, p QueryParams, def measureDef, top int, bucket string) (QueryResult, error) {
 	res := QueryResult{Measure: p.Measure, Bucket: bucket, Dims: append([]string{}, p.Dims...)}
 	f2, ignored := def.applyFilters(f)
 	res.Ignored = ignored
@@ -311,7 +324,7 @@ func (t *Tenant) queryMeasure(ctx context.Context, f AnalyticsFilter, p QueryPar
 	}
 	tops := map[string][]string{}
 	for _, d := range p.Dims {
-		keys, err := t.rankDim(ctx, def, src, where, args, d, loc, top)
+		keys, err := t.rankDim(ctx, q, def, src, where, args, d, loc, top)
 		if err != nil {
 			return QueryResult{}, err
 		}
@@ -320,9 +333,9 @@ func (t *Tenant) queryMeasure(ctx context.Context, f AnalyticsFilter, p QueryPar
 	var rows []QueryRow
 	var err error
 	if loc == time.UTC {
-		rows, err = t.finalUTC(ctx, def, src, where, args, p.Dims, tops, bucket)
+		rows, err = t.finalUTC(ctx, q, def, src, where, args, p.Dims, tops, bucket)
 	} else {
-		rows, err = t.finalLocal(ctx, def, src, where, args, p.Dims, tops, bucket, loc)
+		rows, err = t.finalLocal(ctx, q, def, src, where, args, p.Dims, tops, bucket, loc)
 	}
 	if err != nil {
 		return QueryResult{}, err
@@ -394,24 +407,24 @@ func (d measureDef) whereClause(f AnalyticsFilter) (string, []any) {
 	return w, args
 }
 
-func (t *Tenant) rankDim(ctx context.Context, def measureDef, src, where string, args []any, dim string, loc *time.Location, top int) ([]string, error) {
+func (t *Tenant) rankDim(ctx context.Context, q rowQueryer, def measureDef, src, where string, args []any, dim string, loc *time.Location, top int) ([]string, error) {
 	if dim == "hour_of_day" || dim == "weekday" {
 		if loc == time.UTC {
 			if dim == "hour_of_day" {
-				return t.rankSQL(ctx, def, src, where, args, hourOfDayExpr(def), top)
+				return t.rankSQL(ctx, q, def, src, where, args, hourOfDayExpr(def), top)
 			}
-			return t.rankSQL(ctx, def, src, where, args, weekdayExpr(def), top)
+			return t.rankSQL(ctx, q, def, src, where, args, weekdayExpr(def), top)
 		}
-		return t.rankLocalTimeDim(ctx, def, src, where, args, dim, loc, top)
+		return t.rankLocalTimeDim(ctx, q, def, src, where, args, dim, loc, top)
 	}
-	return t.rankSQL(ctx, def, src, where, args, def.colExpr(dim), top)
+	return t.rankSQL(ctx, q, def, src, where, args, def.colExpr(dim), top)
 }
 
-func (t *Tenant) rankSQL(ctx context.Context, def measureDef, src, where string, args []any, expr string, top int) ([]string, error) {
-	q := "SELECT " + expr + " AS k, " + def.aggSQL() + " AS v FROM " + src + " WHERE " + where +
+func (t *Tenant) rankSQL(ctx context.Context, q rowQueryer, def measureDef, src, where string, args []any, expr string, top int) ([]string, error) {
+	sql := "SELECT " + expr + " AS k, " + def.aggSQL() + " AS v FROM " + src + " WHERE " + where +
 		" GROUP BY k ORDER BY v DESC, k ASC LIMIT ?"
 	qargs := append(append([]any{}, args...), top)
-	rows, err := t.rdb.QueryContext(ctx, q, qargs...)
+	rows, err := q.QueryContext(ctx, sql, qargs...)
 	if err != nil {
 		return nil, err
 	}
@@ -428,11 +441,11 @@ func (t *Tenant) rankSQL(ctx context.Context, def measureDef, src, where string,
 	return keys, rows.Err()
 }
 
-func (t *Tenant) rankLocalTimeDim(ctx context.Context, def measureDef, src, where string, args []any, dim string, loc *time.Location, top int) ([]string, error) {
+func (t *Tenant) rankLocalTimeDim(ctx context.Context, q rowQueryer, def measureDef, src, where string, args []any, dim string, loc *time.Location, top int) ([]string, error) {
 	totals := map[string]float64{}
 	if def.distinct == "" {
-		q := "SELECT " + hourKeyExpr(def) + " AS h, " + def.aggSQL() + " AS v FROM " + src + " WHERE " + where + " GROUP BY h"
-		rows, err := t.rdb.QueryContext(ctx, q, args...)
+		sql := "SELECT " + hourKeyExpr(def) + " AS h, " + def.aggSQL() + " AS v FROM " + src + " WHERE " + where + " GROUP BY h"
+		rows, err := q.QueryContext(ctx, sql, args...)
 		if err != nil {
 			return nil, err
 		}
@@ -449,8 +462,8 @@ func (t *Tenant) rankLocalTimeDim(ctx context.Context, def measureDef, src, wher
 			return nil, err
 		}
 	} else {
-		q := "SELECT DISTINCT " + hourKeyExpr(def) + " AS h, " + def.distinct + " FROM " + src + " WHERE " + where
-		rows, err := t.rdb.QueryContext(ctx, q, args...)
+		sql := "SELECT DISTINCT " + hourKeyExpr(def) + " AS h, " + def.distinct + " FROM " + src + " WHERE " + where
+		rows, err := q.QueryContext(ctx, sql, args...)
 		if err != nil {
 			return nil, err
 		}
@@ -477,7 +490,7 @@ func (t *Tenant) rankLocalTimeDim(ctx context.Context, def measureDef, src, wher
 	return rankKeys(totals, top), nil
 }
 
-func (t *Tenant) finalUTC(ctx context.Context, def measureDef, src, where string, args []any, dims []string, tops map[string][]string, bucket string) ([]QueryRow, error) {
+func (t *Tenant) finalUTC(ctx context.Context, q rowQueryer, def measureDef, src, where string, args []any, dims []string, tops map[string][]string, bucket string) ([]QueryRow, error) {
 	var sel []string
 	var selArgs []any
 	var groupBy []string
@@ -501,12 +514,12 @@ func (t *Tenant) finalUTC(ctx context.Context, def measureDef, src, where string
 		groupBy = append(groupBy, "t")
 	}
 	sel = append(sel, def.aggSQL()+" AS v")
-	q := "SELECT " + strings.Join(sel, ", ") + " FROM " + src + " WHERE " + where
+	sql := "SELECT " + strings.Join(sel, ", ") + " FROM " + src + " WHERE " + where
 	if len(groupBy) > 0 {
-		q += " GROUP BY " + strings.Join(groupBy, ", ")
+		sql += " GROUP BY " + strings.Join(groupBy, ", ")
 	}
 	qargs := append(append([]any{}, selArgs...), args...)
-	rows, err := t.rdb.QueryContext(ctx, q, qargs...)
+	rows, err := q.QueryContext(ctx, sql, qargs...)
 	if err != nil {
 		return nil, err
 	}
@@ -532,7 +545,7 @@ func (t *Tenant) finalUTC(ctx context.Context, def measureDef, src, where string
 	return out, rows.Err()
 }
 
-func (t *Tenant) finalLocal(ctx context.Context, def measureDef, src, where string, args []any, dims []string, tops map[string][]string, bucket string, loc *time.Location) ([]QueryRow, error) {
+func (t *Tenant) finalLocal(ctx context.Context, q rowQueryer, def measureDef, src, where string, args []any, dims []string, tops map[string][]string, bucket string, loc *time.Location) ([]QueryRow, error) {
 	var sel []string
 	var selArgs []any
 	var aliases []string
@@ -551,17 +564,17 @@ func (t *Tenant) finalLocal(ctx context.Context, def measureDef, src, where stri
 	} else {
 		sel = append(sel, def.aggSQL()+" AS v")
 	}
-	q := "SELECT "
+	sql := "SELECT "
 	if distinct {
-		q += "DISTINCT "
+		sql += "DISTINCT "
 	}
-	q += strings.Join(sel, ", ") + " FROM " + src + " WHERE " + where
+	sql += strings.Join(sel, ", ") + " FROM " + src + " WHERE " + where
 	if !distinct {
 		gb := append(append([]string{}, aliases...), "h")
-		q += " GROUP BY " + strings.Join(gb, ", ")
+		sql += " GROUP BY " + strings.Join(gb, ", ")
 	}
 	qargs := append(append([]any{}, selArgs...), args...)
-	rows, err := t.rdb.QueryContext(ctx, q, qargs...)
+	rows, err := q.QueryContext(ctx, sql, qargs...)
 	if err != nil {
 		return nil, err
 	}

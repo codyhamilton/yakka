@@ -79,7 +79,7 @@ func (s *Server) analyticsConversation(w http.ResponseWriter, r *http.Request, _
 	events := make([]map[string]any, 0, len(d.Events))
 	for _, e := range d.Events {
 		m := map[string]any{"ts": rfc(e.TS), "type": e.Type, "norm_event": e.NormEvent, "event": e.Event,
-			"tool": e.Tool, "model": e.Model, "path": e.Path, "kind": e.Kind, "source": e.Source, "sha": e.SHA}
+			"tool": e.Tool, "tool_kind": e.ToolKind, "model": e.Model, "path": e.Path, "kind": e.Kind, "source": e.Source, "sha": e.SHA}
 		if e.Tokens != nil {
 			m["tokens"] = map[string]any{"in": e.Tokens.In, "out": e.Tokens.Out, "cache_read": e.Tokens.CacheRead,
 				"cache_write": e.Tokens.CacheWrite, "reasoning": e.Tokens.Reasoning}

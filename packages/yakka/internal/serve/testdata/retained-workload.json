@@ -1,0 +1,612 @@
+{
+  "version": 1,
+  "phase": "phase 2 verified",
+  "source": "synthetic",
+  "runs": 20,
+  "workload": {
+    "version": 1,
+    "seed": "plan29-retained-v1",
+    "generated": {
+      "facts": 239810,
+      "hook_events": 236000,
+      "usage_calls": 33600,
+      "artifact_versions": 2910,
+      "commits": 900,
+      "sessions": 7440,
+      "plan_identities": 260,
+      "artifact_files": 1400,
+      "plan_session_associations": 2897,
+      "harness_model_groups": 32,
+      "max_sessions_per_plan": 60,
+      "max_plans_per_session": 50,
+      "scores": 21000,
+      "scored_content": 1400,
+      "checks": 15
+    },
+    "oracle": {
+      "min_fact_ts": 1720714791,
+      "max_fact_ts": 1792711191,
+      "latest_usage_ts": 1790769600,
+      "total_cost_usd": 214.2456100000014,
+      "priced_sessions": 2001,
+      "partially_priced_sessions": 2000,
+      "all_unpriced_sessions": 2000,
+      "mixed_repo_id": "repo-00",
+      "mixed_plan": "plan-000",
+      "mixed_session": "sess-00000",
+      "mixed_session_cost_usd": 0.0016,
+      "mixed_plan_associated_cost_usd": 0.0016,
+      "mixed_usage_raw_repo_empty": true,
+      "max_sessions_per_plan": 60,
+      "max_sessions_plan_repo": "repo-00",
+      "max_sessions_plan": "sess-00000",
+      "max_plans_per_session": 50,
+      "max_plans_session": "sess-00000",
+      "harness_model_groups": 32,
+      "scored_content": 1400,
+      "scores": 21000,
+      "checks": [
+        "clarity",
+        "quality",
+        "debt",
+        "design-coherence",
+        "scope-fidelity",
+        "test-coverage",
+        "risk",
+        "readability",
+        "structure",
+        "evidence",
+        "tradeoffs",
+        "performance",
+        "security",
+        "maintainability",
+        "clarity-2"
+      ],
+      "shape_oracle": {
+        "artifact_files": 1400,
+        "plan_associations": 2897,
+        "plan_detail_sessions": 60,
+        "plan_population": 260,
+        "scored_content": 1400,
+        "session_plans": 50,
+        "sessions": 7440,
+        "usage_calls": 33600,
+        "usage_groups": 32
+      }
+    }
+  },
+  "copy_ms": 0,
+  "generate_ms": 0.155292,
+  "open_ms": 1.287374,
+  "shapes": [
+    {
+      "label": "plan-list-limit-1",
+      "path": "/v1/analytics/entities?grain=plan\u0026limit=1\u0026sort=last_ts%3Adesc\u0026all=1\u0026to=2026-10-22T23%3A19%3A51Z",
+      "expect": "rows_eq",
+      "oracle": "plan_population",
+      "alone_status": 200,
+      "alone_rows": 1,
+      "alone_p95_ms": 128.103495,
+      "alone_max_ms": 128.557169,
+      "load_status": 200,
+      "load_rows": 1,
+      "load_p95_ms": 167.503484,
+      "load_max_ms": 172.386017,
+      "classification": "served"
+    },
+    {
+      "label": "plan-list-limit-10",
+      "path": "/v1/analytics/entities?grain=plan\u0026limit=10\u0026sort=last_ts%3Adesc\u0026all=1\u0026to=2026-10-22T23%3A19%3A51Z",
+      "expect": "rows_eq",
+      "oracle": "plan_population",
+      "alone_status": 200,
+      "alone_rows": 10,
+      "alone_p95_ms": 156.338891,
+      "alone_max_ms": 162.803514,
+      "load_status": 200,
+      "load_rows": 10,
+      "load_p95_ms": 207.598962,
+      "load_max_ms": 208.547509,
+      "classification": "served"
+    },
+    {
+      "label": "plan-list-limit-100",
+      "path": "/v1/analytics/entities?grain=plan\u0026limit=100\u0026sort=last_ts%3Adesc\u0026all=1\u0026to=2026-10-22T23%3A19%3A51Z",
+      "expect": "rows_eq",
+      "oracle": "plan_population",
+      "alone_status": 200,
+      "alone_rows": 100,
+      "alone_p95_ms": 269.928967,
+      "alone_max_ms": 270.001804,
+      "load_status": 200,
+      "load_rows": 100,
+      "load_p95_ms": 348.007357,
+      "load_max_ms": 360.578357,
+      "classification": "served"
+    },
+    {
+      "label": "plan-list-sort-last-ts",
+      "path": "/v1/analytics/entities?grain=plan\u0026limit=100\u0026sort=last_ts%3Adesc\u0026all=1\u0026to=2026-10-22T23%3A19%3A51Z",
+      "expect": "rows",
+      "oracle": "plan_population",
+      "alone_status": 200,
+      "alone_rows": 100,
+      "alone_p95_ms": 274.892724,
+      "alone_max_ms": 276.900605,
+      "load_status": 200,
+      "load_rows": 100,
+      "load_p95_ms": 439.363066,
+      "load_max_ms": 451.949125,
+      "classification": "served"
+    },
+    {
+      "label": "plan-list-sort-associated-cost",
+      "path": "/v1/analytics/entities?grain=plan\u0026limit=100\u0026sort=associated_cost_usd%3Adesc\u0026all=1\u0026to=2026-10-22T23%3A19%3A51Z",
+      "expect": "rows",
+      "oracle": "plan_population",
+      "alone_status": 200,
+      "alone_rows": 100,
+      "alone_p95_ms": 362.949692,
+      "alone_max_ms": 376.676881,
+      "load_status": 200,
+      "load_rows": 100,
+      "load_p95_ms": 432.768349,
+      "load_max_ms": 441.644793,
+      "classification": "served"
+    },
+    {
+      "label": "plan-list-sort-executions-unreported",
+      "path": "/v1/analytics/entities?grain=plan\u0026limit=100\u0026sort=executions_unreported%3Adesc\u0026all=1\u0026to=2026-10-22T23%3A19%3A51Z",
+      "expect": "rows",
+      "oracle": "plan_population",
+      "alone_status": 200,
+      "alone_rows": 100,
+      "alone_p95_ms": 269.124823,
+      "alone_max_ms": 270.101984,
+      "load_status": 200,
+      "load_rows": 100,
+      "load_p95_ms": 346.15011,
+      "load_max_ms": 350.923628,
+      "classification": "served"
+    },
+    {
+      "label": "plan-scatter-cost-artifacts",
+      "path": "/v1/analytics/entities?grain=plan\u0026mode=scatter\u0026fields=associated_cost_usd%2Cartifacts\u0026all=1\u0026to=2026-10-22T23%3A19%3A51Z",
+      "expect": "rows",
+      "oracle": "plan_population",
+      "alone_status": 200,
+      "alone_rows": 100,
+      "alone_p95_ms": 274.983324,
+      "alone_max_ms": 286.08006,
+      "load_status": 200,
+      "load_rows": 100,
+      "load_p95_ms": 349.281756,
+      "load_max_ms": 349.816203,
+      "classification": "served"
+    },
+    {
+      "label": "plan-detail-sessions",
+      "path": "/v1/analytics/entity?grain=plan\u0026repo_id=repo-00\u0026plan=plan-000\u0026collection=sessions\u0026limit=100\u0026all=1\u0026to=2026-10-22T23%3A19%3A51Z",
+      "expect": "rows",
+      "oracle": "plan_detail_sessions",
+      "alone_status": 200,
+      "alone_rows": 60,
+      "alone_p95_ms": 22.356617,
+      "alone_max_ms": 22.78352,
+      "load_status": 200,
+      "load_rows": 60,
+      "load_p95_ms": 34.480767,
+      "load_max_ms": 38.009532,
+      "classification": "served"
+    },
+    {
+      "label": "plan-detail-events",
+      "path": "/v1/analytics/entity?grain=plan\u0026repo_id=repo-00\u0026plan=plan-000\u0026collection=events\u0026limit=100\u0026all=1\u0026to=2026-10-22T23%3A19%3A51Z",
+      "expect": "rows",
+      "oracle": "plan_associations",
+      "alone_status": 200,
+      "alone_rows": 100,
+      "alone_p95_ms": 21.500836,
+      "alone_max_ms": 21.605954,
+      "load_status": 200,
+      "load_rows": 100,
+      "load_p95_ms": 36.733879,
+      "load_max_ms": 37.826347,
+      "classification": "served"
+    },
+    {
+      "label": "plan-detail-artifacts",
+      "path": "/v1/analytics/entity?grain=plan\u0026repo_id=repo-00\u0026plan=plan-000\u0026collection=artifacts\u0026limit=100\u0026all=1\u0026to=2026-10-22T23%3A19%3A51Z",
+      "expect": "rows",
+      "oracle": "plan_population",
+      "alone_status": 200,
+      "alone_rows": 6,
+      "alone_p95_ms": 21.996709,
+      "alone_max_ms": 22.088343,
+      "load_status": 200,
+      "load_rows": 6,
+      "load_p95_ms": 37.65795,
+      "load_max_ms": 47.801951,
+      "classification": "served"
+    },
+    {
+      "label": "plan-detail-executions",
+      "path": "/v1/analytics/entity?grain=plan\u0026repo_id=repo-00\u0026plan=plan-000\u0026collection=executions\u0026limit=100\u0026all=1\u0026to=2026-10-22T23%3A19%3A51Z",
+      "expect": "rows",
+      "oracle": "plan_population",
+      "alone_status": 200,
+      "alone_rows": 6,
+      "alone_p95_ms": 23.479892,
+      "alone_max_ms": 26.952691,
+      "load_status": 200,
+      "load_rows": 6,
+      "load_p95_ms": 36.36248,
+      "load_max_ms": 39.022449,
+      "classification": "served"
+    },
+    {
+      "label": "workflow-plan-rank",
+      "path": "/v1/analytics/entities?grain=plan\u0026limit=12\u0026sort=associated_cost_usd%3Adesc\u0026all=1\u0026to=2026-10-22T23%3A19%3A51Z",
+      "expect": "rows",
+      "oracle": "plan_population",
+      "alone_status": 200,
+      "alone_rows": 12,
+      "alone_p95_ms": 289.319406,
+      "alone_max_ms": 292.174583,
+      "load_status": 200,
+      "load_rows": 12,
+      "load_p95_ms": 369.950223,
+      "load_max_ms": 374.545157,
+      "classification": "served"
+    },
+    {
+      "label": "workflow-activity-list",
+      "path": "/v1/analytics/activity?mode=list\u0026limit=100\u0026all=1\u0026to=2026-10-22T23%3A19%3A51Z",
+      "expect": "rows",
+      "oracle": "sessions",
+      "alone_status": 200,
+      "alone_rows": 100,
+      "alone_p95_ms": 223.395182,
+      "alone_max_ms": 224.833269,
+      "load_status": 200,
+      "load_rows": 100,
+      "load_p95_ms": 339.182188,
+      "load_max_ms": 343.22959,
+      "classification": "served"
+    },
+    {
+      "label": "workflow-river",
+      "path": "/v1/analytics/activity?mode=list\u0026limit=50\u0026all=1\u0026to=2026-10-22T23%3A19%3A51Z",
+      "expect": "rows",
+      "oracle": "sessions",
+      "alone_status": 200,
+      "alone_rows": 50,
+      "alone_p95_ms": 228.486378,
+      "alone_max_ms": 231.644946,
+      "load_status": 200,
+      "load_rows": 50,
+      "load_p95_ms": 260.041797,
+      "load_max_ms": 262.073182,
+      "classification": "served"
+    },
+    {
+      "label": "conversation-dist-cost-session-repo",
+      "path": "/v1/analytics/distribution?measure=cost_usd\u0026grain=conversation\u0026dim=session_repo\u0026all=1\u0026to=2026-10-22T23%3A19%3A51Z",
+      "expect": "rows",
+      "oracle": "usage_groups",
+      "alone_status": 200,
+      "alone_rows": 20,
+      "alone_p95_ms": 194.387281,
+      "alone_max_ms": 197.61602,
+      "load_status": 200,
+      "load_rows": 20,
+      "load_p95_ms": 270.93523,
+      "load_max_ms": 274.563091,
+      "classification": "served"
+    },
+    {
+      "label": "conversation-dist-cost-model",
+      "path": "/v1/analytics/distribution?measure=cost_usd\u0026grain=conversation\u0026dim=model\u0026all=1\u0026to=2026-10-22T23%3A19%3A51Z",
+      "expect": "rows",
+      "oracle": "usage_groups",
+      "alone_status": 200,
+      "alone_rows": 8,
+      "alone_p95_ms": 203.361718,
+      "alone_max_ms": 203.816064,
+      "load_status": 200,
+      "load_rows": 8,
+      "load_p95_ms": 337.920412,
+      "load_max_ms": 350.683986,
+      "classification": "served"
+    },
+    {
+      "label": "conversation-dist-cost-harness",
+      "path": "/v1/analytics/distribution?measure=cost_usd\u0026grain=conversation\u0026dim=harness\u0026all=1\u0026to=2026-10-22T23%3A19%3A51Z",
+      "expect": "rows",
+      "oracle": "usage_groups",
+      "alone_status": 200,
+      "alone_rows": 4,
+      "alone_p95_ms": 266.441578,
+      "alone_max_ms": 271.313011,
+      "load_status": 200,
+      "load_rows": 4,
+      "load_p95_ms": 388.59339,
+      "load_max_ms": 398.732161,
+      "classification": "served"
+    },
+    {
+      "label": "conversation-dist-cost-session-model",
+      "path": "/v1/analytics/distribution?measure=cost_usd\u0026grain=conversation\u0026dim=session_model\u0026all=1\u0026to=2026-10-22T23%3A19%3A51Z",
+      "expect": "rows",
+      "oracle": "usage_groups",
+      "alone_status": 200,
+      "alone_rows": 9,
+      "alone_p95_ms": 229.668825,
+      "alone_max_ms": 243.613192,
+      "load_status": 200,
+      "load_rows": 9,
+      "load_p95_ms": 345.342398,
+      "load_max_ms": 359.092088,
+      "classification": "served"
+    },
+    {
+      "label": "conversation-dist-tokens-in",
+      "path": "/v1/analytics/distribution?measure=tokens_in\u0026grain=conversation\u0026all=1\u0026to=2026-10-22T23%3A19%3A51Z",
+      "expect": "rows",
+      "oracle": "usage_groups",
+      "alone_status": 200,
+      "alone_rows": 1,
+      "alone_p95_ms": 138.04659,
+      "alone_max_ms": 138.131992,
+      "load_status": 200,
+      "load_rows": 1,
+      "load_p95_ms": 196.537079,
+      "load_max_ms": 199.399117,
+      "classification": "served"
+    },
+    {
+      "label": "call-dist-cost-harness",
+      "path": "/v1/analytics/distribution?measure=cost_usd\u0026grain=call\u0026dim=harness\u0026all=1\u0026to=2026-10-22T23%3A19%3A51Z",
+      "expect": "rows",
+      "oracle": "usage_groups",
+      "alone_status": 200,
+      "alone_rows": 4,
+      "alone_p95_ms": 313.822055,
+      "alone_max_ms": 315.424222,
+      "load_status": 200,
+      "load_rows": 4,
+      "load_p95_ms": 406.356718,
+      "load_max_ms": 409.128056,
+      "classification": "served"
+    },
+    {
+      "label": "session-scatter-cost-commits-unpriced",
+      "path": "/v1/analytics/entities?grain=session\u0026mode=scatter\u0026fields=cost_usd%2Ccommits%2Cunpriced_calls\u0026all=1\u0026to=2026-10-22T23%3A19%3A51Z",
+      "expect": "rows",
+      "oracle": "sessions",
+      "alone_status": 200,
+      "alone_rows": 5000,
+      "alone_p95_ms": 357.263445,
+      "alone_max_ms": 368.697395,
+      "load_status": 200,
+      "load_rows": 5000,
+      "load_p95_ms": 473.60216,
+      "load_max_ms": 477.684437,
+      "classification": "served"
+    },
+    {
+      "label": "session-scatter-cost-tokens",
+      "path": "/v1/analytics/entities?grain=session\u0026mode=scatter\u0026fields=cost_usd%2Ctokens_in\u0026all=1\u0026to=2026-10-22T23%3A19%3A51Z",
+      "expect": "rows",
+      "oracle": "sessions",
+      "alone_status": 200,
+      "alone_rows": 5000,
+      "alone_p95_ms": 361.295247,
+      "alone_max_ms": 371.47792,
+      "load_status": 200,
+      "load_rows": 5000,
+      "load_p95_ms": 474.193724,
+      "load_max_ms": 483.33133,
+      "classification": "served"
+    },
+    {
+      "label": "cost-treemap-harness-model",
+      "path": "/v1/analytics/query?measure=cost_usd\u0026bucket=none\u0026dim=harness\u0026dim=model\u0026top=100\u0026all=1\u0026to=2026-10-22T23%3A19%3A51Z",
+      "expect": "rows",
+      "oracle": "usage_groups",
+      "alone_status": 200,
+      "alone_rows": 32,
+      "alone_p95_ms": 262.47529,
+      "alone_max_ms": 263.047657,
+      "load_status": 200,
+      "load_rows": 32,
+      "load_p95_ms": 334.432395,
+      "load_max_ms": 337.736115,
+      "classification": "served"
+    },
+    {
+      "label": "artifact-band-mix",
+      "path": "/v1/analytics/entities?grain=artifact\u0026mode=aggregate\u0026stat=count\u0026dim=band%3Aclarity\u0026dim=kind\u0026check=clarity\u0026scorer=jev-1.13.0\u0026limit=4\u0026all=1\u0026to=2026-10-22T23%3A19%3A51Z",
+      "expect": "rows",
+      "oracle": "scored_content",
+      "alone_status": 200,
+      "alone_rows": 9,
+      "alone_p95_ms": 195.293396,
+      "alone_max_ms": 195.956515,
+      "load_status": 200,
+      "load_rows": 9,
+      "load_p95_ms": 274.694017,
+      "load_max_ms": 282.178721,
+      "classification": "served"
+    }
+  ],
+  "cancellation": {
+    "attempts": 1,
+    "deadline_ms": 200,
+    "status": 0,
+    "elapsed_ms": 207.196369,
+    "context_canceled": true,
+    "reader_released": true,
+    "following_status": 200,
+    "following_rows": 4,
+    "following_succeeded": true
+  },
+  "explain": [
+    {
+      "label": "plan_population_and_association",
+      "detail": "SEARCH facts USING INDEX facts_type_ts (type=? AND ts\u003e? AND ts\u003c?)"
+    },
+    {
+      "label": "plan_population_and_association",
+      "detail": "USE TEMP B-TREE FOR GROUP BY"
+    },
+    {
+      "label": "plan_population_and_association",
+      "detail": "USE TEMP B-TREE FOR count(DISTINCT)"
+    },
+    {
+      "label": "plan_population_and_association",
+      "detail": "USE TEMP B-TREE FOR count(DISTINCT)"
+    },
+    {
+      "label": "plan_population_and_association",
+      "detail": "USE TEMP B-TREE FOR count(DISTINCT)"
+    },
+    {
+      "label": "plan_session_ids",
+      "detail": "SEARCH s USING INDEX facts_ts (ts\u003e? AND ts\u003c?)"
+    },
+    {
+      "label": "plan_session_ids",
+      "detail": "SEARCH a EXISTS USING INDEX facts_conv_type_repo (conversation_id=? AND type=? AND repo_id=?)"
+    },
+    {
+      "label": "plan_session_ids",
+      "detail": "USE TEMP B-TREE FOR DISTINCT"
+    },
+    {
+      "label": "session_provenance",
+      "detail": "SEARCH facts USING COVERING INDEX facts_conv_harness (conversation_id=?)"
+    },
+    {
+      "label": "session_provenance",
+      "detail": "USE TEMP B-TREE FOR GROUP BY"
+    },
+    {
+      "label": "usage_dedupe",
+      "detail": "CO-ROUTINE (subquery-2)"
+    },
+    {
+      "label": "usage_dedupe",
+      "detail": "CO-ROUTINE (subquery-5)"
+    },
+    {
+      "label": "usage_dedupe",
+      "detail": "SEARCH facts USING INDEX facts_usage_ts (type=? AND norm_event=? AND ts\u003e? AND ts\u003c?)"
+    },
+    {
+      "label": "usage_dedupe",
+      "detail": "USE TEMP B-TREE FOR ORDER BY"
+    },
+    {
+      "label": "usage_dedupe",
+      "detail": "SCAN (subquery-5)"
+    },
+    {
+      "label": "usage_dedupe",
+      "detail": "SCAN (subquery-2)"
+    },
+    {
+      "label": "conversation_distribution",
+      "detail": "CO-ROUTINE (subquery-2)"
+    },
+    {
+      "label": "conversation_distribution",
+      "detail": "CO-ROUTINE (subquery-5)"
+    },
+    {
+      "label": "conversation_distribution",
+      "detail": "SEARCH facts USING INDEX facts_usage_ts (type=? AND norm_event=? AND ts\u003e? AND ts\u003c?)"
+    },
+    {
+      "label": "conversation_distribution",
+      "detail": "USE TEMP B-TREE FOR ORDER BY"
+    },
+    {
+      "label": "conversation_distribution",
+      "detail": "SCAN (subquery-5)"
+    },
+    {
+      "label": "conversation_distribution",
+      "detail": "SCAN (subquery-2)"
+    },
+    {
+      "label": "conversation_distribution",
+      "detail": "USE TEMP B-TREE FOR GROUP BY"
+    },
+    {
+      "label": "artifact_band_population",
+      "detail": "SEARCH facts USING INDEX facts_type_ts (type=? AND ts\u003e? AND ts\u003c?)"
+    },
+    {
+      "label": "artifact_band_population",
+      "detail": "USE TEMP B-TREE FOR GROUP BY"
+    },
+    {
+      "label": "artifact_band_population",
+      "detail": "USE TEMP B-TREE FOR count(DISTINCT)"
+    },
+    {
+      "label": "artifact_band_population",
+      "detail": "USE TEMP B-TREE FOR count(DISTINCT)"
+    },
+    {
+      "label": "artifact_band_population",
+      "detail": "USE TEMP B-TREE FOR ORDER BY"
+    },
+    {
+      "label": "artifact_latest_scores",
+      "detail": "CO-ROUTINE latest"
+    },
+    {
+      "label": "artifact_latest_scores",
+      "detail": "CO-ROUTINE (subquery-4)"
+    },
+    {
+      "label": "artifact_latest_scores",
+      "detail": "CO-ROUTINE hashes"
+    },
+    {
+      "label": "artifact_latest_scores",
+      "detail": "SEARCH facts USING INDEX facts_usage_ts (type=?)"
+    },
+    {
+      "label": "artifact_latest_scores",
+      "detail": "USE TEMP B-TREE FOR DISTINCT"
+    },
+    {
+      "label": "artifact_latest_scores",
+      "detail": "SCAN h"
+    },
+    {
+      "label": "artifact_latest_scores",
+      "detail": "SEARCH s USING INDEX scores_hash (content_hash=?)"
+    },
+    {
+      "label": "artifact_latest_scores",
+      "detail": "USE TEMP B-TREE FOR ORDER BY"
+    },
+    {
+      "label": "artifact_latest_scores",
+      "detail": "SCAN (subquery-4)"
+    },
+    {
+      "label": "artifact_latest_scores",
+      "detail": "SCAN latest"
+    },
+    {
+      "label": "artifact_latest_scores",
+      "detail": "USE TEMP B-TREE FOR ORDER BY"
+    }
+  ]
+}

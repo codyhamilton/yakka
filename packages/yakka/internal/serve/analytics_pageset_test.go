@@ -53,9 +53,9 @@ import (
 const (
 	pagesetRecordPath     = "testdata/browser-request-shapes.json"
 	pagesetRecordRequests = 75
-	pagesetRecordServed   = 61
-	pagesetRecordRefusals = 14
-	pagesetRecordSHA256   = "420015134d2d3ee8861ee97e449a06e7bed3268d30492e34cdcd0b74012a5c2c"
+	pagesetRecordServed   = 75
+	pagesetRecordRefusals = 0
+	pagesetRecordSHA256   = "47dfc1e3ee74d64cb18839592e6068c513553e511ee0556fae789ce3ddcae6e4"
 	pagesetFixtureTenant  = "fixture-tenant"
 	pagesetRuns           = 5
 	pagesetConc           = 4

@@ -4,7 +4,12 @@
 
 .plans-intro {
   max-width: 70ch;
-  color: var(--yk-muted, #55606a);
+  color: var(--yk-muted);
+}
+
+.workspace-panel[data-chart="table"] .workspace-panel-body {
+  overflow: auto;
+  max-height: 70vh;
 }
 
 .plans-sort {
@@ -16,38 +21,54 @@
 
 .plans-sort-label,
 .plans-sort-current {
-  color: var(--yk-muted, #55606a);
-  font-size: 0.85rem;
+  color: var(--yk-muted);
+  font-size: 0.92rem;
 }
 
 .plans-overlap-banner {
   margin: 0.5rem 0;
-  padding: 0.5rem 0.75rem;
-  border-left: 3px solid var(--yk-warning, #b8860b);
-  background: var(--yk-warning-bg, rgba(184, 134, 11, 0.08));
-  font-size: 0.85rem;
+  padding: 6px 8px;
+  border-left: 3px solid var(--yk-warning);
+  background: var(--yk-warning-bg);
+  font-size: 0.92rem;
 }
 
 .plans-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 0.9rem;
+  font-size: 12px;
+  line-height: 1.5;
 }
 
 .plans-table caption {
   caption-side: top;
   text-align: left;
-  color: var(--yk-muted, #55606a);
-  padding-bottom: 0.4rem;
-  font-size: 0.8rem;
+  color: var(--yk-muted);
+  padding-bottom: 6px;
+  font-size: 0.92rem;
 }
 
 .plans-table th,
 .plans-table td {
-  padding: 0.35rem 0.5rem;
-  border-bottom: 1px solid var(--yk-border, #d7dde3);
+  padding: 3px 8px;
+  border-bottom: 1px solid var(--yk-border);
   text-align: left;
-  vertical-align: top;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
+.plans-table .plan-open {
+  min-height: 24px;
+  padding: 0 6px;
+  vertical-align: middle;
+  font: inherit;
+}
+
+.plans-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--yk-surface);
 }
 
 .plans-table td.numeric {
@@ -56,18 +77,18 @@
 }
 
 .plans-table .plans-id {
-  font-family: var(--yk-mono, ui-monospace, monospace);
+  font-family: ui-monospace, monospace;
   white-space: nowrap;
 }
 
 .plans-table tr[data-malformed="true"] {
-  background: var(--yk-error-bg, rgba(176, 0, 32, 0.06));
+  background: var(--yk-error-bg);
 }
 
 .plans-footer {
   margin-top: 0.5rem;
-  font-size: 0.85rem;
-  color: var(--yk-muted, #55606a);
+  font-size: 0.92rem;
+  color: var(--yk-muted);
 }
 
 .plans-scatter {
@@ -75,44 +96,45 @@
 }
 
 .plans-scatter-not-applied {
-  font-size: 0.85rem;
-  color: var(--yk-warning, #b8860b);
+  font-size: 0.92rem;
+  color: var(--yk-warning);
 }
 
 .plans-scatter-unsupported {
-  font-size: 0.9rem;
-  color: var(--yk-muted, #55606a);
+  font-size: 0.92rem;
+  color: var(--yk-muted);
 }
 
 /* Plan detail: one fixed plan identity, its named collections and the stored
    design context. Tables reuse the explorer chrome; no chart styling here. */
 
 .plans-detail-identity {
-  font-family: var(--yk-mono, ui-monospace, monospace);
+  font-family: ui-monospace, monospace;
   font-size: 1.05rem;
 }
 
 .plans-detail-not-applied {
   margin: 0.5rem 0;
-  padding: 0.5rem 0.75rem;
-  border-left: 3px solid var(--yk-warning, #b8860b);
-  background: var(--yk-warning-bg, rgba(184, 134, 11, 0.08));
-  font-size: 0.85rem;
+  padding: 6px 8px;
+  border-left: 3px solid var(--yk-warning);
+  background: var(--yk-warning-bg);
+  font-size: 0.92rem;
 }
 
 .plans-detail-section {
   margin-top: 1.25rem;
-  border-top: 1px solid var(--yk-border, #d7dde3);
-  padding-top: 0.75rem;
+  border-top: 1px solid var(--yk-border);
+  padding-top: 8px;
+  overflow-x: auto;
 }
 
 .plans-detail-status {
-  font-size: 0.85rem;
-  color: var(--yk-muted, #55606a);
+  font-size: 0.92rem;
+  color: var(--yk-muted);
 }
 
 .plans-detail-section[data-state="error"] .plans-detail-status {
-  color: var(--yk-error, #b00020);
+  color: var(--yk-danger);
 }
 
 .plans-detail-section[data-state="empty"] .plans-detail-status,
@@ -123,34 +145,42 @@
 .plans-detail-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 0.85rem;
+  font-size: 12px;
+  line-height: 1.5;
 }
 
 .plans-detail-table caption {
   caption-side: top;
   text-align: left;
-  color: var(--yk-muted, #55606a);
-  padding-bottom: 0.4rem;
-  font-size: 0.8rem;
+  color: var(--yk-muted);
+  padding-bottom: 6px;
+  font-size: 0.92rem;
 }
 
 .plans-detail-table th,
 .plans-detail-table td {
-  padding: 0.3rem 0.45rem;
-  border-bottom: 1px solid var(--yk-border, #d7dde3);
+  padding: 5px 8px;
+  border-bottom: 1px solid var(--yk-border);
   text-align: left;
   vertical-align: top;
+}
+
+.plans-detail-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--yk-surface);
 }
 
 .plans-detail-facts {
   display: grid;
   grid-template-columns: max-content 1fr;
   gap: 0.2rem 0.75rem;
-  font-size: 0.9rem;
+  font-size: 0.92rem;
 }
 
 .plans-detail-facts dt {
-  color: var(--yk-muted, #55606a);
+  color: var(--yk-muted);
 }
 
 .plans-detail-facts dd {
@@ -161,8 +191,8 @@
 .plans-detail-overlap,
 .plans-detail-events-scope,
 .plans-design-basis {
-  font-size: 0.82rem;
-  color: var(--yk-muted, #55606a);
+  font-size: 0.92rem;
+  color: var(--yk-muted);
 }
 
 .plans-phases {
@@ -180,11 +210,11 @@
 .plans-phase-outcome,
 .plans-phase-briefs {
   margin: 0.15rem 0;
-  font-size: 0.88rem;
+  font-size: 0.92rem;
 }
 
 .plans-unpaired-briefs {
-  font-size: 0.88rem;
+  font-size: 0.92rem;
 }
 
 .plans-detail-more {
@@ -194,4 +224,10 @@
 .plans-detail-back {
   display: inline-block;
   margin-top: 0.35rem;
+}
+
+@media (pointer: coarse) {
+  .plans-table .plan-open {
+    min-height: 44px;
+  }
 }

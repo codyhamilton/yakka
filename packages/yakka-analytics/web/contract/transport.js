@@ -1,3 +1,5 @@
+import { adaptSchema } from '../js/core/schema-adapter.js';
+
 export const API_ORIGIN = 'https://api.yakka.build';
 const storage = key => { try { return (localStorage.getItem(key) || '').trim(); } catch { return ''; } };
 const isPages = () => ['yakka.build', 'www.yakka.build'].includes(location.hostname);
@@ -72,9 +74,39 @@ export function createTransport(scheduler, { fetchImpl = fetch } = {}) {
       const base = resolvedBase();
       return fetchImpl(`${base}/logout`, { method: 'POST', credentials: 'include', headers: { Accept: 'application/json', 'Content-Type': 'application/json' }, body: '{}' });
     },
+    invalidateSchema(tenant = '') {
+      schemas.delete(tenant);
+    },
+    // Adapt at the one boundary and cache only a successful adapted schema. A
+    // non-OK response, network failure or adapter exception reaches the caller
+    // but is dropped from the cache, so a later call performs a fresh read.
     async schema(tenant = '') {
-      if (!schemas.has(tenant)) schemas.set(tenant, get('schema', new URLSearchParams(), { tenant }).then(({ response, body }) => ({ response, body })));
-      return schemas.get(tenant);
+      if (schemas.has(tenant)) return schemas.get(tenant);
+      const pending = (async () => {
+        let result;
+        try {
+          result = await get('schema', new URLSearchParams(), { tenant });
+        } catch (error) {
+          return { response: { ok: false, status: 0, headers: new Headers() }, body: {}, error };
+        }
+        if (!result.response?.ok) return result;
+        try {
+          const adapted = adaptSchema(result.body);
+          return { ...result, body: adapted.schema, warnings: adapted.warnings };
+        } catch (error) {
+          return { ...result, error };
+        }
+      })();
+      schemas.set(tenant, pending);
+      let result;
+      try {
+        result = await pending;
+      } catch (error) {
+        schemas.delete(tenant);
+        throw error;
+      }
+      if (!result?.response?.ok || result.error) schemas.delete(tenant);
+      return result;
     }
   };
 }
