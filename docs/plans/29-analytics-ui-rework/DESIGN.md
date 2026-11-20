@@ -1,5 +1,7 @@
 # Analytics UI rework
 
+Yakka-Plan: docs/plans/29-analytics-ui-rework/
+
 ## Intent
 
 User request, verbatim:
@@ -126,7 +128,7 @@ Tenant … | last event … (age) | usage last … | scoring … | attribution �
 
 ## Architectural Implications
 
-Read [OVERVIEW](../../OVERVIEW.md), [ARCHITECTURE](../../ARCHITECTURE.md), the relevant ingest/remote/advisory/serving contracts in `docs/design/`, and the Plan 20 record. [09-analytics-workspace-contracts.md](../../design/09-analytics-workspace-contracts.md) governs the current workspace; 07 explicitly marks its Svelte-era sections historical.
+Read [OVERVIEW](../../OVERVIEW.md), [ARCHITECTURE](../../ARCHITECTURE.md), the relevant ingest/remote/advisory/serving contracts in `docs/design/`, and the [Plan 20 record](../20-analytics-reset.md). [09-analytics-workspace-contracts.md](../../design/09-analytics-workspace-contracts.md) governs the current workspace; 07 explicitly marks its Svelte-era sections historical.
 
 This widens a visual redesign into bounded API/read-adapter repairs because locally demonstrated failures cannot be fixed in CSS. It preserves the no-build static layout, vendored uPlot 1.6.32 and first-party SVG/canvas engines, the Pages/API release separation, tenant isolation and content trust boundary. Stable contracts gain the dense-layout/theme/read-context seam in this PR. The documented route-wide resolution promise is narrowed to honest per-route advertisement instead of treating the implementation's refusal as an empty result. No deployment, job, secret, database migration or destructive lifecycle operation belongs to this design delivery.
 
