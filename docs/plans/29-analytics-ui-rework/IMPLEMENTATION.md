@@ -50,3 +50,24 @@ Closed `f1f04805`. The integration sweep found all-history reads that sent `all=
 
 Phase 1 status: closed (2026-11-21 02:29 AEST). Commit trailer `Yakka-Phase: 29-analytics-ui-rework:1`.
 
+## Phase 2 — refinement
+
+Refined 2026-11-21 from the Phase 2 outcome and the retained-analytics contract. Five units in two waves; Units list is in `DESIGN.md` § Phase 2 Units. No product code changed in this run.
+
+| Unit | Brief | Wave | Depends on |
+| --- | --- | --- | --- |
+| phase2-01 | `briefs/phase2-01-retained-workload.md` | 1 | — |
+| phase2-02 | `briefs/phase2-02-plan-reads.md` | 1 | 01 (performance table) |
+| phase2-04 | `briefs/phase2-04-multidim-treemap.md` | 1 | 01 (performance table) |
+| phase2-05 | `briefs/phase2-05-artifact-bands.md` | 1 | 01 (performance table) |
+| phase2-03 | `briefs/phase2-03-conversation-distribution.md` | 2 | 01, 02 (shared `analytics_entities.go`) |
+
+- **Carried items placed.** All-zero `commits`/`unpriced_calls` session-scatter marginals → `phase2-03` (new whole-population session marginal path; `/distribution`'s public measures unchanged). REVIEW.md's unverified SQLite interrupt/deadline behaviour → `phase2-01` cancellation test under the retained workload. D18 `$0.10` mixed-attribution acceptance → required green check in `phase2-02`, not re-implemented. The cell-budget residue is not a unit; see the decision below.
+- **Cell-budget decision (phase1-06 residue).** No pre-query cell bound is added in Phase 2. The contract defines a cell as a returned bucket × returned series/check group, which is only known after aggregation; the existing guard therefore bounds the response, not the scan. Window-independent work remains bounded by the unchanged one-second deadline, the query row cap and SQL aggregation; a pre-query refusal would risk rejecting a request whose aggregation fits. Phase 1's session-scatter sample is already a server-side `LIMIT` (`min(population, 5000)`), so only the score-series cell refusal is post-aggregation. This is recorded rather than silently ignored; no clipping, no deadline change.
+- **Measurement.** `phase2-01` writes the committed workload record (`packages/yakka/internal/serve/testdata/retained-workload.json`) and report; it commits the pre-fix baseline. The orchestrator reruns the prepared-ledger measurement after wave 2 and cites the refreshed record here. The opt-in real-ledger path is `YAKKA_RETAINED_LEDGER=<prepared-copy-dir>`; large test data stays under the worktree's ignored `.scratch/plan29-phase2/`, never `/tmp`.
+- **Kickoff split.** `phase2-01`'s full prepared-ledger run is expected to exceed ten minutes; the brief permits the orchestrator to split preparation/handoff from a fresh verification run.
+- **Feedback.** All five briefs returned `state: delivered`, `screen: pass by jev-1.13.0`. Scoring is off on the service, so no scores were returned.
+- **Refinement verdict.** Proceed: five units, maximum four in parallel in wave 1, `phase2-03` after `phase2-02`. No design bounce.
+- **Gates.** `gate: none`. The diagnostic ledger is local and read-only; no secret, deployment or external system is required.
+
+

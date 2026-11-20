@@ -179,6 +179,23 @@ Seven units in three waves. Paths are disjoint within a wave; a unit that shares
 - Approach: known — batch candidate population/association work, make provenance joins conditional and remove per-entity rescans; use measured query plans to select indexes where needed. Preserve public grain semantics and bounded-resource policy.
 - Depends on: Phase 1, so performance is measured for valid, faithful requests.
 
+#### Phase 2 Units
+
+Five units in two waves. Paths are disjoint within a wave; `internal/serve/analytics_entities.go` hosts both the plan and session-scatter surfaces, so `phase2-03` follows `phase2-02`.
+
+**Wave 1 — parallel**
+
+- `phase2-01` — Retained-history workload, measurement and oracle harness. Brief: `briefs/phase2-01-retained-workload.md`. Depends on: nothing. Runs alongside: `phase2-02`, `phase2-04`, `phase2-05`. Its prepared-ledger run is split at kickoff: one worker prepares and hands off a short summary, a fresh worker verifies the ten-minute-plus measurement.
+- `phase2-02` — Batched plan list, detail, scatter and workflow reads (D10, D18). Brief: `briefs/phase2-02-plan-reads.md`. Depends on: `phase2-01` for the retained-scale performance table; correctness tests are independent. Runs alongside: `phase2-01`, `phase2-04`, `phase2-05`.
+- `phase2-04` — Request-scoped usage source for multi-dimension treemaps (D12). Brief: `briefs/phase2-04-multidim-treemap.md`. Depends on: `phase2-01` for the retained-scale performance table. Runs alongside: `phase2-01`, `phase2-02`, `phase2-05`.
+- `phase2-05` — Grouped artifact band counts (D13). Brief: `briefs/phase2-05-artifact-bands.md`. Depends on: `phase2-01` for the retained-scale performance table. Runs alongside: `phase2-01`, `phase2-02`, `phase2-04`.
+
+**Wave 2**
+
+- `phase2-03` — Conditional conversation distributions and session-scatter marginals (D08 marginals, D11). Brief: `briefs/phase2-03-conversation-distribution.md`. Depends on: `phase2-01`, `phase2-02` (shared `analytics_entities.go`). Runs alongside: nothing.
+
+Carried from Phase 1: the all-zero `commits`/`unpriced_calls` scatter marginals go to `phase2-03`; the unverified SQLite interrupt/deadline behaviour is proved by `phase2-01`; the D18 mixed-attribution acceptance stays a required check in `phase2-02`; the score-series cell-budget residue is resolved as an output-cell guard with no pre-query bound, recorded in `IMPLEMENTATION.md`.
+
 ### Phase 3 — Dense full-width views follow the active theme
 
 - Outcome: At 1920×1080 and 1366×900, opening each board/explorer → main content meets the stated full-width gutters, tables/panels follow the density contract, all boards are reachable, and the visible data is the population proved in Phases 1–2. At 768 px and 390 px, and at 200% zoom, controls remain operable and tables scroll locally. Switching dark→light→dark with populated SVG/uPlot/canvas charts → surfaces, controls, headers, legends and tooltips match the active tokens; canvas background pixels agree with the panel surface, with no pure-white plot background, and selection/URL/data survive. Real mouse/keyboard actions still hover, brush, toggle, drill through and open the table alternative. Empty, unauthorized and error states remain readable and actionable in both themes.
