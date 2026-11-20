@@ -62,6 +62,105 @@ func artifactTypedPopulation(scope, eligible, returned int, missing map[string]i
 	return map[string]any{"grain": "artifact", "unit": "repo_id,path", "scope_n": scope, "cohort_n": scope, "eligible_n": eligible, "returned_n": returned, "missing_by_reason": missing, "relation": nil}
 }
 
+// artifactGroupedLens reports lenses the grouped SQL count derives directly from selected latest
+// versions, scores and baselines. Provenance-derived lenses stay on the population path.
+func artifactGroupedLens(name, check string) bool {
+	switch name {
+	case "repo_id", "kind", "plan", "source":
+		return true
+	case "scorer":
+		return check != ""
+	}
+	return strings.HasPrefix(name, "band:") && check != "" && strings.TrimPrefix(name, "band:") == check
+}
+
+// artifactGroupedExcludes keeps only exclusions the shared fact filter applies to artifact facts.
+// Band, session-harness and session-model exclusions need the population path.
+func artifactGroupedExcludes(excludes map[string][]string) bool {
+	for dim := range excludes {
+		switch dim {
+		case "repo_id", "kind", "plan", "source", "conversation_id":
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+// artifactGroupedAggregate answers mode=aggregate&stat=count from grouped SQL instead of loading
+// and enriching every file. It reproduces the population path's group, population and cell-budget
+// shape while list/scatter keep the existing population path.
+func (s *Server) artifactGroupedAggregate(w http.ResponseWriter, r *http.Request, ts *tenantState, q url.Values, check string, dims []string, f store.AnalyticsFilter) {
+	budget := 20000
+	if v := q.Get("max_cells"); v != "" {
+		n, e := strconv.Atoi(v)
+		if e != nil || n < 1 {
+			errJSON(w, 400, "invalid max_cells")
+			return
+		}
+		budget = min(budget, n)
+	}
+	var thresholds map[string]map[string][2]float64
+	for _, dim := range dims {
+		if !strings.HasPrefix(dim, "band:") {
+			continue
+		}
+		var e error
+		thresholds, e = ts.t.ArtifactBandThresholds(r.Context(), check)
+		if e != nil {
+			readFailed(w)
+			return
+		}
+		break
+	}
+	groups, cardinality, total, err := ts.t.ArtifactGroupedCount(r.Context(), f, check, dims, q.Get("scorer"), thresholds)
+	if err != nil {
+		readFailed(w)
+		return
+	}
+	type labelledGroup struct {
+		key   string
+		label map[string]any
+		n     int
+	}
+	sorted := make([]labelledGroup, 0, len(groups))
+	for _, g := range groups {
+		label := map[string]any{}
+		for i, dim := range dims {
+			label[dim] = g.Values[i]
+		}
+		b, _ := json.Marshal(label)
+		sorted = append(sorted, labelledGroup{key: string(b), label: label, n: g.N})
+	}
+	sort.Slice(sorted, func(i, j int) bool { return sorted[i].key < sorted[j].key })
+	outGroups := []map[string]any{}
+	for _, g := range sorted {
+		outGroups = append(outGroups, map[string]any{
+			"stat": "count", "field": "", "eligible_n": g.n, "missing_by_reason": map[string]int{}, "value": g.n,
+			"l": g.label, "population": artifactTypedPopulation(g.n, g.n, 1, map[string]int{}),
+		})
+	}
+	combinations := 1
+	for _, c := range cardinality {
+		if c > 0 && combinations > budget/c {
+			combinations = budget + 1
+			break
+		}
+		combinations *= c
+	}
+	cells := max(len(outGroups), combinations)
+	if cells > budget {
+		errCodeJSON(w, 400, "too_many_cells", "artifact groups exceed the output cell budget", map[string]any{"max_cells": budget, "suggested_bucket": "none"})
+		return
+	}
+	writeJSON(w, 200, map[string]any{
+		"grain": "artifact", "mode": "aggregate", "population": artifactTypedPopulation(total, total, len(outGroups), map[string]int{}),
+		"populations": map[string]any{}, "partial": ts.t.CompactionState() != "complete",
+		"groups": outGroups, "dims": dims, "omitted_groups": 0, "omitted_n": 0, "cells": cells,
+		"stat": "count", "field": "", "eligible_n": total, "missing_by_reason": map[string]int{}, "value": total,
+	})
+}
+
 // Pages bound each database read; the request's shared deadline bounds the complete scan.
 // Membership is selected before lifetime version enrichment and entity predicates.
 func artifactPopulation(ctx context.Context, t *store.Tenant, f store.AnalyticsFilter) ([]artifactPopulationRow, error) {
@@ -465,6 +564,27 @@ func (s *Server) analyticsArtifactEntities(w http.ResponseWriter, r *http.Reques
 			}
 		}
 		return selected, nil
+	}
+	// A count aggregate over plain entity filters needs no per-file enrichment: derive the
+	// requested lenses from selected latest versions, scores and baselines in SQL. Predicates,
+	// ranges, fields, provenance filters and cohorts stay on the population path.
+	stat := q.Get("stat")
+	if stat == "" {
+		stat = "count"
+	}
+	grouped := mode == "aggregate" && stat == "count" && len(ranges) == 0 && predicate == nil && len(fields) == 0 &&
+		f.CohortSQL == "" && len(f.Harnesses) == 0 && len(f.Models) == 0 && artifactGroupedExcludes(f.Excludes)
+	if grouped {
+		for _, dim := range dims {
+			if !artifactGroupedLens(dim, selectedCheck) {
+				grouped = false
+				break
+			}
+		}
+	}
+	if grouped {
+		s.artifactGroupedAggregate(w, r, ts, q, selectedCheck, dims, f)
+		return
 	}
 	rows, err := load(f)
 	if err != nil {
