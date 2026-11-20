@@ -269,6 +269,7 @@ type prepared struct {
 	criteriaRec CriteriaRecord
 	packet      Packet
 	inputHash   string
+	inputBytes  []byte
 	key         string
 	release     func()
 	detachable  bool
@@ -279,6 +280,21 @@ func (p *prepared) releaseReservation() {
 		p.release()
 		p.release = nil
 	}
+}
+
+// persistCapturedInput stores the captured review bytes on the detached attempt
+// path. It runs once per accepted asynchronous request; a failure clears the
+// hash so the terminal row never points at an object that was not written.
+func (p *prepared) persistCapturedInput() error {
+	if p.inputBytes == nil {
+		return nil
+	}
+	err := p.tenant.WriteReviewInput(p.inputHash, p.inputBytes)
+	p.inputBytes = nil
+	if err != nil {
+		p.inputHash = ""
+	}
+	return err
 }
 
 // Run composes the landed criteria, packet, provider, pricing and persistence
@@ -458,18 +474,35 @@ func begin(ctx context.Context, tenant *store.Tenant, tenantID string, req Reque
 	}
 	inputHash := ""
 	key := ""
+	var inputBytes []byte
 	if controls.store {
-		inputBytes := packetInput(packet)
+		inputBytes = packetInput(packet)
 		inputHash = keys.ContentHash(inputBytes)
-		if err := tenant.WriteReviewInput(inputHash, inputBytes); err != nil {
-			return nil, Receipt{}, errors.New("review input persistence failed")
-		}
 		key = executionKey(req, tenantID, repo, packet, resolved.Record, model, controls.effective, controls.profile, controls.tags)
+	}
+	persistInput := func() error {
+		if !controls.store || inputBytes == nil {
+			return nil
+		}
+		if err := tenant.WriteReviewInput(inputHash, inputBytes); err != nil {
+			return errors.New("review input persistence failed")
+		}
+		inputBytes = nil
+		return nil
+	}
+	// A synchronous run persists the captured input before the provider call. An
+	// accepted asynchronous request defers it to the detached attempt, so a large
+	// fsync is not charged to the POST that only needs to return the in-flight
+	// receipt. Terminal answers below still write it before their row.
+	if !async {
+		if err := persistInput(); err != nil {
+			return nil, Receipt{}, err
+		}
 	}
 	id := makeID()
 	var release func()
 	if controls.store {
-		hitRow, found, lookupErr := tenant.ReviewByExecutionKey(ctx, repo, key)
+		hitRow, found, lookupErr := reviewByExecutionKey(ctx, tenant, repo, key)
 		if lookupErr != nil {
 			status, reason = "unavailable", "review record lookup failed"
 		} else if found {
@@ -480,6 +513,9 @@ func begin(ctx context.Context, tenant *store.Tenant, tenantID string, req Reque
 			if !usable {
 				return nil, cached, nil
 			}
+			if err := persistInput(); err != nil {
+				return nil, Receipt{}, err
+			}
 			if _, err := persistRecord(ctx, tenant, tenantID, req, repo, makeID(), "skipped_duplicate", cached.OriginalReviewID, Result{}, nil, packet, resolved.Record, inputHash, cfg, controls, key, true); err != nil {
 				return nil, Receipt{}, err
 			}
@@ -487,7 +523,7 @@ func begin(ctx context.Context, tenant *store.Tenant, tenantID string, req Reque
 		} else if controls.legacyFallback {
 			legacyKey := PreUpgradeExecutionKey(req, tenantID, repo, packet, resolved.Record, model, controls.effective, controls.profile)
 			if legacyKey != key {
-				legacyRow, legacyFound, legacyErr := tenant.ReviewByExecutionKey(ctx, repo, legacyKey)
+				legacyRow, legacyFound, legacyErr := reviewByExecutionKey(ctx, tenant, repo, legacyKey)
 				if legacyErr != nil {
 					status, reason = "unavailable", "review record lookup failed"
 				} else if legacyFound && legacyIdentityMatches(legacyRow, req.Trial) {
@@ -497,6 +533,9 @@ func begin(ctx context.Context, tenant *store.Tenant, tenantID string, req Reque
 					cached, usable := cachedReceipt(legacyRow)
 					if !usable {
 						return nil, cached, nil
+					}
+					if err := persistInput(); err != nil {
+						return nil, Receipt{}, err
 					}
 					if _, err := persistRecord(ctx, tenant, tenantID, req, repo, makeID(), "skipped_duplicate", cached.OriginalReviewID, Result{}, nil, packet, resolved.Record, inputHash, cfg, controls, key, true); err != nil {
 						return nil, Receipt{}, err
@@ -514,7 +553,7 @@ func begin(ctx context.Context, tenant *store.Tenant, tenantID string, req Reque
 			if err := cfg.Reservations.begin(key, id, tenantID); err != nil {
 				if first, dup := duplicateReview(err); dup {
 					originalID := first
-					if row, found, lerr := tenant.ReviewByExecutionKey(ctx, repo, key); lerr == nil && found {
+					if row, found, lerr := reviewByExecutionKey(ctx, tenant, repo, key); lerr == nil && found {
 						if inflight, ok := inFlightReceipt(row); ok {
 							return nil, inflight, nil
 						}
@@ -538,10 +577,13 @@ func begin(ctx context.Context, tenant *store.Tenant, tenantID string, req Reque
 		}
 	}
 	if status != "" {
+		if err := persistInput(); err != nil {
+			return nil, Receipt{}, err
+		}
 		receipt, err := persistRecord(ctx, tenant, tenantID, req, repo, id, status, reason, Result{}, nil, packet, resolved.Record, inputHash, cfg, controls, key, controls.store)
 		return nil, receipt, err
 	}
-	p := &prepared{tenant: tenant, req: req, tenantID: tenantID, repo: repo, id: id, controls: controls, criteria: resolved.Criteria, criteriaRec: resolved.Record, packet: packet, inputHash: inputHash, key: key, release: release}
+	p := &prepared{tenant: tenant, req: req, tenantID: tenantID, repo: repo, id: id, controls: controls, criteria: resolved.Criteria, criteriaRec: resolved.Record, packet: packet, inputHash: inputHash, inputBytes: inputBytes, key: key, release: release}
 	if async && controls.store {
 		if _, err := persistRecord(ctx, tenant, tenantID, req, repo, id, StatusRunning, "", Result{}, nil, packet, resolved.Record, inputHash, cfg, controls, key, true); err != nil {
 			p.releaseReservation()
@@ -583,6 +625,7 @@ func (p *prepared) finishDetached(ctx context.Context, cfg RunConfig) (receipt R
 		status   string
 		reason   string
 	)
+	inputErr := p.persistCapturedInput()
 	func() {
 		// A provider or parsing panic on this detached goroutine would otherwise
 		// take down the whole server (net/http only recovers request goroutines)
@@ -592,6 +635,10 @@ func (p *prepared) finishDetached(ctx context.Context, cfg RunConfig) (receipt R
 				result, attempts, status, reason = Result{}, nil, "api_error", "internal error"
 			}
 		}()
+		if inputErr != nil {
+			status, reason = "api_error", inputPersistFailureReason
+			return
+		}
 		result, attempts, status, reason = p.attempt(ctx, cfg)
 	}()
 	// Finalizing must survive server shutdown cancelling ctx, otherwise the
@@ -1222,6 +1269,10 @@ func finalizeRecord(ctx context.Context, t *store.Tenant, tenant string, r Reque
 // terminal provider outcome could not be persisted normally. It never carries
 // provider, model or capture text.
 const finalizeFallbackReason = "review record persistence failed"
+
+// inputPersistFailureReason is the fixed, content-free reason recorded when the
+// deferred captured-input write fails before the detached provider attempt.
+const inputPersistFailureReason = "review input persistence failed"
 
 // persistTerminalFallback replaces the in-flight row with a terminal api_error
 // row on the same review id after finalizeRecord failed. The row carries no

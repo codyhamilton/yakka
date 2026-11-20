@@ -266,3 +266,38 @@ func TestPersistedInFlightRowBlocksAfterRestart(t *testing.T) {
 		t.Fatalf("restart duplicate job=%v receipt=%+v calls=%d err=%v", job, receipt, calls.Load(), err)
 	}
 }
+
+func TestStartPersistsCapturedInputOnDetachedPath(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		io.WriteString(w, providerReply([]any{}, []any{}, []any{}, "complete"))
+	}))
+	defer srv.Close()
+
+	tenant := reviewTenant(t)
+	cfg := availableConfig(srv.URL)
+	cfg.Lifetime = context.Background()
+	job, accepted, err := Start(context.Background(), tenant, "tenant", reviewRequest(true), cfg)
+	if err != nil || job == nil || accepted.Status != StatusRunning {
+		t.Fatalf("accepted=%+v job=%v err=%v", accepted, job, err)
+	}
+	final, done := job.Wait(context.Background())
+	if !done || final.Status != "ok" {
+		t.Fatalf("final=%+v done=%v", final, done)
+	}
+	rows, err := tenant.ReviewRecords(context.Background(), store.ReviewRecordFilter{RepoID: "repo-sentinel", Limit: 1})
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("rows=%d err=%v", len(rows), err)
+	}
+	var rec map[string]any
+	if err := json.Unmarshal(rows[0].Raw, &rec); err != nil {
+		t.Fatal(err)
+	}
+	h, _ := rec["input_hash"].(string)
+	if h == "" {
+		t.Fatalf("terminal record has no input hash: %v", rec)
+	}
+	input, err := tenant.ReadReviewInput(h)
+	if err != nil || !strings.Contains(string(input), "safe changed implementation") {
+		t.Fatalf("captured input=%q err=%v", input, err)
+	}
+}
