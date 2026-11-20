@@ -23,7 +23,16 @@ func legacyLedger(t *testing.T, dir string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.Exec(`CREATE TABLE facts (row_hash TEXT PRIMARY KEY, type TEXT NOT NULL, harness TEXT NOT NULL DEFAULT '', event TEXT NOT NULL DEFAULT '')`); err != nil {
+	if _, err := db.Exec(`CREATE TABLE facts (
+		row_hash TEXT PRIMARY KEY, type TEXT NOT NULL, conversation_id TEXT NOT NULL DEFAULT '',
+		harness TEXT NOT NULL DEFAULT '', event TEXT NOT NULL DEFAULT '', ts REAL NOT NULL DEFAULT 0,
+		received_at INTEGER NOT NULL DEFAULT 0, repo_id TEXT NOT NULL DEFAULT '',
+		path TEXT NOT NULL DEFAULT '', content_hash TEXT NOT NULL DEFAULT '', raw BLOB,
+		norm_event TEXT NOT NULL DEFAULT '', tool TEXT NOT NULL DEFAULT '', model TEXT NOT NULL DEFAULT '',
+		kind TEXT NOT NULL DEFAULT '', plan TEXT NOT NULL DEFAULT '', source TEXT NOT NULL DEFAULT '',
+		sha TEXT NOT NULL DEFAULT '', tok_in INTEGER NOT NULL DEFAULT 0, tok_out INTEGER NOT NULL DEFAULT 0,
+		tok_cache_read INTEGER NOT NULL DEFAULT 0, tok_cache_write INTEGER NOT NULL DEFAULT 0,
+		tok_reasoning INTEGER NOT NULL DEFAULT 0, cost_reported REAL)`); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := db.Exec(`INSERT INTO facts(row_hash,type) VALUES('x','hook')`); err != nil {

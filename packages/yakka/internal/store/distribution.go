@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"math"
 	"sort"
+	"strings"
+	"sync"
 )
 
 // DistributionParams selects measure, grain, optional lens dimension, and top-N keys.
@@ -89,42 +91,67 @@ func (t *Tenant) Distribution(ctx context.Context, f AnalyticsFilter, p Distribu
 			keyExpr = "COALESCE(sr.repo,'(none)')"
 		}
 	}
-	var query string
+	var query, provQuery, provFallback string
+	var provArgs []any
 	if p.Grain == "conversation" {
-		// Aggregate the in-window usage population once, then derive only the lifetime
-		// provenance the requested lens needs for those candidate conversations. The calls
-		// and per CTEs are materialized so the kept usage dedup and pricing run once.
-		callsCTE := `calls AS MATERIALIZED (SELECT conversation_id,model,` + pricedExpr + ` priced,` + valueExpr + ` value FROM kept)`
+		// Aggregate the in-window usage population once, then derive the lifetime
+		// provenance the requested lens needs. The usage scan and the provenance scan
+		// are independent, so for a lens they run concurrently and their results are
+		// joined in connection-scoped temp tables instead of nesting the provenance
+		// scan inside the usage scan.
+		callsCTE := `calls AS MATERIALIZED (SELECT conversation_id,harness,model,` + pricedExpr + ` priced,` + valueExpr + ` value FROM kept)`
 		perCTE := `per AS MATERIALIZED (SELECT conversation_id,sum(CASE WHEN priced=1 THEN value ELSE 0 END) value,
 				sum(1-priced) unpriced,sum(priced) priced FROM calls GROUP BY conversation_id)`
 		base := cte + `, ` + callsCTE + `, ` + perCTE
-		candidates := `candidates AS (SELECT conversation_id FROM per)`
+		baseArgs := append([]any(nil), args...)
 		predicate := sessionPredicateSQL(f2, "per", &args)
+		provFallback = "unknown"
 		switch p.Dim {
 		case "":
 			query = base + ` INSERT INTO dist_samples SELECT 'all',per.value,per.priced,per.unpriced FROM per` + predicate
 		case "model":
-			query = base + `, ` + candidates + `, counts AS (SELECT conversation_id,model,count(*) n FROM calls WHERE model!='' GROUP BY conversation_id,model),
+			query = base + ` INSERT INTO dist_samples SELECT conversation_id,per.value,per.priced,per.unpriced FROM per` + predicate
+			provQuery = cte + `, model_calls AS (SELECT conversation_id,model FROM kept),
+				counts AS (SELECT conversation_id,model,count(*) n FROM model_calls WHERE model!='' GROUP BY conversation_id,model),
 				mc AS (SELECT conversation_id,model,ROW_NUMBER() OVER(PARTITION BY conversation_id ORDER BY n DESC,model ASC) rn FROM counts),
 				cm AS (SELECT conversation_id,model FROM mc WHERE rn=1)
-				INSERT INTO dist_samples SELECT coalesce(cm.model,''),per.value,per.priced,per.unpriced FROM per LEFT JOIN cm USING(conversation_id)` + predicate
+				SELECT conversation_id,coalesce(model,'') FROM cm`
+			provArgs = baseArgs
+			provFallback = ""
 		case "harness":
-			query = base + `, ` + candidates + `, harness_counts AS (SELECT conversation_id,COALESCE(NULLIF(harness,''),'unknown') harness,COUNT(*) n FROM facts WHERE conversation_id IN (SELECT conversation_id FROM candidates) GROUP BY conversation_id,COALESCE(NULLIF(harness,''),'unknown')),
-				harness_ranked AS (SELECT conversation_id,harness,ROW_NUMBER() OVER(PARTITION BY conversation_id ORDER BY n DESC,harness ASC) rn FROM harness_counts),
-				session_harness AS (SELECT conversation_id,harness FROM harness_ranked WHERE rn=1)
-				INSERT INTO dist_samples SELECT coalesce(sh.harness,'unknown'),per.value,per.priced,per.unpriced FROM per LEFT JOIN session_harness sh USING(conversation_id)` + predicate
+			query = base + ` INSERT INTO dist_samples SELECT conversation_id,per.value,per.priced,per.unpriced FROM per` + predicate
+			provQuery = `SELECT conversation_id,harness FROM (
+				SELECT conversation_id,harness,ROW_NUMBER() OVER(PARTITION BY conversation_id ORDER BY n DESC,harness ASC) rn FROM (
+					SELECT conversation_id,COALESCE(NULLIF(harness,''),'unknown') harness,COUNT(*) n
+					FROM facts INDEXED BY facts_conv_harness
+					GROUP BY conversation_id,COALESCE(NULLIF(harness,''),'unknown')
+				)
+			) WHERE rn=1`
+			provArgs = nil
+			provFallback = "unknown"
 		case "session_model":
-			query = base + `, ` + candidates + `, all_usage AS (SELECT row_hash,conversation_id,model,CASE WHEN harness='claude' THEN json_extract(raw,'$.backfill.ref') END mid,tok_out FROM facts WHERE type='hook_event' AND norm_event='usage' AND conversation_id IN (SELECT conversation_id FROM candidates)),
-				all_kept AS (SELECT * FROM (SELECT *,ROW_NUMBER() OVER(PARTITION BY conversation_id,mid ORDER BY tok_out DESC,row_hash ASC) rn FROM all_usage) WHERE mid IS NULL OR mid='' OR rn=1),
+			query = base + ` INSERT INTO dist_samples SELECT conversation_id,per.value,per.priced,per.unpriced FROM per` + predicate
+			provQuery = `WITH all_usage AS MATERIALIZED (SELECT row_hash,conversation_id,model,CASE WHEN harness='claude' THEN json_extract(raw,'$.backfill.ref') END mid,tok_out FROM facts INDEXED BY facts_conv_type_event WHERE type='hook_event' AND norm_event='usage'),
+				all_kept AS (SELECT *,NULL AS rn FROM all_usage WHERE mid IS NULL OR mid='' UNION ALL SELECT * FROM (SELECT *,ROW_NUMBER() OVER(PARTITION BY conversation_id,mid ORDER BY tok_out DESC,row_hash ASC) rn FROM all_usage WHERE mid IS NOT NULL AND mid<>'') WHERE rn=1),
 				model_counts AS (SELECT conversation_id,model,COUNT(*) n FROM all_kept WHERE model!='' GROUP BY conversation_id,model),
 				model_totals AS (SELECT conversation_id,COUNT(*) n FROM all_kept GROUP BY conversation_id),
 				model_ranked AS (SELECT conversation_id,model,n,ROW_NUMBER() OVER(PARTITION BY conversation_id ORDER BY n DESC,model ASC) rn FROM model_counts),
 				session_model AS (SELECT t.conversation_id,CASE WHEN t.n=0 THEN '(none)' WHEN COALESCE(r.n,0)*1.0/t.n<0.8 THEN '(mixed)' WHEN r.model IS NULL THEN 'unknown' ELSE r.model END model FROM model_totals t LEFT JOIN model_ranked r ON r.conversation_id=t.conversation_id AND r.rn=1)
-				INSERT INTO dist_samples SELECT coalesce(sm.model,'unknown'),per.value,per.priced,per.unpriced FROM per LEFT JOIN session_model sm USING(conversation_id)` + predicate
+				SELECT conversation_id,model FROM session_model`
+			provArgs = nil
+			provFallback = "unknown"
 		case "session_repo":
-			query = base + `, ` + candidates + `, session_repo_counts AS (SELECT conversation_id,COUNT(DISTINCT repo_id) n,MIN(repo_id) repo FROM facts WHERE type IN ('artifact_version','commit') AND repo_id!='' AND conversation_id IN (SELECT conversation_id FROM candidates) GROUP BY conversation_id),
-				session_repo AS (SELECT conversation_id,CASE WHEN n=1 THEN repo WHEN n>1 THEN '(multi)' ELSE '(none)' END repo FROM session_repo_counts)
-				INSERT INTO dist_samples SELECT coalesce(sr.repo,'(none)'),per.value,per.priced,per.unpriced FROM per LEFT JOIN session_repo sr USING(conversation_id)` + predicate
+			query = base + ` INSERT INTO dist_samples SELECT conversation_id,per.value,per.priced,per.unpriced FROM per` + predicate
+			provQuery = `SELECT conversation_id,repo FROM (
+				SELECT conversation_id,CASE WHEN n=1 THEN repo WHEN n>1 THEN '(multi)' ELSE '(none)' END repo FROM (
+					SELECT conversation_id,COUNT(DISTINCT repo_id) n,MIN(repo_id) repo
+					FROM facts INDEXED BY facts_conv_type_repo
+					WHERE type IN ('artifact_version','commit') AND repo_id!=''
+					GROUP BY conversation_id
+				)
+			)`
+			provArgs = nil
+			provFallback = "(none)"
 		default:
 			query = base + ` INSERT INTO dist_samples SELECT 'all',per.value,per.priced,per.unpriced FROM per` + predicate
 		}
@@ -145,8 +172,75 @@ func (t *Tenant) Distribution(ctx context.Context, f AnalyticsFilter, p Distribu
 	if _, err := conn.ExecContext(ctx, `CREATE TEMP TABLE IF NOT EXISTS dist_samples(k TEXT,value REAL,priced INTEGER,unpriced INTEGER); DELETE FROM dist_samples`); err != nil {
 		return DistributionResult{}, err
 	}
+	provNeeded := provQuery != ""
+	var (
+		provRows [][2]string
+		provErr  error
+		wg       sync.WaitGroup
+	)
+	if provNeeded {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			rows, err := t.rdb.QueryContext(ctx, provQuery, provArgs...)
+			if err != nil {
+				provErr = err
+				return
+			}
+			defer rows.Close()
+			for rows.Next() {
+				var id, key string
+				if err := rows.Scan(&id, &key); err != nil {
+					provErr = err
+					return
+				}
+				provRows = append(provRows, [2]string{id, key})
+			}
+			provErr = rows.Err()
+		}()
+	}
 	if _, err := conn.ExecContext(ctx, query, args...); err != nil {
+		wg.Wait()
 		return DistributionResult{}, err
+	}
+	if provNeeded {
+		wg.Wait()
+		if provErr != nil {
+			return DistributionResult{}, provErr
+		}
+		if _, err := conn.ExecContext(ctx, `CREATE TEMP TABLE IF NOT EXISTS dist_prov(conversation_id TEXT PRIMARY KEY,k TEXT); DELETE FROM dist_prov`); err != nil {
+			return DistributionResult{}, err
+		}
+		tx, err := conn.BeginTx(ctx, nil)
+		if err != nil {
+			return DistributionResult{}, err
+		}
+		for i := 0; i < len(provRows); i += 500 {
+			end := i + 500
+			if end > len(provRows) {
+				end = len(provRows)
+			}
+			var sb strings.Builder
+			sb.WriteString(`INSERT INTO dist_prov(conversation_id,k) VALUES `)
+			vargs := make([]any, 0, (end-i)*2)
+			for j := i; j < end; j++ {
+				if j > i {
+					sb.WriteByte(',')
+				}
+				sb.WriteString(`(?,?)`)
+				vargs = append(vargs, provRows[j][0], provRows[j][1])
+			}
+			if _, err := tx.ExecContext(ctx, sb.String(), vargs...); err != nil {
+				tx.Rollback()
+				return DistributionResult{}, err
+			}
+		}
+		if err := tx.Commit(); err != nil {
+			return DistributionResult{}, err
+		}
+		if _, err := conn.ExecContext(ctx, `UPDATE dist_samples SET k=COALESCE((SELECT k FROM dist_prov p WHERE p.conversation_id=dist_samples.k),?)`, provFallback); err != nil {
+			return DistributionResult{}, err
+		}
 	}
 	top := p.Top
 	if top <= 0 {
@@ -305,7 +399,7 @@ func (t *Tenant) SessionScatterPopulation(ctx context.Context, f AnalyticsFilter
 	 FROM kept GROUP BY conversation_id
 	), base AS (
 	 SELECT conversation_id,SUM(CASE WHEN type='commit' THEN 1 ELSE 0 END) commits
-	 FROM facts INDEXED BY facts_conv WHERE ` + factWhere + ` GROUP BY conversation_id
+	 FROM facts INDEXED BY facts_conv_ts_type WHERE ` + factWhere + ` GROUP BY conversation_id
 	), result AS (SELECT base.conversation_id,base.commits,COALESCE(usage.model_calls,0) model_calls,COALESCE(usage.unpriced_calls,0) unpriced_calls,
 	 COALESCE(usage.cost_usd,0) cost_usd,COALESCE(usage.tokens_in,0) tokens_in,COALESCE(usage.tokens_out,0) tokens_out,
 	 COALESCE(usage.tokens_cache_read,0) tokens_cache_read,COALESCE(usage.tokens_cache_write,0) tokens_cache_write,COALESCE(usage.tokens_reasoning,0) tokens_reasoning

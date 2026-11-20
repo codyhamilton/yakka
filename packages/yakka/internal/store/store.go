@@ -146,6 +146,14 @@ var migrations = []string{
 	// those rows until this runs. It deletes the facts only; the rollups that exist already are
 	// rebuilt in open, and the archive keeps its lines (sync and ingest skip them by policy).
 	purgeSQL(purgedEvents),
+	// 10: the activity session-start bucket, the session-scatter commit base, and the
+	// conversation lenses all group or look up facts by conversation and read one or two more
+	// columns. Covering indexes keep those scans off the table pages.
+	`CREATE INDEX IF NOT EXISTS facts_conv_ts_harness ON facts(conversation_id, ts, harness);
+	CREATE INDEX IF NOT EXISTS facts_conv_ts_type ON facts(conversation_id, ts, type);
+	CREATE INDEX IF NOT EXISTS facts_conv_harness ON facts(conversation_id, harness);
+	CREATE INDEX IF NOT EXISTS facts_conv_type_repo ON facts(conversation_id, type, repo_id);
+	CREATE INDEX IF NOT EXISTS facts_conv_type_event ON facts(conversation_id, type, norm_event);`,
 }
 
 var hashRE = regexp.MustCompile(`^[0-9a-f]{64}$`)
@@ -181,7 +189,7 @@ type Tenant struct {
 }
 
 func dsn(path string) string {
-	return "file:" + path + "?_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=busy_timeout(5000)"
+	return "file:" + path + "?_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=busy_timeout(5000)&_pragma=cache_size(-131072)&_pragma=mmap_size(268435456)&_pragma=temp_store(MEMORY)"
 }
 
 // Open creates dir, blobs/, pending/, migrates ledger.db and starts the writer. It takes a shared

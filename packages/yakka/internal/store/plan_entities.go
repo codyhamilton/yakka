@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"sort"
 	"strings"
 )
 
@@ -42,51 +43,219 @@ func planKeyValues(plans []PlanIdentity) (string, []any) {
 	return b.String(), args
 }
 
-// PlanAssociatedCosts returns associated cost for every requested plan in one grouped read over
-// the deduplicated usage source. The association is lifetime plan artifacts intersected with the
-// in-window conversation set, matching PlanAssociatedCost.
+// PlanCostsAll returns associated cost for every plan with a lifetime artifact association. The
+// deduplicated usage source and the lifetime plan associations are read separately and joined in
+// Go, because a SQL join between the two grouped reads forces SQLite into a cross-product scan.
+func (t *Tenant) PlanCostsAll(ctx context.Context, f AnalyticsFilter) (map[PlanIdentity]PlanCost, error) {
+	usageFilter := f
+	usageFilter.Plans = nil
+	usageFilter.Repos = nil
+	uq, uargs := usageRowsWhere(usageFilter)
+	rows, err := t.rdb.QueryContext(ctx, uq+`, perconv AS MATERIALIZED (
+		SELECT conversation_id,
+		 SUM(wf_usage_cost(harness,model,tok_in,tok_out,tok_cache_read,tok_cache_write,tok_reasoning,cost_reported)) cost,
+		 SUM(1-wf_usage_priced(harness,model,tok_in,tok_out,tok_cache_read,tok_cache_write,tok_reasoning,cost_reported)) unpriced,
+		 COUNT(*) calls FROM kept GROUP BY conversation_id
+		) SELECT conversation_id,cost,unpriced,calls FROM perconv`, uargs...)
+	if err != nil {
+		return nil, err
+	}
+	type conversationCost struct {
+		cost     sql.NullFloat64
+		unpriced int
+		calls    int
+	}
+	perconv := map[string]conversationCost{}
+	for rows.Next() {
+		var id string
+		var c conversationCost
+		if err := rows.Scan(&id, &c.cost, &c.unpriced, &c.calls); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		perconv[id] = c
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return nil, err
+	}
+	rows.Close()
+
+	w, wargs := f.factWhere()
+	rows, err = t.rdb.QueryContext(ctx, `SELECT DISTINCT a.repo_id,a.plan,a.conversation_id FROM facts a
+		WHERE a.type='artifact_version' AND a.plan<>''
+		AND EXISTS(SELECT 1 FROM facts wf WHERE wf.conversation_id=a.conversation_id AND `+w+`)`, wargs...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[PlanIdentity]PlanCost{}
+	cost := map[PlanIdentity]float64{}
+	hasCost := map[PlanIdentity]bool{}
+	for rows.Next() {
+		var key PlanIdentity
+		var id string
+		if err := rows.Scan(&key.RepoID, &key.Plan, &id); err != nil {
+			return nil, err
+		}
+		c, ok := perconv[id]
+		if !ok {
+			continue
+		}
+		pc := out[key]
+		pc.UnpricedCalls += c.unpriced
+		pc.Calls += c.calls
+		if c.cost.Valid {
+			cost[key] += c.cost.Float64
+			hasCost[key] = true
+		}
+		out[key] = pc
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	for key, pc := range out {
+		if hasCost[key] {
+			v := cost[key]
+			pc.CostUSD = &v
+		}
+		out[key] = pc
+	}
+	return out, nil
+}
+
+type planAssociation struct {
+	Key            PlanIdentity
+	ConversationID string
+}
+
+// planAssociations reads lifetime plan artifacts intersected with the in-window conversation set.
+func (t *Tenant) planAssociations(ctx context.Context, f AnalyticsFilter, plans []PlanIdentity) ([]planAssociation, error) {
+	w, wargs := f.factWhere()
+	q := `SELECT DISTINCT a.repo_id,a.plan,a.conversation_id FROM facts a
+		WHERE a.type='artifact_version' AND a.plan<>''
+		AND EXISTS(SELECT 1 FROM facts wf WHERE wf.conversation_id=a.conversation_id AND ` + w + `)`
+	args := append([]any{}, wargs...)
+	if len(plans) > 0 {
+		values, pageArgs := planKeyValues(plans)
+		q = `WITH page(repo_id,plan) AS (VALUES ` + values + `) ` + q +
+			` AND EXISTS(SELECT 1 FROM page p WHERE p.repo_id=a.repo_id AND p.plan=a.plan)`
+		args = append(pageArgs, args...)
+	}
+	rows, err := t.rdb.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []planAssociation{}
+	for rows.Next() {
+		var a planAssociation
+		if err := rows.Scan(&a.Key.RepoID, &a.Key.Plan, &a.ConversationID); err != nil {
+			return nil, err
+		}
+		out = append(out, a)
+	}
+	return out, rows.Err()
+}
+
+// planCostsForAssociations groups the deduplicated usage source only for the associated
+// conversations, then folds it into per-plan totals in Go.
+func (t *Tenant) planCostsForAssociations(ctx context.Context, f AnalyticsFilter, assocs []planAssociation) (map[PlanIdentity]PlanCost, error) {
+	out := map[PlanIdentity]PlanCost{}
+	if len(assocs) == 0 {
+		return out, nil
+	}
+	seen := map[string]bool{}
+	ids := make([]string, 0, len(assocs))
+	for _, a := range assocs {
+		if !seen[a.ConversationID] {
+			seen[a.ConversationID] = true
+			ids = append(ids, a.ConversationID)
+		}
+	}
+	usageFilter := f
+	usageFilter.Plans = nil
+	usageFilter.Repos = nil
+	usageFilter.ConversationIDs = ids
+	uq, uargs := usageRowsWhere(usageFilter)
+	rows, err := t.rdb.QueryContext(ctx, uq+`, perconv AS MATERIALIZED (
+		SELECT conversation_id,
+		 SUM(wf_usage_cost(harness,model,tok_in,tok_out,tok_cache_read,tok_cache_write,tok_reasoning,cost_reported)) cost,
+		 SUM(1-wf_usage_priced(harness,model,tok_in,tok_out,tok_cache_read,tok_cache_write,tok_reasoning,cost_reported)) unpriced,
+		 COUNT(*) calls FROM kept GROUP BY conversation_id
+		) SELECT conversation_id,cost,unpriced,calls FROM perconv`, uargs...)
+	if err != nil {
+		return nil, err
+	}
+	type conversationCost struct {
+		cost     sql.NullFloat64
+		unpriced int
+		calls    int
+	}
+	perconv := map[string]conversationCost{}
+	for rows.Next() {
+		var id string
+		var c conversationCost
+		if err := rows.Scan(&id, &c.cost, &c.unpriced, &c.calls); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		perconv[id] = c
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return nil, err
+	}
+	rows.Close()
+
+	cost := map[PlanIdentity]float64{}
+	hasCost := map[PlanIdentity]bool{}
+	for _, a := range assocs {
+		c, ok := perconv[a.ConversationID]
+		if !ok {
+			continue
+		}
+		pc := out[a.Key]
+		pc.UnpricedCalls += c.unpriced
+		pc.Calls += c.calls
+		if c.cost.Valid {
+			cost[a.Key] += c.cost.Float64
+			hasCost[a.Key] = true
+		}
+		out[a.Key] = pc
+	}
+	for key, pc := range out {
+		if hasCost[key] {
+			v := cost[key]
+			pc.CostUSD = &v
+		}
+		out[key] = pc
+	}
+	return out, nil
+}
+
+// PlanAssociatedCosts returns associated cost for every requested plan. The association is
+// lifetime plan artifacts intersected with the in-window conversation set, matching
+// PlanAssociatedCost, and only the associated conversations are grouped.
 func (t *Tenant) PlanAssociatedCosts(ctx context.Context, f AnalyticsFilter, plans []PlanIdentity) (map[PlanIdentity]PlanCost, error) {
 	out := make(map[PlanIdentity]PlanCost, len(plans))
 	if len(plans) == 0 {
 		return out, nil
 	}
-	values, pageArgs := planKeyValues(plans)
-	usageFilter := f
-	usageFilter.Plans = nil
-	usageFilter.Repos = nil
-	uq, uargs := usageRowsWhere(usageFilter)
-	w, wargs := f.factWhere()
-	args := append([]any{}, pageArgs...)
-	args = append(args, uargs...)
-	args = append(args, wargs...)
-	rows, err := t.rdb.QueryContext(ctx, `WITH page(repo_id,plan) AS (VALUES `+values+`), `+strings.TrimPrefix(uq, "WITH ")+`, associated AS (
-		 SELECT DISTINCT a.repo_id,a.plan,a.conversation_id FROM facts a
-		 WHERE a.type='artifact_version'
-		 AND EXISTS(SELECT 1 FROM page p WHERE p.repo_id=a.repo_id AND p.plan=a.plan)
-		 AND a.conversation_id IN (SELECT conversation_id FROM facts WHERE `+w+`)
-		) SELECT associated.repo_id,associated.plan,
-		 SUM(wf_usage_cost(u.harness,u.model,u.tok_in,u.tok_out,u.tok_cache_read,u.tok_cache_write,u.tok_reasoning,u.cost_reported)),
-		 COALESCE(SUM(1-wf_usage_priced(u.harness,u.model,u.tok_in,u.tok_out,u.tok_cache_read,u.tok_cache_write,u.tok_reasoning,u.cost_reported)),0),COUNT(*)
-		 FROM kept u JOIN associated ON associated.conversation_id=u.conversation_id GROUP BY associated.repo_id,associated.plan`, args...)
+	assocs, err := t.planAssociations(ctx, f, plans)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	for rows.Next() {
-		var key PlanIdentity
-		var value sql.NullFloat64
-		var unpriced, calls int
-		if err := rows.Scan(&key.RepoID, &key.Plan, &value, &unpriced, &calls); err != nil {
-			return nil, err
-		}
-		pc := PlanCost{UnpricedCalls: unpriced, Calls: calls}
-		if value.Valid {
-			v := value.Float64
-			pc.CostUSD = &v
-		}
-		out[key] = pc
+	all, err := t.planCostsForAssociations(ctx, f, assocs)
+	if err != nil {
+		return nil, err
 	}
-	return out, rows.Err()
+	for _, p := range plans {
+		if pc, ok := all[p]; ok {
+			out[p] = pc
+		}
+	}
+	return out, nil
 }
 
 // PlanSessionIDsByPlan returns the in-window associated session IDs for every requested plan in
@@ -105,7 +274,7 @@ func (t *Tenant) PlanSessionIDsByPlan(ctx context.Context, f AnalyticsFilter, pl
 		 SELECT DISTINCT a.repo_id,a.plan,a.conversation_id FROM facts a
 		 WHERE a.type='artifact_version'
 		 AND EXISTS(SELECT 1 FROM page p WHERE p.repo_id=a.repo_id AND p.plan=a.plan)
-		 AND a.conversation_id IN (SELECT conversation_id FROM facts WHERE `+w+`)
+		 AND EXISTS(SELECT 1 FROM facts wf WHERE wf.conversation_id=a.conversation_id AND `+w+`)
 		) SELECT repo_id,plan,conversation_id FROM associated ORDER BY repo_id,plan,conversation_id`, args...)
 	if err != nil {
 		return nil, err
@@ -270,9 +439,44 @@ func (t *Tenant) PlanExecutionSnapshot(ctx context.Context) (EntitySnapshot, err
 	return s, err
 }
 
+func planCostsValues(costs map[PlanIdentity]PlanCost) (string, []any) {
+	keys := make([]PlanIdentity, 0, len(costs))
+	for k := range costs {
+		keys = append(keys, k)
+	}
+	sort.Slice(keys, func(i, j int) bool {
+		if keys[i].RepoID != keys[j].RepoID {
+			return keys[i].RepoID < keys[j].RepoID
+		}
+		return keys[i].Plan < keys[j].Plan
+	})
+	var b strings.Builder
+	args := make([]any, 0, len(keys)*5)
+	for i, k := range keys {
+		if i > 0 {
+			b.WriteByte(',')
+		}
+		b.WriteString("(?,?,?,?,?)")
+		pc := costs[k]
+		var cost any
+		if pc.CostUSD != nil {
+			cost = *pc.CostUSD
+		}
+		args = append(args, k.RepoID, k.Plan, cost, pc.UnpricedCalls, pc.Calls)
+	}
+	return b.String(), args
+}
+
 // PlanEntitiesPage lists plans established by in-window artifact facts. Session and execution
 // association is deliberately derived from captured artifact and brief facts only.
 func (t *Tenant) PlanEntitiesPage(ctx context.Context, f AnalyticsFilter, sortBy string, desc bool, cur *PlanCursor, limit int) ([]PlanEntity, bool, error) {
+	return t.PlanEntitiesPageWithCosts(ctx, f, sortBy, desc, cur, limit, nil)
+}
+
+// PlanEntitiesPageWithCosts is PlanEntitiesPage with a precomputed cost snapshot. Supplying the
+// snapshot lets a caller that already needs every plan's cost avoid a second deduplicated usage
+// pass; nil computes it here for cost sorts.
+func (t *Tenant) PlanEntitiesPageWithCosts(ctx context.Context, f AnalyticsFilter, sortBy string, desc bool, cur *PlanCursor, limit int, costs map[PlanIdentity]PlanCost) ([]PlanEntity, bool, error) {
 	col, sortArgs, dynamic := planSortExpression(sortBy)
 	if col == "" {
 		return nil, false, fmt.Errorf("unsupported plan sort")
@@ -287,21 +491,35 @@ func (t *Tenant) PlanEntitiesPage(ctx context.Context, f AnalyticsFilter, sortBy
 	wArgs := append([]any{}, args...)
 	needsCost := sortBy == "associated_cost_usd" || sortBy == "unpriced_calls"
 	costCTE, costJoin := "", ""
+	costArgs := []any{}
 	if needsCost {
-		costCTE = `, assoc AS (SELECT DISTINCT a.repo_id,a.plan,a.conversation_id FROM facts a WHERE a.type='artifact_version' AND a.plan<>''), plan_costs AS (
-		 SELECT assoc.repo_id,assoc.plan,SUM(wf_usage_cost(u.harness,u.model,u.tok_in,u.tok_out,u.tok_cache_read,u.tok_cache_write,u.tok_reasoning,u.cost_reported)) cost,
-		 SUM(1-wf_usage_priced(u.harness,u.model,u.tok_in,u.tok_out,u.tok_cache_read,u.tok_cache_write,u.tok_reasoning,u.cost_reported)) unpriced,
-		 COUNT(*) calls FROM kept u JOIN assoc ON assoc.conversation_id=u.conversation_id GROUP BY assoc.repo_id,assoc.plan)`
+		if costs == nil {
+			var err error
+			costs, err = t.PlanCostsAll(ctx, f)
+			if err != nil {
+				return nil, false, err
+			}
+		}
+		if len(costs) == 0 {
+			costCTE = `, plan_costs(repo_id,plan,cost,unpriced,calls) AS (SELECT '','',NULL,0,0 WHERE 0)`
+		} else {
+			values, args := planCostsValues(costs)
+			costCTE = `, plan_costs(repo_id,plan,cost,unpriced,calls) AS (VALUES ` + values + `)`
+			costArgs = args
+		}
 		costJoin = ` LEFT JOIN plan_costs pc USING(repo_id,plan)`
 	}
 	q := `WITH ` + usageCTE + `, selected AS (SELECT repo_id,plan,path,content_hash,conversation_id,ts FROM facts WHERE type='artifact_version' AND plan<>'' AND ` + w + `), plans AS (
 	 SELECT repo_id,plan,COUNT(DISTINCT path) artifacts,COUNT(DISTINCT content_hash) versions,COUNT(DISTINCT conversation_id) sessions,MIN(ts) first_ts,MAX(ts) last_ts FROM selected GROUP BY repo_id,plan
-	), shared AS (SELECT s.repo_id,s.plan,COUNT(DISTINCT s.conversation_id) shared_sessions FROM selected s WHERE (SELECT COUNT(DISTINCT f2.plan) FROM facts f2 WHERE f2.type='artifact_version' AND f2.conversation_id=s.conversation_id AND f2.plan<>'')>1 GROUP BY s.repo_id,s.plan), execs AS (
+	), session_plans AS (SELECT conversation_id,COUNT(DISTINCT plan) np FROM facts WHERE type='artifact_version' AND plan<>'' GROUP BY conversation_id), shared AS (SELECT s.repo_id,s.plan,COUNT(DISTINCT s.conversation_id) shared_sessions FROM selected s JOIN session_plans sp ON sp.conversation_id=s.conversation_id AND sp.np>1 GROUP BY s.repo_id,s.plan), execs AS (
 	 SELECT repo_id,plan,SUM(shape='complete') executions_complete,SUM(shape='unreported') executions_unreported,SUM(shape='started') executions_started FROM (
 	 SELECT b.repo_id,b.plan,b.conversation_id,b.path,` + execShapeSQL + ` shape FROM (SELECT repo_id,plan,conversation_id,path,harness,ts,ROW_NUMBER() OVER(PARTITION BY repo_id,conversation_id,path ORDER BY ts,rowid) rn FROM facts WHERE type='artifact_version' AND kind='brief' AND ` + w + `) b WHERE rn=1) GROUP BY repo_id,plan
 	)` + costCTE + `, computed AS (SELECT p.repo_id,p.plan,p.artifacts,p.versions,p.sessions,COALESCE(sh.shared_sessions,0) shared_sessions,COALESCE(e.executions_complete,0) executions_complete,COALESCE(e.executions_unreported,0) executions_unreported,COALESCE(e.executions_started,0) executions_started,p.first_ts,p.last_ts,CAST((` + col + `) AS REAL) AS sort_value FROM plans p LEFT JOIN shared sh USING(repo_id,plan) LEFT JOIN execs e USING(repo_id,plan)` + costJoin + `) SELECT * FROM computed`
 	args = append(append([]any{}, usageArgs...), args...)
 	args = append(args, wArgs...)
+	if needsCost {
+		args = append(args, costArgs...)
+	}
 	args = append(args, sortArgs...)
 	if dynamic {
 		args = append(args, wArgsForSort(f)...)
@@ -482,7 +700,7 @@ func (t *Tenant) PlanDetailCount(ctx context.Context, f AnalyticsFilter, repo, p
 	case "artifacts":
 		q = `SELECT COUNT(*) FROM (SELECT path FROM facts WHERE type='artifact_version' AND ` + w + ` AND repo_id=? AND plan=? GROUP BY path)`
 	case "sessions":
-		q = `SELECT COUNT(DISTINCT s.conversation_id) FROM facts s WHERE ` + w + ` AND EXISTS(SELECT 1 FROM facts a WHERE a.type='artifact_version' AND a.repo_id=? AND a.plan=? AND a.conversation_id=s.conversation_id)`
+		q = `SELECT COUNT(DISTINCT s.conversation_id) FROM facts s WHERE ` + w + ` AND s.conversation_id IN (SELECT a.conversation_id FROM facts a WHERE a.type='artifact_version' AND a.repo_id=? AND a.plan=?)`
 	case "executions":
 		q = `SELECT COUNT(*) FROM (SELECT repo_id,conversation_id,path FROM facts WHERE type='artifact_version' AND kind='brief' AND ` + w + ` AND repo_id=? AND plan=? GROUP BY repo_id,conversation_id,path)`
 	case "events":
@@ -511,7 +729,7 @@ func (t *Tenant) PlanDetailPage(ctx context.Context, f AnalyticsFilter, repo, pl
 	case "artifacts":
 		q = `SELECT repo_id,plan,path,'','','',MAX(ts) FROM facts WHERE type='artifact_version' AND ` + w + ` AND repo_id=? AND plan=? GROUP BY repo_id,plan,path`
 	case "sessions":
-		q = `SELECT s.repo_id,?,'',s.conversation_id,'','',MAX(s.ts) FROM facts s WHERE ` + w + ` AND EXISTS(SELECT 1 FROM facts a WHERE a.type='artifact_version' AND a.repo_id=? AND a.plan=? AND a.conversation_id=s.conversation_id) GROUP BY s.repo_id,s.conversation_id`
+		q = `SELECT s.repo_id,?,'',s.conversation_id,'','',MAX(s.ts) FROM facts s WHERE ` + w + ` AND s.conversation_id IN (SELECT a.conversation_id FROM facts a WHERE a.type='artifact_version' AND a.repo_id=? AND a.plan=?) GROUP BY s.repo_id,s.conversation_id`
 	case "executions":
 		q = `SELECT repo_id,plan,path,conversation_id,'','brief',MIN(ts) FROM facts WHERE type='artifact_version' AND kind='brief' AND ` + w + ` AND repo_id=? AND plan=? GROUP BY repo_id,plan,path,conversation_id`
 	case "events":

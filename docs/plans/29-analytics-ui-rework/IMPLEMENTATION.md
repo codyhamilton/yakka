@@ -79,3 +79,37 @@ Refined 2026-11-21 from the Phase 2 outcome and the retained-analytics contract.
 - Design baseline: `e5052a43`; Phase 1 closed `f5fe52fd`; Phase 2 refinement `4f65947d`
 - Units and waves: see `DESIGN.md` § Phase 2 Units.
 
+- **phase2-01-retained-workload** — closed `48398072` (done with concerns: no prepared real-ledger copy was available, so the recorded baseline is the deterministic synthetic tenant). Added `internal/analyticsfixture/retained.go` (`CreateRetained`, exact `RetainedSummary`/`RetainedOracle`, digest), its ungated fixture test, `internal/serve/analytics_retained_bench_test.go` (smoke test, opt-in 20-run alone/load measurement, cancellation/release proof, EXPLAIN recording, mixed-attribution check), `testdata/retained-request-shapes.json` (24 shapes) and the initial `testdata/retained-workload.json`. Synthetic workload is at or above every EVIDENCE floor (239,810 facts, 33,600 usage calls, 2,910 artifact versions, 7,440 sessions, 260 plans). Baseline recorded 19/24 shapes timing out and the remaining served shapes above 500 ms under load. No product query/store/deadline/auth/wire change. Report: `reports/phase2-01-retained-workload.md`.
+- **phase2-02-plan-reads** — closed `c7588a47` (done with concerns; retained-scale measurement deferred to the orchestrator). Batched plan population, artifact-kind and design-score reads per page; added `PlanAssociatedCosts`, `PlanSessionIDsByPlan` and a scoped `plan_costs` CTE so association is lifetime plan artifacts intersected with the in-window conversation set and is computed once before `LIMIT`. D18 `$0.10` mixed-attribution acceptance remained green. Report: `reports/phase2-02-plan-reads.md`.
+- **phase2-04-multidim-treemap** — closed `bcb1df4c`. Multi-dimension cost treemaps share one request-scoped deduplicated usage source instead of re-reading it per dimension; public query shape and bucket semantics unchanged. Report: `reports/phase2-04-multidim-treemap.md`.
+- **phase2-05-artifact-bands** — closed `7686b663`. Artifact band counts are grouped from the selected artifact versions in one read; band keys, ordering and counts unchanged. Report: `reports/phase2-05-artifact-bands.md`.
+- **phase2-03-conversation-distribution** — closed `4570cb25` (done with concerns: correctness complete, but `dim=harness`/`dim=session_model` and session scatter still missed the p95 bound under load). Conversation distributions derive only the requested lens; the empty lens aggregates `kept` per conversation directly. New `SessionScatterMarginals` and `SessionScatterPopulation` fold the whole filtered session population once for all marginal bins and the bounded sample; `SessionProvenanceFor` runs its independent harness/repo/model reads concurrently. Report: `reports/phase2-03-conversation-distribution.md`.
+
+### Post-unit retained-latency pass
+
+The orchestrator finished the Phase 2 latency contract after the five unit commits. Product changes:
+- Migration 10 adds covering indexes `facts_conv_ts_harness`, `facts_conv_ts_type`, `facts_conv_harness`, `facts_conv_type_repo` and `facts_conv_type_event`; `IF NOT EXISTS` keeps rewind tests and pre-existing ledgers working.
+- `PlanCostsAll` reads deduplicated per-conversation usage and lifetime plan associations separately and joins in Go; `planAssociations`/`planCostsForAssociations` scope association and usage to the page; `PlanEntitiesPageWithCosts` accepts the snapshot so the handler computes it once. The old `kept` × association cross join is gone.
+- `usageRowsWhere` materializes the usage scan and splits the dedup into all null/empty-backfill rows plus one windowed row per non-empty backfill ref, avoiding a window over every usage fact. `wf_usage_priced` now mirrors `CostAtInputSize` directly (positive reported cost or a priced model).
+- Activity session-start buckets, scatter commit counts and session provenance pin the new covering indexes. Plan detail sessions use an artifact-driven `IN` membership instead of a correlated `EXISTS`.
+- Conversation distributions run the in-window `per` scan and the lifetime provenance scan concurrently on separate connections, batch the provenance into a connection temp table, then join keys and reuse the existing percentile/bin path. Session scatter obtains scoped session IDs and warms provenance concurrently with the population query.
+- The SQLite DSN sets a 128 MiB page cache, 256 MiB mmap and in-memory temp store; the read workload is warm by design but this removed most remaining page-cache cost.
+
+Test fixtures updated for the new schema: `reads_test.go` drops the migration-10 indexes when rewinding to version 1, and `compaction_state_test.go`'s pre-migration-5 fixture now carries the v4 column set migration 10 indexes.
+
+### Verification
+
+- Final retained measurement (`YAKKA_RETAINED_PROFILE=1 YAKKA_RETAINED_RUNS=20`, source `synthetic`, 24 shapes): every shape returns 200 with the expected row count alone and under four-request load. Worst alone p95 `362.9 ms` (`plan-list-sort-associated-cost`); worst load p95 `474.2 ms` (`session-scatter-cost-tokens`); no shape above 500 ms. `conversation-dist-cost-harness` is `266.4 / 388.6 ms`, `conversation-dist-cost-session-model` `229.7 / 345.3 ms`, and both session-scatter shapes `~359 / ~474 ms`. Record: `packages/yakka/internal/serve/testdata/retained-workload.json` (`phase: phase 2 verified`, `runs: 20`).
+- Cancellation/release proof in the record: a 200 ms deadline cancels the query, reports `context_canceled`, releases the reader, and the following request succeeds (status 200, 4 rows).
+- Mixed attribution: the retained harness's `validateRetainedMixedAttribution` passed in the final run, including the `$0.10` plan cost and raw-repo-empty usage event.
+- `go test ./internal/store ./internal/serve -count=1` pass; `go test ./... -count=1` pass except `internal/keys TestRepoPath`, which fails only because the run's `TMPDIR` was inside the worktree and passes with `TMPDIR=/tmp` (environment artifact, not a code regression). `go vet ./internal/store ./internal/serve` clean.
+
+### Carried
+
+- The committed record's `source` is `synthetic`; the opt-in prepared real-ledger path (`YAKKA_RETAINED_LEDGER`) remains unmeasured. It is the same harness and shape set, so the next run should refresh the record rather than change code.
+- Session scatter provenance now covers the full filtered session population (7,440 at retained scale) instead of only the returned 5,000-row sample; extra entries are unused. This is ~40 ms at retained scale, but a much larger window would need batching to stay under SQLite's variable limit.
+- The DSN cache/mmap/temp-store pragmas are tenant-global. They are bounded and appropriate for the EVIDENCE scale; revisit if multi-tenant memory becomes a constraint.
+
+- **Feedback.** All five Phase 2 briefs and all five unit reports returned `state: delivered`, `screen: pass by jev-1.13.0`; scoring is off on the service, so no scores were returned. No flagged checks.
+
+Phase 2 status: closed (2026-11-21 05:51 AEST). Commit trailer `Yakka-Phase: 29-analytics-ui-rework:2`.

@@ -262,7 +262,16 @@ func (s *Server) analyticsPlanEntities(w http.ResponseWriter, r *http.Request, t
 	if cur != nil && (len(cur.Key) == 2 || len(cur.Key) == 3) {
 		sc = &store.PlanCursor{TS: cur.TS, RepoID: cur.Key[0], Plan: cur.Key[1], Null: len(cur.Key) == 3 && cur.Key[2] == "null"}
 	}
-	page, more, err := ts.t.PlanEntitiesPage(r.Context(), f, p[0], p[1] == "desc", sc, limit)
+	needsCost := p[0] == "associated_cost_usd" || p[0] == "unpriced_calls"
+	var costs map[store.PlanIdentity]store.PlanCost
+	if needsCost {
+		costs, err = ts.t.PlanCostsAll(r.Context(), f)
+		if err != nil {
+			readFailed(w)
+			return
+		}
+	}
+	page, more, err := ts.t.PlanEntitiesPageWithCosts(r.Context(), f, p[0], p[1] == "desc", sc, limit, costs)
 	if err != nil {
 		readFailed(w)
 		return
@@ -284,10 +293,12 @@ func (s *Server) analyticsPlanEntities(w http.ResponseWriter, r *http.Request, t
 	for i := range page {
 		keys[i] = store.PlanIdentity{RepoID: page[i].RepoID, Plan: page[i].Plan}
 	}
-	costs, err := ts.t.PlanAssociatedCosts(r.Context(), f, keys)
-	if err != nil {
-		readFailed(w)
-		return
+	if !needsCost {
+		costs, err = ts.t.PlanAssociatedCosts(r.Context(), f, keys)
+		if err != nil {
+			readFailed(w)
+			return
+		}
 	}
 	sessionIDs, err := ts.t.PlanSessionIDsByPlan(r.Context(), f, keys)
 	if err != nil {
@@ -1151,20 +1162,31 @@ func (s *Server) analyticsSessionScatter(w http.ResponseWriter, r *http.Request,
 			return
 		}
 	} else {
+		ids, idErr := ts.t.SessionIDs(r.Context(), filter)
+		if idErr != nil {
+			readFailed(w)
+			return
+		}
+		type provenanceResult struct {
+			prov map[string]store.SessionProvenance
+			err  error
+		}
+		provCh := make(chan provenanceResult, 1)
+		go func() {
+			m, err := ts.t.SessionProvenanceFor(r.Context(), ids)
+			provCh <- provenanceResult{m, err}
+		}()
 		page, population, marginalBins, err = ts.t.SessionScatterPopulation(r.Context(), filter, fields, 5000)
+		pr := <-provCh
 		if err != nil {
 			readFailed(w)
 			return
 		}
-		ids := make([]string, len(page))
-		for i := range page {
-			ids[i] = page[i].ID
-		}
-		prov, err = ts.t.SessionProvenanceFor(r.Context(), ids)
-		if err != nil {
+		if pr.err != nil {
 			readFailed(w)
 			return
 		}
+		prov = pr.prov
 	}
 	points := make([]map[string]any, 0, len(page))
 	for _, row := range page {

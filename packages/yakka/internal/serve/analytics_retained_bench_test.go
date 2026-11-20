@@ -619,7 +619,7 @@ func TestAnalyticsRetainedWorkload(t *testing.T) {
 	cancel := retainedCancellation(t, h)
 	explain := retainedExplain(t, h, rec)
 	record := retainedRecord{
-		Version: 1, Phase: "pre-fix baseline", Source: h.source, Runs: runs, Workload: h.summary,
+		Version: 1, Phase: "phase 2 verified", Source: h.source, Runs: runs, Workload: h.summary,
 		CopyMS: h.copyMS, GenerateMS: h.genMS, OpenMS: h.openMS,
 		Shapes: results, Cancellation: cancel, Explain: explain,
 	}
