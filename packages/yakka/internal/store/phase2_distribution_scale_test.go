@@ -62,20 +62,20 @@ func TestDistributionConversationProvenanceOracle(t *testing.T) {
 		top  int
 		rows map[string]want
 	}{
-		// Conversation n counts priced samples per group, which for a non-cost measure is the
-		// kept-call count; the provenance change must not alter that existing n semantics.
+		// Published n stays the priced-call count. Percentiles and bins are one summed
+		// value per conversation, so c1 (calls of 10 and 20) is 30, not an empty box.
 		{name: "no-dim", dim: "", top: 10, rows: map[string]want{"all": {4, 0, 5, 30}}},
 		{name: "model", dim: "model", top: 10, rows: map[string]want{
-			"model-a": {2, 0, 0, 0}, "model-b": {1, 0, 30, 30}, "model-c": {1, 0, 5, 5},
+			"model-a": {2, 0, 30, 30}, "model-b": {1, 0, 30, 30}, "model-c": {1, 0, 5, 5},
 		}},
 		{name: "harness", dim: "harness", top: 10, rows: map[string]want{
-			"cursor": {1, 0, 30, 30}, "opencode": {3, 0, 5, 5},
+			"cursor": {1, 0, 30, 30}, "opencode": {3, 0, 5, 30},
 		}},
 		{name: "session-model", dim: "session_model", top: 10, rows: map[string]want{
-			"model-a": {2, 0, 0, 0}, "model-b": {1, 0, 30, 30}, "model-c": {1, 0, 5, 5},
+			"model-a": {2, 0, 30, 30}, "model-b": {1, 0, 30, 30}, "model-c": {1, 0, 5, 5},
 		}},
 		{name: "session-repo", dim: "session_repo", top: 10, rows: map[string]want{
-			"r1": {2, 0, 0, 0}, "(multi)": {1, 0, 30, 30}, "(none)": {1, 0, 5, 5},
+			"r1": {2, 0, 30, 30}, "(multi)": {1, 0, 30, 30}, "(none)": {1, 0, 5, 5},
 		}},
 	}
 	for _, tc := range cases {
@@ -100,6 +100,15 @@ func TestDistributionConversationProvenanceOracle(t *testing.T) {
 				}
 				if len(row.Bins) != len(distributionBinDefs("tokens_out")) {
 					t.Fatalf("%s bins=%d want the fixed token bins", row.K, len(row.Bins))
+				}
+				if row.Min > 0 {
+					filled := 0
+					for _, bin := range row.Bins {
+						filled += bin.N
+					}
+					if filled == 0 {
+						t.Fatalf("%s has min %v but every bin is empty", row.K, row.Min)
+					}
 				}
 			}
 		})

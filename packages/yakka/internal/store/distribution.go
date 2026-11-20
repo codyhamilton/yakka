@@ -260,13 +260,18 @@ func (t *Tenant) Distribution(ctx context.Context, f AnalyticsFilter, p Distribu
 	if err := conn.QueryRowContext(ctx, `SELECT COALESCE(SUM(priced),0),COALESCE(SUM(unpriced),0) FROM dist_samples WHERE k NOT IN (SELECT k FROM dist_samples GROUP BY k ORDER BY SUM(priced) DESC,k ASC LIMIT ?)`, top).Scan(&res.OmittedN, &res.OmittedUnpriced); err != nil {
 		return DistributionResult{}, err
 	}
+	// `priced` is 0/1 per call, and at conversation grain it is the priced-call
+	// count. Published n stays that sum. Percentiles and bins are one sample per
+	// row with priced>0, so a multi-call conversation contributes its summed value
+	// once instead of disappearing when the count is not exactly 1. Call grain is
+	// unchanged: its priced flag is already 0 or 1.
 	rows, err := conn.QueryContext(ctx, `WITH groups AS (SELECT k,sum(priced) n,sum(unpriced) unpriced FROM dist_samples GROUP BY k),
-		ranked AS (SELECT d.k,d.value,ROW_NUMBER() OVER(PARTITION BY d.k ORDER BY d.value)-1 rn,g.n FROM dist_samples d JOIN groups g USING(k) WHERE d.priced=1),
-		stats AS (SELECT k,MIN(value) minv,MAX(value) maxv,MAX(n) n,
-			SUM(CASE WHEN rn=CAST((n-1)*0.25 AS INTEGER) THEN value*(1-((n-1)*0.25-CAST((n-1)*0.25 AS INTEGER))) WHEN rn=CAST((n-1)*0.25 AS INTEGER)+1 THEN value*((n-1)*0.25-CAST((n-1)*0.25 AS INTEGER)) ELSE 0 END) p25,
-			SUM(CASE WHEN rn=CAST((n-1)*0.5 AS INTEGER) THEN value*(1-((n-1)*0.5-CAST((n-1)*0.5 AS INTEGER))) WHEN rn=CAST((n-1)*0.5 AS INTEGER)+1 THEN value*((n-1)*0.5-CAST((n-1)*0.5 AS INTEGER)) ELSE 0 END) med,
-			SUM(CASE WHEN rn=CAST((n-1)*0.75 AS INTEGER) THEN value*(1-((n-1)*0.75-CAST((n-1)*0.75 AS INTEGER))) WHEN rn=CAST((n-1)*0.75 AS INTEGER)+1 THEN value*((n-1)*0.75-CAST((n-1)*0.75 AS INTEGER)) ELSE 0 END) p75,
-			SUM(CASE WHEN rn=CAST((n-1)*0.95 AS INTEGER) THEN value*(1-((n-1)*0.95-CAST((n-1)*0.95 AS INTEGER))) WHEN rn=CAST((n-1)*0.95 AS INTEGER)+1 THEN value*((n-1)*0.95-CAST((n-1)*0.95 AS INTEGER)) ELSE 0 END) p95
+		ranked AS (SELECT k,value,ROW_NUMBER() OVER(PARTITION BY k ORDER BY value)-1 rn,COUNT(*) OVER(PARTITION BY k) samples FROM dist_samples WHERE priced>0),
+		stats AS (SELECT k,MIN(value) minv,MAX(value) maxv,MAX(samples) samples,
+			SUM(CASE WHEN rn=CAST((samples-1)*0.25 AS INTEGER) THEN value*(1-((samples-1)*0.25-CAST((samples-1)*0.25 AS INTEGER))) WHEN rn=CAST((samples-1)*0.25 AS INTEGER)+1 THEN value*((samples-1)*0.25-CAST((samples-1)*0.25 AS INTEGER)) ELSE 0 END) p25,
+			SUM(CASE WHEN rn=CAST((samples-1)*0.5 AS INTEGER) THEN value*(1-((samples-1)*0.5-CAST((samples-1)*0.5 AS INTEGER))) WHEN rn=CAST((samples-1)*0.5 AS INTEGER)+1 THEN value*((samples-1)*0.5-CAST((samples-1)*0.5 AS INTEGER)) ELSE 0 END) med,
+			SUM(CASE WHEN rn=CAST((samples-1)*0.75 AS INTEGER) THEN value*(1-((samples-1)*0.75-CAST((samples-1)*0.75 AS INTEGER))) WHEN rn=CAST((samples-1)*0.75 AS INTEGER)+1 THEN value*((samples-1)*0.75-CAST((samples-1)*0.75 AS INTEGER)) ELSE 0 END) p75,
+			SUM(CASE WHEN rn=CAST((samples-1)*0.95 AS INTEGER) THEN value*(1-((samples-1)*0.95-CAST((samples-1)*0.95 AS INTEGER))) WHEN rn=CAST((samples-1)*0.95 AS INTEGER)+1 THEN value*((samples-1)*0.95-CAST((samples-1)*0.95 AS INTEGER)) ELSE 0 END) p95
 		FROM ranked GROUP BY k) SELECT g.k,g.n,g.unpriced,s.minv,s.p25,s.med,s.p75,s.p95,s.maxv FROM groups g LEFT JOIN stats s USING(k) ORDER BY g.n DESC,g.k ASC LIMIT ?`, top)
 	if err != nil {
 		return DistributionResult{}, err
@@ -301,7 +306,7 @@ func (t *Tenant) Distribution(ctx context.Context, f AnalyticsFilter, p Distribu
 		SELECT k FROM dist_samples GROUP BY k ORDER BY sum(priced) DESC,k ASC LIMIT ?
 	), counts AS (
 		SELECT d.k,`+distributionBinIndexSQL(p.Measure)+` AS bin_index,count(*) AS n
-		FROM dist_samples d JOIN top_keys USING(k) WHERE d.priced=1 GROUP BY d.k,bin_index
+		FROM dist_samples d JOIN top_keys USING(k) WHERE d.priced>0 GROUP BY d.k,bin_index
 	) SELECT k,bin_index,n FROM counts ORDER BY k,bin_index`, top)
 	if err != nil {
 		return DistributionResult{}, err
@@ -442,6 +447,34 @@ func (t *Tenant) SessionScatterPopulation(ctx context.Context, f AnalyticsFilter
 		return nil, 0, nil, err
 	}
 	return sample, population, out, nil
+}
+
+// SessionScatterMarginalsFromRows folds marginal histograms from session rows the caller
+// already holds. Lens-filtered scatter uses it so the marginal query does not bind every
+// matching conversation id.
+func (t *Tenant) SessionScatterMarginalsFromRows(fields []string, rows []SessionEntityRow) (map[string][]DistributionBin, error) {
+	for _, field := range fields {
+		if !sessionScatterMarginalMeasures[field] {
+			return nil, fmt.Errorf("unsupported session scatter field %s", field)
+		}
+	}
+	out := make(map[string][]DistributionBin, len(fields))
+	for _, field := range fields {
+		out[field] = distributionBinDefs(field)
+	}
+	for _, row := range rows {
+		m := row.Measures
+		for _, field := range fields {
+			value, ok := sessionMarginalValue(field, m["model_calls"], m["unpriced_calls"], m["commits"], m["cost_usd"], m["tokens_in"], m["tokens_out"], m["tokens_cache_read"], m["tokens_cache_write"], m["tokens_reasoning"])
+			if !ok {
+				continue
+			}
+			bins := out[field]
+			assignBin(&bins, field, value)
+			out[field] = bins
+		}
+	}
+	return out, nil
 }
 
 func sessionMarginalValue(field string, modelCalls, unpriced, commits, cost, tokIn, tokOut, cacheRead, cacheWrite, reasoning float64) (float64, bool) {

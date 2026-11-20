@@ -69,6 +69,10 @@ func TestAnalyticsSessionScatterMarginalsCommitsUnpriced(t *testing.T) {
 	byID := map[string]fx{}
 	for _, row := range rowsOf(got, "rows") {
 		byID[row["id"].(string)] = row["m"].(map[string]any)
+		lenses, _ := row["l"].(map[string]any)
+		if lenses["harness"] != "h" {
+			t.Fatalf("%s harness lens=%v, want h", row["id"], lenses["harness"])
+		}
 	}
 	want := map[string]struct {
 		commits, unpriced float64

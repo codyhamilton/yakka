@@ -1156,37 +1156,30 @@ func (s *Server) analyticsSessionScatter(w http.ResponseWriter, r *http.Request,
 		}
 		filter = sessionMemberFilter(filter, lens)
 		filter.ConversationIDs = ids
-		marginalBins, err = ts.t.SessionScatterMarginals(r.Context(), filter, fields)
+		// The lens scan already holds every matching session. Bin those rows instead of
+		// rebinding every conversation id into another query.
+		marginalBins, err = ts.t.SessionScatterMarginalsFromRows(fields, members)
 		if err != nil {
 			readFailed(w)
 			return
 		}
 	} else {
-		ids, idErr := ts.t.SessionIDs(r.Context(), filter)
-		if idErr != nil {
-			readFailed(w)
-			return
-		}
-		type provenanceResult struct {
-			prov map[string]store.SessionProvenance
-			err  error
-		}
-		provCh := make(chan provenanceResult, 1)
-		go func() {
-			m, err := ts.t.SessionProvenanceFor(r.Context(), ids)
-			provCh <- provenanceResult{m, err}
-		}()
 		page, population, marginalBins, err = ts.t.SessionScatterPopulation(r.Context(), filter, fields, 5000)
-		pr := <-provCh
 		if err != nil {
 			readFailed(w)
 			return
 		}
-		if pr.err != nil {
+		// Provenance is only attached to the returned sample. The sample is at most
+		// 5000 ids; binding the whole window exceeds SQLite's variable limit.
+		ids := make([]string, len(page))
+		for i := range page {
+			ids[i] = page[i].ID
+		}
+		prov, err = ts.t.SessionProvenanceFor(r.Context(), ids)
+		if err != nil {
 			readFailed(w)
 			return
 		}
-		prov = pr.prov
 	}
 	points := make([]map[string]any, 0, len(page))
 	for _, row := range page {

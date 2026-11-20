@@ -26,9 +26,12 @@ func TestDistributionCostExcludesUnpricedFromStats(t *testing.T) {
 	if row.N != 2 || row.Unpriced != 1 {
 		t.Fatalf("n/unpriced: got %d/%d want 2/1", row.N, row.Unpriced)
 	}
-	// Priced costs: codex 0.0004 and opencode 0.25.
+	// Priced costs: codex 0.0004 and opencode 0.25. Median is the (n-1)*0.5 interpolation.
 	if math.Abs(row.Min-0.0004) > 1e-9 || math.Abs(row.Max-0.25) > 1e-9 {
 		t.Fatalf("min/max: %v %v", row.Min, row.Max)
+	}
+	if math.Abs(row.Median-0.1252) > 1e-9 {
+		t.Fatalf("median: %v want 0.1252", row.Median)
 	}
 	var zeroN int
 	for _, b := range row.Bins {

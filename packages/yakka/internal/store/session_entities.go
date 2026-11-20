@@ -198,26 +198,6 @@ func (t *Tenant) SessionEntitiesPage(ctx context.Context, f AnalyticsFilter, sor
 	return out, more, nil
 }
 
-// SessionIDs returns the distinct conversation IDs in the filter's scope. It is the superset used
-// to warm session provenance while the scatter population query runs.
-func (t *Tenant) SessionIDs(ctx context.Context, f AnalyticsFilter) ([]string, error) {
-	w, args := f.factWhere()
-	rows, err := t.rdb.QueryContext(ctx, `SELECT DISTINCT conversation_id FROM facts INDEXED BY facts_conv WHERE `+w, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	out := []string{}
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			return nil, err
-		}
-		out = append(out, id)
-	}
-	return out, rows.Err()
-}
-
 // SessionProvenanceFor returns lifetime-derived repo, model and harness lenses for only the
 // supplied page of conversation identities. The caller must keep the identity page bounded.
 // The independent harness, repo and model reads run concurrently because the page is bounded.
