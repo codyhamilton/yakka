@@ -53,8 +53,8 @@ import (
 const (
 	pagesetRecordPath     = "testdata/browser-request-shapes.json"
 	pagesetRecordRequests = 75
-	pagesetRecordServed   = 61
-	pagesetRecordRefusals = 14
+	pagesetRecordServed   = 65
+	pagesetRecordRefusals = 10
 	pagesetRecordSHA256   = "420015134d2d3ee8861ee97e449a06e7bed3268d30492e34cdcd0b74012a5c2c"
 	pagesetFixtureTenant  = "fixture-tenant"
 	pagesetRuns           = 5
