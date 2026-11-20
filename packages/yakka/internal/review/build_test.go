@@ -35,12 +35,23 @@ func overBudgetBytes() int {
 }
 
 func TestEstimateInputTokensCoversSmokeCase(t *testing.T) {
-	// Review 8ae31155 measured 39615 actual input tokens. The old formula
-	// estimated 32490 for 97468-97470 bytes, so those lengths must now estimate
-	// at least the observed count.
+	// Review 8ae31155 measured 39615 actual input tokens. The earlier
+	// three-bytes-per-token estimate yielded 32490 for 97468-97470 bytes, so
+	// those lengths must now estimate at least the observed count.
 	for _, n := range []int{97468, 97469, 97470} {
 		if got := estimateInputTokens(make([]byte, n)); got < 39615 {
 			t.Fatalf("estimate for %d bytes = %d; want >= 39615", n, got)
+		}
+	}
+}
+
+func TestEstimateInputTokensUsesCalibratedRatioAndRoundsUp(t *testing.T) {
+	for _, tc := range []struct {
+		bytes int
+		want  int
+	}{{0, 0}, {1, 1}, {40, 20}, {41, 20}, {42, 21}, {97468, 47546}} {
+		if got := estimateInputTokens(make([]byte, tc.bytes)); got != tc.want {
+			t.Errorf("estimate for %d bytes = %d; want %d", tc.bytes, got, tc.want)
 		}
 	}
 }
