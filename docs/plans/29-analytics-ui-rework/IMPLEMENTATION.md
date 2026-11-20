@@ -71,3 +71,11 @@ Refined 2026-11-21 from the Phase 2 outcome and the retained-analytics contract.
 - **Gates.** `gate: none`. The diagnostic ledger is local and read-only; no secret, deployment or external system is required.
 
 
+## Phase 2 — Retained history is queryable and correct at useful latency
+
+- Tool: OpenCode `opencode run` — model `opencode-go/deepseek-v4.1-flash`; build orchestrated in worktree `/home/codyh/workspace/yakka-build/29`
+- Start: 2026-11-21 03:00 AEST (Australia/Brisbane, UTC+10)
+- Branch: `feat/29-analytics-ui-rework`
+- Design baseline: `e5052a43`; Phase 1 closed `f5fe52fd`; Phase 2 refinement `4f65947d`
+- Units and waves: see `DESIGN.md` § Phase 2 Units.
+
