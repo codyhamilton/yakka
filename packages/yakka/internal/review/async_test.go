@@ -113,7 +113,7 @@ func TestStartFinalizeFailureTerminalizesFallbackAndUnblocksDedupe(t *testing.T)
 	cfg.Lifetime = context.Background()
 	var finalizeCalls atomic.Int32
 	cfg.finalize = func(ctx context.Context, tn *store.Tenant, id string, raw []byte) (bool, error) {
-		if finalizeCalls.Add(1) == 1 {
+		if finalizeCalls.Add(1) <= 2 {
 			return false, errors.New("injected finalize failure")
 		}
 		return tn.FinalizeReviewRun(ctx, id, raw)
@@ -150,8 +150,12 @@ func TestStartFinalizeFailureTerminalizesFallbackAndUnblocksDedupe(t *testing.T)
 	if attempt["status"] != "ok" || attempt["input_tokens"] != float64(100) || attempt["output_tokens"] != float64(50) {
 		t.Fatalf("fallback attempt metadata=%v", attempt)
 	}
-	if rec["input_tokens"] != float64(100) || rec["output_tokens"] != float64(50) || rec["cost_known"] != true {
+	cost, costOK := rec["cost_usd"].(float64)
+	if rec["input_tokens"] != float64(100) || rec["output_tokens"] != float64(50) || rec["cost_known"] != true || !costOK || cost <= 0 || rec["pricing_table_id"] == nil {
 		t.Fatalf("fallback lost usage/cost totals: %v", rec)
+	}
+	if finalizeCalls.Load() != 3 {
+		t.Fatalf("fallback did not reach minimal-record write: finalize calls=%d", finalizeCalls.Load())
 	}
 	rows, err := tenant.ReviewRecords(context.Background(), store.ReviewRecordFilter{RepoID: "repo-sentinel", Limit: 10})
 	if err != nil || len(rows) != 1 {

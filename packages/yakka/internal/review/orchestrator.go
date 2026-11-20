@@ -1225,7 +1225,7 @@ const finalizeFallbackReason = "review record persistence failed"
 // persistTerminalFallback replaces the in-flight row with a terminal api_error
 // row on the same review id after finalizeRecord failed. The row carries no
 // model payload. A first record keeps the content-free attempt/usage metadata;
-// if ingest rejects it, a minimal terminal record is written instead.
+// if ingest rejects it, a minimal terminal record keeps safe usage/cost totals.
 func (p *prepared) persistTerminalFallback(ctx context.Context, cfg RunConfig, result Result, attempts []Attempt) (Receipt, error) {
 	now := time.Now()
 	if cfg.Now != nil {
@@ -1238,7 +1238,7 @@ func (p *prepared) persistTerminalFallback(ctx context.Context, cfg RunConfig, r
 		return out, nil
 	}
 	minimal := map[string]any{}
-	for _, k := range []string{"id", "review_id", "type", "repo_id", "kind", "plan", "phase", "pr", "capture_id", "status", "reason", "key", "attempts", "conversation_id", "ts"} {
+	for _, k := range []string{"id", "review_id", "type", "repo_id", "kind", "plan", "phase", "pr", "capture_id", "status", "reason", "key", "attempts", "input_tokens", "output_tokens", "cost_usd", "cost_known", "pricing_table_id", "conversation_id", "ts"} {
 		if v, ok := rec[k]; ok {
 			minimal[k] = v
 		}
