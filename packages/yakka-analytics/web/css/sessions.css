@@ -1,35 +1,47 @@
 /* Sessions explorer: the server-sorted list and the bounded detail timeline. */
 
-.sessions-intro { max-width: 70ch; color: var(--muted, #555); }
+.workspace-panel[data-chart="table"] .workspace-panel-body { overflow: auto; max-height: 70vh; }
 
-.sessions-table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
-.sessions-table caption { text-align: left; padding: 0 0 0.5rem; color: var(--muted, #555); }
-.sessions-table th, .sessions-table td { padding: 0.3rem 0.5rem; border-bottom: 1px solid var(--line, #e3e3e3); text-align: left; }
+.sessions-intro { max-width: 70ch; color: var(--yk-muted); }
+
+.sessions-table { width: 100%; border-collapse: collapse; font-size: 12px; line-height: 1.5; }
+.sessions-table caption { text-align: left; padding: 0 0 6px; color: var(--yk-muted); }
+.sessions-table th, .sessions-table td { padding: 3px 8px; border-bottom: 1px solid var(--yk-border); text-align: left; white-space: nowrap; }
+.sessions-table thead th { position: sticky; top: 0; z-index: 1; background: var(--yk-surface); }
 .sessions-table th { font-weight: 600; }
 .sessions-table td.numeric { text-align: right; font-variant-numeric: tabular-nums; }
 .session-row { cursor: pointer; }
-.session-row:focus-visible { outline: 2px solid var(--focus, #2b6cb0); outline-offset: -2px; }
-.session-row[data-selected="include"] { background: var(--selected, #eef5ff); }
-.session-row[data-selected="exclude"] { background: var(--excluded, #fff0f0); }
+.session-row:focus-visible { outline: 2px solid var(--yk-focus); outline-offset: -2px; }
+.session-row[data-selected="include"] { background: var(--yk-selected); }
+.session-row[data-selected="exclude"] { background: var(--yk-excluded); }
 .sessions-select { width: 3rem; }
-.session-open { font: inherit; padding: 0.1rem 0.5rem; }
+.session-row-check { display: block; width: 18px; height: 18px; margin: 0 auto; }
+.session-open { min-height: 24px; padding: 0 6px; vertical-align: middle; font: inherit; }
 .sessions-lenses { display: flex; flex-wrap: wrap; gap: 0.35rem; margin: 0.75rem 0; }
-.session-lens { font: inherit; padding: 0.15rem 0.55rem; border: 1px solid var(--line, #ccc); border-radius: 999px; background: transparent; cursor: pointer; }
-.session-lens:hover, .session-lens:focus-visible { background: var(--selected, #eef5ff); }
+.session-lens { min-height: 26px; font: inherit; padding: 2px 8px; border: 1px solid var(--yk-border); border-radius: 2px; background: transparent; color: var(--yk-text); cursor: pointer; }
+.session-lens:hover, .session-lens:focus-visible { background: var(--yk-selected); }
 .session-sort { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
-.session-sort-current { color: var(--muted, #555); }
+.session-sort-current { color: var(--yk-muted); }
 .sessions-population { font-weight: 600; }
-.sessions-coverage { color: var(--muted, #555); }
+.sessions-coverage { color: var(--yk-muted); }
 
 .session-detail-facts dl, .session-totals dl { display: grid; grid-template-columns: max-content 1fr; gap: 0.2rem 0.75rem; }
 .session-detail-facts dt, .session-totals dt { font-weight: 600; }
 .session-coverage-line { margin: 0.2rem 0; }
 .session-totals h3, .session-written h3 { font-size: 0.95rem; margin: 0.75rem 0 0.25rem; }
 .session-lanes-chart { display: block; width: 100%; }
-.session-lanes-basis { color: var(--muted, #555); font-size: 0.85rem; }
-.session-events { width: 100%; border-collapse: collapse; font-size: 0.82rem; margin-top: 0.75rem; }
-.session-events caption { text-align: left; color: var(--muted, #555); padding-bottom: 0.35rem; }
-.session-events th, .session-events td { padding: 0.2rem 0.45rem; border-bottom: 1px solid var(--line, #e3e3e3); text-align: left; }
-.session-event-row[data-priced="false"] td { color: var(--muted, #555); font-style: italic; }
+.session-lanes-basis { color: var(--yk-muted); font-size: 0.92rem; }
+.session-events { width: 100%; border-collapse: collapse; font-size: 12px; line-height: 1.5; margin-top: 0.75rem; }
+.session-events caption { text-align: left; color: var(--yk-muted); padding-bottom: 6px; }
+.session-events th, .session-events td { padding: 5px 8px; border-bottom: 1px solid var(--yk-border); text-align: left; }
+.session-event-row[data-priced="false"] td { color: var(--yk-muted); font-style: italic; }
 .session-artifacts, .session-plans { margin: 0.25rem 0 0.5rem 1rem; }
 .sessions-back { display: inline-block; margin-bottom: 0.5rem; }
+
+@media (pointer: coarse) {
+  .session-open, .session-lens { min-height: 44px; }
+}
+
+@media (max-width: 900px) {
+  .session-detail-facts dl, .session-totals dl { grid-template-columns: 1fr; }
+}

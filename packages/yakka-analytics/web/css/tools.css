@@ -4,7 +4,7 @@
 .p10-tools .p10-basis,
 .p10-tools .p10-note {
   margin: 0.25rem 0;
-  font-size: 0.85rem;
+  font-size: 0.92rem;
   color: var(--yk-chart-muted);
 }
 
@@ -14,8 +14,8 @@
 
 .p10-tools .p10-tools-note {
   margin: 0.35rem 0 0.25rem;
-  padding: 0.3rem 0.5rem;
-  font-size: 0.85rem;
+  padding: 6px 8px;
+  font-size: 0.92rem;
   border-left: 3px solid var(--yk-chart-border);
   color: var(--yk-chart-text);
 }

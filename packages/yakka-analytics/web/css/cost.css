@@ -4,8 +4,8 @@
 
 .p10-cost .p10-basis {
   margin: 0.25rem 0 0.4rem;
-  font-size: 0.85rem;
-  color: var(--yk-chart-muted, #586579);
+  font-size: 0.92rem;
+  color: var(--yk-chart-muted);
 }
 
 .p10-cost-chart {
@@ -15,43 +15,51 @@
 }
 
 .p10-treemap .p10-cost-chart {
-  min-height: 320px;
+  min-height: 260px;
 }
 
 .p10-pricing {
   margin: 0.35rem 0 0.25rem;
-  padding: 0.35rem 0.5rem;
-  font-size: 0.85rem;
-  border-left: 3px solid var(--yk-chart-border, #d6dde7);
-  color: var(--yk-chart-text, #18212f);
+  padding: 6px 8px;
+  font-size: 0.92rem;
+  border-left: 3px solid var(--yk-chart-border);
+  color: var(--yk-chart-text);
 }
 
 .p10-pricing[data-state='lower-bound'],
 .p10-pricing[data-state='all-unpriced'] {
-  border-left-color: var(--yk-chart-warning, #b26b00);
+  border-left-color: var(--yk-warning);
 }
 
 .p10-pricing[data-state='priced-zero'] {
-  border-left-color: var(--yk-chart-muted, #586579);
+  border-left-color: var(--yk-chart-muted);
 }
 
 .p10-cost table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 0.85rem;
+  font-size: 12px;
+  line-height: 1.5;
 }
 
 .p10-cost table caption {
   text-align: left;
-  padding: 0.25rem 0;
-  color: var(--yk-chart-muted, #586579);
+  padding: 4px 0;
+  color: var(--yk-chart-muted);
 }
 
 .p10-cost th,
 .p10-cost td {
-  padding: 0.2rem 0.4rem;
-  border-bottom: 1px solid var(--yk-chart-border, #d6dde7);
+  padding: 5px 8px;
+  border-bottom: 1px solid var(--yk-chart-border);
   text-align: left;
+}
+
+.p10-cost thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--yk-surface);
 }
 
 .p10-cost th[data-numeric='true'],
