@@ -487,11 +487,30 @@ func (t *Tenant) AnalyticsCoverage(ctx context.Context) (map[string]any, error) 
 	}
 	kr.Close()
 	var sessions, withRepo, withoutRepo int
-	err = t.rdb.QueryRowContext(ctx, `WITH repos AS (SELECT conversation_id,COUNT(DISTINCT repo_id) n FROM facts WHERE type IN ('artifact_version','commit') AND repo_id!='' GROUP BY conversation_id), sessions AS (SELECT DISTINCT conversation_id FROM facts) SELECT COUNT(*),SUM(CASE WHEN coalesce(r.n,0)>0 THEN 1 ELSE 0 END),SUM(CASE WHEN coalesce(r.n,0)=0 THEN 1 ELSE 0 END) FROM sessions s LEFT JOIN repos r USING(conversation_id)`).Scan(&sessions, &withRepo, &withoutRepo)
+	err = t.rdb.QueryRowContext(ctx, `WITH repos AS (SELECT conversation_id,COUNT(DISTINCT repo_id) n FROM facts WHERE type IN ('artifact_version','commit') AND repo_id!='' GROUP BY conversation_id), sessions AS (SELECT DISTINCT conversation_id FROM facts) SELECT COUNT(*),COALESCE(SUM(CASE WHEN coalesce(r.n,0)>0 THEN 1 ELSE 0 END),0),COALESCE(SUM(CASE WHEN coalesce(r.n,0)=0 THEN 1 ELSE 0 END),0) FROM sessions s LEFT JOIN repos r USING(conversation_id)`).Scan(&sessions, &withRepo, &withoutRepo)
 	if err != nil {
 		return nil, err
 	}
-	return map[string]any{"facts": firstLast, "sessions": map[string]int{"total": sessions, "with_session_repo": withRepo, "without_session_repo": withoutRepo}, "scored_content_by_kind": scoredByKind}, nil
+	var usage any
+	var uLo, uHi sql.NullFloat64
+	var uRecv sql.NullInt64
+	if err := t.rdb.QueryRowContext(ctx, `SELECT MIN(ts),MAX(ts),MAX(received_at) FROM facts WHERE type='hook_event' AND norm_event='usage'`).Scan(&uLo, &uHi, &uRecv); err != nil {
+		return nil, err
+	}
+	if uLo.Valid || uHi.Valid || uRecv.Valid {
+		u := map[string]any{}
+		if uLo.Valid {
+			u["first_ts"] = uLo.Float64
+		}
+		if uHi.Valid {
+			u["last_ts"] = uHi.Float64
+		}
+		if uRecv.Valid {
+			u["last_received_at"] = uRecv.Int64
+		}
+		usage = u
+	}
+	return map[string]any{"facts": firstLast, "usage": usage, "sessions": map[string]int{"total": sessions, "with_session_repo": withRepo, "without_session_repo": withoutRepo}, "scored_content_by_kind": scoredByKind, "units": map[string]any{"ts": "unix_seconds", "received_at": "unix_nanoseconds"}}, nil
 }
 
 func placeholders(n int) string {
