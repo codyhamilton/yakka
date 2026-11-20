@@ -24,13 +24,13 @@ Metric-only evidence from the finished real-server trial. No garcia-music diff, 
 ## Population and floor
 
 - Manifest: 360 eligible/frozen cases, target 360, floor 300; 100 censored cases in the manifest.
-- Main run: 311 HIGH completions (`ok` 45, `ok_partial` 266) of 360 eligible.
+- Main run: 311 HIGH completions (`ok` 45, `ok_partial` 266) of 360 eligible; the report counts 356 canonical attempted rows and records 4 edge-cut POSTs separately as `started_unknown`.
 - Retry run: 18 further HIGH completions from 43 retried rows.
 - **Final HIGH completed: 329 of 360 eligible, against the 300 floor. No padding.** The main report alone is 311; the retry report alone is 18 and is not a second independent population.
 
 ## Failures by reason
 
-Main run (360 attempted HIGH cases):
+Main run (360 HIGH case POSTs; 356 canonical attempted rows in the report):
 
 | Reason | Count |
 |---|---:|
