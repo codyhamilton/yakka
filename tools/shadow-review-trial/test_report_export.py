@@ -164,6 +164,21 @@ class ReportExportTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "run_id"):
             report.build_report(manifest, export, wrong_ledger_run, {}, adjudication())
 
+    def test_null_attempts_is_a_stored_noncompletion_not_malformed_export(self):
+        manifest = make_manifest(1)
+        row = record(manifest, "case-0", "high", status="refused_disclosure", cost=None)
+        row["attempts"] = None
+        result = report.build_report(manifest, make_export(manifest, [row]), make_ledger(manifest, []),
+                                     {}, adjudication())
+        self.assertEqual(result["arms"]["high"]["completed"], 0)
+        self.assertEqual(result["records_by_status"]["refused_disclosure"], 1)
+
+        broken = copy.deepcopy(row)
+        broken["attempts"] = "not-an-array"
+        with self.assertRaisesRegex(ValueError, "array or null"):
+            report.build_report(manifest, make_export(manifest, [broken]), make_ledger(manifest, []),
+                                {}, adjudication())
+
     def test_failed_billed_receipt_contributes_but_dry_run_does_not(self):
         manifest = make_manifest(3)
         export = make_export(manifest, [record(manifest, "case-0", "high", cost=0.1)])

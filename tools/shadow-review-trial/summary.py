@@ -183,11 +183,24 @@ def _reconciliation(lines: list[str], reconciliation: Any) -> None:
         lines.append(f"- {key}: {_fmt(reconciliation.get(key))}")
 
 
+def _dropped_arms(lines: list[str], dropped: Any) -> None:
+    if not isinstance(dropped, list) or not dropped:
+        return
+    parts = []
+    for row in dropped:
+        row = row if isinstance(row, dict) else {}
+        parts.append(f"{_fmt(row.get('effort'))} (attempted {_fmt(row.get('attempted'))}, "
+                     f"completed {_fmt(row.get('completed'))}, counted as failure "
+                     f"{_fmt(row.get('counted_as_failure'))})")
+    lines.append("- owner-dropped arms: " + "; ".join(parts))
+
+
 def render(report: dict) -> str:
     """Render a ``report.build_report`` result as deterministic Markdown."""
     report = report if isinstance(report, dict) else {}
     lines = ["# Shadow review trial report", ""]
     _population(lines, report.get("population"))
+    _dropped_arms(lines, report.get("owner_dropped_arms"))
     lines.append("")
     _comparisons(lines, report.get("comparisons"), report.get("cost_latency"))
     lines.append("")

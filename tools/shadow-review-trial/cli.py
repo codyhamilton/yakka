@@ -135,6 +135,11 @@ def _parser():
     report.add_argument("--adjudication", type=pathlib.Path, required=True)
     report.add_argument("--output", type=pathlib.Path, required=True)
     report.add_argument("--comparators", type=pathlib.Path, help="optional saved comparator evidence JSON")
+    report.add_argument("--efforts", help="comma-separated efforts to report; omitted efforts become owner-dropped arms")
+    report.add_argument("--drop-reason", default="owner_dropped",
+                        help="reason recorded for efforts left out by --efforts")
+    report.add_argument("--metric-only", action="store_true",
+                        help="strip case ids, review ids, paths and finding rows from the output artifact")
 
     evidence = commands.add_parser("evidence-check", help="reject an evidence folder holding a manifest or export")
     evidence.add_argument("--folder", type=pathlib.Path, required=True)
@@ -176,7 +181,11 @@ def main(argv=None):
             ledger = _json_file(args.ledger, "run ledger")
             adjudication = _json_file(args.adjudication, "adjudication")
             comparators = _json_file(args.comparators, "comparators") if args.comparators else {}
-            result = alignment_report.build_report(frozen, export, ledger, comparators, adjudication)
+            efforts = [part.strip() for part in args.efforts.split(",") if part.strip()] if args.efforts else None
+            result = alignment_report.build_report(frozen, export, ledger, comparators, adjudication,
+                                                   efforts=efforts, drop_reason=args.drop_reason)
+            if args.metric_only:
+                result = alignment_report.metric_only(result)
             _write_json(args.output, result)
             summary_path = args.output.with_suffix(".md")
             summary_path.parent.mkdir(parents=True, exist_ok=True)
