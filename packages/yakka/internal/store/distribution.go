@@ -91,39 +91,51 @@ func (t *Tenant) Distribution(ctx context.Context, f AnalyticsFilter, p Distribu
 	}
 	var query string
 	if p.Grain == "conversation" {
+		// Aggregate the in-window usage population once, then derive only the lifetime
+		// provenance the requested lens needs for those candidate conversations. The calls
+		// and per CTEs are materialized so the kept usage dedup and pricing run once.
+		callsCTE := `calls AS MATERIALIZED (SELECT conversation_id,model,` + pricedExpr + ` priced,` + valueExpr + ` value FROM kept)`
+		perCTE := `per AS MATERIALIZED (SELECT conversation_id,sum(CASE WHEN priced=1 THEN value ELSE 0 END) value,
+				sum(1-priced) unpriced,sum(priced) priced FROM calls GROUP BY conversation_id)`
+		base := cte + `, ` + callsCTE + `, ` + perCTE
+		candidates := `candidates AS (SELECT conversation_id FROM per)`
+		predicate := sessionPredicateSQL(f2, "per", &args)
 		switch p.Dim {
+		case "":
+			query = base + ` INSERT INTO dist_samples SELECT 'all',per.value,per.priced,per.unpriced FROM per` + predicate
 		case "model":
-			keyExpr = "coalesce(cm.model,'')"
+			query = base + `, ` + candidates + `, counts AS (SELECT conversation_id,model,count(*) n FROM calls WHERE model!='' GROUP BY conversation_id,model),
+				mc AS (SELECT conversation_id,model,ROW_NUMBER() OVER(PARTITION BY conversation_id ORDER BY n DESC,model ASC) rn FROM counts),
+				cm AS (SELECT conversation_id,model FROM mc WHERE rn=1)
+				INSERT INTO dist_samples SELECT coalesce(cm.model,''),per.value,per.priced,per.unpriced FROM per LEFT JOIN cm USING(conversation_id)` + predicate
 		case "harness":
-			keyExpr = "coalesce(sh.harness,'unknown')"
+			query = base + `, ` + candidates + `, harness_counts AS (SELECT conversation_id,COALESCE(NULLIF(harness,''),'unknown') harness,COUNT(*) n FROM facts WHERE conversation_id IN (SELECT conversation_id FROM candidates) GROUP BY conversation_id,COALESCE(NULLIF(harness,''),'unknown')),
+				harness_ranked AS (SELECT conversation_id,harness,ROW_NUMBER() OVER(PARTITION BY conversation_id ORDER BY n DESC,harness ASC) rn FROM harness_counts),
+				session_harness AS (SELECT conversation_id,harness FROM harness_ranked WHERE rn=1)
+				INSERT INTO dist_samples SELECT coalesce(sh.harness,'unknown'),per.value,per.priced,per.unpriced FROM per LEFT JOIN session_harness sh USING(conversation_id)` + predicate
 		case "session_model":
-			keyExpr = "coalesce(sm.model,'unknown')"
+			query = base + `, ` + candidates + `, all_usage AS (SELECT row_hash,conversation_id,model,CASE WHEN harness='claude' THEN json_extract(raw,'$.backfill.ref') END mid,tok_out FROM facts WHERE type='hook_event' AND norm_event='usage' AND conversation_id IN (SELECT conversation_id FROM candidates)),
+				all_kept AS (SELECT * FROM (SELECT *,ROW_NUMBER() OVER(PARTITION BY conversation_id,mid ORDER BY tok_out DESC,row_hash ASC) rn FROM all_usage) WHERE mid IS NULL OR mid='' OR rn=1),
+				model_counts AS (SELECT conversation_id,model,COUNT(*) n FROM all_kept WHERE model!='' GROUP BY conversation_id,model),
+				model_totals AS (SELECT conversation_id,COUNT(*) n FROM all_kept GROUP BY conversation_id),
+				model_ranked AS (SELECT conversation_id,model,n,ROW_NUMBER() OVER(PARTITION BY conversation_id ORDER BY n DESC,model ASC) rn FROM model_counts),
+				session_model AS (SELECT t.conversation_id,CASE WHEN t.n=0 THEN '(none)' WHEN COALESCE(r.n,0)*1.0/t.n<0.8 THEN '(mixed)' WHEN r.model IS NULL THEN 'unknown' ELSE r.model END model FROM model_totals t LEFT JOIN model_ranked r ON r.conversation_id=t.conversation_id AND r.rn=1)
+				INSERT INTO dist_samples SELECT coalesce(sm.model,'unknown'),per.value,per.priced,per.unpriced FROM per LEFT JOIN session_model sm USING(conversation_id)` + predicate
 		case "session_repo":
-			keyExpr = "coalesce(sr.repo,'(none)')"
+			query = base + `, ` + candidates + `, session_repo_counts AS (SELECT conversation_id,COUNT(DISTINCT repo_id) n,MIN(repo_id) repo FROM facts WHERE type IN ('artifact_version','commit') AND repo_id!='' AND conversation_id IN (SELECT conversation_id FROM candidates) GROUP BY conversation_id),
+				session_repo AS (SELECT conversation_id,CASE WHEN n=1 THEN repo WHEN n>1 THEN '(multi)' ELSE '(none)' END repo FROM session_repo_counts)
+				INSERT INTO dist_samples SELECT coalesce(sr.repo,'(none)'),per.value,per.priced,per.unpriced FROM per LEFT JOIN session_repo sr USING(conversation_id)` + predicate
+		default:
+			query = base + ` INSERT INTO dist_samples SELECT 'all',per.value,per.priced,per.unpriced FROM per` + predicate
 		}
-		query = cte + `, session_repo_counts AS (SELECT conversation_id,COUNT(DISTINCT repo_id) n,MIN(repo_id) repo FROM facts WHERE type IN ('artifact_version','commit') AND repo_id!='' GROUP BY conversation_id),
-			session_repo AS (SELECT conversation_id,CASE WHEN n=1 THEN repo WHEN n>1 THEN '(multi)' ELSE '(none)' END repo FROM session_repo_counts),
-			harness_counts AS (SELECT conversation_id,COALESCE(NULLIF(harness,''),'unknown') harness,COUNT(*) n FROM facts GROUP BY conversation_id,COALESCE(NULLIF(harness,''),'unknown')),
-			harness_ranked AS (SELECT conversation_id,harness,ROW_NUMBER() OVER(PARTITION BY conversation_id ORDER BY n DESC,harness ASC) rn FROM harness_counts),
-			session_harness AS (SELECT conversation_id,harness FROM harness_ranked WHERE rn=1),
-			all_usage AS (SELECT row_hash,conversation_id,model,CASE WHEN harness='claude' THEN json_extract(raw,'$.backfill.ref') END mid,tok_out FROM facts WHERE type='hook_event' AND norm_event='usage'),
-			all_kept AS (SELECT * FROM (SELECT *,ROW_NUMBER() OVER(PARTITION BY conversation_id,mid ORDER BY tok_out DESC,row_hash ASC) rn FROM all_usage) WHERE mid IS NULL OR mid='' OR rn=1),
-			model_counts AS (SELECT conversation_id,model,COUNT(*) n FROM all_kept WHERE model!='' GROUP BY conversation_id,model),
-			model_totals AS (SELECT conversation_id,COUNT(*) n FROM all_kept GROUP BY conversation_id),
-			model_ranked AS (SELECT conversation_id,model,n,ROW_NUMBER() OVER(PARTITION BY conversation_id ORDER BY n DESC,model ASC) rn FROM model_counts),
-			session_model AS (SELECT t.conversation_id,CASE WHEN t.n=0 THEN '(none)' WHEN COALESCE(r.n,0)*1.0/t.n<0.8 THEN '(mixed)' WHEN r.model IS NULL THEN 'unknown' ELSE r.model END model FROM model_totals t LEFT JOIN model_ranked r ON r.conversation_id=t.conversation_id AND r.rn=1),
-			counts AS (SELECT conversation_id,model,count(*) n FROM kept WHERE model!='' GROUP BY conversation_id,model),
-			mc AS (SELECT conversation_id,model,ROW_NUMBER() OVER(PARTITION BY conversation_id ORDER BY n DESC,model ASC) rn FROM counts),
-			cm AS (SELECT conversation_id,model FROM mc WHERE rn=1),
-			per AS (SELECT conversation_id,sum(CASE WHEN ` + pricedExpr + `=1 THEN ` + valueExpr + ` ELSE 0 END) value,
-				sum(1-` + pricedExpr + `) unpriced,sum(` + pricedExpr + `) priced FROM kept GROUP BY conversation_id)
-			INSERT INTO dist_samples SELECT ` + keyExpr + `,per.value,per.priced,per.unpriced FROM per LEFT JOIN cm USING(conversation_id) LEFT JOIN session_repo sr USING(conversation_id) LEFT JOIN session_harness sh USING(conversation_id) LEFT JOIN session_model sm USING(conversation_id)` + sessionPredicateSQL(f2, "per", &args)
 	} else {
+		extra, from := "", " FROM kept"
 		if p.Dim == "session_repo" {
-			query = cte + `, session_repo_counts AS (SELECT conversation_id,COUNT(DISTINCT repo_id) n,MIN(repo_id) repo FROM facts WHERE type IN ('artifact_version','commit') AND repo_id!='' GROUP BY conversation_id), session_repo AS (SELECT conversation_id,CASE WHEN n=1 THEN repo WHEN n>1 THEN '(multi)' ELSE '(none)' END repo FROM session_repo_counts) INSERT INTO dist_samples SELECT ` + keyExpr + `,` + valueExpr + `,` + pricedExpr + `,1-` + pricedExpr + ` FROM kept LEFT JOIN session_repo sr USING(conversation_id)`
-		} else {
-			query = cte + ` INSERT INTO dist_samples SELECT ` + keyExpr + `,` + valueExpr + `,` + pricedExpr + `,1-` + pricedExpr + ` FROM kept`
+			extra = `, session_repo_counts AS (SELECT conversation_id,COUNT(DISTINCT repo_id) n,MIN(repo_id) repo FROM facts WHERE type IN ('artifact_version','commit') AND repo_id!='' GROUP BY conversation_id), session_repo AS (SELECT conversation_id,CASE WHEN n=1 THEN repo WHEN n>1 THEN '(multi)' ELSE '(none)' END repo FROM session_repo_counts)`
+			from = " FROM kept LEFT JOIN session_repo sr USING(conversation_id)"
 		}
+		// Evaluate the pricing lookups once per kept call rather than once per use.
+		query = cte + extra + `, per_call AS (SELECT ` + keyExpr + ` k,` + valueExpr + ` value,` + pricedExpr + ` priced` + from + `) INSERT INTO dist_samples SELECT k,value,priced,1-priced FROM per_call`
 	}
 	conn, err := t.rdb.Conn(ctx)
 	if err != nil {
@@ -220,6 +232,147 @@ func (t *Tenant) Distribution(ctx context.Context, f AnalyticsFilter, p Distribu
 	}
 	res.OmittedGroups = res.GroupN - len(res.Rows)
 	return res, nil
+}
+
+// sessionScatterMarginalMeasures are the session-scatter fields with a whole-population marginal.
+var sessionScatterMarginalMeasures = map[string]bool{
+	"cost_usd": true, "commits": true, "unpriced_calls": true,
+	"tokens_in": true, "tokens_out": true, "tokens_cache_read": true,
+	"tokens_cache_write": true, "tokens_reasoning": true,
+}
+
+// SessionScatterMarginals returns the fixed-bin marginal histogram for each requested
+// session-scatter field over the whole filtered session population. It folds the session
+// aggregate rows in one stream instead of running a Distribution query per field, and never
+// retains the population in Go. Cost follows the priced-only eligibility used by session cost;
+// every other field counts every session, including zero-valued ones.
+func (t *Tenant) SessionScatterMarginals(ctx context.Context, f AnalyticsFilter, fields []string) (map[string][]DistributionBin, error) {
+	for _, field := range fields {
+		if !sessionScatterMarginalMeasures[field] {
+			return nil, fmt.Errorf("unsupported session scatter field %s", field)
+		}
+	}
+	cte, args := sessionAggregateCTE(f)
+	rows, err := t.rdb.QueryContext(ctx, cte+` SELECT model_calls,unpriced_calls,commits,cost_usd,tokens_in,tokens_out,tokens_cache_read,tokens_cache_write,tokens_reasoning FROM filtered`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make(map[string][]DistributionBin, len(fields))
+	for _, field := range fields {
+		out[field] = distributionBinDefs(field)
+	}
+	for rows.Next() {
+		var modelCalls, unpriced, commits, cost, tokIn, tokOut, cacheRead, cacheWrite, reasoning float64
+		if err := rows.Scan(&modelCalls, &unpriced, &commits, &cost, &tokIn, &tokOut, &cacheRead, &cacheWrite, &reasoning); err != nil {
+			return nil, err
+		}
+		for _, field := range fields {
+			value, ok := sessionMarginalValue(field, modelCalls, unpriced, commits, cost, tokIn, tokOut, cacheRead, cacheWrite, reasoning)
+			if !ok {
+				continue
+			}
+			bins := out[field]
+			assignBin(&bins, field, value)
+			out[field] = bins
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// SessionScatterPopulation reads the filtered session population once, returning the
+// deterministic hash sample and the whole-population marginal histograms. It streams the rows so
+// only the bounded sample is retained in Go, and the marginals share the same aggregates the
+// scatter sample is drawn from.
+func (t *Tenant) SessionScatterPopulation(ctx context.Context, f AnalyticsFilter, fields []string, limit int) ([]SessionEntityRow, int, map[string][]DistributionBin, error) {
+	for _, field := range fields {
+		if !sessionScatterMarginalMeasures[field] {
+			return nil, 0, nil, fmt.Errorf("unsupported session scatter field %s", field)
+		}
+	}
+	usageCTE, usageArgs := usageRowsWhere(f)
+	factWhere, factArgs := f.factWhere()
+	args := append(append([]any{}, usageArgs...), factArgs...)
+	usageValue := func(col string) string { return "COALESCE(SUM(" + col + "),0)" }
+	query := usageCTE + `, usage AS (
+	 SELECT conversation_id,COUNT(*) model_calls,SUM(1-wf_usage_priced(harness,model,tok_in,tok_out,tok_cache_read,tok_cache_write,tok_reasoning,cost_reported)) unpriced_calls,
+	 ` + usageValue("wf_usage_cost(harness,model,tok_in,tok_out,tok_cache_read,tok_cache_write,tok_reasoning,cost_reported)") + ` cost_usd,
+	 ` + usageValue("tok_in") + ` tokens_in,` + usageValue("tok_out") + ` tokens_out,` + usageValue("tok_cache_read") + ` tokens_cache_read,
+	 ` + usageValue("tok_cache_write") + ` tokens_cache_write,` + usageValue("tok_reasoning") + ` tokens_reasoning
+	 FROM kept GROUP BY conversation_id
+	), base AS (
+	 SELECT conversation_id,SUM(CASE WHEN type='commit' THEN 1 ELSE 0 END) commits
+	 FROM facts INDEXED BY facts_conv WHERE ` + factWhere + ` GROUP BY conversation_id
+	), result AS (SELECT base.conversation_id,base.commits,COALESCE(usage.model_calls,0) model_calls,COALESCE(usage.unpriced_calls,0) unpriced_calls,
+	 COALESCE(usage.cost_usd,0) cost_usd,COALESCE(usage.tokens_in,0) tokens_in,COALESCE(usage.tokens_out,0) tokens_out,
+	 COALESCE(usage.tokens_cache_read,0) tokens_cache_read,COALESCE(usage.tokens_cache_write,0) tokens_cache_write,COALESCE(usage.tokens_reasoning,0) tokens_reasoning
+	 FROM base LEFT JOIN usage USING(conversation_id)), filtered AS (SELECT * FROM result WHERE 1=1` + sessionRangeWhere(f.SessionRanges, &args) + `)
+	 SELECT conversation_id,commits,model_calls,unpriced_calls,cost_usd,tokens_in,tokens_out,tokens_cache_read,tokens_cache_write,tokens_reasoning
+	 FROM filtered ORDER BY wf_session_hash(conversation_id) ASC`
+	rows, err := t.rdb.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, 0, nil, err
+	}
+	defer rows.Close()
+	out := make(map[string][]DistributionBin, len(fields))
+	for _, field := range fields {
+		out[field] = distributionBinDefs(field)
+	}
+	sample := make([]SessionEntityRow, 0, limit)
+	population := 0
+	for rows.Next() {
+		var r SessionEntityRow
+		vals := make([]float64, 9)
+		if err := rows.Scan(&r.ID, &vals[0], &vals[1], &vals[2], &vals[3], &vals[4], &vals[5], &vals[6], &vals[7], &vals[8]); err != nil {
+			return nil, 0, nil, err
+		}
+		r.Measures = map[string]float64{"commits": vals[0], "model_calls": vals[1], "unpriced_calls": vals[2], "cost_usd": vals[3], "tokens_in": vals[4], "tokens_out": vals[5], "tokens_cache_read": vals[6], "tokens_cache_write": vals[7], "tokens_reasoning": vals[8]}
+		population++
+		for _, field := range fields {
+			value, ok := sessionMarginalValue(field, r.Measures["model_calls"], r.Measures["unpriced_calls"], r.Measures["commits"], r.Measures["cost_usd"], r.Measures["tokens_in"], r.Measures["tokens_out"], r.Measures["tokens_cache_read"], r.Measures["tokens_cache_write"], r.Measures["tokens_reasoning"])
+			if !ok {
+				continue
+			}
+			bins := out[field]
+			assignBin(&bins, field, value)
+			out[field] = bins
+		}
+		if len(sample) < limit {
+			sample = append(sample, r)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, nil, err
+	}
+	return sample, population, out, nil
+}
+
+func sessionMarginalValue(field string, modelCalls, unpriced, commits, cost, tokIn, tokOut, cacheRead, cacheWrite, reasoning float64) (float64, bool) {
+	switch field {
+	case "cost_usd":
+		if modelCalls > 0 && modelCalls <= unpriced {
+			return 0, false
+		}
+		return cost, true
+	case "commits":
+		return commits, true
+	case "unpriced_calls":
+		return unpriced, true
+	case "tokens_in":
+		return tokIn, true
+	case "tokens_out":
+		return tokOut, true
+	case "tokens_cache_read":
+		return cacheRead, true
+	case "tokens_cache_write":
+		return cacheWrite, true
+	case "tokens_reasoning":
+		return reasoning, true
+	}
+	return 0, false
 }
 
 func distributionBinIndexSQL(measure string) string {

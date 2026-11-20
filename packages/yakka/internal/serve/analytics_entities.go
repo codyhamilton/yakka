@@ -1125,6 +1125,7 @@ func (s *Server) analyticsSessionScatter(w http.ResponseWriter, r *http.Request,
 	var population int
 	var page []store.SessionEntityRow
 	var prov map[string]store.SessionProvenance
+	var marginalBins map[string][]store.DistributionBin
 	if lens.active() {
 		members, memberProv, err := sessionLensPopulation(r.Context(), ts.t, filter, lens)
 		if err != nil {
@@ -1144,14 +1145,13 @@ func (s *Server) analyticsSessionScatter(w http.ResponseWriter, r *http.Request,
 		}
 		filter = sessionMemberFilter(filter, lens)
 		filter.ConversationIDs = ids
-	} else {
-		var err error
-		population, err = ts.t.ConversationCount(r.Context(), filter)
+		marginalBins, err = ts.t.SessionScatterMarginals(r.Context(), filter, fields)
 		if err != nil {
 			readFailed(w)
 			return
 		}
-		page, _, err = ts.t.SessionEntitiesPage(r.Context(), filter, "sample_hash", false, nil, min(population, 5000))
+	} else {
+		page, population, marginalBins, err = ts.t.SessionScatterPopulation(r.Context(), filter, fields, 5000)
 		if err != nil {
 			readFailed(w)
 			return
@@ -1182,45 +1182,16 @@ func (s *Server) analyticsSessionScatter(w http.ResponseWriter, r *http.Request,
 	marginals := map[string]any{}
 	eligible := map[string]int{}
 	missing := map[string]int{}
-	callSessions, err := ts.t.SessionCallConversationCount(r.Context(), filter)
-	if err != nil {
-		readFailed(w)
-		return
-	}
-	noCalls := max(0, population-callSessions)
 	for _, f := range fields {
-		d, err := ts.t.Distribution(r.Context(), filter, store.DistributionParams{Measure: f, Grain: "conversation", Top: 100})
-		if err != nil {
-			readFailed(w)
-			return
-		}
-		bins := []store.DistributionBin{}
-		for _, g := range d.Rows {
-			if g.K == "all" {
-				bins = g.Bins
-				break
-			}
-		}
-		if noCalls > 0 {
-			if len(bins) == 0 {
-				// Distribution has no row when the population has no model calls;
-				// represent the no-call sessions in the zero-value marginal bin.
-				bins = append(bins, store.DistributionBin{Lo: 0})
-			}
-			// The first distribution bin is the zero-value bin for the supported
-			// non-negative session usage and cost measures.
-			bins[0].N += noCalls
-		}
+		bins := marginalBins[f]
 		marginals[f] = bins
 		total := 0
 		for _, b := range bins {
 			total += b.N
 		}
+		eligible[f] = total
 		if f == "cost_usd" {
-			eligible[f] = total
 			missing["unpriced_cost"] += max(0, population-total)
-		} else {
-			eligible[f] = total
 		}
 	}
 	sampled := population > len(points)
