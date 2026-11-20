@@ -212,6 +212,9 @@ type RunConfig struct {
 	// and has released its reservation, including when the attempt panics.
 	// It must not block. It is not called for synchronous completions.
 	OnFinish func()
+	// finalize overrides the store finalize call in tests. Production leaves it
+	// nil, which uses Tenant.FinalizeReviewRun.
+	finalize func(context.Context, *store.Tenant, string, []byte) (bool, error)
 }
 
 // Job is one detached stored review attempt. Wait reports the current receipt and
@@ -596,9 +599,19 @@ func (p *prepared) finishDetached(ctx context.Context, cfg RunConfig) (receipt R
 	defer cancel()
 	receipt, err = finalizeRecord(fctx, p.tenant, p.tenantID, p.req, p.repo, p.id, status, reason, result, attempts, p.packet, p.criteriaRec, p.inputHash, cfg, p.controls, p.key)
 	if err != nil {
-		// Keep the in-flight identity visible rather than a zero receipt; the
-		// persisted running row remains the polling answer.
-		return Receipt{ID: p.id, Status: StatusRunning, Cached: boolPtr(false)}, err
+		// The provider outcome is terminal but the result could not be written.
+		// Terminalize the same row so polling stops returning running and the
+		// execution key no longer dedupes as in-flight. Use a fresh bounded
+		// context: the finalize deadline above may already be spent.
+		fallbackCtx, cancelFallback := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+		defer cancelFallback()
+		fallbackReceipt, fallbackErr := p.persistTerminalFallback(fallbackCtx, cfg, result, attempts)
+		if fallbackErr != nil {
+			// Keep the in-flight identity visible rather than a zero receipt; the
+			// persisted running row remains the polling answer.
+			return Receipt{ID: p.id, Status: StatusRunning, Cached: boolPtr(false)}, err
+		}
+		return fallbackReceipt, nil
 	}
 	return receipt, nil
 }
@@ -1198,21 +1211,68 @@ func finalizeRecord(ctx context.Context, t *store.Tenant, tenant string, r Reque
 		now = cfg.Now()
 	}
 	rec, out := reviewRecord(r, repo, id, status, reason, result, attempts, p, c, inputHash, cfg, ctl, key, now, true)
+	if err := persistFinalizeRecord(ctx, t, cfg, id, rec); err != nil {
+		return Receipt{}, err
+	}
+	return out, nil
+}
+
+// finalizeFallbackReason is the fixed, content-free reason recorded when the
+// terminal provider outcome could not be persisted normally. It never carries
+// provider, model or capture text.
+const finalizeFallbackReason = "review record persistence failed"
+
+// persistTerminalFallback replaces the in-flight row with a terminal api_error
+// row on the same review id after finalizeRecord failed. The row carries no
+// model payload. A first record keeps the content-free attempt/usage metadata;
+// if ingest rejects it, a minimal terminal record keeps safe usage/cost totals.
+func (p *prepared) persistTerminalFallback(ctx context.Context, cfg RunConfig, result Result, attempts []Attempt) (Receipt, error) {
+	now := time.Now()
+	if cfg.Now != nil {
+		now = cfg.Now()
+	}
+	rec, out := reviewRecord(p.req, p.repo, p.id, "api_error", finalizeFallbackReason, Result{Model: result.Model}, attempts, p.packet, p.criteriaRec, p.inputHash, cfg, p.controls, p.key, now, true)
+	delete(rec, "payload")
+	out.Result = nil
+	if err := persistFinalizeRecord(ctx, p.tenant, cfg, p.id, rec); err == nil {
+		return out, nil
+	}
+	minimal := map[string]any{}
+	for _, k := range []string{"id", "review_id", "type", "repo_id", "kind", "plan", "phase", "pr", "capture_id", "status", "reason", "key", "attempts", "input_tokens", "output_tokens", "cost_usd", "cost_known", "pricing_table_id", "conversation_id", "ts"} {
+		if v, ok := rec[k]; ok {
+			minimal[k] = v
+		}
+	}
+	if err := persistFinalizeRecord(ctx, p.tenant, cfg, p.id, minimal); err != nil {
+		return Receipt{}, err
+	}
+	return out, nil
+}
+
+func persistFinalizeRecord(ctx context.Context, t *store.Tenant, cfg RunConfig, id string, rec map[string]any) error {
 	b, _ := json.Marshal(rec)
 	// Validate and precheck exactly as the append path does before the in-place
 	// update, so async persistence cannot bypass the ingest gatekeeper.
 	canon, reason := ingest.PrepareReviewRun(b)
 	if reason != "" {
-		return Receipt{}, fmt.Errorf("review record rejected: %s", reason)
+		return fmt.Errorf("review record rejected: %s", reason)
 	}
-	updated, err := t.FinalizeReviewRun(ctx, id, canon)
+	var (
+		updated bool
+		err     error
+	)
+	if cfg.finalize != nil {
+		updated, err = cfg.finalize(ctx, t, id, canon)
+	} else {
+		updated, err = t.FinalizeReviewRun(ctx, id, canon)
+	}
 	if err != nil {
-		return Receipt{}, errors.New("review record persistence failed")
+		return errors.New("review record persistence failed")
 	}
 	if !updated {
-		return Receipt{}, errors.New("review record finalize failed")
+		return errors.New("review record finalize failed")
 	}
-	return out, nil
+	return nil
 }
 
 // persistReviewUsage writes one content-free review_usage fact for a store=false call that
