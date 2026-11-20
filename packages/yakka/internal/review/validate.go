@@ -52,6 +52,91 @@ func (e *InvalidReplyError) Error() string { return "invalid output" }
 
 func invalidReply(reason string) error { return &InvalidReplyError{Reason: reason} }
 
+// redactReply replaces secret matches inside decoded string fields and reports
+// whether any value changed. It never touches JSON structure or non-string
+// values. Support checks run afterwards on these redacted values, preserving
+// the prior behaviour where redaction happened before validation.
+func redactReply(reply *reviewerReply) bool {
+	changed := false
+	redact := func(s *string) {
+		if *s == "" {
+			return
+		}
+		if r := secrets.Redact(*s); r != *s {
+			*s = r
+			changed = true
+		}
+	}
+	for i := range reply.Outcomes {
+		o := &reply.Outcomes[i]
+		redact(&o.CriterionID)
+		redact(&o.Evidence)
+	}
+	for i := range reply.Findings {
+		f := &reply.Findings[i]
+		redact(&f.ID)
+		redact(&f.Title)
+		redact(&f.Path)
+		redact(&f.Evidence)
+		redact(&f.Rationale)
+		for j := range f.CriterionIDs {
+			redact(&f.CriterionIDs[j])
+		}
+	}
+	for i := range reply.Limitations {
+		redact(&reply.Limitations[i])
+	}
+	return changed
+}
+
+// rawOutcomeEvidenceValid reports whether every raw outcome evidence token is
+// valid UTF-8. Malformed structure is left to the strict decoder.
+func rawOutcomeEvidenceValid(raw json.RawMessage) bool {
+	var outcomes []map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &outcomes); err != nil {
+		return true
+	}
+	for _, outcome := range outcomes {
+		if evidence, ok := outcome["evidence"]; ok && !utf8.Valid(evidence) {
+			return false
+		}
+	}
+	return true
+}
+
+// validateOutcomes enforces one outcome per supplied criterion id and returns
+// the supplied id set for finding support checks. Each failure has a distinct
+// body-free reason.
+func validateOutcomes(outcomes []Outcome, criteria []Criterion) (map[string]struct{}, error) {
+	criteriaSet := make(map[string]struct{}, len(criteria))
+	for _, criterion := range criteria {
+		if criterion.ID == "" {
+			return nil, invalidReply("empty_criterion_id")
+		}
+		criteriaSet[criterion.ID] = struct{}{}
+	}
+	seen := make(map[string]bool, len(criteriaSet))
+	for _, outcome := range outcomes {
+		if _, exists := criteriaSet[outcome.CriterionID]; !exists {
+			return nil, invalidReply("unknown_criterion")
+		}
+		if seen[outcome.CriterionID] {
+			return nil, invalidReply("duplicate_criterion")
+		}
+		seen[outcome.CriterionID] = true
+		if outcome.Assessment != "met" && outcome.Assessment != "partial" && outcome.Assessment != "not met" && outcome.Assessment != "unassessable" {
+			return nil, invalidReply("invalid_assessment")
+		}
+		if !utf8.ValidString(outcome.Evidence) {
+			return nil, invalidReply("invalid_evidence")
+		}
+	}
+	if len(seen) != len(criteriaSet) {
+		return nil, invalidReply("missing_outcomes")
+	}
+	return criteriaSet, nil
+}
+
 // InvalidReason returns the body-free validator classification, if any.
 func InvalidReason(err error) string {
 	var ire *InvalidReplyError
@@ -93,9 +178,7 @@ func unwrapJSONFence(raw []byte) []byte {
 // failure returns an *InvalidReplyError with a body-free reason.
 func ValidateReply(raw []byte, packet Packet, criteria []Criterion) (Result, error) {
 	raw = unwrapJSONFence(raw)
-	redacted := secrets.Redact(string(raw))
-	wasRedacted := redacted != string(raw)
-	dec := json.NewDecoder(bytes.NewBufferString(redacted))
+	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.DisallowUnknownFields()
 	var reply reviewerReply
 	if err := dec.Decode(&reply); err != nil {
@@ -109,7 +192,7 @@ func ValidateReply(raw []byte, packet Packet, criteria []Criterion) (Result, err
 		return Result{}, invalidReply("trailing_data")
 	}
 	var fields map[string]json.RawMessage
-	if err := json.Unmarshal([]byte(redacted), &fields); err != nil {
+	if err := json.Unmarshal(raw, &fields); err != nil {
 		return Result{}, invalidReply("json_parse")
 	}
 	for _, key := range []string{"outcomes", "findings", "limitations", "coverage"} {
@@ -126,31 +209,21 @@ func ValidateReply(raw []byte, packet Packet, criteria []Criterion) (Result, err
 	if reply.Findings == nil || reply.Limitations == nil {
 		return Result{}, invalidReply("missing_field")
 	}
+	// The decoder replaces invalid UTF-8 bytes with U+FFFD, so check the raw
+	// outcome evidence tokens before that sanitization can hide the defect.
+	if !rawOutcomeEvidenceValid(fields["outcomes"]) {
+		return Result{}, invalidReply("invalid_evidence")
+	}
+	// Redact decoded string values only, after the strict decode. The raw bytes
+	// are valid JSON by construction, so an env-style assignment at the start of
+	// a value can no longer consume the opening quote and corrupt parsing.
+	wasRedacted := redactReply(&reply)
 	if reply.Coverage != "complete" && reply.Coverage != "partial" {
-		return Result{}, invalidReply("schema")
+		return Result{}, invalidReply("invalid_coverage")
 	}
-	criteriaSet := make(map[string]struct{}, len(criteria))
-	for _, criterion := range criteria {
-		if criterion.ID == "" {
-			return Result{}, invalidReply("schema")
-		}
-		criteriaSet[criterion.ID] = struct{}{}
-	}
-	seen := make(map[string]bool, len(criteriaSet))
-	for _, outcome := range reply.Outcomes {
-		if _, exists := criteriaSet[outcome.CriterionID]; !exists || seen[outcome.CriterionID] {
-			return Result{}, invalidReply("schema")
-		}
-		seen[outcome.CriterionID] = true
-		if outcome.Assessment != "met" && outcome.Assessment != "partial" && outcome.Assessment != "not met" && outcome.Assessment != "unassessable" {
-			return Result{}, invalidReply("invalid_assessment")
-		}
-		if !utf8.ValidString(outcome.Evidence) {
-			return Result{}, invalidReply("schema")
-		}
-	}
-	if len(seen) != len(criteriaSet) {
-		return Result{}, invalidReply("missing_outcomes")
+	criteriaSet, err := validateOutcomes(reply.Outcomes, criteria)
+	if err != nil {
+		return Result{}, err
 	}
 	context, err := untrustedText(packet.Prompt)
 	if err != nil {

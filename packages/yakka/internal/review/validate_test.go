@@ -1,6 +1,7 @@
 package review
 
 import (
+	"bytes"
 	"strings"
 	"testing"
 )
@@ -91,23 +92,47 @@ func TestValidateReplyRejectsUnwrappedTrailingAndProse(t *testing.T) {
 
 func TestValidateReplyReasonsAreSpecific(t *testing.T) {
 	for name, tc := range map[string]struct {
-		raw  string
-		want string
+		raw      string
+		want     string
+		criteria []Criterion
 	}{
-		"parse":              {"not json", "json_parse"},
-		"trailing":           {validReplyJSON() + " trailing", "trailing_data"},
-		"unknown field":      {strings.Replace(validReplyJSON(), `"coverage":"complete"`, `"coverage":"complete","extra":true`, 1), "unknown_field"},
-		"missing field":      {strings.Replace(validReplyJSON(), `"limitations":[],`, "", 1), "missing_field"},
-		"missing outcomes":   {strings.Replace(validReplyJSON(), `{"outcomes":[{"criterion_id":"I1","assessment":"met","evidence":"reviewed"}],`, `{"outcomes":[],`, 1), "missing_outcomes"},
-		"invalid assessment": {strings.Replace(validReplyJSON(), `"assessment":"met"`, `"assessment":"maybe"`, 1), "invalid_assessment"},
-		"invalid finding":    {strings.Replace(validReplyJSON(), `"rationale":"The changed function has a correctness issue."`, `"rationale":""`, 1), "invalid_finding"},
+		"parse":               {"not json", "json_parse", nil},
+		"trailing":            {validReplyJSON() + " trailing", "trailing_data", nil},
+		"unknown field":       {strings.Replace(validReplyJSON(), `"coverage":"complete"`, `"coverage":"complete","extra":true`, 1), "unknown_field", nil},
+		"missing field":       {strings.Replace(validReplyJSON(), `"limitations":[],`, "", 1), "missing_field", nil},
+		"missing outcomes":    {strings.Replace(validReplyJSON(), `{"outcomes":[{"criterion_id":"I1","assessment":"met","evidence":"reviewed"}],`, `{"outcomes":[],`, 1), "missing_outcomes", nil},
+		"invalid coverage":    {strings.Replace(validReplyJSON(), `"coverage":"complete"`, `"coverage":"unknown"`, 1), "invalid_coverage", nil},
+		"empty criterion id":  {validReplyJSON(), "empty_criterion_id", []Criterion{{ID: ""}}},
+		"unknown criterion":   {strings.Replace(validReplyJSON(), `"criterion_id":"I1"`, `"criterion_id":"I2"`, 1), "unknown_criterion", nil},
+		"duplicate criterion": {strings.Replace(validReplyJSON(), `"outcomes":[{"criterion_id":"I1","assessment":"met","evidence":"reviewed"}]`, `"outcomes":[{"criterion_id":"I1","assessment":"met","evidence":"reviewed"},{"criterion_id":"I1","assessment":"partial","evidence":"reviewed"}]`, 1), "duplicate_criterion", nil},
+		"invalid assessment":  {strings.Replace(validReplyJSON(), `"assessment":"met"`, `"assessment":"maybe"`, 1), "invalid_assessment", nil},
+		"invalid finding":     {strings.Replace(validReplyJSON(), `"rationale":"The changed function has a correctness issue."`, `"rationale":""`, 1), "invalid_finding", nil},
 	} {
 		t.Run(name, func(t *testing.T) {
-			_, err := ValidateReply([]byte(tc.raw), testPacket(), []Criterion{{ID: "I1"}})
+			criteria := tc.criteria
+			if criteria == nil {
+				criteria = []Criterion{{ID: "I1"}}
+			}
+			_, err := ValidateReply([]byte(tc.raw), testPacket(), criteria)
 			if got := InvalidReason(err); got != tc.want {
 				t.Fatalf("reason = %q; want %q (err=%v)", got, tc.want, err)
 			}
 		})
+	}
+}
+
+func TestValidateReplyRejectsInvalidEvidence(t *testing.T) {
+	raw := bytes.Replace([]byte(validReplyJSON()), []byte("reviewed"), []byte("a\xffb"), 1)
+	_, err := ValidateReply(raw, testPacket(), []Criterion{{ID: "I1"}})
+	if got := InvalidReason(err); got != "invalid_evidence" {
+		t.Fatalf("reason = %q; want invalid_evidence", got)
+	}
+}
+
+func TestValidateOutcomesRejectsInvalidEvidence(t *testing.T) {
+	_, err := validateOutcomes([]Outcome{{CriterionID: "I1", Assessment: "met", Evidence: string([]byte{0xff})}}, []Criterion{{ID: "I1"}})
+	if got := InvalidReason(err); got != "invalid_evidence" {
+		t.Fatalf("reason = %q; want invalid_evidence (err=%v)", got, err)
 	}
 }
 
@@ -125,6 +150,24 @@ func TestValidateReplyRejectsMalformedCoverageAndSchema(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			if _, err := ValidateReply([]byte(raw), testPacket(), []Criterion{{ID: "I1"}}); err == nil {
 				t.Fatal("expected invalid_output")
+			}
+		})
+	}
+}
+
+func TestValidateReplyRedactsEnvAssignmentAtValueStart(t *testing.T) {
+	for name, value := range map[string]string{
+		"plain value":      "API_KEY=abcd1234efgh5678 set",
+		"escaped key form": `{\"API_KEY\":\"abcd1234efgh5678\"}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			raw := strings.Replace(validReplyJSON(), supportedExcerpt, value, 1)
+			result, err := ValidateReply([]byte(raw), testPacket(), []Criterion{{ID: "I1"}})
+			if err != nil {
+				t.Fatalf("valid JSON with an env-style value must validate: %v", err)
+			}
+			if !result.ReplyRedacted || strings.Contains(result.Findings[0].Evidence, "abcd1234efgh5678") || !strings.Contains(result.Findings[0].Evidence, "[REDACTED:env_assignment]") {
+				t.Fatalf("result=%+v", result)
 			}
 		})
 	}

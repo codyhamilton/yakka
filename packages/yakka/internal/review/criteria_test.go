@@ -161,6 +161,59 @@ func TestResolveExplicitNoneAndNoCrossTenant(t *testing.T) {
 	if err != nil || text.CriteriaText != "one\ntwo" || text.Record.Source != "explicit" || text.Record.ContentHash != keys.ContentHash([]byte("one\ntwo")) {
 		t.Fatalf("explicit text: %+v %v", text, err)
 	}
+	if len(text.Criteria) != 2 || text.Criteria[0] != (Criterion{ID: "X1", Text: "one"}) || text.Criteria[1] != (Criterion{ID: "X2", Text: "two"}) {
+		t.Fatalf("explicit synthetic ids: %+v", text.Criteria)
+	}
+}
+
+func TestExplicitCriteriaSyntheticIdsRenderAndValidate(t *testing.T) {
+	tn := openCriteriaTenant(t)
+	ctx := context.Background()
+	for _, tc := range []struct {
+		name string
+		text []string
+		want []Criterion
+	}{
+		{"single", []string{"Ship Phase 3"}, []Criterion{{ID: "X1", Text: "Ship Phase 3"}}},
+		{"multiple", []string{"first criterion", "second criterion"}, []Criterion{{ID: "X1", Text: "first criterion"}, {ID: "X2", Text: "second criterion"}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			resolved, err := ResolveCriteria(ctx, tn, CriteriaRequest{RepoID: "repo", CriteriaText: tc.text})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(resolved.Criteria) != len(tc.want) {
+				t.Fatalf("criteria = %+v", resolved.Criteria)
+			}
+			for i := range tc.want {
+				if resolved.Criteria[i] != tc.want[i] {
+					t.Fatalf("criteria[%d] = %+v; want %+v", i, resolved.Criteria[i], tc.want[i])
+				}
+			}
+			packet := mustBuild(t, Input{Capture: capture(fileDiff("pkg/a.go", "safe change")), Criteria: resolved.Criteria, CriteriaText: resolved.CriteriaText})
+			for _, c := range tc.want {
+				if !strings.Contains(string(packet.Prompt), c.ID+": "+c.Text) {
+					t.Fatalf("prompt missing %s: %s", c.ID, packet.Prompt)
+				}
+			}
+			outcomes := make([]map[string]string, len(tc.want))
+			for i, c := range tc.want {
+				outcomes[i] = map[string]string{"criterion_id": c.ID, "assessment": "met", "evidence": "checked"}
+			}
+			outcomesJSON, err := json.Marshal(outcomes)
+			if err != nil {
+				t.Fatal(err)
+			}
+			reply := []byte(`{"outcomes":` + string(outcomesJSON) + `,"findings":[],"limitations":[],"coverage":"complete"}`)
+			if _, err := ValidateReply(reply, packet, resolved.Criteria); err != nil {
+				t.Fatalf("synthetic id outcomes must validate: %v", err)
+			}
+			empty := []byte(`{"outcomes":[],"findings":[],"limitations":[],"coverage":"complete"}`)
+			if _, err := ValidateReply(empty, packet, resolved.Criteria); InvalidReason(err) != "missing_outcomes" {
+				t.Fatalf("zero outcomes reason = %q; want missing_outcomes (err=%v)", InvalidReason(err), err)
+			}
+		})
+	}
 }
 
 func TestResolveRefusalCodesAndRejectedFallback(t *testing.T) {
