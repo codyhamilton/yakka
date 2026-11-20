@@ -1530,7 +1530,7 @@ func TestRunRecordsOnlyActualCost(t *testing.T) {
 }
 
 func TestReviewTimeoutBudgetRelationship(t *testing.T) {
-	if defaultAttemptTimeout != 10*time.Minute {
+	if defaultAttemptTimeout != 15*time.Minute {
 		t.Fatalf("attempt timeout = %v", defaultAttemptTimeout)
 	}
 	if reviewWallTime < 2*defaultAttemptTimeout {

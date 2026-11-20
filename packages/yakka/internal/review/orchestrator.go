@@ -30,16 +30,17 @@ const (
 	// clients poll GET /v1/reviews/{id} until the attempt reaches a terminal status.
 	StatusPending = "pending"
 	StatusRunning = "running"
-	// AttemptTimeout bounds one provider attempt. It was raised from 60s
-	// after seven high-effort reviews timed out at exactly 60s. Tune it again
-	// once high/xhigh/max wall times have been measured.
-	AttemptTimeout = 10 * time.Minute
+	// AttemptTimeout bounds one provider attempt. It was raised from 60s after
+	// seven high-effort reviews timed out at exactly 60s, then to 15m after
+	// xhigh/max reviews at the 100k output cap took about 400s. At 128k output
+	// that is about 520s, too close to the old 10-minute attempt deadline.
+	AttemptTimeout = 15 * time.Minute
 	// AttemptTimeoutHeadroom lets the HTTP transport and outer MCP call finish
 	// response handling after the provider attempt deadline.
 	AttemptTimeoutHeadroom = 30 * time.Second
 	defaultAttemptTimeout  = AttemptTimeout
 	// reviewWallTime covers both allowed attempts plus a little overhead so a
-	// single 10-minute attempt is never cut short by the outer deadline.
+	// single 15-minute attempt is never cut short by the outer deadline.
 	reviewWallTime = 2*defaultAttemptTimeout + 30*time.Second
 )
 

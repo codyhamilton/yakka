@@ -113,6 +113,9 @@ func TestBuildTruncatesWholeFilesInPolicyOrder(t *testing.T) {
 }
 
 func TestBuildStaysUnderTokenBudgetAndRecordsEstimate(t *testing.T) {
+	if maxInputTokens != 92000 {
+		t.Fatalf("input token budget = %d; want 92000", maxInputTokens)
+	}
 	diff := fileDiff("pkg/a.go", strings.Repeat("x", 20000)) + fileDiff("pkg/a_test.go", strings.Repeat("y", 20000))
 	p := mustBuild(t, Input{Capture: capture(diff)})
 	if p.InputTokenEstimate <= 0 || p.InputTokenEstimate > maxInputTokens {

@@ -200,14 +200,16 @@ Include exactly one outcome for every supplied criterion id, including an empty 
 
 // maxInputTokens is the hard ceiling on estimated input tokens for the one-shot
 // Messages request. Anthropic has no offline tokenizer here, so Build uses a
-// calibrated, deliberately conservative estimate. The smoke case review
-// 8ae31155 measured 39615 actual input tokens for a packet the old one-token-
-// per-three-bytes formula estimated at 32490, i.e. about 2.46 bytes per real
-// token. Estimating at about 2.4 bytes per token over-counts that case rather
-// than under-counting it, keeping the packet below the real ceiling.
+// calibrated, deliberately conservative estimate at about 2.4 bytes per token.
 // The policy-ordered trim loop keeps the whole assembled prompt under this
 // value; only an irreducible prompt that still exceeds it is refused.
-const maxInputTokens = 100000
+//
+// The estimate still undercounts real input by 4.7-6.7% on large packets:
+// review aea53ede was trimmed to an estimated 94570 tokens but the provider
+// billed 100920 actual, crossing the over-100k input price tier (5x price).
+// A 92000 budget keeps billed input under 100k even at that undercount, and
+// stays uniform across efforts so trial arms remain paired.
+const maxInputTokens = 92000
 
 // Estimate ratio in twelfths: 12 bytes per 5 estimated tokens is about 2.4
 // bytes per token. Integer-only, rounding up so the estimate over-counts.

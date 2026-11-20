@@ -30,9 +30,11 @@ const (
 	claudeAPIVersion  = "2023-06-01"
 	maxReplyBytes     = 2 << 20
 	maxPacketBytes    = 2 << 20
-	// maxTokens is a temporary trial cap. Lower it once real output_tokens at
-	// high/xhigh/max have been measured.
-	maxTokens = 100000
+	// maxTokens is the model's synchronous output ceiling for claude-haiku-5-5.
+	// Thinking tokens count toward max_tokens, so trial reviews at xhigh/max
+	// stopped at exactly the previous 100k cap with stop_reason max_tokens. One
+	// value for every effort is correct: unused tokens are not billed.
+	maxTokens = 128000
 )
 
 // ProviderStatus is a safe, body-free provider failure classification.
