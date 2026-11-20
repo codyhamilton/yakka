@@ -151,8 +151,8 @@ export function createInspector({ doc = globalThis.document, router, onAction = 
     status.setAttribute('aria-live', 'polite');
 
     element.append(header, facts, actions, status);
-    const first = element.querySelector('.workspace-inspector-close') || element.querySelector('button');
-    first?.focus?.({ preventScroll: true });
+    element.tabIndex = -1;
+    element.focus?.({ preventScroll: true });
   }
 
   function onKeyDown(event) {
