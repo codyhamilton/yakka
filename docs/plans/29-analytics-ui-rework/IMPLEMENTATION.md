@@ -113,3 +113,22 @@ Test fixtures updated for the new schema: `reads_test.go` drops the migration-10
 - **Feedback.** All five Phase 2 briefs and all five unit reports returned `state: delivered`, `screen: pass by jev-1.13.0`; scoring is off on the service, so no scores were returned. No flagged checks.
 
 Phase 2 status: closed (2026-11-21 05:51 AEST). Commit trailer `Yakka-Phase: 29-analytics-ui-rework:2`.
+
+## Phase 3 — refinement
+
+Refined 2026-11-21 from the Phase 3 outcome, the "Dense workspace and theme" contract and the Phase 1/2 records. Phase 1 closed `f5fe52fd`, Phase 2 closed `877f8195`. No product code changed in this run; the Units list is in `DESIGN.md` § Phase 3 Units.
+
+| Unit | Brief | Wave | Depends on |
+| --- | --- | --- | --- |
+| phase3-01 | `briefs/phase3-01-theme-family.md` | 1 | — |
+| phase3-02 | `briefs/phase3-02-dense-shell.md` | 1 | 01 (token names, pinned) |
+| phase3-03 | `briefs/phase3-03-component-density.md` | 1 | 01 (token names, pinned) |
+| phase3-04 | `briefs/phase3-04-acceptance.md` | 2 | 01, 02, 03 |
+
+- **Ownership.** `phase3-01` owns `charts.css` and the chart token/canvas read; `phase3-02` owns `index.html`, `app.css`, `workspace.css`, `app.js` and `panel-frame.js`; `phase3-03` owns every per-panel/explorer stylesheet. The three wave-1 units are path-disjoint. `phase3-02` adds the `/css/charts.css` link so the one token family reaches the document; the canonical token names are pinned in the `phase3-01`/`02`/`03` briefs so the parallel work does not drift.
+- **Carried items placed.** None becomes a Phase 3 unit. (1) The committed retained-workload record's `source: synthetic` and the unmeasured `YAKKA_RETAINED_LEDGER` path are a Phase 2 measurement property: the same harness refreshes the record, and Phase 3 acceptance uses the local real-Go fixture, not the retained workload. (2) Full-population session-scatter provenance (7,440 at retained scale, ~40 ms, SQLite variable limit on a much larger window) is Phase 2 retained-query behaviour; no shell/theme clause touches it. (3) The tenant-global SQLite cache/mmap/temp-store pragmas are server configuration, bounded for the EVIDENCE scale; not a presentation obligation. All remain recorded in the Phase 2 § Carried section and are not reopened.
+- **Acceptance.** `phase3-04` commits a real-Go real-Chromium suite (phase1-01 two-tenant harness, tenant `plan29-a`/`plan29-b`, no stubs) plus `tests/plan29/phase3-measurements.json` recording client/main widths at 1920/1366, gutter, row height, panel gap, plot height, both themes' resolved tokens, and the sampled canvas RGBA. It also runs the gallery/palette, workspace/identity, static-shell and release-record regressions. No timing assertions.
+- **Phase 1 gate.** `gate: production parity canvas sampling needs an authenticated deployed UI session` remains the stale Phase 1 line. Phase 3 verification will do the separate read-only deployed parity check described for the orchestrator (trial tenant `test`, `YAKKA_TRIAL_TENANT_TOKEN` from `/home/codyh/.config/yakka/trial.env`, GET-only, no token logging, canvas-pixel sample); if the remote 403s or the UI is unreachable it records `gate: production parity <reason>` and continues. No brief depends on it.
+- **Feedback.** All four Phase 3 briefs returned `state: delivered`, `screen: pass by jev-1.13.0`. Scoring is off on the service, so no scores were returned.
+- **Refinement verdict.** Proceed: four units, three in parallel in wave 1, `phase3-04` after all three. No design bounce.
+- **Gates.** `gate: none` for this refinement. The build needs Go 1.27.1 via `GOTOOLCHAIN=auto`, Chromium 1243/playwright-core under the documented `NODE_PATH`, and scratch under the worktree's ignored `.scratch/`; all are available in this environment.

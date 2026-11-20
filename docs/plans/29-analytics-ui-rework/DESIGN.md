@@ -203,6 +203,22 @@ Carried from Phase 1: the all-zero `commits`/`unpriced_calls` scatter marginals 
 - Approach: known — retain the route/chart systems, replace centered geometry and duplicated chrome, establish inherited theme tokens across light/shadow DOM and verify rendered states.
 - Depends on: Phases 1 and 2, so visual acceptance exercises real observations.
 
+#### Phase 3 Units
+
+Four units in two waves. Paths are disjoint within wave 1; `phase3-04` follows all three. The read-only production-parity check remains an orchestrator verification step, not a unit, and no unit depends on it.
+
+**Wave 1 — parallel**
+
+- `phase3-01` — One inherited active-theme token family across document, shadow roots and canvas (D16). Brief: `briefs/phase3-01-theme-family.md`. Depends on: nothing. Runs alongside: `phase3-02`, `phase3-03`.
+- `phase3-02` — Full-width dense shell, 12-column grid, compact scope/coverage rows and inspector column. Brief: `briefs/phase3-02-dense-shell.md`. Depends on: `phase3-01` for the canonical token names (pinned in both briefs; no path collision). Runs alongside: `phase3-01`, `phase3-03`.
+- `phase3-03` — Dense component surfaces: tables, panels and explorer chrome consume the active-token family (D16 light-DOM surfaces). Brief: `briefs/phase3-03-component-density.md`. Depends on: `phase3-01` for the canonical token names. Runs alongside: `phase3-01`, `phase3-02`.
+
+**Wave 2**
+
+- `phase3-04` — Real-Go real-Chromium Phase 3 acceptance and committed geometry/token record. Brief: `briefs/phase3-04-acceptance.md`. Depends on: `phase3-01`, `phase3-02`, `phase3-03`. Runs alongside: nothing.
+
+Carried from Phase 2, none becomes a Phase 3 unit: the synthetic `source`/unmeasured `YAKKA_RETAINED_LEDGER` record is a Phase 2 measurement property refreshed by the same harness, not a visual/theme obligation; the full-population session-scatter provenance and its SQLite variable-limit note are retained-query behaviour already owned by Phase 2; the tenant-global DSN pragmas are server configuration outside the shell/theme contract. All three stay recorded in `IMPLEMENTATION.md` for the Phase 2 record and are not reopened here.
+
 ## Provenance Notes
 
 Ground was independently delegated for UI/request and API/storage recon, then tested with current Go and Chromium. The original ledger was never opened for writing: SQLite backup was migrated only inside this worktree. No complete bodies, tokens, cookies or personal row dumps enter the design artifacts. A browser-only schema transformation and configured-check comparison exposed defects hidden behind the initial failures; those are explicitly labeled diagnostic interventions in EVIDENCE and are not shipped fixes.
