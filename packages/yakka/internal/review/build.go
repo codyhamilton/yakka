@@ -200,22 +200,25 @@ Include exactly one outcome for every supplied criterion id, including an empty 
 
 // maxInputTokens is the hard ceiling on estimated input tokens for the one-shot
 // Messages request. Anthropic has no offline tokenizer here, so Build uses a
-// calibrated, deliberately conservative estimate at about 2.4 bytes per token.
+// calibrated, deliberately conservative estimate at about 2.05 bytes per token.
 // The policy-ordered trim loop keeps the whole assembled prompt under this
 // value; only an irreducible prompt that still exceeds it is refused.
 //
-// The estimate still undercounts real input by 4.7-6.7% on large packets:
-// review aea53ede was trimmed to an estimated 94570 tokens but the provider
-// billed 100920 actual, crossing the over-100k input price tier (5x price).
-// A 92000 budget keeps billed input under 100k even at that undercount, and
+// The Plan 28 Phase 5 trial (plan28-p5-20261121, 348 reviews with both estimate
+// and actual) measured median actual/estimate 0.99 but a worst case of x1.154:
+// 90975 estimated -> 104997 billed, 91473 -> 103239, 88813 -> 98197, and
+// 41804 -> 47079 (x1.126). Five reviews billed over 100k input and paid the 5x
+// price tier. The worst packet billed about 2.08 bytes per token, so at 2.05 a
+// 92000-token budget caps the prompt at 188600 bytes, which bills about 90700
+// tokens and stays under 100k even at the observed worst undercount. The budget
 // stays uniform across efforts so trial arms remain paired.
 const maxInputTokens = 92000
 
-// Estimate ratio in twelfths: 12 bytes per 5 estimated tokens is about 2.4
-// bytes per token. Integer-only, rounding up so the estimate over-counts.
+// Estimate ratio: 41 bytes per 20 estimated tokens is 2.05 bytes per token.
+// Integer-only, rounding up so the estimate over-counts.
 const (
-	estimateBytesPerTokenNum = 12
-	estimateBytesPerTokenDen = 5
+	estimateBytesPerTokenNum = 41
+	estimateBytesPerTokenDen = 20
 )
 
 func estimateInputTokens(b []byte) int {
