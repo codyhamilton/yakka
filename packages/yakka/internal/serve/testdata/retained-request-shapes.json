@@ -1,0 +1,175 @@
+{
+  "version": 1,
+  "note": "Plan 29 Phase 2 retained-history request shapes. Every shape uses All history with a frozen to instant and never sends win. rows means the response carries at least one result row/group; rows_eq is an exact returned-row count; refusal means a documented capability refusal naming an unsupported dimension/field/mode/check/scorer. The oracle key names the RetainedSummary field group the replay compares against.",
+  "frozen_to": "2026-10-22T23:19:51Z",
+  "shapes": [
+    {
+      "label": "plan-list-limit-1",
+      "path": "/v1/analytics/entities?grain=plan&limit=1&sort=last_ts%3Adesc&all=1&to=2026-10-22T23%3A19%3A51Z",
+      "expect": "rows_eq",
+      "rows_eq": 1,
+      "oracle": "plan_population"
+    },
+    {
+      "label": "plan-list-limit-10",
+      "path": "/v1/analytics/entities?grain=plan&limit=10&sort=last_ts%3Adesc&all=1&to=2026-10-22T23%3A19%3A51Z",
+      "expect": "rows_eq",
+      "rows_eq": 10,
+      "oracle": "plan_population"
+    },
+    {
+      "label": "plan-list-limit-100",
+      "path": "/v1/analytics/entities?grain=plan&limit=100&sort=last_ts%3Adesc&all=1&to=2026-10-22T23%3A19%3A51Z",
+      "expect": "rows_eq",
+      "rows_eq": 100,
+      "oracle": "plan_population"
+    },
+    {
+      "label": "plan-list-sort-last-ts",
+      "path": "/v1/analytics/entities?grain=plan&limit=100&sort=last_ts%3Adesc&all=1&to=2026-10-22T23%3A19%3A51Z",
+      "expect": "rows",
+      "min_rows": 1,
+      "oracle": "plan_population"
+    },
+    {
+      "label": "plan-list-sort-associated-cost",
+      "path": "/v1/analytics/entities?grain=plan&limit=100&sort=associated_cost_usd%3Adesc&all=1&to=2026-10-22T23%3A19%3A51Z",
+      "expect": "rows",
+      "min_rows": 1,
+      "oracle": "plan_population"
+    },
+    {
+      "label": "plan-list-sort-executions-unreported",
+      "path": "/v1/analytics/entities?grain=plan&limit=100&sort=executions_unreported%3Adesc&all=1&to=2026-10-22T23%3A19%3A51Z",
+      "expect": "rows",
+      "min_rows": 1,
+      "oracle": "plan_population"
+    },
+    {
+      "label": "plan-scatter-cost-artifacts",
+      "path": "/v1/analytics/entities?grain=plan&mode=scatter&fields=associated_cost_usd%2Cartifacts&all=1&to=2026-10-22T23%3A19%3A51Z",
+      "expect": "rows",
+      "min_rows": 1,
+      "oracle": "plan_population"
+    },
+    {
+      "label": "plan-detail-sessions",
+      "path": "/v1/analytics/entity?grain=plan&repo_id=repo-00&plan=plan-000&collection=sessions&limit=100&all=1&to=2026-10-22T23%3A19%3A51Z",
+      "expect": "rows",
+      "min_rows": 57,
+      "oracle": "plan_detail_sessions"
+    },
+    {
+      "label": "plan-detail-events",
+      "path": "/v1/analytics/entity?grain=plan&repo_id=repo-00&plan=plan-000&collection=events&limit=100&all=1&to=2026-10-22T23%3A19%3A51Z",
+      "expect": "rows",
+      "min_rows": 1,
+      "oracle": "plan_associations"
+    },
+    {
+      "label": "plan-detail-artifacts",
+      "path": "/v1/analytics/entity?grain=plan&repo_id=repo-00&plan=plan-000&collection=artifacts&limit=100&all=1&to=2026-10-22T23%3A19%3A51Z",
+      "expect": "rows",
+      "min_rows": 1,
+      "oracle": "plan_population"
+    },
+    {
+      "label": "plan-detail-executions",
+      "path": "/v1/analytics/entity?grain=plan&repo_id=repo-00&plan=plan-000&collection=executions&limit=100&all=1&to=2026-10-22T23%3A19%3A51Z",
+      "expect": "rows",
+      "min_rows": 1,
+      "oracle": "plan_population"
+    },
+    {
+      "label": "workflow-plan-rank",
+      "path": "/v1/analytics/entities?grain=plan&limit=12&sort=associated_cost_usd%3Adesc&all=1&to=2026-10-22T23%3A19%3A51Z",
+      "expect": "rows",
+      "min_rows": 1,
+      "oracle": "plan_population"
+    },
+    {
+      "label": "workflow-activity-list",
+      "path": "/v1/analytics/activity?mode=list&limit=100&all=1&to=2026-10-22T23%3A19%3A51Z",
+      "expect": "rows",
+      "min_rows": 1,
+      "oracle": "sessions"
+    },
+    {
+      "label": "workflow-river",
+      "path": "/v1/analytics/activity?mode=list&limit=50&all=1&to=2026-10-22T23%3A19%3A51Z",
+      "expect": "rows",
+      "min_rows": 1,
+      "oracle": "sessions"
+    },
+    {
+      "label": "conversation-dist-cost-session-repo",
+      "path": "/v1/analytics/distribution?measure=cost_usd&grain=conversation&dim=session_repo&all=1&to=2026-10-22T23%3A19%3A51Z",
+      "expect": "rows",
+      "min_rows": 1,
+      "oracle": "usage_groups"
+    },
+    {
+      "label": "conversation-dist-cost-model",
+      "path": "/v1/analytics/distribution?measure=cost_usd&grain=conversation&dim=model&all=1&to=2026-10-22T23%3A19%3A51Z",
+      "expect": "rows",
+      "min_rows": 1,
+      "oracle": "usage_groups"
+    },
+    {
+      "label": "conversation-dist-cost-harness",
+      "path": "/v1/analytics/distribution?measure=cost_usd&grain=conversation&dim=harness&all=1&to=2026-10-22T23%3A19%3A51Z",
+      "expect": "rows",
+      "min_rows": 1,
+      "oracle": "usage_groups"
+    },
+    {
+      "label": "conversation-dist-cost-session-model",
+      "path": "/v1/analytics/distribution?measure=cost_usd&grain=conversation&dim=session_model&all=1&to=2026-10-22T23%3A19%3A51Z",
+      "expect": "rows",
+      "min_rows": 1,
+      "oracle": "usage_groups"
+    },
+    {
+      "label": "conversation-dist-tokens-in",
+      "path": "/v1/analytics/distribution?measure=tokens_in&grain=conversation&all=1&to=2026-10-22T23%3A19%3A51Z",
+      "expect": "rows",
+      "min_rows": 1,
+      "oracle": "usage_groups"
+    },
+    {
+      "label": "call-dist-cost-harness",
+      "path": "/v1/analytics/distribution?measure=cost_usd&grain=call&dim=harness&all=1&to=2026-10-22T23%3A19%3A51Z",
+      "expect": "rows",
+      "min_rows": 1,
+      "oracle": "usage_groups"
+    },
+    {
+      "label": "session-scatter-cost-commits-unpriced",
+      "path": "/v1/analytics/entities?grain=session&mode=scatter&fields=cost_usd%2Ccommits%2Cunpriced_calls&all=1&to=2026-10-22T23%3A19%3A51Z",
+      "expect": "rows",
+      "min_rows": 1,
+      "oracle": "sessions"
+    },
+    {
+      "label": "session-scatter-cost-tokens",
+      "path": "/v1/analytics/entities?grain=session&mode=scatter&fields=cost_usd%2Ctokens_in&all=1&to=2026-10-22T23%3A19%3A51Z",
+      "expect": "rows",
+      "min_rows": 1,
+      "oracle": "sessions"
+    },
+    {
+      "label": "cost-treemap-harness-model",
+      "path": "/v1/analytics/query?measure=cost_usd&bucket=none&dim=harness&dim=model&top=100&all=1&to=2026-10-22T23%3A19%3A51Z",
+      "expect": "rows",
+      "min_rows": 32,
+      "oracle": "usage_groups"
+    },
+    {
+      "label": "artifact-band-mix",
+      "path": "/v1/analytics/entities?grain=artifact&mode=aggregate&stat=count&dim=band%3Aclarity&dim=kind&check=clarity&scorer=jev-1.13.0&limit=4&all=1&to=2026-10-22T23%3A19%3A51Z",
+      "expect": "rows",
+      "min_rows": 1,
+      "oracle": "scored_content"
+    }
+  ]
+}
