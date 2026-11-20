@@ -183,7 +183,6 @@ func usageQueryImpl(ctx context.Context, t *Tenant, f AnalyticsFilter, p QueryPa
 		top = 100
 	}
 	f2, ignored := def.applyFilters(f)
-	where, args := def.whereClause(AnalyticsFilter{From: f2.From, To: f2.To})
 	cte, sourceArgs := usageRowsWhere(f2)
 	value := "count(*)"
 	switch p.Measure {
@@ -202,12 +201,26 @@ func usageQueryImpl(ctx context.Context, t *Tenant, f AnalyticsFilter, p QueryPa
 	case "unpriced_calls":
 		value = "sum(1-wf_usage_priced(harness,model,tok_in,tok_out,tok_cache_read,tok_cache_write,tok_reasoning,cost_reported))"
 	}
-	qdef := measureDef{table: "facts", value: value, dims: []string{"harness", "repo_id", "model", "conversation_id"}, sourceSQL: "(" + cte + " SELECT harness,repo_id,model,conversation_id,ts,tok_in,tok_out,tok_cache_read,tok_cache_write,tok_reasoning,cost_reported FROM kept)", sourceArgs: sourceArgs}
-	// The source CTE already applied the usage-specific filter and message dedupe. The outer time
-	// predicate is neutral, retaining queryMeasure's rank/fold/bucket SQL without materializing calls.
-	_ = where
-	_ = args
-	res, err := t.queryMeasure(ctx, AnalyticsFilter{From: f.From, To: f.To, TZ: f.TZ}, p, qdef, top, bucket)
+	// Evaluate the deduplicated/priced source once on this request's connection, then reuse the
+	// materialized kept rows for every independent dimension rank and the final folded query. The
+	// source CTE already applied the usage-specific filter and message dedupe, so the outer time
+	// predicate is all queryMeasure needs to add.
+	conn, err := t.rdb.Conn(ctx)
+	if err != nil {
+		return QueryResult{}, err
+	}
+	defer conn.Close()
+	if _, err := conn.ExecContext(ctx, `CREATE TEMP TABLE IF NOT EXISTS usage_kept(
+		harness TEXT, repo_id TEXT, model TEXT, conversation_id TEXT, ts REAL,
+		tok_in INTEGER, tok_out INTEGER, tok_cache_read INTEGER, tok_cache_write INTEGER,
+		tok_reasoning INTEGER, cost_reported REAL); DELETE FROM usage_kept`); err != nil {
+		return QueryResult{}, err
+	}
+	if _, err := conn.ExecContext(ctx, cte+" INSERT INTO usage_kept SELECT harness,repo_id,model,conversation_id,ts,tok_in,tok_out,tok_cache_read,tok_cache_write,tok_reasoning,cost_reported FROM kept", sourceArgs...); err != nil {
+		return QueryResult{}, err
+	}
+	qdef := measureDef{table: "facts", value: value, dims: []string{"harness", "repo_id", "model", "conversation_id"}, sourceSQL: "usage_kept"}
+	res, err := t.queryMeasureOn(ctx, conn, AnalyticsFilter{From: f.From, To: f.To, TZ: f.TZ}, p, qdef, top, bucket)
 	if err != nil {
 		return QueryResult{}, err
 	}
