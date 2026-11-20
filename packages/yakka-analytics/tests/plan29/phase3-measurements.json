@@ -1,0 +1,113 @@
+{
+  "phase": 3,
+  "routes": [
+    "/",
+    "/b/pulse",
+    "/b/trends",
+    "/b/cost",
+    "/b/quality",
+    "/b/tools",
+    "/b/workflow",
+    "/b/compare",
+    "/b/scatter",
+    "/plans",
+    "/sessions",
+    "/ledger",
+    "/ops",
+    "/artifact",
+    "/sessions/<id>",
+    "/plans/<repo>/<plan>"
+  ],
+  "viewports": [
+    1920,
+    1366,
+    768,
+    390
+  ],
+  "geometry": {
+    "390": {
+      "clientWidth": 390,
+      "mainWidth": 374,
+      "gutter": 8,
+      "rowHeight": 27,
+      "panelGap": 8,
+      "plotHeight": 240
+    },
+    "768": {
+      "clientWidth": 768,
+      "mainWidth": 744,
+      "gutter": 12,
+      "rowHeight": 27,
+      "panelGap": 8,
+      "plotHeight": 240
+    },
+    "1366": {
+      "clientWidth": 1366,
+      "mainWidth": 1342,
+      "gutter": 12,
+      "rowHeight": 29,
+      "panelGap": 8,
+      "plotHeight": 240
+    },
+    "1920": {
+      "clientWidth": 1920,
+      "mainWidth": 1896,
+      "gutter": 12,
+      "rowHeight": 29,
+      "panelGap": 8,
+      "plotHeight": 240
+    }
+  },
+  "tokens": {
+    "light": {
+      "--yk-bg": "#eef1f4",
+      "--yk-surface": "#f4f6f8",
+      "--yk-surface-alt": "#e9edf1",
+      "--yk-text": "#18212f",
+      "--yk-muted": "#586579",
+      "--yk-border": "#d6dde7",
+      "--yk-grid": "#e6ebf2",
+      "--yk-focus": "#176b87",
+      "--yk-chart-surface": "#f4f6f8",
+      "--yk-chart-text": "#18212f",
+      "--yk-chart-grid": "#e6ebf2",
+      "--yk-tooltip-surface": "#111923",
+      "--yk-selected": "#dbeafe",
+      "--yk-excluded": "#f6dede"
+    },
+    "dark": {
+      "--yk-bg": "#111923",
+      "--yk-surface": "#1b2734",
+      "--yk-surface-alt": "#223141",
+      "--yk-text": "#edf3f8",
+      "--yk-muted": "#b5c0cc",
+      "--yk-border": "#405061",
+      "--yk-grid": "#2a3948",
+      "--yk-focus": "#83c9df",
+      "--yk-chart-surface": "#1b2734",
+      "--yk-chart-text": "#edf3f8",
+      "--yk-chart-grid": "#2a3948",
+      "--yk-tooltip-surface": "#0b1119",
+      "--yk-selected": "#23445a",
+      "--yk-excluded": "#3a2428"
+    }
+  },
+  "canvas": {
+    "light": [
+      244,
+      246,
+      248,
+      255
+    ],
+    "dark": [
+      27,
+      39,
+      52,
+      255
+    ]
+  },
+  "header": {
+    "light": "rgb(244, 246, 248)",
+    "dark": "rgb(27, 39, 52)"
+  }
+}
