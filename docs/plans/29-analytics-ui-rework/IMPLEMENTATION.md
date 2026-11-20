@@ -132,3 +132,19 @@ Refined 2026-11-21 from the Phase 3 outcome, the "Dense workspace and theme" con
 - **Feedback.** All four Phase 3 briefs returned `state: delivered`, `screen: pass by jev-1.13.0`. Scoring is off on the service, so no scores were returned.
 - **Refinement verdict.** Proceed: four units, three in parallel in wave 1, `phase3-04` after all three. No design bounce.
 - **Gates.** `gate: none` for this refinement. The build needs Go 1.27.1 via `GOTOOLCHAIN=auto`, Chromium 1243/playwright-core under the documented `NODE_PATH`, and scratch under the worktree's ignored `.scratch/`; all are available in this environment.
+
+## Phase 3 — Dense full-width views follow the active theme
+
+- Tool: OpenCode `opencode run` — model `opencode-go/deepseek-v4.1-flash`; build orchestrated in worktree `/home/codyh/workspace/yakka-build/29`
+- Start: 2026-11-21 06:12 AEST (Australia/Brisbane, UTC+10)
+- Branch: `feat/29-analytics-ui-rework`
+- Design baseline: `e5052a43`; Phase 1 closed `f5fe52fd`; Phase 2 closed `877f8195`; Phase 3 refinement `787507f5`
+- Units and waves: see `DESIGN.md` § Phase 3 Units.
+
+| Unit | Brief | Wave | Depends on |
+| --- | --- | --- | --- |
+| phase3-01 | `briefs/phase3-01-theme-family.md` | 1 | — |
+| phase3-02 | `briefs/phase3-02-dense-shell.md` | 1 | 01 (token names) |
+| phase3-03 | `briefs/phase3-03-component-density.md` | 1 | 01 (token names) |
+| phase3-04 | `briefs/phase3-04-acceptance.md` | 2 | 01, 02, 03 |
+
