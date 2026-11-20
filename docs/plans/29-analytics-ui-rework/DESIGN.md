@@ -150,6 +150,27 @@ Three phases; each is large enough for `refine` to produce separate bounded unit
 - Surfaces: `web/contract/{transport,url-state,session-gate}.js`, `web/js/app.js`, `web/js/{core,boards,panels,explorers}/` read/adapter boundaries; Go `internal/serve/analytics*`, `internal/store/session_entities.go`; existing browser/Go contract and fixture harnesses.
 - Approach: known — normalize actual wire capabilities, centralize context, repair the documented request/serializer/catalogue mismatches. Browser proof uses the real Go API with cookie sessions; stub-only tests cannot close this phase.
 - Depends on: nothing.
+- Carried from previous phase: none (first phase).
+
+#### Phase 1 Units
+
+Seven units in three waves. Paths are disjoint within a wave; a unit that shares a file with another runs in a later wave.
+
+**Wave 1 — parallel**
+
+- `phase1-01` — Real-Go authenticated two-tenant browser harness. Brief: `briefs/phase1-01-real-go-two-tenant-harness.md`. Depends on: nothing. Runs alongside: `phase1-02`, `phase1-05`.
+- `phase1-02` — One read context: tenant, resolved scope and coverage truth (D01, D04, D07, D14 client). Brief: `briefs/phase1-02-read-context.md`. Depends on: `phase1-01` for browser done evidence. Runs alongside: `phase1-01`, `phase1-05`.
+- `phase1-05` — Empty-ledger schema and coverage facts (D02, D14 server). Brief: `briefs/phase1-05-coverage.md`. Depends on: nothing for the Go code (`phase1-01` for the browser observable). Runs alongside: `phase1-01`, `phase1-02`.
+
+**Wave 2 — parallel**
+
+- `phase1-03` — Schema adapter boundary and route error containment (D03, D02 client handling, state contract). Brief: `briefs/phase1-03-schema-adapter.md`. Depends on: `phase1-01`, `phase1-02`. Runs alongside: `phase1-06`.
+- `phase1-06` — Catalogue parity, route score-series capability and session scatter fields (D06, D08 server, D17 server). Brief: `briefs/phase1-06-capability-parity.md`. Depends on: nothing for the Go code (`phase1-01` for the harness observable). Runs alongside: `phase1-03`.
+
+**Wave 3 — parallel**
+
+- `phase1-04` — Valid fields for Movers, session scatter, score strips and score trend (D05, D08 client, D09, D17 client). Brief: `briefs/phase1-04-field-validity.md`. Depends on: `phase1-01`, `phase1-03`, `phase1-06`. Runs alongside: `phase1-07`.
+- `phase1-07` — Plan identity/associated cost/events and conversation tool kinds (D15, D18). Brief: `briefs/phase1-07-plan-conversation.md`. Depends on: `phase1-01`, `phase1-06` (shared `analytics_entities.go`). Runs alongside: `phase1-04`.
 
 ### Phase 2 — Retained history is queryable and correct at useful latency
 
