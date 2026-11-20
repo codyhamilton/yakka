@@ -138,9 +138,10 @@ export function baselineKey(kind, check, scorer) {
 export function createBaselineCache({ transport, tenant = '', signal } = {}) {
   const cache = new Map();
   async function get(kind, check, scorer) {
-    const key = baselineKey(kind, check, scorer);
+    const key = `${tenant}\u001f${baselineKey(kind, check, scorer)}`;
     if (cache.has(key)) return cache.get(key);
     const params = new URLSearchParams({ kind, check, scorer, population: 'content' });
+    if (isCollectorMode() && tenant) params.set('tenant', tenant);
     const promise = (async () => {
       try {
         const { response, body } = await transport.request('baselines', { params, signal, stateKey: 'artifact-baselines' });

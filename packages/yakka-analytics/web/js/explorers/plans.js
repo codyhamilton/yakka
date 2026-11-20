@@ -133,13 +133,13 @@ export function cohortParam(scope = {}) {
 
 // Only contract filter names, the frozen window, sort, paging and the first
 // valid cohort are sent.
-export function planListParams({ state = {}, filters = PLAN_FILTERS, measures = PLAN_MEASURES, sort = DEFAULT_SORT, limit = null, cursor = '', now = Date.now() } = {}) {
+export function planListParams({ state = {}, filters = PLAN_FILTERS, measures = PLAN_MEASURES, sort = DEFAULT_SORT, limit = null, cursor = '', now = Date.now(), window = null } = {}) {
   const scope = readScope(state, filters);
   const params = new URLSearchParams();
-  const window = resolveWindow(scope, now);
-  if (window.all) params.set('all', '1');
-  if (window.from) params.set('from', window.from);
-  if (window.to) params.set('to', window.to);
+  const resolved = resolveWindow(scope, now, window);
+  if (resolved.all) params.set('all', '1');
+  if (resolved.from) params.set('from', resolved.from);
+  if (resolved.to) params.set('to', resolved.to);
   const tz = scope.tz || Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
   params.set('tz', tz);
   params.set('grain', 'plan');
@@ -467,9 +467,9 @@ export function parsePlanDetailPath(pathname = '') {
 function windowParams(state = {}, now = Date.now()) {
   const params = new URLSearchParams();
   const window = resolveWindow(state, now);
-  if (window.all) params.set('all', '1');
-  if (window.from) params.set('from', window.from);
-  if (window.to) params.set('to', window.to);
+  if (resolved.all) params.set('all', '1');
+  if (resolved.from) params.set('from', resolved.from);
+  if (resolved.to) params.set('to', resolved.to);
   params.set('tz', state.tz || Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC');
   return params;
 }
@@ -763,7 +763,7 @@ function detailTimestamp(value) {
   return new Date(number * 1000).toISOString().replace('T', ' ').replace('.000Z', ' UTC');
 }
 
-async function renderDetail(root, doc, { signal, identity } = {}) {
+async function renderDetail(root, doc, { signal, identity, tenant = '', readContext = null } = {}) {
   ensurePlansStyles(doc);
   root.replaceChildren();
   const state = readScope(decodeUrlState(globalThis.location?.search || ''));
@@ -791,10 +791,13 @@ async function renderDetail(root, doc, { signal, identity } = {}) {
     else signal.addEventListener('abort', () => controller.abort(), { once: true });
   }
   let disposed = false;
-  let tenant = '';
   let schema = null;
   let timelineFrame = null;
-  const baselineCache = createBaselineCache({ transport, tenant: '', signal: controller.signal });
+  let baselineCache = null;
+  function baselineFor() {
+    if (!baselineCache) baselineCache = createBaselineCache({ transport, tenant, signal: controller.signal });
+    return baselineCache;
+  }
   const artifactsState = { rows: [], next: '', population: null, bands: new Map() };
   const executionsState = { rows: [], next: '', population: null };
   const sessionsState = { rows: [], next: '', population: null, resolved: new Map() };
@@ -814,11 +817,11 @@ async function renderDetail(root, doc, { signal, identity } = {}) {
       const path = String(row?.id?.path || '');
       const kind = row?.l?.kind || artifactKind(path);
       for (const entry of artifactScoreEntries(row)) {
-        const key = `${path}\u001f${entry.check}`;
+        const key = `${tenant}\u001f${path}\u001f${entry.check}`;
         if (entry.band) { bands.set(key, entry.band); continue; }
         if (entry.score === null || entry.score === undefined) { bands.set(key, 'unscored'); continue; }
         if (!entry.scorer) { bands.set(key, 'baseline_unavailable'); continue; }
-        const baseline = await baselineCache.get(kind, entry.check, entry.scorer).catch(() => null);
+        const baseline = await baselineFor().get(kind, entry.check, entry.scorer).catch(() => null);
         bands.set(key, bandFor(entry.score, baseline));
       }
     }
@@ -856,7 +859,7 @@ async function renderDetail(root, doc, { signal, identity } = {}) {
     const rows = artifactsState.rows.map(row => {
       const path = String(row.id?.path || '');
       const scores = artifactScoreEntries(row).map(entry => {
-        const band = artifactsState.bands.get(`${path}\u001f${entry.check}`) || entry.band || 'baseline_unavailable';
+        const band = artifactsState.bands.get(`${tenant}\u001f${path}\u001f${entry.check}`) || entry.band || 'baseline_unavailable';
         const value = entry.score === null || entry.score === undefined ? 'unscored' : Number(entry.score).toFixed(2);
         const scorer = entry.scorer || 'scorer not served';
         return `${entry.check} ${value} · ${scorer} · ${band}`;
@@ -1137,12 +1140,14 @@ async function renderDetail(root, doc, { signal, identity } = {}) {
   let pageLimit = null;
 
   async function start() {
-    try {
-      const me = await transport.request('me', { signal: controller.signal, stateKey: 'plans-detail-me' });
-      tenant = rememberedTenant(me?.body || {});
-    } catch (error) {
-      if (error?.name === 'AbortError') return;
-      tenant = '';
+    if (!tenant) {
+      try {
+        const me = await transport.request('me', { signal: controller.signal, stateKey: 'plans-detail-me' });
+        tenant = rememberedTenant(me?.body || {});
+      } catch (error) {
+        if (error?.name === 'AbortError') return;
+        tenant = '';
+      }
     }
     if (disposed) return;
     try {
@@ -1249,15 +1254,15 @@ function detailContentFailure(result = {}) {
   return result.message || 'The content request failed.';
 }
 
-export function render(root, doc = globalThis.document, { signal } = {}) {
+export function render(root, doc = globalThis.document, { signal, tenant = '', readContext = null } = {}) {
   const route = parseRoute(globalThis.location?.pathname || '/', globalThis.location?.search || '');
   if (route?.kind === 'explorer' && route.explorer === 'plans' && route.plan) {
-    return renderDetail(root, doc, { signal, identity: route.plan });
+    return renderDetail(root, doc, { signal, identity: route.plan, tenant, readContext });
   }
-  return renderList(root, doc, { signal });
+  return renderList(root, doc, { signal, tenant, readContext });
 }
 
-export function renderList(root, doc = globalThis.document, { signal } = {}) {
+export function renderList(root, doc = globalThis.document, { signal, tenant = '', readContext = null } = {}) {
   ensurePlansStyles(doc);
   register();
   root.replaceChildren();
@@ -1288,7 +1293,6 @@ export function renderList(root, doc = globalThis.document, { signal } = {}) {
   root.append(scatterSection);
 
   let schema = null;
-  let tenant = '';
   let measures = PLAN_MEASURES.slice();
   let filters = PLAN_FILTERS.slice();
   let sort = parseSort(new URLSearchParams(globalThis.location?.search || '').get('sort'), measures);
@@ -1474,7 +1478,7 @@ export function renderList(root, doc = globalThis.document, { signal } = {}) {
     if (signal?.aborted) controller.abort();
     else signal?.addEventListener('abort', () => controller.abort(), { once: true });
     frame.setState('loading', { inFlight: 1 });
-    base = planListParams({ state: currentScope(), filters, measures, sort: sort.raw, limit: pageLimit });
+    base = planListParams({ state: currentScope(), filters, measures, sort: sort.raw, limit: pageLimit, window: readContext?.window || null });
     try {
       const { response, body: payload } = await transport.get('entities', base, { tenant, signal: controller.signal, stateKey: 'plans' });
       if (disposed || id !== runId) return;
@@ -1509,7 +1513,7 @@ export function renderList(root, doc = globalThis.document, { signal } = {}) {
     const id = ++runId;
     frame.setState('loading', { inFlight: 1 });
     try {
-      const { response, body: payload } = await transport.get('entities', planPageParams(base, { cursor, limit: pageLimit }), { signal: controller.signal, stateKey: 'plans' });
+      const { response, body: payload } = await transport.get('entities', planPageParams(base, { cursor, limit: pageLimit }), { tenant, signal: controller.signal, stateKey: 'plans' });
       if (disposed || id !== runId) return;
       const result = mapPlanListResponse({ status: response.status, body: payload });
       if (result.state !== 'ready') { result.retry = loadMore; frame.setState(result.state, result); return; }
@@ -1536,12 +1540,14 @@ export function renderList(root, doc = globalThis.document, { signal } = {}) {
   }
 
   async function start() {
-    try {
-      const me = await transport.request('me', { signal: controller.signal, stateKey: 'plans-me' });
-      tenant = rememberedTenant(me?.body || {});
-    } catch (error) {
-      if (error?.name === 'AbortError') { if (!disposed) frame.setState('cancelled', { retry: start }); return; }
-      tenant = '';
+    if (!tenant) {
+      try {
+        const me = await transport.request('me', { signal: controller.signal, stateKey: 'plans-me' });
+        tenant = rememberedTenant(me?.body || {});
+      } catch (error) {
+        if (error?.name === 'AbortError') { if (!disposed) frame.setState('cancelled', { retry: start }); return; }
+        tenant = '';
+      }
     }
     if (disposed) return;
     let body = null;

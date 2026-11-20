@@ -97,7 +97,7 @@ function ledgerTableCauses(state, push) {
   return emptyCauses({ filters });
 }
 
-export function render(root, doc = globalThis.document, { signal } = {}) {
+export function render(root, doc = globalThis.document, { signal, tenant = '', readContext = null } = {}) {
   loadStyles(doc);
   register();
   root.replaceChildren();
@@ -278,9 +278,9 @@ export function render(root, doc = globalThis.document, { signal } = {}) {
     if (signal?.aborted) controller.abort();
     else signal?.addEventListener('abort', () => controller.abort(), { once: true });
     frame.setState('loading', { inFlight: 1 });
-    base = filterToParameters(state, { now: Date.now() });
+    base = filterToParameters(state, { now: Date.now(), window: readContext?.window || null });
     try {
-      const result = await fetchLedgerPage({ transport, params: pageParameters(base, { limit: pageLimit }), signal: controller.signal, stateKey: 'ledger' });
+      const result = await fetchLedgerPage({ transport, params: pageParameters(base, { limit: pageLimit }), signal: controller.signal, stateKey: 'ledger', tenant });
       if (disposed || id !== runId) return;
       if (result.state === 'ready') {
         rows = result.rows;
@@ -314,7 +314,7 @@ export function render(root, doc = globalThis.document, { signal } = {}) {
     const id = ++runId;
     frame.setState('loading', { inFlight: 1 });
     try {
-      const result = await fetchLedgerPage({ transport, params: pageParameters(base, { cursor, limit: pageLimit }), signal: controller.signal, stateKey: 'ledger' });
+      const result = await fetchLedgerPage({ transport, params: pageParameters(base, { cursor, limit: pageLimit }), signal: controller.signal, stateKey: 'ledger', tenant });
       if (disposed || id !== runId) return;
       if (result.state !== 'ready') {
         result.retry = loadMore;
@@ -338,7 +338,7 @@ export function render(root, doc = globalThis.document, { signal } = {}) {
   // The page budget comes from the server schema; the client hard-codes none.
   async function resolvePageLimit() {
     try {
-      const { response, body } = await transport.schema('');
+      const { response, body } = await transport.schema(tenant);
       if (!response.ok || !body) return undefined;
       const budgets = body.budgets || {};
       const candidates = [budgets.explore_page_max, budgets.page_max].map(Number).filter(value => Number.isFinite(value) && value > 0);

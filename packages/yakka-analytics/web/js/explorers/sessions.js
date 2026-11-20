@@ -121,13 +121,13 @@ export function unappliedFilter(state = {}, filters = SESSION_FILTERS) {
 }
 
 // Only contract filter names, the frozen window, sort and paging are sent.
-export function sessionListParams({ state = {}, filters = SESSION_FILTERS, measures = SESSION_MEASURES, sort = DEFAULT_SORT, limit = null, cursor = '', now = Date.now() } = {}) {
+export function sessionListParams({ state = {}, filters = SESSION_FILTERS, measures = SESSION_MEASURES, sort = DEFAULT_SORT, limit = null, cursor = '', now = Date.now(), window = null } = {}) {
   const scope = readScope(state, filters);
   const params = new URLSearchParams();
-  const window = resolveWindow(scope, now);
-  if (window.all) params.set('all', '1');
-  if (window.from) params.set('from', window.from);
-  if (window.to) params.set('to', window.to);
+  const resolved = resolveWindow(scope, now, window);
+  if (resolved.all) params.set('all', '1');
+  if (resolved.from) params.set('from', resolved.from);
+  if (resolved.to) params.set('to', resolved.to);
   const tz = scope.tz || Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
   params.set('tz', tz);
   params.set('grain', 'session');
@@ -416,7 +416,7 @@ function listCauses(scope, push) {
   return emptyCauses({ filters });
 }
 
-function renderList(root, doc, { signal } = {}) {
+function renderList(root, doc, { signal, tenant = '', readContext = null } = {}) {
   ensureSessionsStyles(doc);
   root.replaceChildren();
   root.append(el(doc, 'h1', '', title));
@@ -617,9 +617,9 @@ function renderList(root, doc, { signal } = {}) {
     if (signal?.aborted) controller.abort();
     else signal?.addEventListener('abort', () => controller.abort(), { once: true });
     frame.setState('loading', { inFlight: 1 });
-    base = sessionListParams({ state: currentScope(), filters, measures, sort: sort.raw, limit: pageLimit });
+    base = sessionListParams({ state: currentScope(), filters, measures, sort: sort.raw, limit: pageLimit, window: readContext?.window || null });
     try {
-      const { response, body: payload } = await transport.get('entities', base, { signal: controller.signal, stateKey: 'sessions' });
+      const { response, body: payload } = await transport.get('entities', base, { tenant, signal: controller.signal, stateKey: 'sessions' });
       if (disposed || id !== runId) return;
       const result = mapSessionListResponse({ status: response.status, body: payload });
       if (result.state === 'ready') {
@@ -652,7 +652,7 @@ function renderList(root, doc, { signal } = {}) {
     const id = ++runId;
     frame.setState('loading', { inFlight: 1 });
     try {
-      const { response, body: payload } = await transport.get('entities', sessionPageParams(base, { cursor, limit: pageLimit }), { signal: controller.signal, stateKey: 'sessions' });
+      const { response, body: payload } = await transport.get('entities', sessionPageParams(base, { cursor, limit: pageLimit }), { tenant, signal: controller.signal, stateKey: 'sessions' });
       if (disposed || id !== runId) return;
       const result = mapSessionListResponse({ status: response.status, body: payload });
       if (result.state !== 'ready') { result.retry = loadMore; frame.setState(result.state, result); return; }
@@ -680,7 +680,7 @@ function renderList(root, doc, { signal } = {}) {
   async function start() {
     let body = null;
     try {
-      const result = await transport.schema('');
+      const result = await transport.schema(tenant);
       if (result.response.ok) body = result.body;
     } catch { body = null; }
     if (disposed) return;
@@ -746,7 +746,7 @@ function renderLinks(host, conversation, doc) {
   host.append(section);
 }
 
-function renderDetail(root, doc, { signal, id } = {}) {
+function renderDetail(root, doc, { signal, id, tenant = '', readContext = null } = {}) {
   ensureSessionsStyles(doc);
   register();
   root.replaceChildren();
@@ -778,7 +778,7 @@ function renderDetail(root, doc, { signal, id } = {}) {
     else signal?.addEventListener('abort', () => controller.abort(), { once: true });
     frame.setState('loading', { inFlight: 1 });
     try {
-      const result = await fetchConversation({ transport, id, scope: conversationScope(decodeUrlState(globalThis.location?.search || '')), signal: controller.signal, stateKey: 'sessions-detail' });
+      const result = await fetchConversation({ transport, id, scope: conversationScope(decodeUrlState(globalThis.location?.search || '')), signal: controller.signal, tenant, stateKey: 'sessions-detail' });
       if (disposed) return;
       if (result.state !== 'ready') { result.retry = loadDetail; frame.setState(result.state, result); return; }
       const conversation = result.conversation;
@@ -820,10 +820,10 @@ function renderDetail(root, doc, { signal, id } = {}) {
   return () => { disposed = true; controller.abort(); };
 }
 
-export function render(root, doc = globalThis.document, { signal } = {}) {
+export function render(root, doc = globalThis.document, { signal, tenant = '', readContext = null } = {}) {
   const route = parseRoute(globalThis.location?.pathname || '/', globalThis.location?.search || '');
-  if (route.sessionId) return renderDetail(root, doc, { signal, id: route.sessionId });
-  return renderList(root, doc, { signal });
+  if (route.sessionId) return renderDetail(root, doc, { signal, id: route.sessionId, tenant, readContext });
+  return renderList(root, doc, { signal, tenant, readContext });
 }
 
 export default { title, phase, render };

@@ -6,15 +6,127 @@ import { formatCount } from '../charts/formatters.js';
 import { cancelledState, emptyState, errorState, unsupportedState } from '../core/panel-state.js';
 import { emptyCausesFor, ensurePulseStyles, scopeParams, summaryIsEmpty, table, whenPanelBody } from './pulse-strips.js';
 
-function timeText(value) {
+// Explicit unit conversions. Event bounds (`first_ts`, `last_ts`) are Unix
+// seconds; receive time (`last_received_at`) is Unix nanoseconds. A string is
+// already an RFC3339 timestamp. There is no magnitude heuristic.
+export function eventTimeText(value) {
   if (value === null || value === undefined || value === '') return 'not supplied';
-  if (typeof value === 'number') {
-    const ms = value > 1e12 ? value : value * 1000;
-    const date = new Date(ms);
-    return Number.isFinite(date.getTime()) ? date.toISOString() : 'not supplied';
+  if (typeof value === 'string') {
+    const parsed = Date.parse(value);
+    return Number.isFinite(parsed) ? new Date(parsed).toISOString() : 'not supplied';
   }
-  const parsed = Date.parse(value);
-  return Number.isFinite(parsed) ? new Date(parsed).toISOString() : String(value);
+  const seconds = Number(value);
+  if (!Number.isFinite(seconds)) return 'not supplied';
+  const date = new Date(seconds * 1000);
+  return Number.isFinite(date.getTime()) ? date.toISOString() : 'not supplied';
+}
+
+export function receiveTimeText(value) {
+  if (value === null || value === undefined || value === '') return 'not supplied';
+  if (typeof value === 'string') {
+    const parsed = Date.parse(value);
+    return Number.isFinite(parsed) ? new Date(parsed).toISOString() : 'not supplied';
+  }
+  const nanos = Number(value);
+  if (!Number.isFinite(nanos)) return 'not supplied';
+  const date = new Date(Math.floor(nanos / 1e6));
+  return Number.isFinite(date.getTime()) ? date.toISOString() : 'not supplied';
+}
+
+export function ageText(ms) {
+  const value = Number(ms);
+  if (!Number.isFinite(value) || value < 0) return 'not supplied';
+  const minutes = Math.floor(value / 60000);
+  if (minutes < 1) return 'less than a minute';
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 48) return `${hours}h ${minutes % 60}m`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ${hours % 24}h`;
+}
+
+function epochSeconds(value) {
+  if (typeof value === 'string') {
+    const parsed = Date.parse(value);
+    return Number.isFinite(parsed) ? parsed / 1000 : null;
+  }
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+// The retained observations themselves, with explicit units. A schema without
+// `facts` keeps the legacy top-level bounds (RFC3339 strings in fixtures).
+function observationRows(coverage = {}) {
+  const facts = coverage.facts && typeof coverage.facts === 'object' ? coverage.facts : null;
+  if (facts) {
+    return Object.entries(facts).map(([type, entry]) => ({
+      type,
+      first: eventTimeText(entry?.first_ts),
+      last: eventTimeText(entry?.last_ts),
+      received: receiveTimeText(entry?.last_received_at),
+      firstSeconds: epochSeconds(entry?.first_ts),
+      lastSeconds: epochSeconds(entry?.last_ts),
+      usage: type === 'usage'
+    }));
+  }
+  if (coverage.first_ts === undefined && coverage.last_ts === undefined && coverage.last_received_at === undefined) return [];
+  return [{
+    type: 'all',
+    first: eventTimeText(coverage.first_ts),
+    last: eventTimeText(coverage.last_ts),
+    received: receiveTimeText(coverage.last_received_at),
+    firstSeconds: epochSeconds(coverage.first_ts),
+    lastSeconds: epochSeconds(coverage.last_ts),
+    usage: false
+  }];
+}
+
+function usageRow(coverage = {}, now) {
+  const usage = coverage.usage && typeof coverage.usage === 'object' ? coverage.usage : null;
+  if (!usage) return null;
+  const seconds = epochSeconds(usage.last_ts);
+  return {
+    first: eventTimeText(usage.first_ts),
+    last: eventTimeText(usage.last_ts),
+    received: receiveTimeText(usage.last_received_at),
+    age: seconds === null ? 'not supplied' : ageText(now - seconds * 1000)
+  };
+}
+
+// One short, honest summary: latest retained event and its age, latest usage
+// separately, the available range, attribution and scored hashes. It never
+// claims the archive is complete.
+export function coverageSnapshot(coverage = null, now = Date.now()) {
+  const cov = coverage && typeof coverage === 'object' ? coverage : {};
+  const rows = observationRows(cov);
+  let latest = null;
+  let earliest = null;
+  for (const row of rows) {
+    if (row.lastSeconds !== null && (latest === null || row.lastSeconds > latest.lastSeconds)) latest = row;
+    if (row.firstSeconds !== null && (earliest === null || row.firstSeconds < earliest.firstSeconds)) earliest = row;
+  }
+  const usage = usageRow(cov, now);
+  const sessions = cov.sessions && typeof cov.sessions === 'object' ? cov.sessions : null;
+  const scored = cov.scored_content_by_kind && typeof cov.scored_content_by_kind === 'object' ? cov.scored_content_by_kind : null;
+  let scoredTotal = 0;
+  let hashTotal = 0;
+  if (scored) {
+    for (const entry of Object.values(scored)) {
+      if (Number.isFinite(Number(entry?.scored))) scoredTotal += Number(entry.scored);
+      if (Number.isFinite(Number(entry?.total))) hashTotal += Number(entry.total);
+    }
+  }
+  return {
+    rows,
+    latest: latest
+      ? { type: latest.type, at: latest.last, age: ageText(now - latest.lastSeconds * 1000) }
+      : null,
+    received: latest ? { type: latest.type, at: latest.received } : null,
+    usage,
+    range: earliest && latest ? { from: earliest.first, to: latest.last } : null,
+    sessions,
+    scored: scored ? { scored: scoredTotal, total: hashTotal } : null
+  };
 }
 
 function countText(value, unit) {
@@ -24,29 +136,38 @@ function countText(value, unit) {
 
 // Map the two responses to row groups, each naming its own unit. No group is
 // divided by another to produce a single blended percentage.
-export function coverageModel({ coverage = null, summary = null } = {}) {
+export function coverageModel({ coverage = null, summary = null, now = Date.now() } = {}) {
   const cov = coverage && typeof coverage === 'object' ? coverage : {};
   const sum = summary && typeof summary === 'object' ? summary : {};
-  const facts = cov.facts && typeof cov.facts === 'object' ? cov.facts : null;
   const groups = [];
 
-  const factRows = [];
-  if (facts) {
-    for (const [type, entry] of Object.entries(facts)) {
-      factRows.push([type, timeText(entry?.first_ts), timeText(entry?.last_ts), timeText(entry?.last_received_at)]);
-    }
-  } else {
-    for (const [label, value] of [['first', cov.first_ts], ['last', cov.last_ts], ['received', cov.last_received_at]]) {
-      if (value !== undefined) factRows.push([label, 'not supplied', timeText(value), 'not supplied']);
-    }
-  }
+  const factRows = observationRows(cov).map(row => [row.type, row.first, row.last, row.received]);
   groups.push({
     key: 'facts',
-    title: 'Facts by type (first / last event time, last receive time — UTC)',
+    title: 'Facts by type (first / last event time UTC seconds, last receive time UTC nanoseconds)',
     columns: [{ label: 'Fact type' }, { label: 'First event' }, { label: 'Last event' }, { label: 'Last received' }],
     rows: factRows,
     empty: 'not supplied',
-    units: 'one row per fact type; times are UTC ISO strings'
+    units: 'one row per fact type; event seconds and receive nanoseconds are converted by their declared unit'
+  });
+
+  const snapshot = coverageSnapshot(cov, now);
+  const summaryRows = [
+    ['Latest retained event', snapshot.latest ? `${snapshot.latest.at} (${snapshot.latest.age} ago)` : 'not supplied'],
+    ['Latest usage event', snapshot.usage ? `${snapshot.usage.last} (${snapshot.usage.age} ago)` : 'not supplied'],
+    ['Available historical range', snapshot.range ? `${snapshot.range.from} → ${snapshot.range.to}` : 'not supplied'],
+    ['Sessions with / without a derived repo', snapshot.sessions
+      ? `${countText(snapshot.sessions.with_session_repo, 'sessions')} / ${countText(snapshot.sessions.without_session_repo, 'sessions')}`
+      : 'not supplied'],
+    ['Scored / total content hashes', snapshot.scored ? `${countText(snapshot.scored.scored, 'hashes')} / ${countText(snapshot.scored.total, 'hashes')}` : 'not supplied']
+  ];
+  groups.push({
+    key: 'latest',
+    title: 'Retained observation summary — not a completeness claim',
+    columns: [{ label: 'Observation' }, { label: 'Value' }],
+    rows: summaryRows,
+    empty: 'not supplied',
+    units: 'latest event and usage are separate observations; age is measured from the selected render time'
   });
 
   const sessions = cov.sessions && typeof cov.sessions === 'object' ? cov.sessions : null;
@@ -178,12 +299,13 @@ export function renderCoverage(container, model, doc = globalThis.document) {
   return container;
 }
 
-export async function load({ scope = {}, transport, tenant, signal, doc = globalThis.document, clear = null } = {}) {
+export async function load({ scope = {}, transport, tenant, signal, doc = globalThis.document, clear = null, readContext = null } = {}) {
   ensurePulseStyles(doc);
   try {
+    const params = readContext ? readContext.paramsFor() : scopeParams(scope);
     const [{ body: schema }, { response, body: summary }] = await Promise.all([
       transport.schema(tenant),
-      transport.get('summary', scopeParams(scope), { tenant, signal, stateKey: 'coverage-summary' })
+      transport.get('summary', params, { tenant, signal, stateKey: 'coverage-summary' })
     ]);
     if (!response.ok) {
       return errorState({ message: summary?.error || `The server returned ${response.status}.`, code: summary?.code || String(response.status || '') });
@@ -192,9 +314,11 @@ export async function load({ scope = {}, transport, tenant, signal, doc = global
     if (!coverage && !summary) {
       return unsupportedState({ feature: 'Coverage', reason: 'the server publishes neither /schema.coverage nor /summary', source: 'this plan\'s server phases' });
     }
-    if (!coverage && summaryIsEmpty(summary)) {
+    if (summaryIsEmpty(summary)) {
       whenPanelBody('coverage', doc, host => host.replaceChildren());
       const causes = emptyCausesFor(scope, clear);
+      const all = (readContext?.window?.all === true) || (!scope.from && !scope.to && (!scope.win || scope.win === 'all'));
+      if (!all) causes.push({ kind: 'window', label: 'No observations in this window — view all history', clear: typeof clear === 'function' ? () => clear({ kind: 'window' }) : null });
       if (!causes.length) causes.push({ kind: 'scope', label: `no coverage data in window ${scope.win || 'all'}`, clear: null });
       return emptyState(causes);
     }

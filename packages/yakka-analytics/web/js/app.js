@@ -1,8 +1,9 @@
 import { decodeUrlState } from '../contract/url-state.js';
+import { resolveReadContext } from './core/read-context.js';
 import { createScheduler } from './core/request-scheduler.js';
 import { createTransport } from '../contract/transport.js';
 import { legacyErrorMessage } from './core/legacy-error.js';
-import { rememberedTenant, sessionGateDecision, shouldRecoverTenant } from '../contract/session-gate.js';
+import { sessionGateDecision, shouldRecoverTenant } from '../contract/session-gate.js';
 import { renderIdentity } from './identity/flows.js';
 import { createRouter, isAccountRoute, loadExplorer } from './core/router.js';
 import { createFollow } from './core/follow.js';
@@ -23,6 +24,7 @@ import { createInspector } from './core/inspector.js';
 import { createCapabilityInspector } from './core/capability-inspector.js';
 import { unsupportedState } from './core/panel-state.js';
 import { decodePick, encodePick } from './core/selection-model.js';
+import { coverageSnapshot } from './panels/coverage.js';
 
 const root = document.querySelector('#app');
 const scheduler = createScheduler({ onChange: ({ inFlight }) => {
@@ -150,12 +152,18 @@ function renderScopeBar(container, state) {
 function renderCoverageStrip(container, schema) {
   const coverage = schema?.coverage;
   if (!coverage) return;
+  const snapshot = coverageSnapshot(coverage, Date.now());
   const strip = element('section', 'coverage-strip');
   strip.setAttribute('aria-label', 'Coverage');
   strip.append(element('strong', '', 'Coverage'));
-  for (const [label, value] of [['first', coverage.first_ts || coverage.firstTs], ['last', coverage.last_ts || coverage.lastTs], ['received', coverage.last_received_at || coverage.lastReceivedAt]]) {
-    if (value) strip.append(element('span', 'coverage-item', `${label} ${value}`));
+  if (snapshot.latest) {
+    strip.append(element('span', 'coverage-item', `${snapshot.latest.type} last ${snapshot.latest.at}`));
+    strip.append(element('span', 'coverage-item', `age ${snapshot.latest.age}`));
+  } else {
+    strip.append(element('span', 'coverage-item', 'no retained observation'));
   }
+  if (snapshot.usage) strip.append(element('span', 'coverage-item', `usage last ${snapshot.usage.last} (${snapshot.usage.age} ago)`));
+  if (snapshot.range) strip.append(element('span', 'coverage-item', `range ${snapshot.range.from} → ${snapshot.range.to}`));
   if (coverage.scorer_configured === false) strip.append(element('span', 'coverage-item', 'no scorer configured'));
   container.append(strip);
 }
@@ -281,7 +289,8 @@ function currentState() {
   return decodeUrlState(globalThis.location?.search || '');
 }
 
-async function renderBoard(container, record, state, schema, tenant) {
+async function renderBoard(container, record, state, schema, context) {
+  const tenant = context?.tenant || '';
   renderScopeBar(container, state);
   renderCoverageStrip(container, schema);
   const board = assembleBoard({ presetId: record.presetId, state });
@@ -315,6 +324,8 @@ async function renderBoard(container, record, state, schema, tenant) {
       next = removeCohortChip(state, cause.key);
     } else if (cause.kind === 'selection') {
       next = state.pick ? withPick(state, '') : { ...state, sel: '' };
+    } else if (cause.kind === 'window') {
+      next = { ...state, win: 'all', from: '', to: '' };
     } else {
       return;
     }
@@ -353,8 +364,8 @@ async function renderBoard(container, record, state, schema, tenant) {
     const wrappedPanel = entry.panel.load
       ? {
         ...entry.panel,
-        load: async context => {
-          const result = await entry.panel.load({ ...context, clear: clearPanelCause });
+        load: async loadContext => {
+          const result = await entry.panel.load({ ...loadContext, clear: clearPanelCause, readContext: context });
           panelRuntime.population = result?.population || null;
           if (!runtime.population) runtime.population = panelRuntime.population;
           if (!runtime.unit && panelRuntime.population?.unit) runtime.unit = panelRuntime.population.unit;
@@ -505,12 +516,14 @@ function handleInspectorAction(detail, runtime, record) {
 
 // Each explorer gets one route-scoped AbortController. Leaving the route aborts
 // it (and any request it started); a module may also return a destroy function.
-async function renderExplorer(container, record) {
+async function renderExplorer(container, record, context) {
   const controller = new AbortController();
   activeRouteTeardown = () => controller.abort();
   const module = await loadExplorer(record.explorer);
   if (controller.signal.aborted) return;
-  const cleanup = await module.render?.(container, document, { signal: controller.signal });
+  const cleanup = await module.render?.(container, document, {
+    signal: controller.signal, tenant: context?.tenant || '', readContext: context || null
+  });
   if (typeof cleanup === 'function') {
     activeRouteTeardown = () => { controller.abort(); cleanup(); };
   }
@@ -553,7 +566,8 @@ async function render(record) {
     return;
   }
 
-  const tenant = rememberedTenant(me);
+  const context = resolveReadContext({ me, state, now: Date.now() });
+  const tenant = context.tenant;
   let schema = null;
   try {
     const result = await transport.schema(tenant);
@@ -576,13 +590,13 @@ async function render(record) {
     renderQuestionPaths(root, schema);
     renderCoverageStrip(root, schema);
   } else if (record.kind === 'board') {
-    await renderBoard(root, record, state, schema, tenant);
+    await renderBoard(root, record, state, schema, context);
   } else if (record.kind === 'named') {
     renderScopeBar(root, state);
     renderCoverageStrip(root, schema);
     renderNamedDestination(root, record);
   } else if (record.kind === 'explorer') {
-    await renderExplorer(root, record);
+    await renderExplorer(root, record, context);
   } else {
     renderNotFound(root, record);
   }

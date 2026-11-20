@@ -5,6 +5,7 @@
 
 import { formatCount, formatMoney, formatNumber } from '../charts/formatters.js';
 import { cancelledState, emptyState, errorState } from '../core/panel-state.js';
+import { resolveReadContext } from '../core/read-context.js';
 
 export const WINDOW_MS = { h: 3600e3, d: 86400e3, w: 7 * 86400e3, m: 30 * 86400e3, y: 365 * 86400e3 };
 
@@ -19,23 +20,11 @@ export const STRIP_MEASURES = [
   { key: 'quality_median', label: 'Quality median', kind: 'ratio', unit: 'score' }
 ];
 
-const SCOPE_KEYS = new Set(['win', 'from', 'to', 'tz', 'cohorts', 'sel', 'hide', 'cmp', 'pick']);
-
-// Request parameters for a panel scope. The transport adds `tz` when absent
-// and the shared filter names pass through unchanged.
+// Request parameters for a panel scope. Relative windows resolve to absolute
+// bounds here, so no panel ever sends `win`; the shared filter names pass
+// through unchanged.
 export function scopeParams(scope = {}) {
-  const params = new URLSearchParams();
-  if (scope.from || scope.to) {
-    if (scope.from) params.set('from', scope.from);
-    if (scope.to) params.set('to', scope.to);
-  } else if (scope.win) params.set('win', scope.win);
-  if (scope.tz) params.set('tz', scope.tz);
-  for (const [key, value] of Object.entries(scope)) {
-    if (SCOPE_KEYS.has(key)) continue;
-    if (Array.isArray(value)) { for (const item of value) params.append(key, item); }
-    else if (typeof value === 'string' && value) params.set(key, value);
-  }
-  return params;
+  return resolveReadContext({ state: scope }).paramsFor();
 }
 
 export function windowParams(win) {
@@ -335,24 +324,38 @@ async function fetchSummary(transport, params, { tenant, signal, stateKey }) {
   return body && typeof body === 'object' ? body : {};
 }
 
-export async function load({ scope = {}, transport, tenant, signal, doc = globalThis.document, clear = null } = {}) {
+function previousFromContext(readContext) {
+  if (!readContext || readContext.window?.all || !readContext.window?.from) return null;
+  const from = Date.parse(readContext.window.from);
+  const to = Date.parse(readContext.window.to);
+  const span = to - from;
+  if (!Number.isFinite(span) || !(span > 0)) return null;
+  return { from: from - span, to: from };
+}
+
+export async function load({ scope = {}, transport, tenant, signal, doc = globalThis.document, clear = null, readContext = null } = {}) {
   ensurePulseStyles(doc);
   try {
-    const current = await fetchSummary(transport, scopeParams(scope), { tenant, signal, stateKey: 'pulse-summary' });
+    const current = await fetchSummary(transport, readContext ? readContext.paramsFor() : scopeParams(scope), { tenant, signal, stateKey: 'pulse-summary' });
     if (summaryIsEmpty(current)) {
       whenPanelBody('pulse-strips', doc, host => host.replaceChildren());
       const causes = emptyCausesFor(scope, clear);
       if (!causes.length) causes.push({ kind: 'scope', label: `no measures in window ${scope.win || 'all'}`, clear: null });
       return emptyState(causes);
     }
-    const prev = previousWindow(scope);
+    const prev = readContext ? previousFromContext(readContext) : previousWindow(scope);
     let previous = null;
     if (prev) {
       try { previous = await fetchSummary(transport, windowParams(prev), { tenant, signal, stateKey: 'pulse-summary-prev' }); } catch { previous = null; }
     }
     let scores = null;
     try {
-      const { response, body } = await transport.get('scores', new URLSearchParams({ kind: 'design' }), { tenant, signal, stateKey: 'pulse-scores' });
+      const scoreParams = readContext ? readContext.paramsFor({ kind: 'design' }) : (() => {
+        const params = scopeParams(scope);
+        params.set('kind', 'design');
+        return params;
+      })();
+      const { response, body } = await transport.get('scores', scoreParams, { tenant, signal, stateKey: 'pulse-scores' });
       if (response.ok) scores = body;
     } catch { scores = null; }
     const model = stripModel({ summary: current, previous, scores, kind: 'design', scope });
