@@ -134,6 +134,13 @@ the Phase 5 deploy/tenant gates (completed 21 Nov 2026) and the accepted Assumpt
 briefs and reports delivered through the artifact screen except one Phase 4 brief whose service copy stayed
 stale; its committed content is the amended text.
 
+PR #290 automation review at `b9b0495`: **PASS_WITH_FOLLOWUPS**. Phase 5 is met — 329 HIGH completions of
+360 eligible against the 300 floor, metric-only evidence passes `evidence-check`, hashes match the research
+README, and owner-dropped xHIGH/MAX arms are recorded without shortfall inflation. `--efforts` /
+`--metric-only` and `attempts: null` handling are covered by the Python suite (158 tests). Go `review`,
+`ingest`, `store` and `serve` suites pass locally. No blocker, high or critical findings. Follow-ups remain
+#285–#288 and `gate: adjudication labelling` (documented, not invented).
+
 ## QA
 
 No separate QA stage ran. Go suites for `review`, `ingest`, `store` and `serve` passed under the 8 GiB cap;
