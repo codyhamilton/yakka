@@ -16,7 +16,7 @@
 
 .panel-grid{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:8px;margin:8px 0}
 .panel-grid > *{grid-column:span 4;min-width:0}
-.panel-grid > [data-chart=""]{grid-column:span 12}
+.panel-grid > [data-chart=""],.panel-grid > [data-chart="table"]{grid-column:span 12}
 .panel-grid > [data-chart="lanes"]{grid-column:span 12}
 .workspace-panel{display:flex;flex-direction:column;gap:4px;padding:6px 8px;min-height:0;min-width:0;border-radius:2px}
 .workspace-panel-header{display:flex;flex-wrap:wrap;align-items:center;gap:4px;justify-content:space-between}
