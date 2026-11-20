@@ -455,12 +455,12 @@ export class YkChart extends HTMLElement {
     };
 
     const tokens = {
-      surface: readToken(this, '--yk-chart-surface'),
-      text: readToken(this, '--yk-chart-text'),
-      muted: readToken(this, '--yk-chart-muted'),
-      grid: readToken(this, '--yk-chart-grid'),
-      border: readToken(this, '--yk-chart-border'),
-      focus: readToken(this, '--yk-chart-focus')
+      surface: readToken(this, '--yk-surface') || readToken(this, '--yk-chart-surface'),
+      text: readToken(this, '--yk-text'),
+      muted: readToken(this, '--yk-muted'),
+      grid: readToken(this, '--yk-grid'),
+      border: readToken(this, '--yk-border'),
+      focus: readToken(this, '--yk-focus')
     };
 
     this.#scatter = createCanvasScatter({

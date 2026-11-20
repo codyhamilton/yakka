@@ -7,15 +7,30 @@
 :root,
 :host {
   color-scheme: light;
-  --yk-chart-surface: #ffffff;
-  --yk-chart-text: #18212f;
-  --yk-chart-muted: #586579;
-  --yk-chart-border: #d6dde7;
-  --yk-chart-grid: #e6ebf2;
-  --yk-chart-focus: #176b87;
+  --yk-bg: #eef1f4;
+  --yk-surface: #f4f6f8;
+  --yk-surface-alt: #e9edf1;
+  --yk-text: #18212f;
+  --yk-muted: #586579;
+  --yk-border: #d6dde7;
+  --yk-grid: #e6ebf2;
+  --yk-focus: #176b87;
+  --yk-danger: #a3262a;
+  --yk-warning: #b45309;
+  --yk-warning-bg: #fdf1d4;
+  --yk-error-bg: #fbe4e4;
+  --yk-selected: #dbeafe;
+  --yk-excluded: #f6dede;
+
+  --yk-chart-surface: var(--yk-surface);
+  --yk-chart-text: var(--yk-text);
+  --yk-chart-muted: var(--yk-muted);
+  --yk-chart-border: var(--yk-border);
+  --yk-chart-grid: var(--yk-grid);
+  --yk-chart-focus: var(--yk-focus);
   --yk-tooltip-surface: #111923;
   --yk-tooltip-text: #edf3f8;
-  --yk-legend-surface: #ffffff;
+  --yk-legend-surface: var(--yk-surface);
   --yk-badge-surface: #eef3f8;
   --yk-badge-text: #334155;
   --yk-pattern-ink: rgba(0, 0, 0, 0.32);
@@ -65,15 +80,30 @@
 html[data-theme='dark'],
 :host-context(html[data-theme='dark']) {
   color-scheme: dark;
-  --yk-chart-surface: #1b2734;
-  --yk-chart-text: #edf3f8;
-  --yk-chart-muted: #b5c0cc;
-  --yk-chart-border: #405061;
-  --yk-chart-grid: #2a3948;
-  --yk-chart-focus: #83c9df;
+  --yk-bg: #111923;
+  --yk-surface: #1b2734;
+  --yk-surface-alt: #223141;
+  --yk-text: #edf3f8;
+  --yk-muted: #b5c0cc;
+  --yk-border: #405061;
+  --yk-grid: #2a3948;
+  --yk-focus: #83c9df;
+  --yk-danger: #ff9696;
+  --yk-warning: #fbbf24;
+  --yk-warning-bg: #3a2d10;
+  --yk-error-bg: #3a1d1f;
+  --yk-selected: #23445a;
+  --yk-excluded: #3a2428;
+
+  --yk-chart-surface: var(--yk-surface);
+  --yk-chart-text: var(--yk-text);
+  --yk-chart-muted: var(--yk-muted);
+  --yk-chart-border: var(--yk-border);
+  --yk-chart-grid: var(--yk-grid);
+  --yk-chart-focus: var(--yk-focus);
   --yk-tooltip-surface: #0b1119;
   --yk-tooltip-text: #edf3f8;
-  --yk-legend-surface: #1b2734;
+  --yk-legend-surface: var(--yk-surface);
   --yk-badge-surface: #223141;
   --yk-badge-text: #dce7f1;
   --yk-pattern-ink: rgba(255, 255, 255, 0.4);
@@ -136,9 +166,9 @@ html[data-theme='dark'],
 
 .yk-chart {
   position: relative;
-  color: var(--yk-chart-text);
-  background: var(--yk-chart-surface);
-  border: 1px solid var(--yk-chart-border);
+  color: var(--yk-text);
+  background: var(--yk-surface);
+  border: 1px solid var(--yk-border);
   border-radius: 0.6rem;
   padding: 0.75rem;
 }
@@ -147,7 +177,7 @@ html[data-theme='dark'],
 .yk-legend button:focus-visible,
 .yk-table tr:focus-visible,
 .yk-table-select:focus-visible {
-  outline: 2px solid var(--yk-chart-focus);
+  outline: 2px solid var(--yk-focus);
   outline-offset: 2px;
 }
 
@@ -157,7 +187,7 @@ html[data-theme='dark'],
 }
 
 .yk-chart-basis {
-  color: var(--yk-chart-muted);
+  color: var(--yk-muted);
   font-size: 0.85rem;
 }
 
@@ -177,7 +207,7 @@ html[data-theme='dark'],
   flex-wrap: wrap;
   gap: 0.5rem;
   padding: 0.25rem;
-  background: var(--yk-legend-surface);
+  background: var(--yk-surface);
 }
 
 .yk-legend-item {
@@ -195,17 +225,17 @@ html[data-theme='dark'],
 
 .yk-legend-item[data-active='true'],
 .yk-legend-item[data-isolated='true'] {
-  border-color: var(--yk-chart-focus);
+  border-color: var(--yk-focus);
 }
 
 .yk-legend button {
   min-width: 44px;
   min-height: 44px;
   padding: 0.35rem 0.6rem;
-  border: 1px solid var(--yk-chart-border);
+  border: 1px solid var(--yk-border);
   border-radius: 0.4rem;
-  background: var(--yk-chart-surface);
-  color: var(--yk-chart-text);
+  background: var(--yk-surface);
+  color: var(--yk-text);
   font: inherit;
   cursor: pointer;
 }
@@ -224,7 +254,7 @@ html[data-theme='dark'],
   height: 0.9rem;
   flex: none;
   background: var(--yk-swatch, var(--yk-cat-1));
-  border: 1px solid color-mix(in srgb, var(--yk-chart-text) 35%, transparent);
+  border: 1px solid color-mix(in srgb, var(--yk-text) 35%, transparent);
 }
 
 .yk-swatch {
@@ -286,7 +316,7 @@ html[data-theme='dark'],
   color: var(--yk-tooltip-text);
   border-radius: 0.45rem;
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.28);
-  font-size: 0.85rem;
+  font-size: 12px;
   pointer-events: none;
 }
 
@@ -349,13 +379,16 @@ html[data-theme='dark'],
 .yk-table-wrap {
   overflow: auto;
   max-width: 100%;
-  border: 1px solid var(--yk-chart-border);
+  background: var(--yk-surface);
+  border: 1px solid var(--yk-border);
   border-radius: 0.5rem;
 }
 
 .yk-table {
   width: 100%;
   border-collapse: collapse;
+  background: var(--yk-surface);
+  font-size: 12px;
   font-variant-numeric: tabular-nums;
 }
 
@@ -363,24 +396,41 @@ html[data-theme='dark'],
   caption-side: top;
   text-align: left;
   padding: 0.5rem 0.65rem;
-  color: var(--yk-chart-muted);
+  color: var(--yk-muted);
+  font-size: 12px;
 }
 
 .yk-table th,
 .yk-table td {
   padding: 0.4rem 0.6rem;
-  border-bottom: 1px solid var(--yk-chart-border);
+  border-bottom: 1px solid var(--yk-border);
   text-align: left;
   white-space: nowrap;
+  font-size: 12px;
 }
 
 .yk-table thead th {
-  color: var(--yk-chart-muted);
+  background: var(--yk-surface);
+  color: var(--yk-muted);
   font-weight: 600;
 }
 
+.yk-table tbody tr:nth-child(even) {
+  background: var(--yk-surface-alt);
+}
+
+.yk-table tbody tr[data-selected='true'] {
+  background: var(--yk-selected);
+}
+
+.yk-table tbody tr[data-excluded='true'] {
+  background: var(--yk-excluded);
+  opacity: 0.6;
+  text-decoration: line-through;
+}
+
 .yk-table tbody tr:focus-visible {
-  outline: 2px solid var(--yk-chart-focus);
+  outline: 2px solid var(--yk-focus);
   outline-offset: -2px;
 }
 
@@ -404,7 +454,7 @@ html[data-theme='dark'],
   max-width: 1100px;
   margin: 0 auto;
   padding: 1rem 1.25rem 3rem;
-  color: var(--yk-chart-text);
+  color: var(--yk-text);
 }
 
 .yk-swatch-grid {
@@ -423,10 +473,10 @@ html[data-theme='dark'],
 .yk-hit-target {
   min-height: 44px;
   padding: 0.4rem 0.6rem;
-  border: 1px solid var(--yk-chart-border);
+  border: 1px solid var(--yk-border);
   border-radius: 0.4rem;
-  background: var(--yk-chart-surface);
-  color: var(--yk-chart-text);
+  background: var(--yk-surface);
+  color: var(--yk-text);
   font: inherit;
   cursor: crosshair;
 }
@@ -439,23 +489,23 @@ html[data-theme='dark'],
 
 .yk-cat-grid,
 .yk-cat-axis {
-  stroke: var(--yk-chart-grid);
+  stroke: var(--yk-grid);
   stroke-width: 1;
 }
 
 .yk-cat-axis {
-  stroke: var(--yk-chart-border);
+  stroke: var(--yk-border);
 }
 
 .yk-cat-label {
-  fill: var(--yk-chart-muted);
-  font-size: 0.72rem;
+  fill: var(--yk-muted);
+  font-size: 12px;
 }
 
 .yk-cat-tick,
 .yk-cat-value {
-  fill: var(--yk-chart-text);
-  font-size: 0.72rem;
+  fill: var(--yk-text);
+  font-size: 12px;
   font-variant-numeric: tabular-nums;
 }
 
@@ -464,17 +514,17 @@ html[data-theme='dark'],
 }
 
 .yk-mark:focus-visible {
-  outline: 2px solid var(--yk-chart-focus);
+  outline: 2px solid var(--yk-focus);
   outline-offset: 2px;
 }
 
 .yk-mark[data-highlight='true'] .yk-mark-shape {
-  stroke: var(--yk-chart-focus);
+  stroke: var(--yk-focus);
   stroke-width: 2.5;
 }
 
 .yk-mark[data-selected='true'] .yk-mark-shape {
-  stroke: var(--yk-chart-text);
+  stroke: var(--yk-text);
   stroke-width: 2;
 }
 
