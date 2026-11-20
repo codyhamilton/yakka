@@ -32,9 +32,21 @@ Units and waves: see `DESIGN.md` § Phase 1 Units.
 
 - **phase1-04-field-validity** — closed `81a94a7c`. Movers derives split lenses from the time grain/measure dimensions and uses raw `model` (never `dim=session_model` on `/query`); session scatter axes/chooser use `scatter_fields` (default `cost_usd` vs `commits`, size `unpriced_calls`, with an older-schema fallback); score strips request only `score:<check>` numeric fields, group by returned `l`/`l.kind`, and use the same-kind catalogue; score trend uses `schema.resolutions.routes['score-series']` (known day/week/month fallback, no inferred global auto), removes the hardcoded day metadata, and renders `unsupported_resolution`/`too_many_cells` without changing the URL/window; artifact scatter and rank use published per-mode lists/dimensions. New `field-validity` spec fails 5/6 before and passes 6/6 after; scatter+quality 23/23, pulse+regression 36/36, all plan29 11/11, trends acceptance+cost 14/14. Deviation: one `tests/workspace/pulse.test.mjs` assertion `session_model`→`model` encoded the old invalid D05 request and was updated. Report: `reports/phase1-04-field-validity.md`.
 
-Refinement feedback: `artifact_feedback` returned `local context unavailable: queue (invalid_context)` for all seven briefs. Recorded as queued, not scored; refine continued.
+Refinement feedback: the first `artifact_feedback` pass returned `local context unavailable: queue (invalid_context)` for all seven briefs. Retried after delivery: all seven briefs and all seven reports now report `state: delivered`, `screen: pass by jev-1.13.0`; scoring is off on the service, so no scores were returned.
 
 First-refinement coarse check: Phase 2 and Phase 3 surfaces, contracts and outcomes are locatable in `DESIGN.md`/`EVIDENCE.md`, and their dependency on Phase 1 is real; no briefs were written for them.
 
-Phase 1 status: not started; the orchestrator builds and closes it.
+### Orchestrator follow-up: fixed all-history `to`
+
+Closed `f1f04805`. The integration sweep found all-history reads that sent `all=1` without the frozen `to` upper bound. Fixed in `web/js/core/read-context.js` (All resolves `to` before the `from`/`to` branch), `web/js/panels/p10-shared.js` and `web/js/panels/pulse-strips.js` (All keeps `scope.to`), `web/js/panels/rank.js` (plan rank list keeps `scope.to`), `web/js/app.js` (each board entry receives the read-context `from`/`to`), and `web/js/explorers/plans.js` (plan detail `windowParams` referenced an undefined `resolved`; detail builders and the plan scatter now receive the frozen read-context window). `tests/plan29/read-context.test.mjs` now asserts the Plans scatter and Workflow plan requests keep the fixed `to`.
+
+### Verification
+
+- Real-Go two-tenant browser sweep (runner-only `.scratch/plan29-verify/sweep.mjs`, 29 board/explorer paths including every `?win=all` variant, session detail, and plan detail): **0 failures of 29**; every path settled, every analytics request carried the selected tenant, no request carried `win`, every `all=1` request carried `to`.
+- `go test ./internal/store -count=1` pass; `go test ./internal/serve -run 'TestAnalytics(PageSetSmoke|CapabilityParity|PlanConversationParity|EmptySchema)' -count=1` pass (176.7s); full `go test ./internal/serve -count=1` pass (210.3s); `go vet ./internal/store ./internal/serve` clean. `gofmt -l` reports one pre-existing untouched file, `internal/serve/mcp_discovery_limits.go`.
+- Node: all `tests/plan29/*.test.mjs` pass (including the new all-history assertions); `tests/workspace/pulse.test.mjs`, `tests/trends-quality/{acceptance,cost,quality}.test.mjs` and `tests/scatter-sessions/scatter.test.mjs` pass.
+- Read-only production parity probe (trial tenant `t-60d108478da4`, no writes): deployed `/schema` serves 200; deployed `/score-series?bucket=auto` still returns 400 `bucket must be day, week, or month` (no `supported_buckets`), and deployed session scatter still returns 400 `unsupported session scatter field commits`, confirming the D06/D08 behaviour is still in production. Deployed-canvas white sampling was not attempted because the UI session gate needs an interactive `/v1/me` session and the trial token is an API key, not a browser session.
+- `gate: production parity canvas sampling needs an authenticated deployed UI session`.
+
+Phase 1 status: closed (2026-11-21 02:29 AEST). Commit trailer `Yakka-Phase: 29-analytics-ui-rework:1`.
 
