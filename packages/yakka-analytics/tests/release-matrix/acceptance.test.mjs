@@ -48,10 +48,10 @@ const SUITE_COUNTS = {
   'packages/yakka-analytics/tests/scatter-sessions/acceptance.test.mjs': 5,
   'packages/yakka-analytics/tests/plans-artifacts/acceptance.test.mjs': 4
 };
-const RECORD_SHA256 = '420015134d2d3ee8861ee97e449a06e7bed3268d30492e34cdcd0b74012a5c2c';
+const RECORD_SHA256 = '47dfc1e3ee74d64cb18839592e6068c513553e511ee0556fae789ce3ddcae6e4';
 const RECORD_REQUESTS = 75;
 const RECORD_SCENARIOS = 12;
-const RECORD_ALL_HISTORY = 9;
+const RECORD_ALL_HISTORY = 20;
 
 function topLevelTests(source) {
   return (source.match(/^test\(/gm) || []).length;
