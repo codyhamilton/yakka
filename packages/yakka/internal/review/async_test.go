@@ -3,6 +3,7 @@ package review
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -95,6 +96,83 @@ func TestStartDetachesAndFinalizesOneRowAfterClientCancel(t *testing.T) {
 	polled, found, err := tenant.ReviewByID(context.Background(), accepted.ID)
 	if err != nil || !found || !strings.Contains(string(polled.Raw), `"status":"ok"`) {
 		t.Fatalf("poll found=%v err=%v raw=%s", found, err, polled.Raw)
+	}
+}
+
+func TestStartFinalizeFailureTerminalizesFallbackAndUnblocksDedupe(t *testing.T) {
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
+		io.WriteString(w, providerReply([]any{}, []any{}, []any{}, "complete"))
+	}))
+	defer srv.Close()
+
+	tenant := reviewTenant(t)
+	req := reviewRequest(true)
+	cfg := availableConfig(srv.URL)
+	cfg.Lifetime = context.Background()
+	var finalizeCalls atomic.Int32
+	cfg.finalize = func(ctx context.Context, tn *store.Tenant, id string, raw []byte) (bool, error) {
+		if finalizeCalls.Add(1) == 1 {
+			return false, errors.New("injected finalize failure")
+		}
+		return tn.FinalizeReviewRun(ctx, id, raw)
+	}
+
+	job, accepted, err := Start(context.Background(), tenant, "tenant", req, cfg)
+	if err != nil || job == nil || accepted.Status != StatusRunning {
+		t.Fatalf("accepted=%+v job=%v err=%v", accepted, job, err)
+	}
+	final, done := job.Wait(context.Background())
+	if !done || final.ID != accepted.ID || final.Status != "api_error" || final.Status == StatusRunning {
+		t.Fatalf("fallback receipt=%+v done=%v", final, done)
+	}
+
+	polled, found, err := tenant.ReviewByID(context.Background(), accepted.ID)
+	if err != nil || !found {
+		t.Fatalf("poll found=%v err=%v", found, err)
+	}
+	var rec map[string]any
+	if err := json.Unmarshal(polled.Raw, &rec); err != nil {
+		t.Fatal(err)
+	}
+	if rec["status"] != "api_error" || rec["reason"] != finalizeFallbackReason || rec["review_id"] != accepted.ID {
+		t.Fatalf("fallback record=%v", rec)
+	}
+	if _, hasPayload := rec["payload"]; hasPayload {
+		t.Fatalf("fallback record kept a model payload: %v", rec)
+	}
+	attempts, _ := rec["attempts"].([]any)
+	if len(attempts) != 1 {
+		t.Fatalf("fallback lost attempt metadata: %v", rec["attempts"])
+	}
+	attempt, _ := attempts[0].(map[string]any)
+	if attempt["status"] != "ok" || attempt["input_tokens"] != float64(100) || attempt["output_tokens"] != float64(50) {
+		t.Fatalf("fallback attempt metadata=%v", attempt)
+	}
+	if rec["input_tokens"] != float64(100) || rec["output_tokens"] != float64(50) || rec["cost_known"] != true {
+		t.Fatalf("fallback lost usage/cost totals: %v", rec)
+	}
+	rows, err := tenant.ReviewRecords(context.Background(), store.ReviewRecordFilter{RepoID: "repo-sentinel", Limit: 10})
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("rows=%d err=%v", len(rows), err)
+	}
+
+	// A repeat POST with the same key must not resolve as in-flight. It is
+	// answered the way any stored api_error row is answered today: cached.
+	repeat, repeatReceipt, err := Start(context.Background(), tenant, "tenant", req, cfg)
+	if err != nil || repeat != nil {
+		t.Fatalf("repeat job=%v receipt=%+v err=%v", repeat, repeatReceipt, err)
+	}
+	if repeatReceipt.Status == StatusRunning || repeatReceipt.Status == StatusPending {
+		t.Fatalf("repeat answered in-flight: %+v", repeatReceipt)
+	}
+	if repeatReceipt.Status != "skipped_duplicate" || repeatReceipt.Cached == nil || !*repeatReceipt.Cached ||
+		repeatReceipt.OriginalReviewID != accepted.ID || repeatReceipt.OriginalStatus != "api_error" {
+		t.Fatalf("repeat receipt=%+v", repeatReceipt)
+	}
+	if calls.Load() != 1 {
+		t.Fatalf("provider calls=%d", calls.Load())
 	}
 }
 
