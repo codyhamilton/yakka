@@ -415,8 +415,15 @@ export async function load(context = {}) {
     if (offered.length && !offered.includes(measure)) {
       return unsupportedState({ missing: measure, reason: 'not published for the time grain', source: 'server /schema' });
     }
-    const validSplits = ['model', 'harness', 'session_model', 'session_repo', 'repo_id', 'tool', 'tool_kind', 'kind', 'plan'];
-    const split = spec.split && validSplits.includes(spec.split) ? spec.split : 'model';
+    const rankSplits = ['model', 'harness', 'session_model', 'session_repo', 'repo_id', 'tool', 'tool_kind', 'kind', 'plan'];
+    const dims = measureMeta(schema, measure).dims;
+    const validSplits = dims.length ? dims : rankSplits;
+    if (spec.split && dims.length && !validSplits.includes(spec.split)) {
+      return unsupportedState({ missing: `${measure} by ${spec.split}`, reason: 'not a published dimension for this measure', source: 'server /schema', nearest: validSplits.find(name => rankSplits.includes(name)) || null });
+    }
+    const split = spec.split && validSplits.includes(spec.split)
+      ? spec.split
+      : (validSplits.find(name => rankSplits.includes(name)) || 'model');
     const guard = honestJoinGuard(measure, [split]);
     if (guard) return unsupportedState({ missing: guard.missing, reason: guard.reason, source: 'contract 17.3', nearest: guard.try });
     if (compare && !currentWindow(scope)) return unsupportedState({ missing: 'period comparison', reason: PERIOD_UNSUPPORTED, source: 'scope' });

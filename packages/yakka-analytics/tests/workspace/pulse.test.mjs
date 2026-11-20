@@ -75,7 +75,7 @@ test('the quality median names kind, check, scorer and n rather than inventing a
 test('movers offers the repo lens only when the time grain publishes session_repo', () => {
   const plain = makeSchema();
   assert.equal(repoLensOffered(plain), false);
-  assert.deepEqual(moverLenses(plain), ['harness', 'session_model']);
+  assert.deepEqual(moverLenses(plain), ['harness', 'model']);
   const withRepo = makeSchema();
   withRepo.grains.time.lenses = ['harness', 'session_model', 'session_repo'];
   assert.equal(repoLensOffered(withRepo), true);

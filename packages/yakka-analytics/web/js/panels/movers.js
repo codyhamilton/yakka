@@ -33,15 +33,30 @@ function schemaLenses(schema) {
   return new Set(list);
 }
 
-// Harness and model are the Phase 9 lenses; the repo lens is conditional.
-export function moverLenses(schema) {
-  const lenses = ['harness', 'session_model'];
-  if (schemaLenses(schema).has('session_repo')) lenses.push('session_repo');
-  return lenses;
+// `/query` publishes the dimensions a time measure accepts; the raw `model`
+// dimension is the valid model split there. Derived `session_model` belongs to
+// a session-grain route and is never sent to `/query`.
+function measureDims(schema, measure) {
+  const grain = schema?.grains?.time;
+  const metadata = grain?.measure_metadata?.[measure];
+  if (Array.isArray(metadata?.dims) && metadata.dims.length) return metadata.dims;
+  const listed = (Array.isArray(schema?.measures) ? schema.measures : [])
+    .find(item => (typeof item === 'string' ? item : item?.name) === measure);
+  return Array.isArray(listed?.dims) ? listed.dims : [];
 }
 
-export function repoLensOffered(schema) {
-  return moverLenses(schema).includes('session_repo');
+// Harness and raw model are the offered `/query` splits for the selected
+// measure; the repo lens is conditional on the grain publishing session_repo.
+export function moverLenses(schema, measure = MOVER_DEFAULT_MEASURE) {
+  const dims = measureDims(schema, measure);
+  const offered = dims.length ? new Set(dims) : new Set(['harness', 'model']);
+  const lenses = ['harness', 'model'].filter(lens => offered.has(lens));
+  if (schemaLenses(schema).has('session_repo')) lenses.push('session_repo');
+  return lenses.length ? lenses : ['harness'];
+}
+
+export function repoLensOffered(schema, measure = MOVER_DEFAULT_MEASURE) {
+  return moverLenses(schema, measure).includes('session_repo');
 }
 
 export function parseQueryRows(body) {
@@ -228,7 +243,7 @@ export async function load({ scope = {}, spec = {}, transport, tenant, signal, d
     const measuresList = measures.length ? measures : FALLBACK_MEASURES;
     let measure = (spec.measures || [])[0];
     if (!measuresList.includes(measure)) measure = measuresList.includes(MOVER_DEFAULT_MEASURE) ? MOVER_DEFAULT_MEASURE : measuresList[0];
-    const lenses = moverLenses(schema);
+    const lenses = moverLenses(schema, measure);
     const prev = previousWindow(scope);
     const models = [];
     for (const lens of lenses) {
@@ -259,7 +274,7 @@ export async function load({ scope = {}, spec = {}, transport, tenant, signal, d
         renderMovers(holder, model, doc, context);
         container.append(section);
       }
-      if (!repoLensOffered(schema)) {
+      if (!repoLensOffered(schema, measure)) {
         const note = doc.createElement('p');
         note.className = 'pulse-note';
         note.textContent = 'Repository lens not offered: the server does not list session_repo for the time grain.';
@@ -286,7 +301,7 @@ export const MOVERS_PANEL = {
   title: 'Movers',
   grain: 'time',
   measures: PANEL_MEASURES,
-  lenses: ['harness', 'session_model', 'session_repo'],
+  lenses: ['harness', 'model', 'session_repo'],
   charts: ['bars', 'lines'],
   requires: [],
   caveats: 'Ranked change is an association, not cause. The repo lens is offered only when /schema lists session_repo for the time grain. Per-group n and unpriced counts are named when the server does not supply them.',
@@ -294,7 +309,7 @@ export const MOVERS_PANEL = {
   requests: () => [
     { route: '/v1/analytics/query', method: 'GET', params: { measure: 'cost_usd', dim: 'harness', bucket: 'none' } },
     { route: '/v1/analytics/query', method: 'GET', params: { measure: 'cost_usd', dim: 'harness', bucket: 'day' } },
-    { route: '/v1/analytics/query', method: 'GET', params: { measure: 'cost_usd', dim: 'session_model', bucket: 'none' } }
+    { route: '/v1/analytics/query', method: 'GET', params: { measure: 'cost_usd', dim: 'model', bucket: 'none' } }
   ],
   load
 };

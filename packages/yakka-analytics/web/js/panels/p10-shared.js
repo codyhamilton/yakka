@@ -279,13 +279,32 @@ export function honestJoinGuard(measure, dims = []) {
   return null;
 }
 
+// score-series resolutions are route-specific (DESIGN.md:99). The route entry,
+// when published, replaces the legacy global auto/year flags; older schemas get
+// the known day/week/month set for this route and never inferred global auto.
+export const SCORE_SERIES_BUCKETS = ['day', 'week', 'month'];
+
+export function scoreSeriesRoute(schema = null) {
+  const route = schema?.resolutions?.routes?.['score-series'];
+  const buckets = Array.isArray(route?.buckets)
+    ? route.buckets.filter(name => typeof name === 'string' && name)
+    : [];
+  return {
+    buckets: buckets.length ? buckets : SCORE_SERIES_BUCKETS.slice(),
+    auto: route?.auto === true,
+    published: Boolean(route)
+  };
+}
+
 export function bucketForWindow(scope = {}, schema = null) {
+  const supported = scoreSeriesRoute(schema).buckets;
+  const pick = name => supported.includes(name) ? name : (supported[supported.length - 1] || 'month');
   const win = currentWindow(scope);
-  if (!win) return 'month';
+  if (!win) return pick('month');
   const days = (win.to - win.from) / (WINDOW_MS.d);
-  if (days <= 90) return 'day';
-  if (days <= 730) return 'week';
-  return 'month';
+  if (days <= 90) return pick('day');
+  if (days <= 730) return pick('week');
+  return pick('month');
 }
 
 // Effective bucket/window text from the response contract (17.1): the server

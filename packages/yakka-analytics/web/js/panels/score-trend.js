@@ -6,7 +6,7 @@ import { cancelledState, emptyState, errorState, unsupportedState } from '../cor
 import { table } from './pulse-strips.js';
 import {
   bucketForWindow, bucketInfo, coarsenedText, ensureP10Styles, populationLine, requestParams,
-  whenPanelBody, whenPanelSlot
+  scoreSeriesRoute, whenPanelBody, whenPanelSlot
 } from './p10-shared.js';
 import {
   BASELINE_LABEL, QUALITY_KINDS, baselineBand, catalogueChecks, contentSplits, groupName, qualityScope,
@@ -116,13 +116,39 @@ export async function load(context = {}) {
     if (spec.split && !splits.includes(spec.split)) {
       return unsupportedState({ lens: `split ${spec.split}`, reason: 'not published for the content grain', source: 'server /schema', nearest: split || null });
     }
+    const route = scoreSeriesRoute(schema);
     const bucket = bucketForWindow(scope, schema);
     const params = requestParams({
       scope: { ...scope, kind }, spec: { ...spec, split: '' }, measure: '', bucket,
       extra: { kind, check, ...(resolved.scorer ? { scorer: resolved.scorer } : {}), ...(split ? { dim: split } : {}) }
     });
     const { response, body } = await transport.get('score-series', params, { tenant, signal, stateKey: 'score-trend' });
-    if (!response.ok) return errorState({ message: body?.error || `The server returned ${response.status}.`, code: body?.code || String(response.status || '') });
+    if (!response.ok) {
+      const code = body?.code || String(response.status || '');
+      if (code === 'unsupported_resolution') {
+        const buckets = Array.isArray(body?.supported_buckets) && body.supported_buckets.length
+          ? body.supported_buckets
+          : route.buckets;
+        return unsupportedState({
+          feature: `score-series ${bucket} buckets`,
+          reason: `${body?.error || 'the server refused this resolution'} (supported buckets: ${buckets.join(', ')})`,
+          source: 'server /score-series',
+          nearest: buckets.join(', ')
+        });
+      }
+      if (code === 'too_many_cells') {
+        const details = [`max_cells: ${body?.max_cells ?? 'not supplied'}`];
+        if (body?.suggested_bucket) details.push(`suggested_bucket: ${body.suggested_bucket}`);
+        if (body?.suggested_action) details.push(`suggested_action: ${body.suggested_action}`);
+        return unsupportedState({
+          feature: `score-series ${bucket} buckets at this cell budget`,
+          reason: `${body?.error || 'the server refused the cell budget'} (${details.join('; ')})`,
+          source: 'server /score-series',
+          nearest: body?.suggested_bucket || body?.suggested_action || null
+        });
+      }
+      return errorState({ message: body?.error || `The server returned ${response.status}.`, code });
+    }
     const band = baselineBand(resolved.entry);
     const model = scoreTrendModel({ body, check, split, baseline: band });
     if (!model.rows.length) {
@@ -169,6 +195,7 @@ export async function load(context = {}) {
     });
     return {
       state: 'ready', kind, check, scorer: resolved.scorer, split, bucket: info.effective,
+      requestedBucket: bucket, supportedBuckets: route.buckets, routeAuto: route.auto,
       coarsened: info.coarsened, baseline: band || 'baseline_unavailable',
       population: model.population,
       basis: `${check} hashes per ${info.effective || 'bucket'} by ${split || 'bucket'}; ${band ? 'all-time scorer baseline' : 'baseline_unavailable'}`,
@@ -190,7 +217,7 @@ export const SCORE_TREND_PANEL = {
   requires: ['scores_by_lens'],
   caveats: 'Distinct content hashes per bucket; a hash may recur in several buckets, so series n is not the window population. The all-time scorer baseline is printed beside the series.',
   measureBasis: 'artifact event facts.ts bucket start; latest-known scores',
-  requests: () => [{ route: '/v1/analytics/score-series', method: 'GET', params: { kind: 'design', check: 'clarity', dim: 'session_model', bucket: 'day' } }],
+  requests: () => [{ route: '/v1/analytics/score-series', method: 'GET', params: { kind: 'design', check: 'clarity', dim: 'session_model', bucket: 'week' } }],
   load
 };
 

@@ -31,9 +31,12 @@ export function artifactAxes(schema, catalogue = null) {
   const checks = catalogueChecks(catalogue || {});
   const checkSet = new Set(checks);
   const lenses = new Set(grain?.lenses || []);
+  const modeFields = Array.isArray(grain?.scatter_fields) && grain.scatter_fields.length
+    ? grain.scatter_fields
+    : (grain?.measures || []);
   const axes = [];
   const unsupported = [];
-  for (const name of grain?.measures || []) {
+  for (const name of modeFields) {
     if (name === 'id' || name === 'model' || lenses.has(name)) {
       unsupported.push({
         kind: 'axis', name,
