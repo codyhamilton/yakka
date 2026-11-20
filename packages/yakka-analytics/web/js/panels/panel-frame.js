@@ -65,7 +65,10 @@ export function createPanelFrame({ panel, spec = {}, scope = {}, transport, sche
   basis.className = 'workspace-panel-basis';
   const inspectorSlot = doc.createElement('div');
   inspectorSlot.className = 'workspace-panel-inspector';
-  element.append(chipSlot, chooserSlot, body, status, population, basis, inspectorSlot);
+  const meta = doc.createElement('div');
+  meta.className = 'workspace-panel-meta';
+  meta.append(status, population, basis);
+  element.append(chipSlot, chooserSlot, body, meta, inspectorSlot);
 
   let controller = null;
   let state = 'loading';

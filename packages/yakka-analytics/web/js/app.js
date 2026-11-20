@@ -494,7 +494,9 @@ async function renderBoard(container, record, state, schema, context) {
     }
     frame.load();
   }
-  container.append(grid, tray.element, inspector.element);
+  const layout = element('div', 'workspace-layout');
+  layout.append(grid, inspector.element);
+  container.append(layout, tray.element);
   updateTray();
   mountFollow(container, schema, tenant);
   mountSavedBoards(container, state);
