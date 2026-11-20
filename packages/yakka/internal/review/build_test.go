@@ -28,7 +28,7 @@ func mustBuild(t *testing.T, in Input) Packet {
 }
 
 // overBudgetBytes is a byte count whose token estimate exceeds maxInputTokens
-// under the calibrated 2.4-bytes-per-token ratio, so fixtures do not bake in
+// under the calibrated 2.05-bytes-per-token ratio, so fixtures do not bake in
 // the old three-bytes-per-token assumption.
 func overBudgetBytes() int {
 	return (estimateBytesPerTokenNum*maxInputTokens)/estimateBytesPerTokenDen + 1
@@ -95,7 +95,7 @@ func TestBuildReappliesLockfileAndPlanArtifactExclusions(t *testing.T) {
 }
 
 func TestBuildTruncatesWholeFilesInPolicyOrder(t *testing.T) {
-	large := strings.Repeat("x", 30000)
+	large := strings.Repeat("x", 25000)
 	diff := fileDiff("pkg/a.go", large) + fileDiff("pkg/b.go", large) +
 		fileDiff("pkg/a_test.go", large) + fileDiff("pkg/b_test.go", large) +
 		fileDiff("config.yaml", large) + fileDiff("settings.json", large) +
@@ -130,7 +130,7 @@ func TestBuildStaysUnderTokenBudgetAndRecordsEstimate(t *testing.T) {
 }
 
 func TestBuildDynamicTrimUsesPolicyOrder(t *testing.T) {
-	body := strings.Repeat("x", 30000)
+	body := strings.Repeat("x", 25000)
 	var diff strings.Builder
 	for _, name := range []string{"pkg/a.go", "pkg/b.go", "pkg/c.go"} {
 		diff.WriteString(fileDiff(name, body))
