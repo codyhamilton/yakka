@@ -569,5 +569,61 @@ class AlignmentReportTests(unittest.TestCase):
                                 unkeyed, {}, adjudication())
 
 
+class EffortSelectionTests(unittest.TestCase):
+    def _inputs(self):
+        manifest = make_manifest(2)
+        rows = [record(manifest, f"case-{index}", "high") for index in range(2)]
+        refs = [(f"case-{index}", "high", f"case-{index}-high") for index in range(2)]
+        return manifest, make_export(manifest, rows), make_ledger(manifest, refs)
+
+    def test_high_only_report_drops_other_arms_without_counting_them_as_failures(self):
+        manifest, export, ledger = self._inputs()
+        result = report.build_report(manifest, export, ledger, {}, adjudication(),
+                                     efforts=("high",), drop_reason="owner decision: high only")
+        default = report.build_report(manifest, export, ledger, {}, adjudication())
+        self.assertEqual(set(default["arms"]), set(report.EFFORTS))
+        self.assertEqual(result["reported_efforts"], ["high"])
+        self.assertEqual(set(result["arms"]), {"high"})
+        self.assertEqual(set(result["population"]["by_effort"]), {"high"})
+        self.assertEqual(set(result["comparisons"]["finding_recall"]["by_effort"]), {"high"})
+        self.assertEqual(set(result["cost_latency"]["by_effort"]), {"high"})
+        self.assertTrue(all(set(row) == {"high"} for row in result["cost_latency"]["per_review"].values()))
+        dropped = {row["effort"]: row for row in result["owner_dropped_arms"]}
+        self.assertEqual(set(dropped), {"xhigh", "max"})
+        for row in dropped.values():
+            self.assertEqual((row["attempted"], row["completed"]), (0, 0))
+            self.assertFalse(row["counted_as_failure"])
+            self.assertEqual(row["reason"], "owner decision: high only")
+        self.assertEqual(result["arms"]["high"]["completed"], 2)
+        self.assertRegex(result["reproducibility"]["report_sha256"], r"^[0-9a-f]{64}$")
+
+    def test_metric_only_copy_drops_case_rows_and_keeps_metrics_and_validation(self):
+        manifest, export, ledger = self._inputs()
+        full = report.build_report(manifest, export, ledger, {}, adjudication())
+        result = report.metric_only(full)
+        rendered = json.dumps(result, sort_keys=True)
+        self.assertNotIn("case-0", rendered)
+        self.assertNotIn("case-1", rendered)
+        for arm in result["arms"].values():
+            self.assertNotIn("completed_case_ids", arm)
+            self.assertNotIn("per_case", arm)
+        self.assertNotIn("per_review", result["cost_latency"])
+        self.assertNotIn("items", result["new_findings"])
+        self.assertNotIn("items", result["historical_findings"])
+        self.assertNotIn("pages", result["provenance"])
+        self.assertTrue(result["metric_only"])
+        self.assertRegex(result["reproducibility"]["metric_only_sha256"], r"^[0-9a-f]{64}$")
+        self.assertEqual(result["reproducibility"]["report_sha256"], full["reproducibility"]["report_sha256"])
+        self.assertEqual(result["arms"]["high"]["completed"], full["arms"]["high"]["completed"])
+        self.assertTrue(result["validation"]["leak_check"]["pass"])
+        self.assertIn("completed_case_ids", full["arms"]["high"])
+
+    def test_unknown_or_empty_effort_selection_is_refused(self):
+        manifest, export, ledger = self._inputs()
+        for selection in ((), ("bogus",), ("high", "bogus")):
+            with self.assertRaisesRegex(ValueError, "subset of high, xhigh, max"):
+                report.build_report(manifest, export, ledger, {}, adjudication(), efforts=selection)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -83,6 +83,8 @@ The JSON report carries the `population` section (eligible, frozen, attempted, c
 
 Adjudication version 1 is extended with optional `second_label`, `labeler_model` and `second_labeler_model` fields; double-labelled pairs produce Cohen's kappa. Review-finding decisions use the `valid`, `invalid` and `unknown` categories in addition to the new-finding categories, while historical comparator decisions use `matched`, `partial` and `unmatched`.
 
+`--efforts high` (or a comma-separated subset) reports only the selected arms and records the omitted arms as owner-dropped: 0 attempted, 0 completed and not failures, never padded. The default reports every effort in the manifest. `--metric-only` strips case ids, review ids, evidence paths and finding rows from the written JSON while keeping counts, rates, intervals, hashes and the validation controls; the JSON retains the full `report_sha256` and adds `metric_only_sha256` for the committed aggregate. A stored `attempts: null` is treated as a non-completion; any other non-array attempts value is still refused.
+
 ### Leak check
 
 > **Leak check.** The trial reconstructs every request the runner would send

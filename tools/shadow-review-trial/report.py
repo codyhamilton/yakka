@@ -10,6 +10,7 @@ decisions are retained as unadjudicated.
 """
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 import math
@@ -202,9 +203,9 @@ def _validate_export(export: dict[str, Any], manifest: dict[str, Any]) -> None:
         raise ValueError("review export terminal page is not complete")
     for index, raw in enumerate(rows):
         review = _mapping(raw, f"reviews[{index}]")
-        if "attempts" in review and not isinstance(review["attempts"], list):
-            raise ValueError(f"reviews[{index}].attempts must be an array")
-        for a_index, attempt in enumerate(review.get("attempts", [])):
+        if review.get("attempts") is not None and not isinstance(review["attempts"], list):
+            raise ValueError(f"reviews[{index}].attempts must be an array or null")
+        for a_index, attempt in enumerate(review.get("attempts") or []):
             attempt = _mapping(attempt, f"reviews[{index}].attempts[{a_index}]")
             _validate_cost(attempt, f"reviews[{index}].attempts[{a_index}]")
             for field in ("latency_ms",):
@@ -930,10 +931,90 @@ def _comparisons_and_validation(manifest: dict[str, Any], cases: dict[str, dict[
 
 
 
+def _restrict_report_efforts(report: dict[str, Any], reported: tuple[str, ...],
+                             drop_reason: str) -> dict[str, Any]:
+    """Drop unselected arms from the result and record them as owner-dropped.
+
+    A dropped arm is never a failure and never contributes a shortfall: it was
+    not attempted by owner decision. The leak check, export certification and
+    canonical-record reconciliation are untouched because they already ran.
+    """
+    dropped = [effort for effort in EFFORTS if effort not in reported]
+    if not dropped:
+        return report
+    for effort in dropped:
+        report["arms"].pop(effort, None)
+        report["population"].get("by_effort", {}).pop(effort, None)
+        outcomes = report.get("outcomes", {})
+        outcomes.get("available_cases", {}).pop(effort, None)
+        outcomes.get("common_completed_cases", {}).get("by_effort", {}).pop(effort, None)
+        for name in ("finding_recall", "fix_recall", "corroboration",
+                     "verdict_agreement", "severity_agreement"):
+            report["comparisons"].get(name, {}).get("by_effort", {}).pop(effort, None)
+        report["cost_latency"].get("by_effort", {}).pop(effort, None)
+    for pair_rows in report["comparisons"].get("paired_deltas", {}).values():
+        for label, first, second in PAIRED_EFFORT_PAIRS:
+            if first not in reported or second not in reported:
+                pair_rows.pop(label, None)
+    for per_case in report["cost_latency"].get("per_review", {}).values():
+        for effort in dropped:
+            per_case.pop(effort, None)
+    eligible = report["population"].get("eligible")
+    report["reported_efforts"] = list(reported)
+    report["owner_dropped_arms"] = [
+        {"effort": effort, "eligible": eligible, "attempted": 0, "completed": 0,
+         "counted_as_failure": False, "reason": drop_reason}
+        for effort in dropped
+    ]
+    report["reproducibility"].pop("report_sha256", None)
+    report["reproducibility"]["report_sha256"] = _canonical_hash(report)
+    return report
+
+
+def metric_only(report: dict[str, Any]) -> dict[str, Any]:
+    """Return an aggregate copy fit for commit: counts, rates, intervals, hashes only.
+
+    Case ordinals, review ids, evidence paths, finding text and per-case rows stay
+    in the local report. The full report hash is retained as ``report_sha256``;
+    ``metric_only_sha256`` covers this sanitized artifact.
+    """
+    result = copy.deepcopy(report)
+    for arm in result.get("arms", {}).values():
+        for key in ("completed_case_ids", "partial_coverage_case_ids", "per_case"):
+            arm.pop(key, None)
+    result.get("paired_intersection", {}).pop("case_ids", None)
+    outcomes = result.get("outcomes", {})
+    outcomes.get("common_completed_cases", {}).pop("case_ids", None)
+    for group in ("common_completed_cases", "available_cases", "by_build_model",
+                  "by_reviewer_model", "by_effective_effort"):
+        rows = outcomes.get(group, {})
+        if group == "common_completed_cases":
+            rows = rows.get("by_effort", {})
+        for row in rows.values() if isinstance(rows, dict) else []:
+            if isinstance(row, dict):
+                row.pop("case_ids", None)
+                row.pop("cases", None)
+    result.get("cost_latency", {}).pop("per_review", None)
+    provenance = result.get("provenance", {})
+    provenance.pop("pages", None)
+    for section in ("new_findings", "historical_findings"):
+        result.get(section, {}).pop("items", None)
+    result["metric_only"] = True
+    result["reproducibility"].pop("metric_only_sha256", None)
+    result["reproducibility"]["metric_only_sha256"] = _canonical_hash(result)
+    return result
+
+
 def build_report(manifest: dict[str, Any], export: dict[str, Any], ledger: dict[str, Any],
-                 comparator_evidence: dict[str, Any], adjudications: dict[str, Any]) -> dict[str, Any]:
+                 comparator_evidence: dict[str, Any], adjudications: dict[str, Any],
+                 *, efforts: tuple[str, ...] | list[str] | None = None,
+                 drop_reason: str = "owner_dropped") -> dict[str, Any]:
     """Build a JSON-serializable report. No input is mutated and no I/O occurs."""
     validate_inputs(manifest, export, ledger, comparator_evidence, adjudications)
+    requested = set(EFFORTS if efforts is None else efforts)
+    if not requested or any(effort not in EFFORTS for effort in requested):
+        raise ValueError("report efforts must be a non-empty subset of high, xhigh, max")
+    reported = tuple(effort for effort in EFFORTS if effort in requested)
     cases = {case["case_id"]: case for case in manifest["cases"]}
     spend = _ledger_spend(ledger, set(cases))
     target = manifest.get("target", manifest.get("target_per_effort", 50))
@@ -1349,7 +1430,7 @@ def build_report(manifest: dict[str, Any], export: dict[str, Any], ledger: dict[
                       "missing_data": missing_data,
                       "unknown_cost_entries": unknown_cost_entries}}
     report["reproducibility"]["report_sha256"] = _canonical_hash(report)
-    return report
+    return _restrict_report_efforts(report, reported, drop_reason)
 
 
 def _distribution(values: list[int]) -> dict[str, int | float | None]:

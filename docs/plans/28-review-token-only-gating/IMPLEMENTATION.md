@@ -150,23 +150,23 @@ Artifact feedback: all 8 reports `delivered`, screen pass; briefs 01, 03, 04, 05
 
 Run: OpenCode `opencode run` — model `opencode-go/deepseek-v4.1-flash`; start 2026-11-18 07:54 AEST. `DESIGN.md` gives Phase 5 no Units table; it is one operational unit (probe, trial, report, evidence), so no refine and no worker brief/report were produced.
 
-**Blocked at the non-spending probe; the phase outcome is not met.**
+**Completed 2026-11-21 AEST; the phase outcome is met.** The earlier 2026-11-18 probes blocked because the deployed server had not yet received the Phase 1 build. The deploy later landed and the frozen Phase 3 manifest ran against tenant `t-60d108478da4` with reviewer model `claude-haiku-5-5`.
 
-- Probe (non-spending, 2026-11-18 07:56–07:59 AEST) against the deployed server `https://api.yakka.build`:
-  - `GET /v1/whoami` with the locally configured client credential returned `scope: read_write` (tenant `default`); the credential value was never printed, recorded or committed.
-  - `POST /v1/mcp` `{"jsonrpc":"2.0","id":1,"method":"tools/list"}` with that `read_write` bearer returned exactly `["list_checks","search_artifacts","artifact_feedback","list_reviews"]`. `review_change` is absent.
-  - The dry-run `POST /v1/reviews` half of the probe was not run: the first half already fails, and the only locally available key is the `default` tenant, not the design's dedicated synthetic trial tenant. No review POST, provider call or spend occurred.
-- Why it fails: the deployed server is not running the Phase 1 build. At the design baseline `34bb808`, `review_change` registration requires `YAKKA_REVIEW_MODEL` (`serve.go:316`); production sets only `CLAUDE_API_TOKEN`, exactly the condition the design describes. The design's Phase 5 gate therefore holds: the probe fails, the phase stops, and no deploy is attempted or worked around.
-- No trial was run. No manifest refresh, run ledger, certified export, adjudication file or alignment report was produced, and nothing was written under `docs/lab/RESEARCH/`. The Phase 3 frozen manifest stays local and gitignored; committing any trial evidence without a real run would be fabricated data. The paid-trial approval recorded on 18 Nov is unused.
-- Retry probe (non-spending, 2026-11-18 08:01 AEST) against the same deployed server, with the same locally configured `read_write` credential: `GET /v1/whoami` returned `{"expires_at":1824903475,"scope":"read_write","tenant":"default"}` and `POST /v1/mcp` `tools/list` returned exactly `["list_checks","search_artifacts","artifact_feedback","list_reviews"]`. `review_change` is still absent, so the deploy gate still holds; the trial was not started and no spend occurred.
+- Owner decision (Cody, 20 Nov 23:53 AEST): HIGH effort only. xHIGH and MAX are owner-dropped arms: 0 attempted, 0 completed, not failures and never padded.
+- Main run `plan28-p5-20261121` (two interleaved shards, merged ledger and certified paged export): 311 HIGH completions of 360 eligible (`ok` 45, `ok_partial` 266).
+- Retry run `plan28-p5-20261121r` over the failed/unfinished HIGH rows (refused rows excluded): 18 further completions from 43 retried rows.
+- Final HIGH completed: **329 of 360 eligible against the 300 floor**. No case was invented or padded.
+- Failures: main run `invalid_output` 37 (`schema` 24, `json_parse` 8, `unknown_field` 4, `missing_field` 1), `unavailable` 2, `refused_disclosure` 6, `started_unknown` after HTTP 524 4; retry remained `invalid_output` 25 (`schema` 22, `json_parse` 2, `missing_field` 1). Final non-completions 31 (25 `invalid_output` + 6 `refused_disclosure`).
+- Actual cost from canonical run receipts: USD 5.690711 main + USD 1.142236 retry = USD 6.832947 known; 4 main-run rows with no receipt are unknown, not estimated.
+- Evidence is metric-only under `docs/lab/RESEARCH/2026-11-21-shadow-review-trial/`: main and retry aggregate JSON plus rendered summaries and README. The full manifest, merged ledgers and certified exports remain local and gitignored; the committed report was stripped of case, review and path detail.
+- Validation: leak check pass, 1,080 requests checked, 0 own-plan document hits, 0 outcome-text hits, 54 `foreign_plan_document_captures`, 1,458 `short_excerpts_skipped`; export certification complete. Adjudication is version 1 with no labels, so kappa is null and 964 required finding adjudications remain unadjudicated (`gate: adjudication labelling`).
+- Tooling: `cli.py report` gained `--efforts` (selected arms plus explicit owner-dropped arms) and `--metric-only` (aggregate commit artifact); null stored `attempts` is accepted as a non-completion while malformed types still fail. Leak check, export certification and the evidence check are unchanged.
 
-**Verification:** the Phase 5 entry point is the probe itself; its observable result is recorded above. `review_change` is absent from a `read_write` `tools/list` on the deployed server, so the phase outcome (trial completion and committed metric-only evidence) cannot be verified or met. No code changed; the Phase 1–4 suites stand as recorded.
+**Verification:** both reports were produced twice from the same local inputs with equal `report_sha256`; the metric-only evidence folder passes `cli.py evidence-check --folder`; the `tools/shadow-review-trial` unittest suite passes. Main report SHA-256 `d93eb91f84d38a4c11c67779ed4e09eb1fcac224fe5a48081c2083a11bf615dd`; retry report SHA-256 `ca93abcb502b417ae7ff9eb0c70a295d7ac3c520816b5d0ed254ad2ad42dd7be`.
 
 **Carried:**
-- gate: deploy the Phase 1 build to the Yakka server `https://api.yakka.build` (operator act; out of scope; no deploy was run).
-- gate: provision the dedicated synthetic trial tenant and its separate `read_write` key, and record its immutable tenant id (operator/human act; the locally configured key is tenant `default`, not a dedicated trial tenant).
-- gate: after both hold, re-run Phase 5 — probe, then the frozen 360-case set at `high`/`xhigh`/`max`, the Phase 4 report and metric-only evidence under `docs/lab/RESEARCH/<date>-shadow-review-trial/`. Never pad and never deploy from the build.
-- Phase 5 report (when it runs): carry the leak check's `short_excerpts_skipped` and `foreign_plan_document_captures` beside `pass` (Phase 4: 1458 and 54 on the real manifest).
+- Phase 5 report guidance holds and is carried in the README beside the leak `pass`: `short_excerpts_skipped` 1458 and `foreign_plan_document_captures` 54. Do not suppress them.
+- gate: adjudication labelling. No human labels were available, so required findings stay `unadjudicated` and kappa is null; do not invent labels.
 
 ## Amendment — optional YAKKA_REVIEW_MODEL (18 Nov 2026, 8:17 AM AEST)
 
