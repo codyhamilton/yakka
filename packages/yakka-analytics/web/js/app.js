@@ -296,6 +296,11 @@ async function renderBoard(container, record, state, schema, context) {
   const board = assembleBoard({ presetId: record.presetId, state });
   if (board.kind === 'named') { renderNamedDestination(container, { ...record, label: board.label, title: board.title, phase: board.phase }); return; }
   if (board.kind !== 'board') { renderNotFound(container, record); container.append(element('p', 'notice', board.reason)); return; }
+  if (context?.window) {
+    for (const entry of board.panels) {
+      entry.scope = { ...entry.scope, from: context.window.from || '', to: context.window.to || '' };
+    }
+  }
   container.append(element('h1', '', board.title));
   const grid = element('div', 'panel-grid');
 

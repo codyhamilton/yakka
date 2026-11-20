@@ -220,6 +220,8 @@ export function requestParams({ scope = {}, spec = {}, measure = '', split = '',
     params.set('to', iso(win.to));
   } else {
     params.set('all', '1');
+    const frozen = scope.to ? Date.parse(scope.to) : NaN;
+    if (Number.isFinite(frozen)) params.set('to', new Date(frozen).toISOString());
   }
   if (scope.tz) params.set('tz', scope.tz);
   for (const key of FILTER_KEYS) {

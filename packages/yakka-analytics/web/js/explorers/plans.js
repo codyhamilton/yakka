@@ -464,9 +464,9 @@ export function parsePlanDetailPath(pathname = '') {
   } catch { return null; }
 }
 
-function windowParams(state = {}, now = Date.now()) {
+function windowParams(state = {}, now = Date.now(), window = null) {
   const params = new URLSearchParams();
-  const window = resolveWindow(state, now);
+  const resolved = resolveWindow(state, now, window);
   if (resolved.all) params.set('all', '1');
   if (resolved.from) params.set('from', resolved.from);
   if (resolved.to) params.set('to', resolved.to);
@@ -490,38 +490,38 @@ function withPaging(params, { limit = null, cursor = '' } = {}) {
 // The plan row is named by repo and plan, not by position; `plan` is a shared
 // filter the entities route applies even though the plan lens contract names
 // repo_id/harness/session_model/id.
-export function planRowParams(identity = {}, { state = {}, limit = 1 } = {}) {
-  const params = windowParams(state);
+export function planRowParams(identity = {}, { state = {}, window = null, limit = 1 } = {}) {
+  const params = windowParams(state, Date.now(), window);
   params.set('grain', 'plan');
   for (const [key, value] of identityParams(identity)) params.set(key, value);
   return withPaging(params, { limit });
 }
 
-export function planArtifactsParams(identity = {}, { state = {}, limit = null, cursor = '' } = {}) {
-  const params = windowParams(state);
+export function planArtifactsParams(identity = {}, { state = {}, window = null, limit = null, cursor = '' } = {}) {
+  const params = windowParams(state, Date.now(), window);
   params.set('grain', 'artifact');
   for (const [key, value] of identityParams(identity)) params.set(key, value);
   return withPaging(params, { limit, cursor });
 }
 
-export function planExecutionsParams(identity = {}, { state = {}, limit = null, cursor = '' } = {}) {
-  const params = windowParams(state);
+export function planExecutionsParams(identity = {}, { state = {}, window = null, limit = null, cursor = '' } = {}) {
+  const params = windowParams(state, Date.now(), window);
   params.set('grain', 'execution');
   for (const [key, value] of identityParams(identity)) params.set(key, value);
   return withPaging(params, { limit, cursor });
 }
 
 // `/entity?grain=plan` refuses `cohort=`; the builder never emits it.
-export function planCollectionParams(identity = {}, collection = '', { state = {}, limit = null, cursor = '' } = {}) {
-  const params = windowParams(state);
+export function planCollectionParams(identity = {}, collection = '', { state = {}, window = null, limit = null, cursor = '' } = {}) {
+  const params = windowParams(state, Date.now(), window);
   params.set('grain', 'plan');
   params.set('collection', collection);
   for (const [key, value] of identityParams(identity)) params.set(key, value);
   return withPaging(params, { limit, cursor });
 }
 
-export function planSessionResolveParams(ids = [], { state = {}, limit = null } = {}) {
-  const params = windowParams(state);
+export function planSessionResolveParams(ids = [], { state = {}, window = null, limit = null } = {}) {
+  const params = windowParams(state, Date.now(), window);
   params.set('grain', 'session');
   const seen = new Set();
   for (const raw of ids) {
@@ -1038,7 +1038,12 @@ async function renderDetail(root, doc, { signal, identity, tenant = '', readCont
     timelineFrame = createPanelFrame({
       panel: PLAN_TIMELINE_PANEL,
       spec: { plan: { repo_id: identity.repo_id, plan: identity.plan } },
-      scope: { ...(state.win ? { win: state.win } : {}), ...(state.from ? { from: state.from } : {}), ...(state.to ? { to: state.to } : {}), ...(state.tz ? { tz: state.tz } : {}) },
+      scope: {
+        ...(state.win ? { win: state.win } : {}),
+        ...(readContext?.window?.from ? { from: readContext.window.from } : (state.from ? { from: state.from } : {})),
+        ...(readContext?.window?.to ? { to: readContext.window.to } : (state.to ? { to: state.to } : {})),
+        ...(state.tz ? { tz: state.tz } : {})
+      },
       transport, scheduler, tenant, schema, doc
     });
     timeline.body.append(timelineFrame.element);
@@ -1046,7 +1051,7 @@ async function renderDetail(root, doc, { signal, identity, tenant = '', readCont
   }
 
   async function loadArtifacts(cursor = '') {
-    const { response, body } = await get('entities', planArtifactsParams(identity, { state, limit: pageLimit, cursor }), 'plan-detail-artifacts');
+    const { response, body } = await get('entities', planArtifactsParams(identity, { state, window: readContext?.window || null, limit: pageLimit, cursor }), 'plan-detail-artifacts');
     if (!response.ok) { artifacts.state('error', errorText(response, body, 'The artifacts request failed.')); return; }
     const incoming = Array.isArray(body.rows) ? body.rows : [];
     artifactsState.rows = cursor ? mergeByIdentity(artifactsState.rows, incoming) : incoming;
@@ -1058,7 +1063,7 @@ async function renderDetail(root, doc, { signal, identity, tenant = '', readCont
   }
 
   async function loadExecutions(cursor = '') {
-    const { response, body } = await get('entities', planExecutionsParams(identity, { state, limit: pageLimit, cursor }), 'plan-detail-executions');
+    const { response, body } = await get('entities', planExecutionsParams(identity, { state, window: readContext?.window || null, limit: pageLimit, cursor }), 'plan-detail-executions');
     if (!response.ok) { executions.state('error', errorText(response, body, 'The executions request failed.')); return; }
     const incoming = Array.isArray(body.rows) ? body.rows : [];
     executionsState.rows = cursor ? mergeByIdentity(executionsState.rows, incoming, true) : incoming;
@@ -1068,7 +1073,7 @@ async function renderDetail(root, doc, { signal, identity, tenant = '', readCont
   }
 
   async function loadSessions(cursor = '') {
-    const { response, body } = await get('entity', planCollectionParams(identity, 'sessions', { state, limit: pageLimit, cursor }), 'plan-detail-sessions');
+    const { response, body } = await get('entity', planCollectionParams(identity, 'sessions', { state, window: readContext?.window || null, limit: pageLimit, cursor }), 'plan-detail-sessions');
     if (!response.ok) { sessions.state('error', errorText(response, body, 'The sessions collection failed.')); return; }
     const incoming = Array.isArray(body.rows) ? body.rows : [];
     sessionsState.rows = cursor ? mergeConversationRows(sessionsState.rows, incoming) : incoming;
@@ -1076,7 +1081,7 @@ async function renderDetail(root, doc, { signal, identity, tenant = '', readCont
     sessionsState.population = body.population || sessionsState.population;
     const ids = [...new Set(sessionsState.rows.map(row => String(row.conversation_id || '')).filter(Boolean))];
     if (ids.length) {
-      const resolved = await get('entities', planSessionResolveParams(ids, { state, limit: pageLimit }), 'plan-detail-session-rows');
+      const resolved = await get('entities', planSessionResolveParams(ids, { state, window: readContext?.window || null, limit: pageLimit }), 'plan-detail-session-rows');
       if (resolved.response.ok) {
         for (const row of resolved.body.rows || []) {
           const id = String(row.id?.conversation_id || row.id || '');
@@ -1088,7 +1093,7 @@ async function renderDetail(root, doc, { signal, identity, tenant = '', readCont
   }
 
   async function loadEvents(cursor = '') {
-    const { response, body } = await get('entity', planCollectionParams(identity, 'events', { state, limit: pageLimit, cursor }), 'plan-detail-events');
+    const { response, body } = await get('entity', planCollectionParams(identity, 'events', { state, window: readContext?.window || null, limit: pageLimit, cursor }), 'plan-detail-events');
     if (!response.ok) { events.state('error', errorText(response, body, 'The events collection failed.')); return; }
     const incoming = Array.isArray(body.rows) ? body.rows : [];
     eventsState.rows = cursor ? mergeEventRows(eventsState.rows, incoming) : incoming;
@@ -1167,7 +1172,7 @@ async function renderDetail(root, doc, { signal, identity, tenant = '', readCont
 
     let rowResult;
     try {
-      rowResult = await get('entities', planRowParams(identity, { state, limit: 1 }), 'plan-detail-row');
+      rowResult = await get('entities', planRowParams(identity, { state, window: readContext?.window || null, limit: 1 }), 'plan-detail-row');
     } catch (error) {
       if (error?.name === 'AbortError') return;
       header.state('error', error?.message || 'The plan request failed.');
@@ -1429,8 +1434,10 @@ export function renderList(root, doc = globalThis.document, { signal, tenant = '
       return;
     }
     if (scatterNote) scatterSection.append(el(doc, 'p', 'plans-scatter-not-applied', scatterNote));
+    const frozen = readContext?.window || null;
+    const scatterScope = { ...flatScope(scope), ...(frozen ? { from: frozen.from || '', to: frozen.to || '' } : {}) };
     scatterFrame = createPanelFrame({
-      panel: SCATTER_PLAN_PANEL, spec: planScatterSpec(), scope: flatScope(scope),
+      panel: SCATTER_PLAN_PANEL, spec: planScatterSpec(), scope: scatterScope,
       transport, scheduler, tenant, schema, doc
     });
     scatterSection.append(scatterFrame.element);

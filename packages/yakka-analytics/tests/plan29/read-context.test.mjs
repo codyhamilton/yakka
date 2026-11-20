@@ -159,6 +159,11 @@ test('plan29 read context: tenant, resolved scope and coverage truth', async t =
     assert.ok(plans.length >= 1, 'plans made a first-page request');
     assertTenant(plans, a);
     assertResolved(plans);
+    const planScatter = requests.filter(entry => entry.route === 'entities'
+      && paramsOf(entry).get('grain') === 'plan' && paramsOf(entry).get('mode') === 'scatter');
+    assert.ok(planScatter.length >= 1, 'plans scatter request kept its all-history bound');
+    assertTenant(planScatter, a);
+    assertResolved(planScatter);
     const plansTo = paramsOf(plans[0]).get('to');
     const plansMore = page.locator('.plans-load-more');
     if (await plansMore.count()) {
@@ -169,6 +174,15 @@ test('plan29 read context: tenant, resolved scope and coverage truth', async t =
       assertTenant(plans, a);
       assert.equal(paramsOf(plans[0]).get('to'), plansTo, 'plans continuation keeps the first to');
     }
+
+    // Workflow's plan panels share the same fixed all-history bound.
+    requests.length = 0;
+    await page.goto(`${harness.origin}/b/workflow?win=all`);
+    await harness.waitIdle(page);
+    const workflowPlans = requests.filter(entry => entry.route === 'entities' && paramsOf(entry).get('grain') === 'plan');
+    assert.ok(workflowPlans.length >= 1, 'workflow made a plan request');
+    assertTenant(workflowPlans, a);
+    assertResolved(workflowPlans);
 
     // Artifact content and its tenant-scoped baseline.
     requests.length = 0;

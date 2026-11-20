@@ -22,12 +22,12 @@ function iso(value) {
 }
 
 function resolveWindow(state = {}, now = Date.now()) {
+  const win = String(state.win || '30d');
+  if (win === 'all') return { all: true, from: '', to: iso(state.to) || iso(now) };
   if (state.from || state.to) {
     const to = iso(state.to) || iso(now);
     return { all: false, from: iso(state.from), to };
   }
-  const win = String(state.win || '30d');
-  if (win === 'all') return { all: true, from: '', to: iso(now) };
   const match = /^(\d+)([hdwmy])$/.exec(win);
   if (!match) return { all: false, from: iso(now - 30 * WINDOW_MS.d), to: iso(now) };
   return { all: false, from: iso(now - Number(match[1]) * WINDOW_MS[match[2]]), to: iso(now) };

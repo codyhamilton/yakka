@@ -90,6 +90,7 @@ export function summaryIsEmpty(summary) {
 
 // Current absolute window, or null for all-history (and for a bare `all`).
 export function currentWindow(scope = {}, now = Date.now()) {
+  if (scope.win === 'all') return null;
   if (scope.from || scope.to) {
     const from = scope.from ? Date.parse(scope.from) : null;
     const to = scope.to ? Date.parse(scope.to) : now;
