@@ -2,6 +2,8 @@
 // preset or a later phase is checked against. A panel is data plus a load()
 // function; this module never renders anything.
 
+import { publishedNames } from '../core/schema-adapter.js';
+
 // Chart names derive from the chart kit's published elements and modes
 // (CONTRACTS.md 17.5), so a panel cannot name a chart the kit does not draw.
 // A table-only panel has no chart: it declares `charts: []` plus `table: true`.
@@ -69,8 +71,8 @@ export function clearPanels() {
 // with the panel's own source, so the capability inspector can name it.
 export function chooserOptions(panel, schema) {
   const grain = schema?.grains?.[panel.grain];
-  const measures = new Set(grain?.measures || []);
-  const lenses = new Set(grain?.lenses || []);
+  const measures = new Set(publishedNames(grain?.measures));
+  const lenses = new Set(publishedNames(grain?.lenses));
   const offered = { measures: [], lenses: [], charts: [], unsupported: [] };
   for (const measure of panel.measures) {
     if (grain && measures.has(measure)) offered.measures.push(measure);

@@ -107,6 +107,24 @@ export function createPanelFrame({ panel, spec = {}, scope = {}, transport, sche
       addRetry(options.retry);
       return;
     }
+    if (next === 'unauthorized') {
+      status.append(text(doc, 'strong', '', options.message || 'This read is not authorized.'));
+      if (options.code) status.append(doc.createTextNode(` (${options.code})`));
+      addRetry(options.retry);
+      return;
+    }
+    if (next === 'busy') {
+      status.append(text(doc, 'strong', '', options.message || 'The server is busy; retry shortly.'));
+      if (options.code) status.append(doc.createTextNode(` (${options.code})`));
+      addRetry(options.retry);
+      return;
+    }
+    if (next === 'timeout') {
+      status.append(text(doc, 'strong', '', options.message || 'The read timed out; narrow the window or retry.'));
+      if (options.code) status.append(doc.createTextNode(` (${options.code})`));
+      addRetry(options.retry);
+      return;
+    }
     if (next === 'unsupported') {
       status.textContent = unsupportedText(options);
       return;

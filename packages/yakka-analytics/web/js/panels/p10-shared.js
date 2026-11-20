@@ -6,6 +6,7 @@
 
 import { currentWindow, ensurePulseStyles, scopeParams, whenPanelBody, windowParams, WINDOW_MS } from './pulse-strips.js';
 import { canonicalPanelSpec } from '../core/view-spec.js';
+import { publishedNames } from '../core/schema-adapter.js';
 import { decodeCohort, encodeCohort } from '../core/selection-model.js';
 import { formatCount, formatMoney, formatNumber } from '../charts/formatters.js';
 
@@ -46,15 +47,18 @@ export function schemaGrain(schema, grain) {
 
 export function measureMeta(schema, name) {
   const key = String(name || '');
-  const listed = (schema?.measures || []).find(item => item?.name === key) || null;
+  const mapped = schema?.measure_metadata?.[key] || {};
+  const listed = (Array.isArray(schema?.measures) ? schema.measures : [])
+    .find(item => (typeof item === 'string' ? item : item?.name) === key) || null;
   const fallback = MEASURE_FALLBACK[key] || {};
-  const unit = listed?.unit || fallback.unit || '';
+  const unit = mapped.unit || listed?.unit || fallback.unit || '';
+  const dims = Array.isArray(mapped.dims) ? mapped.dims : Array.isArray(listed?.dims) ? listed.dims : [];
   return {
     name: key,
     label: fallback.label || key,
     unit,
     kind: fallback.kind || unitKind(unit),
-    dims: Array.isArray(listed?.dims) ? listed.dims.slice() : []
+    dims: dims.slice()
   };
 }
 
@@ -62,14 +66,14 @@ export function measureMeta(schema, name) {
 // own list is the upper bound; the server response decides the intersection.
 export function offeredMeasures(panel, schema) {
   const grain = schemaGrain(schema, panel?.grain);
-  const published = new Set(grain?.measures || []);
+  const published = new Set(publishedNames(grain?.measures));
   return (panel?.measures || []).filter(measure => !grain ? true : published.has(measure));
 }
 
 export function offeredSplit(panel, measure, schema) {
   const grain = schemaGrain(schema, panel?.grain);
   const meta = measureMeta(schema, measure);
-  const candidates = new Set([...(grain?.lenses || []), ...(meta.dims || [])]);
+  const candidates = new Set([...publishedNames(grain?.lenses), ...(meta.dims || [])]);
   const offered = [...candidates].filter(lens => !SPLIT_EXCLUDED.has(lens));
   return offered.sort();
 }

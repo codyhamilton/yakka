@@ -572,16 +572,32 @@ async function render(record) {
   try {
     const result = await transport.schema(tenant);
     if (!renderIsCurrent(generation)) return;
-    if (result.response.ok) schema = result.body;
+    if (result.response.ok && !result.error) schema = result.body;
     else if (shouldRecoverTenant({ status: result.response.status, error: result.body?.error, me, path }) && path !== '/profile') { location.assign('/profile'); return; }
     else {
+      // The failure is named and a fresh read is offered; navigation and the
+      // current route stay rendered, and each panel settles on its own.
       const node = document.querySelector('#schema-status');
-      node.textContent = result.response.status === 401 ? 'Connection was rejected. Check the API base and bearer in Settings.' : legacyErrorMessage(result.body);
+      const reason = result.error?.message || (result.response.status === 401
+        ? 'Connection was rejected. Check the API base and bearer in Settings.'
+        : legacyErrorMessage(result.body));
+      const retry = element('button', '', 'fresh read');
+      retry.type = 'button';
+      retry.addEventListener('click', () => { transport.invalidateSchema(tenant); render(record); }, { once: true });
+      node.replaceChildren(document.createTextNode(`Schema unavailable: ${reason} `), retry);
     }
-    if (schema) document.querySelector('#schema-status').textContent = `${Object.keys(schema.features || {}).length} server capabilities detected`;
+    if (schema) {
+      const warnings = Array.isArray(result.warnings) ? result.warnings : [];
+      const unreadable = warnings.length ? `; unreadable schema sections: ${warnings.map(warning => warning.path || 'unknown').join(', ')}` : '';
+      document.querySelector('#schema-status').textContent = `${Object.keys(schema.features || {}).length} server capabilities detected${unreadable}`;
+    }
   } catch {
     if (!renderIsCurrent(generation)) return;
-    document.querySelector('#schema-status').textContent = 'Connection failed. Check the API base and bearer in Settings.';
+    const node = document.querySelector('#schema-status');
+    const retry = element('button', '', 'fresh read');
+    retry.type = 'button';
+    retry.addEventListener('click', () => { transport.invalidateSchema(tenant); render(record); }, { once: true });
+    node.replaceChildren(document.createTextNode('Connection failed. Check the API base and bearer in Settings. '), retry);
   }
   if (!renderIsCurrent(generation)) return;
 

@@ -53,8 +53,9 @@ export function capabilityModel({ panel = {}, spec = {}, schema = null } = {}) {
     requests: requestsOf(panel),
     grain: panel.grain || spec.grain || '',
     units: (spec.measures?.length ? spec.measures : panel.measures || []).map(name => {
-      const measure = (schema?.measures || []).find(item => item.name === name);
-      return { name, unit: measure?.unit || 'unit not published' };
+      const mapped = schema?.measure_metadata?.[name] || {};
+      const measure = (Array.isArray(schema?.measures) ? schema.measures : []).find(item => (typeof item === 'string' ? item : item?.name) === name);
+      return { name, unit: mapped.unit || measure?.unit || 'unit not published' };
     }),
     basis: panel.measureBasis || spec.timeBasis || panel.timeBasis || '',
     budgets: Object.entries(schema?.budgets || {}),
