@@ -7,6 +7,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -299,5 +301,45 @@ func TestStartPersistsCapturedInputOnDetachedPath(t *testing.T) {
 	input, err := tenant.ReadReviewInput(h)
 	if err != nil || !strings.Contains(string(input), "safe changed implementation") {
 		t.Fatalf("captured input=%q err=%v", input, err)
+	}
+}
+
+func TestStartInputPersistenceFailureTerminalizesWithoutProviderCall(t *testing.T) {
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
+		io.WriteString(w, providerReply([]any{}, []any{}, []any{}, "complete"))
+	}))
+	defer srv.Close()
+
+	tenant := reviewTenant(t)
+	// Make the detached content-addressed write fail while leaving the review
+	// ledger writable, so Start can persist and return its in-flight row first.
+	if err := os.WriteFile(filepath.Join(tenant.Dir(), "review-inputs"), []byte("block directory creation"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg := availableConfig(srv.URL)
+	cfg.Lifetime = context.Background()
+	job, accepted, err := Start(context.Background(), tenant, "tenant", reviewRequest(true), cfg)
+	if err != nil || job == nil || accepted.Status != StatusRunning {
+		t.Fatalf("accepted=%+v job=%v err=%v", accepted, job, err)
+	}
+	final, done := job.Wait(context.Background())
+	if !done || final.Status != "api_error" || final.ID != accepted.ID {
+		t.Fatalf("final=%+v done=%v", final, done)
+	}
+	if calls.Load() != 0 {
+		t.Fatalf("provider calls=%d, want 0 after input persistence failure", calls.Load())
+	}
+	row, found, err := tenant.ReviewByID(context.Background(), accepted.ID)
+	if err != nil || !found {
+		t.Fatalf("terminal row found=%v err=%v", found, err)
+	}
+	var rec map[string]any
+	if err := json.Unmarshal(row.Raw, &rec); err != nil {
+		t.Fatal(err)
+	}
+	if rec["status"] != "api_error" || rec["reason"] != inputPersistFailureReason || rec["input_hash"] != "" {
+		t.Fatalf("terminal record=%v", rec)
 	}
 }
