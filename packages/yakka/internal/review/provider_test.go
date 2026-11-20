@@ -32,7 +32,7 @@ func TestReviewerRequestAndReply(t *testing.T) {
 		if err := json.Unmarshal(body, &got); err != nil {
 			t.Fatal(err)
 		}
-		if got["model"] != "claude-haiku-5-5" || got["max_tokens"] != float64(100000) || got["stream"] != nil || got["tools"] != nil {
+		if got["model"] != "claude-haiku-5-5" || got["max_tokens"] != float64(128000) || got["stream"] != nil || got["tools"] != nil {
 			t.Errorf("request body = %s", body)
 		}
 		if strings.Contains(string(body), "cache_control") {
