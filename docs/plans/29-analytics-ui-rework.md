@@ -55,6 +55,24 @@ The design review passed with follow-ups: design intent, all three phase outcome
 
 The terminal review re-read the whole change against the three phase outcomes, re-ran the plan/store and plan/serve tests, and re-ran the Phase 3 acceptance suite (10/10). It found one HIGH: the plan-association membership subquery applied the plan/repo identity filter, so a plan whose in-window session activity is empty-repo usage could report `$0` associated cost under a repo/plan filter or a window boundary. That was fixed with a focused regression test and recorded as a review touch-up; no CRITICAL or HIGH finding remains. MEDIUM and LOW findings were filed as issues #291–#303 (numbered list in Follow-ups), with the earlier #283, #284 and #289 still open from phase reviews.
 
+### Cursor automation review (`9bb35765`)
+
+Verdict: **PASS_WITH_FOLLOWUPS**. Reviewed SHA `9bb357657bc16a67dbc7409ad01edd900a73bae2`. Four lenses (functional, code quality, security, UI smoke) on a ~9k-line analytics UI + store/serve change.
+
+**Fixed in review**
+
+- **HIGH** — Conversation-grain distribution kept only `priced=1` samples, so multi-call conversations published zeroed percentiles. Fixed in `distribution.go` (`priced>0` for rank/bin queries).
+- **HIGH** — Session scatter loaded provenance for every conversation in the window (~32k SQLite bind cap). Provenance now loads only for the returned sample; marginals fold from loaded rows.
+
+**Non-blocking**
+
+- **MEDIUM** — Lens-filtered scatter with cohort still binds every matching conversation id for cohort counts (fails only past the SQLite variable cap); [#308](https://github.com/codyhamilton/yakka/issues/308).
+- Code-quality debt: duplicated window encoders, unused panel failure states, repeated plan-cost SQL (refactor follow-ups, not merge blockers).
+- Security: no authz, tenant, or injection findings.
+- UI smoke (Scatter, Pulse, Start): full-width layout, light canvas `#f4f6f8`, dark `#1b2734`.
+
+Re-verified: `go test ./internal/store -count=1` and `go test ./internal/serve -count=1` pass on this host.
+
 ## QA
 
 - Real-Go two-tenant Chromium sweep: 29/29 board, explorer and detail paths settled, every analytics request carried the selected tenant, no request carried `win`, every `all=1` request carried `to`.
