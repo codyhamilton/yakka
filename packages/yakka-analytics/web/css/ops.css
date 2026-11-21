@@ -1,43 +1,143 @@
-/* Operations explorer: tenant blocks, tables and definition lists, numeric
-   alignment, visible focus and a single column below 900 px. No animation or
-   transition, and no colour-only cue. */
+/* Operations explorer: fixed health, footprint and recent-record regions.
+   30px single-line table rows, left alignment, token colours, no animation. */
 
-.ops-intro{margin:.25rem 0 0;color:var(--yk-muted)}
-.workspace-panel[data-chart="table"] .workspace-panel-body{overflow:auto;max-height:70vh}
-.ops-status{display:flex;flex-direction:column;gap:1rem}
-.ops-basis{margin:0;color:var(--yk-muted);font-size:.92rem}
-
-.ops-block{display:flex;flex-direction:column;gap:.35rem;margin:.5rem 0}
-.ops-block-title{font-size:.95rem;margin:0;text-transform:uppercase;letter-spacing:.04em;color:var(--yk-muted)}
-
-.ops-tenant{border:1px solid var(--yk-border);border-radius:2px;padding:6px 8px;margin:0;display:flex;flex-direction:column;gap:.5rem;background:var(--yk-surface)}
-.ops-tenant-title{font-size:1.05rem;margin:0}
-.ops-tenant-error{color:var(--yk-danger);font-weight:600;margin:0}
-.ops-missing{color:var(--yk-muted);margin:.25rem 0;font-size:.92rem}
-
-.ops-dl{display:grid;grid-template-columns:max-content 1fr;gap:.2rem .9rem;margin:0}
-.ops-dl dt{color:var(--yk-muted)}
-.ops-dl dd{margin:0}
-
-.ops-table{width:100%;border-collapse:collapse;margin:0;font-size:12px;line-height:1.5}
-.ops-table caption{text-align:left;font-weight:600;padding:4px 0}
-.ops-table th,.ops-table td{padding:5px 8px;border-bottom:1px solid var(--yk-border);text-align:left;vertical-align:top}
-.ops-table thead th{position:sticky;top:0;z-index:1;background:var(--yk-surface)}
-.ops-table th{font-size:12px;color:var(--yk-muted);font-weight:600}
-.ops-table td.numeric,.ops-table th.numeric{text-align:right;font-variant-numeric:tabular-nums}
-
-.ops-table th:focus-visible,.ops-table td:focus-visible,
-.ops-dl dt:focus-visible,.ops-dl dd:focus-visible,
-.workspace-panel button:focus-visible,.workspace-panel a:focus-visible{
-  outline:2px solid var(--yk-focus);outline-offset:2px
+.ops-health,
+.ops-footprint,
+.ops-records {
+  width: 100%;
 }
 
-@media(pointer:coarse){
-  .workspace-panel button,.workspace-panel select{min-height:44px}
+.ops-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+  font-size: 12px;
+  line-height: 18px;
 }
 
-@media(max-width:900px){
-  .ops-dl{grid-template-columns:1fr}
-  .ops-table{display:block;overflow-x:auto;max-width:100%}
-  .ops-tenant{padding:6px}
+.ops-table caption {
+  text-align: left;
+  font-weight: 600;
+  padding: 4px 8px;
+}
+
+.ops-table th,
+.ops-table td {
+  height: 30px;
+  padding: 0 8px;
+  border-bottom: 1px solid var(--yk-border);
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: middle;
+  font-variant-numeric: tabular-nums;
+}
+
+.ops-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--yk-surface);
+  color: var(--yk-muted);
+  font-weight: 600;
+}
+
+.ops-table td.numeric,
+.ops-table th.numeric {
+  text-align: left;
+}
+
+.ops-footprint-body,
+.ops-records-body {
+  padding: 0;
+}
+
+.workspace-panel-status:empty {
+  display: none;
+}
+
+.ops-footprint .workspace-panel-status {
+  margin: 0;
+  padding: 0 8px 6px;
+}
+
+.ops-footprint-chart {
+  min-height: 160px;
+  background: var(--yk-chart-surface);
+  padding: 4px;
+}
+
+.ops-footprint-chart svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  min-height: 160px;
+}
+
+.ops-chart-label {
+  fill: var(--yk-chart-muted);
+  font-size: 11px;
+}
+
+.ops-chart-missing {
+  fill: var(--yk-muted);
+  font-size: 11px;
+}
+
+.ops-chart-bar {
+  fill: var(--yk-cat-1);
+}
+
+.ops-chart-value {
+  fill: var(--yk-chart-text);
+  font-size: 11px;
+}
+
+.ops-chart-grid {
+  stroke: var(--yk-chart-grid);
+  stroke-width: 1;
+}
+
+.ops-records-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+}
+
+.ops-records-population {
+  margin: 0;
+  color: var(--yk-muted);
+  font-size: 12px;
+}
+
+.ops-record-open {
+  color: inherit;
+  text-decoration: underline;
+}
+
+.p10-view-controls {
+  display: flex;
+  gap: 4px;
+  padding: 0 8px;
+}
+
+.p10-view-toggle {
+  min-height: 28px;
+  border: 1px solid var(--yk-border);
+  border-radius: 2px;
+  background: var(--yk-surface-alt);
+  color: var(--yk-text);
+}
+
+.workspace-panel button:focus-visible,
+.workspace-panel a:focus-visible {
+  outline: 2px solid var(--yk-focus);
+  outline-offset: 2px;
+}
+
+@media (max-width: 900px) {
+  .ops-table { table-layout: auto; }
 }

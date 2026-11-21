@@ -1,29 +1,57 @@
 // `/artifact` explorer: the read-only artifact reader. One artifact identity is
-// `(repo_id, path)`; its versions come from `/entity?grain=artifact` and the
-// selected version's complete bytes from `/v1/analytics/content`. Text renders
-// as text nodes only (no HTML, no markdown dependency, no anchors or images from
-// the body), long bodies are chunked display windows, and a missing body shows
-// the server's exact reason. It adds no route, grain, join or dependency.
+// `(repo_id, path)`; versions come from `/entity?grain=artifact`, the selected
+// version's complete bytes from `/v1/analytics/content`, and the score history
+// from the served version rows only. Text renders as text nodes, never markup.
 
 import { createScheduler } from '../core/request-scheduler.js';
 import { createTransport } from '../../contract/transport.js';
 import { rememberedTenant } from '../../contract/session-gate.js';
 import { unsupportedState, unsupportedText } from '../core/panel-state.js';
+import { facetsParameters } from '../core/scope-controls.js';
 import { formatNumber } from '../charts/formatters.js';
+import { registerCaption } from '../panels/captions.js';
+import { mountPanelViews } from '../panels/p10-shared.js';
 import {
-  artifactKind, bandFor, chunkText, createBaselineCache, fetchArtifactText, mapContentError, parseOutline
+  artifactKind, completeBytes, COMPLETE_BYTES_HINT, fetchArtifactText, mapContentError
 } from './artifact-content.js';
 import { DIFF_CEILING, loadDiff, renderDiff } from './artifact-diff.js';
+
+export { completeBytes, COMPLETE_BYTES_HINT };
 
 export const title = 'Artifact';
 export const phase = 12;
 
+export const SCORE_CAPTION = 'Each point shows this file version’s clarity score at its observation time; higher points mean a higher score under the selected scorer.';
+export const VERSION_LOADING_TEXT = 'Loading Version history…';
+export const VERSION_EMPTY_TEXT = 'No records match these filters.';
+export const VERSION_ERROR_TEXT = 'Could not load Version history.';
+export const VERSION_MORE_TEXT = 'Load more versions';
+export const OUTSIDE_NOTICE = 'This record is outside the current filters';
+
+export const ARTIFACT_VERSION_COLUMNS = Object.freeze([
+  { key: 'observed', label: 'Observed', width: 150 },
+  { key: 'hash', label: 'Hash', width: 180 },
+  { key: 'kind', label: 'Kind', width: 80 },
+  { key: 'score', label: 'Score/scorer', width: 180 },
+  { key: 'content', label: 'Content state', width: 110 },
+  { key: 'verdict', label: 'Screen verdict', width: 110 },
+  { key: 'session', label: 'Writing session', width: null }
+]);
+
+export const SCORE_COLUMNS = Object.freeze([
+  { key: 'observed', label: 'Observed' },
+  { key: 'hash', label: 'Version hash' },
+  { key: 'check', label: 'Check' },
+  { key: 'scorer', label: 'Scorer' },
+  { key: 'score', label: 'Score' }
+]);
+
+registerCaption('artifact-score-history', SCORE_CAPTION);
+
 const scheduler = createScheduler();
 const transport = createTransport(scheduler);
-
-const CHUNK_LINES = 400;
-
 let stylesLoaded = false;
+
 export function ensureArtifactStyles(doc = globalThis.document) {
   if (stylesLoaded || doc.querySelector('link[href="/css/artifact.css"]')) return;
   stylesLoaded = true;
@@ -58,8 +86,7 @@ export function parseReaderIdentity(search = '') {
   };
 }
 
-// The clean reader URL: artifact identity, selected hash and optional compare
-// hash. Unknown parameters are dropped.
+// Identity appears exactly once in the encoded URL; unknown parameters drop.
 export function readerUrl({ repo_id = '', path = '', hash = '', compare = '' } = {}) {
   const params = new URLSearchParams();
   if (repo_id) params.set('repo_id', repo_id);
@@ -79,6 +106,27 @@ export function shortHash(hash) {
   return text.length > 12 ? `${text.slice(0, 12)}…` : text;
 }
 
+export function kindLabel(kind) {
+  if (!kind) return '—';
+  return kind === 'other' ? 'other (not stored)' : kind;
+}
+
+function observation(row = {}) {
+  return row.received_at || row.ts || '';
+}
+
+export function versionLabel(row = {}) {
+  return `${cellText(observation(row))} · ${shortHash(row.content_hash)}`;
+}
+
+export function sortVersions(rows = []) {
+  return [...rows].sort((left, right) => {
+    const byTime = String(observation(right)).localeCompare(String(observation(left)));
+    if (byTime) return byTime;
+    return String(left?.content_hash || '').localeCompare(String(right?.content_hash || ''));
+  });
+}
+
 export function checkChoices(rows = [], catalogue = []) {
   const names = new Set();
   for (const row of rows) for (const check of Object.keys(row?.scores || {})) names.add(check);
@@ -87,6 +135,17 @@ export function checkChoices(rows = [], catalogue = []) {
     if (name) names.add(String(name));
   }
   return [...names].sort();
+}
+
+export function scoreCheckNames(rows = []) {
+  const names = new Set();
+  for (const row of rows) for (const check of Object.keys(row?.scores || {})) names.add(check);
+  return [...names].sort();
+}
+
+export function defaultScoreCheck(rows = []) {
+  const names = scoreCheckNames(rows);
+  return names.includes('clarity') ? 'clarity' : (names[0] || 'clarity');
 }
 
 export function defaultCheck(rows = [], choices = []) {
@@ -104,7 +163,106 @@ export function versionScore(row = {}, check = '') {
   return { score, scorer: entry.scorer || '' };
 }
 
-// Every non-200 content state, named with the server's own reason/limits.
+export function scoreScorers(rows = [], check = '') {
+  const names = new Set();
+  for (const row of rows) {
+    const entry = row?.scores?.[check];
+    const score = Number(entry?.score);
+    if (entry && Number.isFinite(score)) names.add(String(entry.scorer || '—'));
+  }
+  return [...names].sort();
+}
+
+export function defaultScorer(rows = [], check = '') {
+  const scorers = scoreScorers(rows, check);
+  return scorers[0] || '—';
+}
+
+// Observation time ascending, hash ascending. Only the selected scorer's points
+// carry a score; a missing or differently-scored version stays an explicit gap.
+export function scoreHistory(rows = [], { check = '', scorer = '' } = {}) {
+  const ordered = sortVersions(rows).reverse();
+  return ordered.map(row => {
+    const entry = row?.scores?.[check];
+    const value = Number(entry?.score);
+    const plotted = Boolean(entry) && Number.isFinite(value) && String(entry.scorer || '—') === scorer;
+    return {
+      hash: String(row?.content_hash || ''),
+      observed: observation(row),
+      scorer: entry?.scorer ? String(entry.scorer) : '',
+      score: plotted ? value : null
+    };
+  });
+}
+
+export function contentStateLabel(result = {}) {
+  if (result.ok) return 'Stored';
+  if (result.code === 'content_unavailable') {
+    if (result.reason === 'not_stored') return 'Not stored';
+    if (result.reason === 'pending') return 'Pending';
+    if (result.reason === 'removed_by_screen') return 'Removed';
+    return 'Unavailable';
+  }
+  if (result.code === 'content_too_large') return 'Too large';
+  if (result.code === 'content_integrity') return 'Integrity error';
+  if (result.status === 404) return 'Not found';
+  return 'Unavailable';
+}
+
+function scoreCell(row = {}) {
+  const names = Object.keys(row?.scores || {}).sort();
+  if (!names.length) return '—';
+  const name = names.includes('clarity') ? 'clarity' : names[0];
+  const entry = row.scores[name] || {};
+  const value = Number(entry.score);
+  if (!Number.isFinite(value)) return '—';
+  return `${value.toFixed(2)} / ${cellText(entry.scorer)}`;
+}
+
+export function artifactVersionRows(rows = [], { contentStates = new Map(), defaultKind = '' } = {}) {
+  return sortVersions(rows).map(row => ({
+    observed: cellText(observation(row)),
+    hash: shortHash(row.content_hash),
+    fullHash: String(row.content_hash || ''),
+    kind: kindLabel(row.kind || defaultKind || ''),
+    score: scoreCell(row),
+    content: contentStates.get(row.content_hash) || '—',
+    verdict: cellText(row.screen?.verdict || 'unscreened'),
+    session: cellText(row.writing_session)
+  }));
+}
+
+export function compareDefaults(rows = [], selectedHash = '') {
+  const ordered = sortVersions(rows);
+  if (!ordered.length) return { from: '', to: '' };
+  const to = ordered.some(row => row.content_hash === selectedHash) ? selectedHash : ordered[0].content_hash;
+  const index = ordered.findIndex(row => row.content_hash === to);
+  const from = ordered[index + 1]?.content_hash || ordered[ordered.length - 1]?.content_hash || '';
+  return { from, to };
+}
+
+function scopeValues(scope, key) {
+  const nested = scope?.filters?.[key];
+  const direct = scope?.[key];
+  return [...new Set([...(Array.isArray(nested) ? nested : nested ? [nested] : []), ...(Array.isArray(direct) ? direct : direct ? [direct] : [])])].filter(Boolean);
+}
+
+// F5: an exact identity outside the committed filters keeps its metadata and
+// bytes, and says so rather than blanking the record.
+export function outsideNotice({ repo_id = '', kind = '', row = null, scope = {}, window = null } = {}) {
+  const repos = scopeValues(scope, 'repo_id');
+  if (repos.length && !repos.includes(repo_id)) return OUTSIDE_NOTICE;
+  const kinds = scopeValues(scope, 'kind');
+  if (kinds.length && !kinds.includes(kind)) return OUTSIDE_NOTICE;
+  if (row && window && window.all !== true) {
+    const at = Date.parse(observation(row));
+    const from = window.from ? Date.parse(window.from) : NaN;
+    const to = window.to ? Date.parse(window.to) : NaN;
+    if (Number.isFinite(at) && ((Number.isFinite(from) && at < from) || (Number.isFinite(to) && at > to))) return OUTSIDE_NOTICE;
+  }
+  return '';
+}
+
 export function contentStateText(result = {}) {
   const status = result.status ?? 0;
   const code = result.code || '';
@@ -132,7 +290,197 @@ function catalogueChecks(body) {
   return checks.map(item => (typeof item === 'string' ? item : item?.name)).filter(Boolean);
 }
 
-export function render(root, doc = globalThis.document, { signal } = {}) {
+function tableHead(doc, columns) {
+  const head = doc.createElement('thead');
+  const row = doc.createElement('tr');
+  for (const column of columns) {
+    const cell = el(doc, 'th', '', column.label);
+    cell.scope = 'col';
+    if (column.width) cell.setAttribute('width', String(column.width));
+    row.append(cell);
+  }
+  head.append(row);
+  return head;
+}
+
+function tableCols(doc, columns) {
+  const group = doc.createElement('colgroup');
+  for (const column of columns) {
+    const col = doc.createElement('col');
+    if (column.width) col.setAttribute('width', String(column.width));
+    group.append(col);
+  }
+  return group;
+}
+
+function versionTable(doc, rows, { state, message = '', code = '', onRetry = null, onAll = null, onReset = null, contentStates = new Map(), defaultKind = '' } = {}) {
+  const table = el(doc, 'table', 'artifact-table artifact-version-table');
+  table.append(el(doc, 'caption', '', 'Version history'), tableCols(doc, ARTIFACT_VERSION_COLUMNS), tableHead(doc, ARTIFACT_VERSION_COLUMNS));
+  const body = doc.createElement('tbody');
+  if (state === 'loading') {
+    const row = doc.createElement('tr');
+    row.dataset.state = 'loading';
+    row.setAttribute('aria-busy', 'true');
+    const cell = el(doc, 'td', '', message || VERSION_LOADING_TEXT);
+    cell.colSpan = ARTIFACT_VERSION_COLUMNS.length;
+    row.append(cell);
+    body.append(row);
+  } else if (state === 'error') {
+    const row = doc.createElement('tr');
+    row.dataset.state = 'error';
+    const cell = el(doc, 'td', '', `${message || VERSION_ERROR_TEXT}${code ? ` (${code})` : ''}`);
+    cell.colSpan = ARTIFACT_VERSION_COLUMNS.length;
+    row.append(cell);
+    if (onRetry) {
+      const retry = el(doc, 'button', 'artifact-retry', 'Retry');
+      retry.type = 'button';
+      retry.addEventListener('click', onRetry);
+      cell.append(' ', retry);
+    }
+    body.append(row);
+  } else if (state === 'empty') {
+    const row = doc.createElement('tr');
+    row.dataset.state = 'empty';
+    const cell = el(doc, 'td', '', VERSION_EMPTY_TEXT);
+    cell.colSpan = ARTIFACT_VERSION_COLUMNS.length;
+    row.append(cell);
+    if (onAll) {
+      const all = el(doc, 'button', '', 'All history');
+      all.type = 'button';
+      all.addEventListener('click', onAll);
+      cell.append(' ', all);
+    }
+    if (onReset) {
+      const reset = el(doc, 'button', '', 'Reset filters');
+      reset.type = 'button';
+      reset.addEventListener('click', onReset);
+      cell.append(' ', reset);
+    }
+    body.append(row);
+  } else {
+    for (const item of artifactVersionRows(rows, { contentStates, defaultKind })) {
+      const row = doc.createElement('tr');
+      row.dataset.hash = item.fullHash;
+      const cells = [
+        [item.observed, item.observed],
+        [item.hash, item.fullHash],
+        [item.kind, item.kind],
+        [item.score, item.score],
+        [item.content, item.content],
+        [item.verdict, item.verdict],
+        [item.session, item.session]
+      ];
+      for (const [text, title] of cells) {
+        const cell = el(doc, 'td', '', text);
+        cell.title = title;
+        row.append(cell);
+      }
+      body.append(row);
+    }
+  }
+  table.append(body);
+  return table;
+}
+
+function axisLabel(doc, svg, x, y, text, anchor = 'start') {
+  const node = doc.createElementNS('http://www.w3.org/2000/svg', 'text');
+  node.setAttribute('x', String(x));
+  node.setAttribute('y', String(y));
+  node.setAttribute('text-anchor', anchor);
+  node.setAttribute('class', 'artifact-chart-label');
+  node.textContent = text;
+  svg.append(node);
+}
+
+function scoreChart(doc, history, { check, scorer } = {}) {
+  const host = el(doc, 'div', 'artifact-score-chart');
+  const points = history.map((point, index) => ({ ...point, index }));
+  const scored = points.filter(point => point.score !== null);
+  const svg = doc.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('viewBox', '0 0 640 160');
+  svg.setAttribute('role', 'img');
+  svg.setAttribute('aria-label', SCORE_CAPTION);
+  host.append(svg);
+  if (!scored.length) {
+    host.append(el(doc, 'p', 'artifact-score-empty', `No ${check || 'score'} history for this scorer.`));
+    return host;
+  }
+  const left = 48;
+  const right = 624;
+  const top = 12;
+  const bottom = 132;
+  const span = Math.max(1, points.length - 1);
+  const xAt = index => left + (points.length === 1 ? (right - left) / 2 : (right - left) * (index / span));
+  const yAt = score => bottom - (bottom - top) * Math.max(0, Math.min(1, score));
+  for (const value of [0, 0.5, 1]) {
+    const line = doc.createElementNS('http://www.w3.org/2000/svg', 'line');
+    line.setAttribute('x1', String(left));
+    line.setAttribute('x2', String(right));
+    line.setAttribute('y1', String(yAt(value)));
+    line.setAttribute('y2', String(yAt(value)));
+    line.setAttribute('class', 'artifact-chart-grid');
+    svg.append(line);
+    axisLabel(doc, svg, left - 6, yAt(value) + 4, value.toFixed(1), 'end');
+  }
+  let segment = [];
+  const flush = () => {
+    if (segment.length > 1) {
+      const line = doc.createElementNS('http://www.w3.org/2000/svg', 'polyline');
+      line.setAttribute('points', segment.map(point => `${xAt(point.index)},${yAt(point.score)}`).join(' '));
+      line.setAttribute('class', 'artifact-chart-line');
+      svg.append(line);
+    }
+    segment = [];
+  };
+  for (const point of points) {
+    if (point.score === null) { flush(); continue; }
+    segment.push(point);
+    const mark = doc.createElementNS('http://www.w3.org/2000/svg', 'circle');
+    mark.setAttribute('cx', String(xAt(point.index)));
+    mark.setAttribute('cy', String(yAt(point.score)));
+    mark.setAttribute('r', '3');
+    mark.setAttribute('class', 'artifact-chart-mark');
+    const title = doc.createElementNS('http://www.w3.org/2000/svg', 'title');
+    title.textContent = `${observation(point)} · ${shortHash(point.hash)} · ${point.score.toFixed(2)} (${scorer})`;
+    mark.append(title);
+    svg.append(mark);
+  }
+  flush();
+  axisLabel(doc, svg, left, 150, 'Observation time');
+  axisLabel(doc, svg, right, 150, 'Clarity score (0–1)', 'end');
+  return host;
+}
+
+function scoreTable(doc, history, { check, scorer } = {}) {
+  const table = el(doc, 'table', 'artifact-table artifact-score-table');
+  table.append(el(doc, 'caption', '', 'Clarity across file versions'), tableCols(doc, SCORE_COLUMNS), tableHead(doc, SCORE_COLUMNS));
+  const body = doc.createElement('tbody');
+  for (const point of history) {
+    const row = doc.createElement('tr');
+    const values = [
+      [cellText(point.observed), cellText(point.observed)],
+      [shortHash(point.hash), point.hash],
+      [check || '—', check || '—'],
+      [point.scorer || '—', point.scorer || '—'],
+      [point.score === null ? '—' : point.score.toFixed(2), point.score === null ? '—' : point.score.toFixed(2)]
+    ];
+    for (const [text, title] of values) {
+      const cell = el(doc, 'td', '', text);
+      cell.title = title;
+      row.append(cell);
+    }
+    body.append(row);
+  }
+  table.append(body);
+  return table;
+}
+
+function reroute(url) {
+  globalThis.history.pushState(null, '', url);
+  globalThis.dispatchEvent(new PopStateEvent('popstate'));
+}
+
+export function render(root, doc = globalThis.document, { signal, tenant = '', readContext = null } = {}) {
   ensureArtifactStyles(doc);
   const identity = parseReaderIdentity(globalThis.location?.search || '');
   root.replaceChildren();
@@ -147,32 +495,28 @@ export function render(root, doc = globalThis.document, { signal } = {}) {
 
   const statusSlot = el(doc, 'p', 'artifact-reader-status');
   statusSlot.setAttribute('aria-live', 'polite');
-  const versionsSlot = el(doc, 'div', 'artifact-versions');
-  const versionSlot = el(doc, 'section', 'artifact-version');
-  versionSlot.dataset.state = 'idle';
-  const diffSlot = el(doc, 'section', 'artifact-diff-slot');
-  diffSlot.setAttribute('aria-live', 'polite');
-  section.append(statusSlot, versionsSlot, versionSlot, diffSlot);
+  section.append(statusSlot);
 
   let disposed = false;
-  let controller = new AbortController();
+  let tenantValue = tenant;
+  const controller = new AbortController();
   if (signal) {
     if (signal.aborted) controller.abort();
     else signal.addEventListener('abort', () => controller.abort(), { once: true });
   }
 
-  function setState(state, message = '') {
+  function finish(state, message = '') {
     section.dataset.state = state;
     section.dataset.idle = state === 'loading' ? 'false' : 'true';
     statusSlot.textContent = message;
   }
 
   if (!identity.repo_id || !identity.path) {
-    setState('identity-required', 'identity required: repo_id and path are required.');
+    renderIdentityForm();
     return () => { disposed = true; controller.abort(); };
   }
   if (identity.invalidHash) {
-    setState('identity-required', 'identity required: hash must be a 64-hex content hash.');
+    finish('identity-required', 'identity required: hash must be a 64-hex content hash.');
     return () => { disposed = true; controller.abort(); };
   }
 
@@ -180,240 +524,267 @@ export function render(root, doc = globalThis.document, { signal } = {}) {
   const kind = artifactKind(path);
   let rows = [];
   let next = null;
-  let latestHash = '';
   let selectedHash = identity.hash;
   let compareHash = identity.compare;
+  let versionState = 'loading';
+  let versionMessage = VERSION_LOADING_TEXT;
+  let versionCode = '';
   let check = '';
+  let scorer = '';
   let checks = [];
-  let textCache = new Map();
-  let bandByHash = new Map();
-  let bodyModel = null;
-  let bodyWrap = null;
-  let contentRun = 0;
-  let baselineCache = null;
-  let tenant = '';
+  let scorers = [];
+  let catalogue = [];
+  let contentStates = new Map();
+  let contentText = '';
+  let contentHash = '';
+  let contentFailure = null;
+  let viewerMode = 'content';
+  let pageMax = null;
+  let outside = '';
   let compareController = null;
+  let contentRun = 0;
   let diffRun = 0;
+  let explicitPair = Boolean(identity.hash && identity.compare && identity.hash !== identity.compare);
+  let loadVersionSlot = null;
+  let scoreSlot = null;
+  let viewerSlot = null;
+  let contentPane = null;
+  let diffPane = null;
+  let contentTab = null;
+  let diffTab = null;
 
-  function scopeText() {
-    const returned = rows.length;
-    const total = latestTotal();
-    return `${formatNumber(returned)} of ${formatNumber(total)} versions shown`;
+  function currentRow() {
+    return rows.find(row => row.content_hash === selectedHash) || null;
   }
 
-  function latestTotal() {
-    return Number(population?.scope_n ?? population?.eligible_n ?? rows.length);
-  }
-
-  let population = null;
-
-  async function paintStrip() {
-    versionsSlot.replaceChildren();
-    bandByHash = new Map();
-    if (checks.length > 1) paintCheckChooser();
-    const strip = el(doc, 'div', 'artifact-version-strip');
-    const promises = [];
-    rows.forEach((row, index) => {
-      const score = versionScore(row, check);
-      const mark = el(doc, 'button', 'artifact-version-mark');
-      mark.type = 'button';
-      mark.dataset.hash = row.content_hash;
-      mark.dataset.selected = row.content_hash === selectedHash ? 'true' : 'false';
-      mark.append(el(doc, 'span', 'artifact-mark-pos', `#${index + 1}`));
-      mark.append(el(doc, 'span', 'artifact-mark-hash', shortHash(row.content_hash)));
-      mark.append(el(doc, 'span', 'artifact-mark-ts', cellText(row.received_at || row.ts)));
-      mark.append(el(doc, 'span', 'artifact-mark-screen', row.screen?.verdict || 'unscreened'));
-      const scoresBox = el(doc, 'span', 'artifact-mark-scores');
-      const names = Object.keys(row.scores || {}).sort();
-      if (names.length) {
-        for (const name of names) {
-          const entry = row.scores[name] || {};
-          scoresBox.append(el(doc, 'span', 'artifact-mark-score', `${name} ${Number(entry.score).toFixed(2)} (${entry.scorer || '—'})`));
-        }
-      } else {
-        scoresBox.append(el(doc, 'span', 'artifact-mark-score', 'no scores'));
-      }
-      mark.append(scoresBox);
-      const band = el(doc, 'span', 'artifact-mark-band', score ? '…' : 'unscored');
-      band.dataset.band = score ? '' : 'unscored';
-      mark.append(band);
-      mark.addEventListener('click', () => selectVersion(row.content_hash));
-      strip.append(mark);
-      if (score) {
-        promises.push(bandForVersion(row, score).then(value => {
-          band.textContent = value;
-          band.dataset.band = value;
-          bandByHash.set(row.content_hash, value);
-        }));
-      }
-    });
-    versionsSlot.append(strip);
-    paintCompareControl();
-    versionsSlot.append(el(doc, 'p', 'artifact-versions-population', rows.length ? `${scopeText()}${next ? '; more versions remain.' : '.'}` : 'No versions returned.'));
-    if (next) {
-      const more = el(doc, 'button', 'artifact-versions-more', 'Load more');
-      more.type = 'button';
-      more.addEventListener('click', async () => {
-        more.disabled = true;
-        await loadMore();
-      });
-      versionsSlot.append(more);
-    }
-    await Promise.all(promises);
-  }
-
-  function paintCompareControl() {
-    const bar = el(doc, 'div', 'artifact-compare');
-    const leftLabel = el(doc, 'label', '', 'Left version');
-    const left = doc.createElement('select');
-    left.className = 'artifact-compare-left';
-    left.setAttribute('aria-label', 'Left version');
-    const rightLabel = el(doc, 'label', '', 'Right version');
-    const right = doc.createElement('select');
-    right.className = 'artifact-compare-right';
-    right.setAttribute('aria-label', 'Right version');
-    for (const row of rows) {
-      const label = `${row.received_at || row.ts || 'version'} · ${shortHash(row.content_hash)}`;
-      for (const select of [left, right]) {
-        const option = doc.createElement('option');
-        option.value = row.content_hash;
-        option.textContent = label;
-        select.append(option);
-      }
-    }
-    const leftDefault = rows.some(row => row.content_hash === selectedHash) ? selectedHash : (rows[0]?.content_hash || '');
-    const rightDefault = rows.some(row => row.content_hash === compareHash)
-      ? compareHash
-      : (rows.find(row => row.content_hash !== leftDefault)?.content_hash || '');
-    left.value = leftDefault;
-    right.value = rightDefault;
-    const compare = el(doc, 'button', 'artifact-compare-button', 'Compare');
-    compare.type = 'button';
-    const available = rows.length >= 2 && kind !== 'other';
-    compare.disabled = !available;
-    if (!available) compare.title = kind === 'other' ? 'Diff unavailable: this artifact kind is not stored.' : 'Diff unavailable: fewer than two stored versions.';
-    compare.addEventListener('click', () => runCompare(left.value, right.value));
-    leftLabel.append(left);
-    rightLabel.append(right);
-    bar.append(leftLabel, rightLabel, compare, el(doc, 'span', 'artifact-compare-ceiling', `Per-side ceiling: ${DIFF_CEILING.bytes.toLocaleString('en-US')} bytes and ${DIFF_CEILING.lines.toLocaleString('en-US')} lines.`));
-    if (identity.invalidCompare) bar.append(el(doc, 'p', 'artifact-diff-message', 'Compare version is invalid; expected a 64-hex hash.'));
-    else if (compareHash && !rows.some(row => row.content_hash === compareHash)) bar.append(el(doc, 'p', 'artifact-diff-message', 'Compare version not found among the stored versions.'));
-    versionsSlot.append(bar);
-  }
-
-  async function runCompare(leftHash, rightHash) {
-    compareController?.abort();
-    compareController = new AbortController();
-    if (controller.signal.aborted) compareController.abort();
-    const run = ++diffRun;
-    diffSlot.replaceChildren();
-    if (kind === 'other') { diffSlot.append(el(doc, 'p', 'artifact-diff-message', 'Diff unavailable: this artifact kind is not stored.')); return; }
-    if (!leftHash || !rightHash || leftHash === rightHash) { diffSlot.append(el(doc, 'p', 'artifact-diff-message', 'Diff declined: select two different stored versions.')); return; }
-    const selectionChanged = selectedHash !== leftHash;
-    selectedHash = leftHash;
-    for (const mark of versionsSlot.querySelectorAll('.artifact-version-mark')) mark.dataset.selected = mark.dataset.hash === leftHash ? 'true' : 'false';
-    compareHash = rightHash;
-    if (selectionChanged) await renderSelected();
-    const url = readerUrl({ repo_id: repo, path, hash: leftHash, compare: rightHash });
-    globalThis.history.pushState(null, '', url);
-    diffSlot.append(el(doc, 'p', 'artifact-diff-message', 'Loading complete version text…'));
-    const result = await loadDiff({ scheduler, repo, path, a: leftHash, b: rightHash, tenant, signal: compareController.signal }).catch(error => {
-      if (error?.name === 'AbortError') return null;
-      return { ok: false, reason: `Diff declined: ${error?.message || 'content request failed'}` };
-    });
-    if (disposed || run !== diffRun || !result) return;
-    diffSlot.replaceChildren(result.ok ? renderDiff(doc, result.result) : el(doc, 'p', 'artifact-diff-message', result.reason));
-  }
-
-  async function bandForVersion(row, score) {
-    try {
-      const baseline = await baselineCache.get(kind, check, score.scorer);
-      return bandFor(score.score, baseline);
-    } catch (error) {
-      if (error?.name === 'AbortError') return 'baseline_unavailable';
-      return 'baseline_unavailable';
+  function updateOutside() {
+    const row = currentRow();
+    outside = outsideNotice({ repo_id: repo, kind, row, scope: readContext?.scope || {}, window: readContext?.window || null });
+    identitySlot.textContent = `${repo} · ${path}`;
+    identitySlot.title = `${repo} · ${path}`;
+    if (outside) {
+      outsideSlot.hidden = false;
+      outsideSlot.textContent = outside;
+    } else {
+      outsideSlot.hidden = true;
+      outsideSlot.textContent = '';
     }
   }
 
-  function paintCheckChooser() {
-    const bar = el(doc, 'div', 'artifact-check');
-    bar.append(el(doc, 'span', 'artifact-check-label', 'Check'));
+  function buildVersionsSlot() {
+    const wrapper = el(doc, 'section', 'workspace-panel artifact-versions');
+    wrapper.append(el(doc, 'h2', 'workspace-panel-title', 'Versions'));
+    const controls = el(doc, 'div', 'artifact-version-controls');
+    wrapper.append(controls);
+    const slot = el(doc, 'div', 'artifact-version-slot');
+    wrapper.append(slot);
+    return { wrapper, controls, slot };
+  }
+
+  function paintVersionControls() {
+    versionControls.replaceChildren();
+    if (!rows.length) return;
+    const versionLabelNode = el(doc, 'label', 'artifact-version-select');
+    versionLabelNode.append(doc.createTextNode('Version '));
     const select = doc.createElement('select');
-    select.className = 'artifact-check-chooser';
-    select.setAttribute('aria-label', 'Band check');
+    select.className = 'artifact-version-chooser';
+    select.setAttribute('aria-label', 'Version');
+    for (const row of sortVersions(rows)) {
+      const option = doc.createElement('option');
+      option.value = row.content_hash;
+      option.textContent = versionLabel(row);
+      option.selected = row.content_hash === selectedHash;
+      select.append(option);
+    }
+    select.addEventListener('change', () => selectVersion(select.value));
+    versionLabelNode.append(select);
+    versionControls.append(versionLabelNode);
+
+    const defaults = compareDefaults(rows, selectedHash);
+    compareHash = rows.some(row => row.content_hash === compareHash) ? compareHash : defaults.to;
+    const pair = explicitPair && rows.some(row => row.content_hash === selectedHash)
+      && rows.some(row => row.content_hash === compareHash) && selectedHash !== compareHash;
+    const from = compareSelect('Compare from', pair ? selectedHash : defaults.from);
+    const to = compareSelect('Compare to', pair ? compareHash : (compareHash || defaults.to));
+    const show = el(doc, 'button', 'artifact-show-diff', 'Show diff');
+    show.type = 'button';
+    show.disabled = rows.length < 2;
+    show.addEventListener('click', () => runDiff(from.select.value, to.select.value));
+    versionControls.append(from.label, to.label, show);
+  }
+
+  function compareSelect(label, value) {
+    const node = el(doc, 'label', 'artifact-compare-select');
+    node.append(doc.createTextNode(`${label} `));
+    const select = doc.createElement('select');
+    select.className = `artifact-compare-${label === 'Compare from' ? 'from' : 'to'}`;
+    select.setAttribute('aria-label', label);
+    for (const row of sortVersions(rows)) {
+      const option = doc.createElement('option');
+      option.value = row.content_hash;
+      option.textContent = shortHash(row.content_hash);
+      option.selected = row.content_hash === value;
+      select.append(option);
+    }
+    node.append(select);
+    return { label: node, select };
+  }
+
+  function paintVersionSlot() {
+    const table = versionTable(doc, rows, {
+      state: versionState,
+      message: versionMessage,
+      code: versionCode,
+      contentStates,
+      defaultKind: kind,
+      onRetry: loadVersions,
+      onAll: () => reroute(`${readerUrl({ repo_id: repo, path, hash: selectedHash, compare: compareHash })}&win=all`),
+      onReset: () => reroute(readerUrl({ repo_id: repo, path, hash: selectedHash }))
+    });
+    const footer = el(doc, 'div', 'artifact-version-footer');
+    footer.append(el(doc, 'p', 'artifact-versions-population', versionState === 'ready' ? `${formatNumber(rows.length)} versions shown${next ? '; more versions remain.' : '.'}` : ''));
+    if (next && versionState === 'ready') {
+      const more = el(doc, 'button', 'artifact-versions-more', VERSION_MORE_TEXT);
+      more.type = 'button';
+      more.addEventListener('click', loadMore);
+      footer.append(more);
+    }
+    loadVersionSlot.replaceChildren(table, footer);
+  }
+
+  function paintScorePanel() {
+    const panel = el(doc, 'section', 'workspace-panel artifact-score');
+    panel.dataset.panel = 'artifact-score-history';
+    panel.append(el(doc, 'h2', 'workspace-panel-title', 'Clarity across file versions'));
+    panel.append(el(doc, 'p', 'workspace-panel-caption', SCORE_CAPTION));
+    const controls = el(doc, 'div', 'artifact-score-controls');
+    const checkLabel = el(doc, 'label', 'artifact-score-check-label', 'Check ');
+    const checkSelect = doc.createElement('select');
+    checkSelect.className = 'artifact-score-check';
+    checkSelect.setAttribute('aria-label', 'Check');
     for (const name of checks) {
       const option = doc.createElement('option');
       option.value = name;
       option.textContent = name;
       option.selected = name === check;
-      select.append(option);
+      checkSelect.append(option);
     }
-    select.addEventListener('change', async () => {
-      check = select.value;
-      await paintStrip();
-      await renderSelected();
+    checkSelect.addEventListener('change', () => {
+      check = checkSelect.value;
+      scorers = scoreScorers(rows, check);
+      scorer = scorers.includes(scorer) ? scorer : defaultScorer(rows, check);
+      paintScorePanel();
     });
-    bar.append(select);
-    versionsSlot.append(bar);
+    checkLabel.append(checkSelect);
+    const scorerLabel = el(doc, 'label', 'artifact-score-scorer-label', 'Scorer ');
+    const scorerSelect = doc.createElement('select');
+    scorerSelect.className = 'artifact-score-scorer';
+    scorerSelect.setAttribute('aria-label', 'Scorer');
+    for (const name of scorers) {
+      const option = doc.createElement('option');
+      option.value = name;
+      option.textContent = name;
+      option.selected = name === scorer;
+      scorerSelect.append(option);
+    }
+    scorerSelect.addEventListener('change', () => { scorer = scorerSelect.value; paintScorePanel(); });
+    scorerLabel.append(scorerSelect);
+    controls.append(checkLabel, scorerLabel);
+    panel.append(controls);
+
+    const history = scoreHistory(rows, { check, scorer });
+    const chart = scoreChart(doc, history, { check, scorer });
+    const table = scoreTable(doc, history, { check, scorer });
+    const views = mountPanelViews({ panelId: 'artifact-score-history', chart, table, doc, defaultView: 'chart', label: 'Score history view' });
+    panel.append(views.element);
+    scoreSlot.replaceChildren(panel);
   }
 
-  function renderHeader(row) {
-    const head = el(doc, 'div', 'artifact-version-header');
-    const dl = doc.createElement('dl');
-    const push = (label, value) => dl.append(el(doc, 'dt', '', label), el(doc, 'dd', '', value));
-    push('Path', path);
-    push('Kind', kind === 'other' ? 'other (not stored)' : kind);
-    const hashRow = el(doc, 'dd', 'artifact-hash-row');
-    hashRow.append(el(doc, 'code', 'artifact-hash', shortHash(row.content_hash)));
-    const copyHash = el(doc, 'button', 'artifact-copy-hash', 'Copy hash');
-    copyHash.type = 'button';
-    copyHash.addEventListener('click', () => copyText(row.content_hash));
-    hashRow.append(copyHash);
-    dl.append(el(doc, 'dt', '', 'Hash'), hashRow);
-    push('Version ts', cellText(row.ts));
-    push('Received', cellText(row.received_at));
-    push('Source', cellText(row.source));
-    push('SHA', cellText(row.sha));
-    push('Screen', row.screen ? `${row.screen.verdict || '—'} · ${cellText(row.screen.scorer)}` : 'unscreened');
-    push('Harness', cellText(row.harness));
-    push('Session model', cellText(row.session_model));
+  function paintViewer() {
+    const panel = el(doc, 'section', 'workspace-panel artifact-viewer');
+    panel.append(el(doc, 'h2', 'workspace-panel-title', 'Version text — plain text'));
+    const tabs = el(doc, 'div', 'artifact-view-tabs');
+    tabs.setAttribute('role', 'tablist');
+    contentTab = el(doc, 'button', 'artifact-tab', 'Content');
+    contentTab.type = 'button';
+    contentTab.setAttribute('role', 'tab');
+    diffTab = el(doc, 'button', 'artifact-tab', 'Diff');
+    diffTab.type = 'button';
+    diffTab.setAttribute('role', 'tab');
+    contentTab.addEventListener('click', () => { viewerMode = 'content'; paintViewerMode(); if (contentHash !== selectedHash) loadContent(selectedHash); });
+    diffTab.addEventListener('click', () => { viewerMode = 'diff'; paintViewerMode(); });
+    tabs.append(contentTab, diffTab);
+    contentPane = el(doc, 'div', 'artifact-content-pane');
+    diffPane = el(doc, 'div', 'artifact-diff-pane');
+    panel.append(tabs, contentPane, diffPane);
+    viewerSlot.replaceChildren(panel);
+    paintViewerMode();
+    paintContent();
+    paintDiff();
+  }
 
-    const sessionRow = el(doc, 'dd', 'artifact-session');
-    if (row.writing_session) {
-      const link = el(doc, 'a', 'artifact-session-link', row.writing_session);
-      link.href = `/sessions/${encodeURIComponent(row.writing_session)}`;
-      sessionRow.append(link);
-      sessionRow.append(doc.createTextNode(' — earliest observed writing session for this version; captured provenance, not proven authorship'));
-    } else {
-      sessionRow.append(doc.createTextNode('—'));
+  function paintViewerMode() {
+    if (!contentTab) return;
+    const onContent = viewerMode === 'content';
+    contentTab.setAttribute('aria-selected', String(onContent));
+    diffTab.setAttribute('aria-selected', String(!onContent));
+    contentPane.hidden = !onContent;
+    diffPane.hidden = onContent;
+  }
+
+  function paintContent() {
+    if (!contentPane) return;
+    contentPane.replaceChildren();
+    const row = currentRow();
+    if (!row) {
+      contentPane.append(el(doc, 'p', 'artifact-version-missing', 'version not found for this artifact'));
+      return;
     }
-    dl.append(el(doc, 'dt', '', 'Writing session'), sessionRow);
-
-    const plan = planOfPath(path);
-    const planRow = el(doc, 'dd', 'artifact-plan');
-    if (plan) {
-      const link = el(doc, 'a', 'artifact-plan-link', plan);
-      link.href = `/plans/${encodeURIComponent(repo)}/${encodeURIComponent(plan)}`;
-      planRow.append(link);
-    } else {
-      planRow.append(doc.createTextNode('—'));
+    if (contentFailure) {
+      const state = contentStateText(contentFailure);
+      const block = el(doc, 'div', 'artifact-content-status');
+      block.dataset.state = state.kind;
+      block.append(el(doc, 'p', 'artifact-content-message', state.message));
+      block.append(el(doc, 'p', 'artifact-content-code', `${state.status} ${state.code}${state.reason ? ` (${state.reason})` : ''}`.trim()));
+      if (!['not_stored', 'pending', 'removed', 'not_found'].includes(state.kind)) {
+        const retry = el(doc, 'button', 'artifact-content-retry', 'Retry');
+        retry.type = 'button';
+        retry.addEventListener('click', () => loadContent(selectedHash));
+        block.append(retry);
+      }
+      contentPane.append(block);
+      return;
     }
-    dl.append(el(doc, 'dt', '', 'Plan'), planRow);
-
-    const scores = Object.keys(row.scores || {}).sort();
-    for (const name of scores) {
-      const entry = row.scores[name] || {};
-      const band = name === check ? ` · band ${bandByHash.get(row.content_hash) || '…'}` : '';
-      push(`${name} score`, `${Number(entry.score).toFixed(2)} · scorer ${cellText(entry.scorer)}${band}`);
+    if (contentHash !== selectedHash || contentText === '') {
+      contentPane.append(el(doc, 'p', 'artifact-content-status', 'Loading content…'));
+      return;
     }
-    if (!scores.includes(check)) push(`${check} score`, 'unscored');
-    head.append(dl);
+    const pre = el(doc, 'pre', 'artifact-content');
+    pre.textContent = contentText;
+    const footer = el(doc, 'div', 'artifact-viewer-actions');
+    const copy = el(doc, 'button', 'artifact-copy-text', 'Copy text');
+    copy.type = 'button';
+    copy.addEventListener('click', () => copyText(contentText));
+    const download = el(doc, 'a', 'artifact-download-text', 'Download text');
+    download.download = path.split('/').pop() || 'artifact.txt';
+    download.href = downloadUrl(contentText);
+    footer.append(copy, download, el(doc, 'span', 'artifact-exact-bytes', COMPLETE_BYTES_HINT));
+    contentPane.append(pre, footer);
+  }
 
-    const copyLink = el(doc, 'button', 'artifact-copy-link', 'Copy link');
-    copyLink.type = 'button';
-    copyLink.addEventListener('click', () => copyText(readerUrl({ repo_id: repo, path, hash: selectedHash })));
-    head.append(copyLink);
-    return head;
+  function paintDiff() {
+    if (!diffPane) return;
+    if (viewerMode !== 'diff') return;
+    if (!diffPane.dataset.result) {
+      diffPane.replaceChildren(el(doc, 'p', 'artifact-diff-message', 'Choose two versions and Show diff to compare complete text.'));
+    }
+  }
+
+  function downloadUrl(text) {
+    try {
+      const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+      return URL.createObjectURL(blob);
+    } catch { return ''; }
   }
 
   async function copyText(value) {
@@ -429,224 +800,264 @@ export function render(root, doc = globalThis.document, { signal } = {}) {
     area.remove();
   }
 
-  function paintBody() {
-    if (!bodyWrap) return;
-    bodyWrap.replaceChildren();
-    if (!bodyModel) return;
-    if (bodyModel.outline.length) {
-      const outline = el(doc, 'nav', 'artifact-outline');
-      outline.append(el(doc, 'h2', 'artifact-outline-title', 'Outline'));
-      const list = el(doc, 'ul', 'artifact-outline-list');
-      bodyModel.outline.forEach((heading, index) => {
-        const item = doc.createElement('li');
-        const button = el(doc, 'button', 'artifact-outline-item', `${'·'.repeat(heading.level - 1)}${heading.level > 1 ? ' ' : ''}${heading.text}`);
-        button.type = 'button';
-        button.dataset.line = String(heading.line);
-        button.addEventListener('click', () => {
-          const target = Math.min(bodyModel.chunks.length - 1, Math.floor((heading.line - 1) / bodyModel.size));
-          if (target + 1 > bodyModel.shown) {
-            bodyModel.shown = target + 1;
-            paintBody();
-          }
-          const chunks = bodyWrap.querySelectorAll('.artifact-chunk');
-          chunks[target]?.scrollIntoView?.({ block: 'start' });
-        });
-        item.append(button);
-        list.append(item);
-      });
-      outline.append(list);
-      bodyWrap.append(outline);
-    }
-    const body = el(doc, 'div', 'artifact-body');
-    for (let index = 0; index < bodyModel.shown && index < bodyModel.chunks.length; index += 1) {
-      const chunk = bodyModel.chunks[index];
-      const pre = el(doc, 'pre', 'artifact-chunk');
-      pre.dataset.firstLine = String(chunk.start);
-      pre.dataset.lastLine = String(chunk.end);
-      pre.textContent = chunk.text;
-      body.append(pre);
-    }
-    bodyWrap.append(body);
-
-    const shownChunk = bodyModel.chunks[Math.min(bodyModel.shown, bodyModel.chunks.length) - 1];
-    const lastLine = shownChunk ? shownChunk.end : 0;
-    const footer = el(doc, 'p', 'artifact-more');
-    footer.append(doc.createTextNode(`Showing lines 1–${formatNumber(lastLine)} of ${formatNumber(bodyModel.totalLines)}; `));
-    if (bodyModel.shown < bodyModel.chunks.length) {
-      const more = el(doc, 'button', 'artifact-show-more', 'Show more');
-      more.type = 'button';
-      more.addEventListener('click', () => { bodyModel.shown += 1; paintBody(); });
-      footer.append(more);
-    } else {
-      footer.append(doc.createTextNode('all displayed.'));
-    }
-    bodyWrap.append(footer);
-  }
-
-  function renderContentState(result) {
-    const state = contentStateText(result);
-    versionSlot.dataset.contentState = state.kind;
-    const block = el(doc, 'div', 'artifact-content-status');
-    block.dataset.state = state.kind;
-    block.append(el(doc, 'p', 'artifact-content-message', state.message));
-    const code = `${state.status} ${state.code}${state.reason ? ` (${state.reason})` : ''}`.trim();
-    block.append(el(doc, 'p', 'artifact-content-code', code));
-    if (state.kind !== 'not_stored' && state.kind !== 'pending' && state.kind !== 'removed' && state.kind !== 'not_found') {
-      const retry = el(doc, 'button', 'artifact-content-retry', 'Retry');
-      retry.type = 'button';
-      retry.addEventListener('click', loadSelected);
-      block.append(retry);
-    }
-    versionSlot.replaceChildren(block);
-  }
-
-  async function renderSelected() {
-    const row = rows.find(item => item.content_hash === selectedHash) || null;
-    if (!row) {
-      versionSlot.dataset.state = 'error';
-      versionSlot.dataset.contentState = 'version_not_found';
-      versionSlot.replaceChildren(el(doc, 'p', 'artifact-version-missing', 'version not found for this artifact'));
-      return;
-    }
-    const head = renderHeader(row);
-    const cached = textCache.get(`${tenant}\u001f${row.content_hash}`);
-    if (cached) {
-      versionSlot.dataset.state = 'ready';
-      versionSlot.dataset.contentState = 'ready';
-      const model = chunkText(cached, { lines: CHUNK_LINES });
-      bodyModel = { chunks: model.chunks, size: model.lines, totalLines: model.totalLines, outline: parseOutline(cached), shown: 1 };
-      bodyWrap = el(doc, 'div', 'artifact-body-wrap');
-      versionSlot.replaceChildren(head, bodyWrap);
-      paintBody();
-      return;
-    }
-    versionSlot.dataset.state = 'loading';
-    versionSlot.dataset.contentState = 'loading';
-    bodyWrap = el(doc, 'div', 'artifact-body-wrap');
-    bodyWrap.append(el(doc, 'p', 'artifact-content-status', 'Loading content…'));
-    versionSlot.replaceChildren(head, bodyWrap);
-    await loadSelected();
-  }
-
-  async function loadSelected() {
-    const row = rows.find(item => item.content_hash === selectedHash) || null;
-    if (!row) { renderSelected(); return; }
+  async function loadContent(hash) {
+    const row = rows.find(item => item.content_hash === hash) || null;
+    if (!row) { paintContent(); return; }
     const run = ++contentRun;
+    contentFailure = null;
+    contentHash = '';
+    paintContent();
     const result = await fetchArtifactText({
-      scheduler, repo, path, hash: row.content_hash, tenant, signal: controller.signal, stateKey: 'artifact-content'
+      scheduler, repo, path, hash, tenant: tenantValue, signal: controller.signal, stateKey: 'artifact-content'
     }).catch(error => {
       if (error?.name === 'AbortError') return null;
       return mapContentError(0, { error: error?.message || 'The content request failed.' });
     });
     if (disposed || run !== contentRun || !result) return;
-    if (!result.ok) { renderContentState(result); return; }
-    textCache.set(`${tenant}\u001f${row.content_hash}`, result.text);
-    versionSlot.dataset.state = 'ready';
-    versionSlot.dataset.contentState = 'ready';
-    const model = chunkText(result.text, { lines: CHUNK_LINES });
-    bodyModel = { chunks: model.chunks, size: model.lines, totalLines: model.totalLines, outline: parseOutline(result.text), shown: 1 };
-    bodyWrap = el(doc, 'div', 'artifact-body-wrap');
-    versionSlot.replaceChildren(renderHeader(row), bodyWrap);
-    paintBody();
+    if (!completeBytes(result)) {
+      contentFailure = result;
+      contentStates.set(hash, contentStateLabel(result));
+      paintVersionSlot();
+      paintContent();
+      return;
+    }
+    contentStates.set(hash, 'Stored');
+    contentText = result.text;
+    contentHash = hash;
+    paintVersionSlot();
+    paintContent();
+  }
+
+  async function runDiff(from, to) {
+    if (kind === 'other') {
+      viewerMode = 'diff';
+      paintViewerMode();
+      diffPane.dataset.result = '1';
+      diffPane.replaceChildren(el(doc, 'p', 'artifact-diff-message', 'Diff unavailable: this artifact kind is not stored.'));
+      return;
+    }
+    if (!from || !to || from === to) {
+      viewerMode = 'diff';
+      paintViewerMode();
+      diffPane.dataset.result = '1';
+      diffPane.replaceChildren(el(doc, 'p', 'artifact-diff-message', 'Diff declined: select two different stored versions.'));
+      return;
+    }
+    compareController?.abort();
+    compareController = new AbortController();
+    if (controller.signal.aborted) compareController.abort();
+    const run = ++diffRun;
+    selectedHash = from;
+    compareHash = to;
+    globalThis.history.pushState(null, '', readerUrl({ repo_id: repo, path, hash: from, compare: to }));
+    viewerMode = 'diff';
+    paintViewerMode();
+    diffPane.dataset.result = '1';
+    diffPane.replaceChildren(el(doc, 'p', 'artifact-diff-message', 'Loading complete version text…'));
+    const result = await loadDiff({ scheduler, repo, path, a: from, b: to, tenant: tenantValue, signal: compareController.signal }).catch(error => {
+      if (error?.name === 'AbortError') return null;
+      return { ok: false, reason: `Diff declined: ${error?.message || 'content request failed'}` };
+    });
+    if (disposed || run !== diffRun || !result) return;
+    diffPane.replaceChildren(result.ok ? renderDiff(doc, result.result) : el(doc, 'p', 'artifact-diff-message', result.reason));
   }
 
   async function selectVersion(hash) {
+    explicitPair = false;
     selectedHash = hash;
-    const url = readerUrl({ repo_id: repo, path, hash, compare: compareHash });
-    globalThis.history.pushState(null, '', url);
-    for (const mark of versionsSlot.querySelectorAll('.artifact-version-mark')) {
-      mark.dataset.selected = mark.dataset.hash === hash ? 'true' : 'false';
-    }
-    await renderSelected();
-    paintCompareControl();
-    if (compareHash) await runCompare(selectedHash, compareHash);
+    compareHash = compareDefaults(rows, hash).from;
+    globalThis.history.pushState(null, '', readerUrl({ repo_id: repo, path, hash }));
+    updateOutside();
+    paintVersionControls();
+    paintVersionSlot();
+    if (viewerMode === 'content') await loadContent(hash);
+    else paintContent();
   }
 
   async function loadMore() {
     if (!next) return;
-    const params = new URLSearchParams({ grain: 'artifact', repo_id: repo, path });
+    const params = new URLSearchParams({ grain: 'artifact', repo_id: repo, path, cursor: next });
     if (pageMax) params.set('limit', String(pageMax));
-    params.set('cursor', next);
-    const { response, body } = await transport.get('entity', params, { tenant, signal: controller.signal, stateKey: 'artifact-versions-more' });
+    const { response, body } = await transport.get('entity', params, { tenant: tenantValue, signal: controller.signal, stateKey: 'artifact-versions-more' });
     if (disposed) return;
-    if (!response.ok) return;
+    if (!response.ok) {
+      versionMessage = VERSION_ERROR_TEXT;
+      versionCode = body?.code || String(response.status);
+      paintVersionSlot();
+      return;
+    }
     const incoming = Array.isArray(body.rows) ? body.rows : [];
-    rows = [...rows, ...incoming];
+    rows = sortVersions([...rows, ...incoming]);
     next = body.next || null;
-    population = body.population || population;
-    await paintStrip();
-    if (disposed) return;
-    await renderSelected();
+    paintVersionControls();
+    paintVersionSlot();
+    paintScorePanel();
   }
 
-  let pageMax = null;
+  let identitySlot;
+  let outsideSlot;
+  let versionControls;
+  let versionSlot;
+
+  async function loadVersions() {
+    versionState = 'loading';
+    versionMessage = VERSION_LOADING_TEXT;
+    paintVersionSlot();
+    const params = new URLSearchParams({ grain: 'artifact', repo_id: repo, path });
+    if (pageMax) params.set('limit', String(pageMax));
+    try {
+      const result = await transport.get('entity', params, { tenant: tenantValue, signal: controller.signal, stateKey: 'artifact-versions' });
+      if (disposed) return;
+      if (!result.response.ok) {
+        versionState = result.response.status === 404 ? 'empty' : 'error';
+        versionMessage = result.response.status === 404 ? VERSION_EMPTY_TEXT : VERSION_ERROR_TEXT;
+        versionCode = result.body?.code || String(result.response.status);
+        paintVersionSlot();
+        finish('error', result.body?.error || `The server returned ${result.response.status}.`);
+        return;
+      }
+      rows = sortVersions(Array.isArray(result.body.rows) ? result.body.rows : []);
+      next = typeof result.body.next === 'string' && result.body.next ? result.body.next : null;
+      if (!rows.length) {
+        versionState = 'empty';
+        versionMessage = VERSION_EMPTY_TEXT;
+        paintVersionSlot();
+        finish('empty', 'no versions for this artifact');
+        return;
+      }
+      versionState = 'ready';
+      versionMessage = '';
+      checks = checkChoices(rows, catalogue);
+      check = defaultScoreCheck(rows) || checks[0] || 'clarity';
+      scorers = scoreScorers(rows, check);
+      scorer = scorers.includes(scorer) ? scorer : defaultScorer(rows, check);
+      if (!selectedHash) selectedHash = result.body.latest?.content_hash || rows[0].content_hash;
+      paintVersionControls();
+      paintVersionSlot();
+      paintScorePanel();
+      paintViewer();
+      updateOutside();
+      finish('ready', '');
+      await loadContent(selectedHash);
+    } catch (error) {
+      if (disposed || error?.name === 'AbortError') return;
+      versionState = 'error';
+      versionMessage = VERSION_ERROR_TEXT;
+      versionCode = error?.code || '';
+      paintVersionSlot();
+      finish('error', error?.message || 'The artifact request failed.');
+    }
+  }
 
   async function start() {
-    setState('loading', 'Loading artifact…');
-    try {
-      const me = await transport.request('me', { signal: controller.signal, stateKey: 'artifact-me' });
-      tenant = rememberedTenant(me?.body || {});
-    } catch (error) {
-      if (error?.name === 'AbortError') { setState('cancelled', 'Request cancelled.'); return; }
-      tenant = '';
+    finish('loading', 'Loading artifact…');
+    if (!tenantValue) {
+      try {
+        const me = await transport.request('me', { signal: controller.signal, stateKey: 'artifact-me' });
+        tenantValue = rememberedTenant(me?.body || {});
+      } catch { tenantValue = ''; }
     }
     if (disposed) return;
     let schema = null;
     try {
-      const result = await transport.schema(tenant);
+      const result = await transport.schema(tenantValue);
       if (result.response.ok) schema = result.body;
     } catch { schema = null; }
     if (disposed) return;
     if (schema?.features && schema.features.entities_artifact === false) {
-      setState('unsupported', unsupportedText(unsupportedState({
+      finish('unsupported', unsupportedText(unsupportedState({
         feature: 'entities_artifact', reason: 'not advertised by this server', source: 'Plan 20 Phase 6 (entities_artifact)'
       })));
       return;
     }
     const max = Number(schema?.budgets?.page_max);
     pageMax = Number.isFinite(max) && max > 0 ? Math.floor(max) : null;
-    baselineCache = createBaselineCache({ transport, tenant, signal: controller.signal });
-
-    const params = new URLSearchParams({ grain: 'artifact', repo_id: repo, path });
-    if (pageMax) params.set('limit', String(pageMax));
-    let response;
-    let body = {};
-    try {
-      const result = await transport.get('entity', params, { tenant, signal: controller.signal, stateKey: 'artifact-versions' });
-      response = result.response;
-      body = result.body;
-    } catch (error) {
-      if (disposed) return;
-      if (error?.name === 'AbortError') { setState('cancelled', 'Request cancelled.'); return; }
-      setState('error', error?.message || 'The artifact request failed.');
-      return;
-    }
-    if (disposed) return;
-    if (response.status === 404) { setState('error', 'artifact not found for this repo and path'); return; }
-    if (!response.ok) { setState('error', body?.error || `The server returned ${response.status}.`); return; }
-
-    rows = Array.isArray(body.rows) ? body.rows : [];
-    next = typeof body.next === 'string' && body.next ? body.next : null;
-    population = body.population || null;
-    latestHash = body.latest?.content_hash || rows[0]?.content_hash || '';
-    if (!rows.length) { setState('empty', 'no versions for this artifact'); return; }
-
-    let catalogue = [];
     if (kind !== 'other') {
       try {
-        const result = await transport.get('scores', new URLSearchParams({ kind }), { tenant, signal: controller.signal, stateKey: 'artifact-catalogue' });
+        const result = await transport.get('scores', new URLSearchParams({ kind }), { tenant: tenantValue, signal: controller.signal, stateKey: 'artifact-catalogue' });
         if (result.response.ok) catalogue = catalogueChecks(result.body);
       } catch { catalogue = []; }
     }
-    if (disposed) return;
-    checks = checkChoices(rows, catalogue);
-    check = defaultCheck(rows, checks);
-    if (!selectedHash) selectedHash = latestHash;
-    await paintStrip();
-    if (disposed) return;
-    await renderSelected();
-    setState('ready', '');
+    await loadVersions();
   }
+
+  function renderIdentityForm() {
+    finish('identity-required', 'identity required: choose a repository and enter a path.');
+    const form = el(doc, 'form', 'artifact-identity-form');
+    form.append(el(doc, 'h2', 'workspace-panel-title', 'Exact file'));
+    const repoLabel = el(doc, 'label', 'artifact-identity-repo', 'Repository ');
+    const repoSelect = doc.createElement('select');
+    repoSelect.className = 'artifact-identity-repository';
+    repoSelect.setAttribute('aria-label', 'Repository');
+    repoSelect.append(el(doc, 'option', '', 'Choose a repository'));
+    repoSelect.options[0].value = '';
+    repoLabel.append(repoSelect);
+    const pathLabel = el(doc, 'label', 'artifact-identity-path', 'Path ');
+    const pathInput = doc.createElement('input');
+    pathInput.className = 'artifact-identity-path-input';
+    pathInput.type = 'text';
+    pathInput.required = true;
+    pathInput.placeholder = 'docs/plans/…/DESIGN.md';
+    pathInput.setAttribute('aria-label', 'Path');
+    pathLabel.append(pathInput);
+    const submit = el(doc, 'button', 'artifact-open', 'Open artifact');
+    submit.type = 'submit';
+    submit.disabled = true;
+    form.append(repoLabel, pathLabel, submit);
+    section.append(form);
+    const checkReady = () => { submit.disabled = !(repoSelect.value && pathInput.value.trim()); };
+    repoSelect.addEventListener('change', checkReady);
+    pathInput.addEventListener('input', checkReady);
+    form.addEventListener('submit', event => {
+      event.preventDefault();
+      if (!repoSelect.value || !pathInput.value.trim()) return;
+      globalThis.history.pushState(null, '', readerUrl({ repo_id: repoSelect.value, path: pathInput.value.trim() }));
+      globalThis.dispatchEvent(new PopStateEvent('popstate'));
+    });
+    if (!tenantValue) {
+      transport.request('me', { signal: controller.signal, stateKey: 'artifact-me' }).then(result => {
+        tenantValue = rememberedTenant(result?.body || {});
+        loadFacets();
+      }).catch(() => loadFacets());
+    } else {
+      loadFacets();
+    }
+    async function loadFacets() {
+      const schema = await transport.schema(tenantValue).catch(() => null);
+      if (disposed || !schema?.features?.facets) return;
+      const params = facetsParameters(readContext || {});
+      transport.get('facets', params, { tenant: tenantValue, signal: controller.signal, stateKey: 'artifact-facets' }).then(({ response, body }) => {
+        if (disposed || !response.ok) return;
+        const repos = (body?.repos || []).map(value => typeof value === 'string' ? value : String(value?.name ?? value?.value ?? '')).filter(Boolean);
+        repoSelect.replaceChildren();
+        const blank = el(doc, 'option', '', 'Choose a repository');
+        blank.value = '';
+        repoSelect.append(blank);
+        for (const name of [...new Set(repos)].sort()) {
+          const option = el(doc, 'option', '', name);
+          option.value = name;
+          repoSelect.append(option);
+        }
+        checkReady();
+      }).catch(() => {});
+    }
+  }
+
+  identitySlot = el(doc, 'p', 'artifact-identity');
+  outsideSlot = el(doc, 'p', 'artifact-outside');
+  outsideSlot.hidden = true;
+  section.append(identitySlot, outsideSlot);
+  const versions = buildVersionsSlot();
+  versionControls = versions.controls;
+  versionSlot = versions.slot;
+  loadVersionSlot = versionSlot;
+  section.append(versions.wrapper);
+  const scoreSection = el(doc, 'div', 'artifact-score-slot');
+  scoreSlot = scoreSection;
+  section.append(scoreSection);
+  const viewerSection = el(doc, 'div', 'artifact-viewer-slot');
+  viewerSlot = viewerSection;
+  section.append(viewerSection);
 
   start();
 

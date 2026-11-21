@@ -173,56 +173,61 @@ async function settleReader(page) {
   await page.waitForFunction(() => document.querySelector('[data-panel="artifact-reader"]')?.dataset.idle === 'true');
 }
 
-async function settleContent(page) {
-  await page.waitForFunction(() => document.querySelector('.artifact-version')?.dataset.state === 'ready'
-    || document.querySelector('.artifact-content-message'));
-}
-
 function openArtifact(page, origin, { path, hash = '' }) {
   const params = new URLSearchParams({ repo_id: 'repo-a', path });
   if (hash) params.set('hash', hash);
   return page.goto(`${origin}/artifact?${params.toString()}`);
 }
 
-test('a deep link with no hash selects the latest version and renders inert text with score and band', { skip: environment.ok ? false : SKIP_REASON }, async t => {
+test('a deep link with no hash selects the latest version and renders inert text with score history', { skip: environment.ok ? false : SKIP_REASON }, async t => {
   const harness = await startWorkspaceHarness();
   harness.api.set({ p12: true });
   const browser = await launchBrowser(environment);
   t.after(async () => { await browser.close(); await harness.close(); });
-  const page = await browser.newPage({ viewport: { width: 1280, height: 1600 } });
+  const page = await browser.newPage({ viewport: { width: 1440, height: 1600 } });
   const diagnostics = await watchPage(page);
 
   await openArtifact(page, harness.origin, { path: DESIGN });
   await settleReader(page);
-  await settleContent(page);
-
   const reader = page.locator('[data-panel="artifact-reader"]');
   assert.equal(await reader.getAttribute('data-state'), 'ready');
-  assert.equal(await page.locator('.artifact-version-mark').count(), 4, 'page_max = 4 versions on page one');
-  const selected = await page.locator('.artifact-version-mark[data-selected="true"]').getAttribute('data-hash');
-  assert.equal(selected, H.designV6);
-  await page.waitForFunction(() => document.querySelector('.artifact-version-mark[data-selected="true"] .artifact-mark-band')?.dataset.band === 'high');
-  const bands = await page.locator('.artifact-version-mark .artifact-mark-band').evaluateAll(nodes => nodes.map(node => node.dataset.band));
-  assert.ok(bands.includes('unscored'), `expected an unscored check, got ${JSON.stringify(bands)}`);
-  assert.ok(bands.includes('low') || bands.includes('high'));
+  await page.waitForFunction(() => document.querySelector('.artifact-version-table tbody tr[data-hash]'));
+  assert.equal(await page.locator('.artifact-version-table tbody tr[data-hash]').count(), 4, 'page_max = 4 versions on page one');
+  assert.equal(await page.locator('.artifact-version-chooser').inputValue(), H.designV6);
+  assert.deepEqual(
+    await page.locator('.artifact-version-table thead th').allInnerTexts(),
+    ['Observed', 'Hash', 'Kind', 'Score/scorer', 'Content state', 'Screen verdict', 'Writing session']
+  );
+  assert.equal(await page.locator('.artifact-version-table tbody tr[data-hash]').first().evaluate(node => getComputedStyle(node).height), '30px');
+  assert.match(await page.locator('.artifact-version-table tbody tr[data-hash="' + H.designV6 + '"]').innerText(), /design\t0\.90 \/ jev-1\.13\.0\tStored/i);
 
-  const bodyText = await page.locator('.artifact-body').innerText();
+  await page.waitForFunction(() => document.querySelector('.artifact-content'));
+  const bodyText = await page.locator('.artifact-content').innerText();
   assert.match(bodyText, /<script>alert\(1\)<\/script>/);
   assert.match(bodyText, /<img src=x onerror=alert\(1\)>/);
   assert.equal(await page.locator('[data-panel="artifact-reader"] script').count(), 0);
   assert.equal(await page.locator('[data-panel="artifact-reader"] img').count(), 0);
-  assert.match(await page.locator('.artifact-more').innerText(), /Showing lines 1–\d+ of \d+/);
+  assert.equal(await page.locator('.artifact-content').evaluate(node => getComputedStyle(node).lineHeight), '18px');
+  assert.match(await page.locator('.artifact-exact-bytes').innerText(), /Exact version; analytics time filter does not alter these bytes/);
+  assert.equal(await page.locator('.artifact-copy-text').count(), 1);
+  assert.equal(await page.locator('.artifact-download-text').count(), 1);
 
-  assert.equal(await page.locator('.artifact-plan-link').getAttribute('href'), '/plans/repo-a/20-analytics-reset');
-  assert.equal(await page.locator('.artifact-session-link').getAttribute('href'), '/sessions/conv-20b');
-  assert.match(await page.locator('.artifact-session').innerText(), /captured provenance, not proven authorship/);
+  assert.match(await page.locator('[data-panel="artifact-score-history"] .workspace-panel-caption').innerText(), /Each point shows this file version’s clarity score at its observation time/);
+  assert.equal(await page.locator('.artifact-score-check').inputValue(), 'clarity');
+  assert.equal(await page.locator('.artifact-score-scorer').inputValue(), 'jev-1.13.0');
+  await page.locator('[data-panel="artifact-score-history"] button[data-view="table"]').click();
+  await page.waitForFunction(() => document.querySelector('.artifact-score-table')?.hidden === false);
+  const scores = await page.locator('.artifact-score-table tbody tr td:nth-child(5)').allInnerTexts();
+  assert.deepEqual(scores, ['—', '—', '0.20', '0.90']);
+  assert.equal(scores.includes('0.00'), false, 'a missing score is never shown as zero');
 
-  await diagnostics.assertClean();
+  assert.equal(await page.locator('.artifact-identity').innerText(), `repo-a · ${DESIGN}`);
   const stats = await (await fetch(`${harness.origin}/__test/stats`)).json();
   assert.ok(stats.maxInFlight <= 4, `max in flight ${stats.maxInFlight}`);
+  await diagnostics.assertClean();
 });
 
-test('a hash selects that version, restores on reload, and a chosen check recomputes bands', { skip: environment.ok ? false : SKIP_REASON }, async t => {
+test('a hash selects that version, restores on reload, and a chosen check changes the score history', { skip: environment.ok ? false : SKIP_REASON }, async t => {
   const harness = await startWorkspaceHarness();
   harness.api.set({ p12: true });
   const browser = await launchBrowser(environment);
@@ -232,47 +237,51 @@ test('a hash selects that version, restores on reload, and a chosen check recomp
 
   await openArtifact(page, harness.origin, { path: DESIGN, hash: H.designV5 });
   await settleReader(page);
-  await settleContent(page);
+  await page.waitForFunction(() => document.querySelector('.artifact-content'));
   assert.equal(page.url().includes(`hash=${H.designV5}`), true, 'a deep-linked hash stays in the URL');
-  assert.equal(await page.locator('.artifact-version-mark[data-selected="true"]').getAttribute('data-hash'), H.designV5);
-  assert.match(await page.locator('.artifact-body').innerText(), /Design B/);
+  assert.equal(await page.locator('.artifact-version-chooser').inputValue(), H.designV5);
+  assert.match(await page.locator('.artifact-content').innerText(), /Design B/);
 
-  await page.selectOption('.artifact-check-chooser', 'structure');
-  await page.waitForFunction(() => [...document.querySelectorAll('.artifact-mark-band')].some(node => node.dataset.band === 'baseline_unavailable'));
-  const bands = await page.locator('.artifact-version-mark .artifact-mark-band').evaluateAll(nodes => nodes.map(node => node.dataset.band));
-  assert.deepEqual(bands, ['low', 'high', 'baseline_unavailable', 'unscored']);
+  await page.reload();
+  await settleReader(page);
+  await page.waitForFunction(() => document.querySelector('.artifact-content'));
+  assert.equal(await page.locator('.artifact-version-chooser').inputValue(), H.designV5);
+
+  await page.selectOption('.artifact-score-check', 'structure');
+  await page.waitForFunction(() => [...document.querySelectorAll('.artifact-score-scorer option')].some(option => option.value === 'jev-missing'));
+  await page.selectOption('.artifact-score-scorer', 'jev-missing');
+  await page.waitForFunction(() => document.querySelector('.artifact-score-scorer')?.value === 'jev-missing');
+  await page.locator('[data-panel="artifact-score-history"] button[data-view="table"]').click();
+  await page.waitForFunction(() => document.querySelector('.artifact-score-table')?.hidden === false);
+  const rows = await page.locator('.artifact-score-table tbody tr').evaluateAll(nodes => nodes.map(node => [...node.cells].map(cell => cell.textContent)));
+  assert.equal(rows.length, 4);
+  assert.equal(rows.filter(row => row[4] !== '—').length, 1, 'only one version has a structure score for this scorer');
+  assert.ok(rows.some(row => row[4] === '0.60' && row[3] === 'jev-missing'));
 
   await diagnostics.assertClean();
   const stats = await (await fetch(`${harness.origin}/__test/stats`)).json();
   assert.ok(stats.maxInFlight <= 4, `max in flight ${stats.maxInFlight}`);
 });
 
-test('a long body chunks, Show more appends windows and the outline jumps to its chunk', { skip: environment.ok ? false : SKIP_REASON }, async t => {
+test('a long body is shown complete, never as a truncated prefix', { skip: environment.ok ? false : SKIP_REASON }, async t => {
   const harness = await startWorkspaceHarness();
   harness.api.set({ p12: true });
   const browser = await launchBrowser(environment);
   t.after(async () => { await browser.close(); await harness.close(); });
-  const page = await browser.newPage({ viewport: { width: 1280, height: 1600 } });
+  const page = await browser.newPage({ viewport: { width: 1440, height: 1600 } });
   const diagnostics = await watchPage(page);
 
   await openArtifact(page, harness.origin, { path: BRIEF });
   await settleReader(page);
-  await settleContent(page);
-  assert.match(await page.locator('.artifact-more').innerText(), /Showing lines 1–400 of 900/);
-  assert.equal(await page.locator('.artifact-chunk').count(), 1);
-  const outline = await page.locator('.artifact-outline-item').allInnerTexts();
-  assert.ok(outline.some(text => /Second section/.test(text)));
-  assert.equal(outline.some(text => /fenced not a heading/.test(text)), false, 'fenced headings never enter the outline');
-
-  await page.locator('.artifact-outline-item', { hasText: 'Second section' }).click();
-  await page.waitForFunction(() => document.querySelectorAll('.artifact-chunk').length === 2);
-  assert.match(await page.locator('.artifact-body').innerText(), /## Second section/);
-  assert.match(await page.locator('.artifact-more').innerText(), /Showing lines 1–800 of 900/);
-
-  await page.locator('.artifact-show-more').click();
-  await page.waitForFunction(() => document.querySelectorAll('.artifact-chunk').length === 3);
-  assert.match(await page.locator('.artifact-more').innerText(), /Showing lines 1–900 of 900/);
-  assert.equal(/truncated/i.test(await page.locator('.artifact-more').innerText()), false);
+  await page.waitForFunction(() => document.querySelector('.artifact-content'));
+  const text = await page.locator('.artifact-content').textContent();
+  assert.match(text, /line 450\b/);
+  assert.match(text, /line 900\b/);
+  assert.equal(text.trim().split('\n').length, 900);
+  assert.equal(/truncated/i.test(text), false);
+  assert.equal(await page.locator('.artifact-show-more').count(), 0, 'the complete body has no chunking controls');
+  assert.equal(await page.locator('.artifact-copy-text').count(), 1);
+  assert.equal(await page.locator('.artifact-download-text').count(), 1);
 
   await diagnostics.assertClean();
   const stats = await (await fetch(`${harness.origin}/__test/stats`)).json();
@@ -293,7 +302,7 @@ test('every unavailable, oversized and integrity state names its exact reason an
     await page.waitForFunction(() => document.querySelector('.artifact-content-message'));
     assert.match(await page.locator('.artifact-content-message').innerText(), message);
     if (code) assert.match(await page.locator('.artifact-content-code').innerText(), code);
-    assert.equal(await page.locator('.artifact-chunk').count(), 0, 'no prefix body is shown');
+    assert.equal(await page.locator('.artifact-content').count(), 0, 'no prefix body is shown');
   }
 
   await expectState(DESIGN, H.designV4, /removed by screen/, /404 content_unavailable \(removed_by_screen\)/);
@@ -301,22 +310,20 @@ test('every unavailable, oversized and integrity state names its exact reason an
   await expectState(REPORT_OVER, H.oversize, /content too large: 20,000,000 bytes exceeds the 16,777,216-byte limit; no prefix is shown/, /413 content_too_large/);
   await expectState(REPORT_INTEGRITY, H.integrity, /content integrity check failed/, /500 content_integrity/);
 
-  // The two page-two states: load the second page, then select each mark.
   await openArtifact(page, harness.origin, { path: DESIGN });
   await settleReader(page);
-  await settleContent(page);
+  await page.waitForFunction(() => document.querySelector('.artifact-version-table tbody tr[data-hash]'));
   await page.locator('.artifact-versions-more').click();
-  await page.waitForFunction(() => document.querySelectorAll('.artifact-version-mark').length === 6);
-  await page.locator(`.artifact-version-mark[data-hash="${H.designV2}"]`).click();
+  await page.waitForFunction(() => document.querySelectorAll('.artifact-version-chooser option').length === 6);
+  await page.selectOption('.artifact-version-chooser', H.designV2);
   await page.waitForFunction(() => document.querySelector('.artifact-content-message'));
   assert.match(await page.locator('.artifact-content-message').innerText(), /not stored: this ledger has no blob for this version/);
   assert.match(await page.locator('.artifact-content-code').innerText(), /404 content_unavailable \(not_stored\)/);
-  assert.equal(await page.locator('.artifact-chunk').count(), 0);
 
-  await page.locator(`.artifact-version-mark[data-hash="${H.designV1}"]`).click();
+  await page.selectOption('.artifact-version-chooser', H.designV1);
   await page.waitForFunction(() => /not found for this repo and path/.test(document.querySelector('.artifact-content-message')?.textContent || ''));
   assert.match(await page.locator('.artifact-content-code').innerText(), /404 not_found/);
-  assert.equal(await page.locator('.artifact-chunk').count(), 0);
+  assert.equal(await page.locator('.artifact-content').count(), 0);
 
   assert.deepEqual(diagnostics.pageErrors, []);
   assert.deepEqual(await diagnostics.cspViolations(), []);
@@ -335,13 +342,17 @@ test('a hash outside the returned versions is named, never substituted, and iden
 
   await openArtifact(page, harness.origin, { path: DESIGN, hash: 'f'.repeat(64) });
   await settleReader(page);
+  await page.waitForFunction(() => document.querySelector('.artifact-version-missing'));
   assert.match(await page.locator('.artifact-version-missing').innerText(), /version not found for this artifact/);
-  assert.equal(await page.locator('.artifact-body').count(), 0);
+  assert.equal(await page.locator('.artifact-content').count(), 0);
+  assert.equal(await page.locator('.artifact-version-chooser').inputValue(), H.designV6, 'the chooser never pretends the missing hash exists');
 
   await page.goto(`${harness.origin}/artifact`);
   await settleReader(page);
   assert.equal(await page.locator('[data-panel="artifact-reader"]').getAttribute('data-state'), 'identity-required');
-  assert.match(await page.locator('.artifact-reader-status').innerText(), /identity required: repo_id and path are required/);
+  assert.match(await page.locator('.artifact-reader-status').innerText(), /identity required: choose a repository and enter a path/);
+  assert.equal(await page.locator('.artifact-identity-form').count(), 1);
+  assert.equal(await page.locator('.artifact-identity-path-input').count(), 1);
 
   await page.goto(`${harness.origin}/artifact?repo_id=repo-a&path=${encodeURIComponent(DESIGN)}&hash=nothex`);
   await settleReader(page);
