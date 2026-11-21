@@ -311,22 +311,27 @@ function cellText(row, field) {
   return String(value);
 }
 
-const COLUMNS = [
-  { field: 'ts', label: 'Time (UTC)' },
-  { field: 'type', label: 'Type' },
-  { field: 'norm_event', label: 'Event' },
-  { field: 'harness', label: 'Harness' },
-  { field: 'repo_id', label: 'Repo' },
-  { field: 'plan', label: 'Plan' },
-  { field: 'kind', label: 'Kind' },
-  { field: 'tool', label: 'Tool' },
-  { field: 'model', label: 'Model' },
-  { field: 'conversation_id', label: 'Conversation' },
-  { field: 'path', label: 'Path' },
-  { field: 'source', label: 'Source' },
-  { field: 'rejection_stage', label: 'Stage' },
-  { field: 'cost_usd', label: 'Cost', cost: true }
+// S-ledger's nine columns, in contract order and with their widths. The
+// Path/event column takes the remaining width and never shrinks below 240px.
+export const LEDGER_COLUMNS = [
+  { field: 'ts', label: 'Time', width: '150px' },
+  { field: 'type', label: 'Type', width: '120px' },
+  { field: 'repo_id', label: 'Repository', width: '160px' },
+  { field: 'plan', label: 'Plan', width: '180px' },
+  { field: 'kind', label: 'Kind', width: '70px' },
+  { field: 'path', label: 'Path/event', width: '240px', remaining: true },
+  { field: 'conversation_id', label: 'Conversation', width: '150px' },
+  { field: 'rejection_stage', label: 'Stage', width: '80px' },
+  { field: 'cost_usd', label: 'Cost USD', width: '90px', cost: true }
 ];
+
+const COLUMNS = LEDGER_COLUMNS;
+
+// The Path/event cell names the exact path when the row has one, else the
+// stored event name (a rejection or a hook has no path).
+function pathEventText(row = {}) {
+  return cellText(row.path && String(row.path) ? row.path : (row.event || row.norm_event));
+}
 
 // The table skeleton shared by ready rows and T1–T3 status rows: caption and
 // scoped headers always exist, and one tbody receives either rows or the
@@ -337,11 +342,15 @@ export function createLedgerTableShell(container, { doc = globalThis.document, c
   const table = el(doc, 'table', 'ledger-table');
   table.append(el(doc, 'caption', 'ledger-caption', caption));
 
+  const colgroup = doc.createElement('colgroup');
+  for (const column of COLUMNS) {
+    const col = doc.createElement('col');
+    col.setAttribute('width', String(parseInt(column.width, 10)));
+    colgroup.append(col);
+  }
+
   const head = doc.createElement('thead');
   const headRow = doc.createElement('tr');
-  const selectHead = el(doc, 'th', 'ledger-select-head', 'Select');
-  selectHead.scope = 'col';
-  headRow.append(selectHead);
   for (const column of COLUMNS) {
     const th = el(doc, 'th', column.cost ? 'numeric' : '', column.label);
     th.scope = 'col';
@@ -351,10 +360,10 @@ export function createLedgerTableShell(container, { doc = globalThis.document, c
 
   const body = doc.createElement('tbody');
   body.className = 'ledger-body';
-  table.append(head, body);
+  table.append(colgroup, head, body);
   wrapper.append(table);
   container.append(wrapper);
-  return { wrapper, table, head, body, caption };
+  return { wrapper, table, colgroup, head, body, caption };
 }
 
 function attachAction(doc, node, item, handlers) {
@@ -373,7 +382,7 @@ export function ledgerStateRow(doc, model, handlers = {}) {
   const row = el(doc, 'tr', 'ledger-state-row');
   row.dataset.state = model.state;
   const cell = el(doc, 'td', 'ledger-state-cell');
-  cell.colSpan = COLUMNS.length + 1;
+  cell.colSpan = COLUMNS.length;
   cell.append(el(doc, 'span', 'ledger-state-text', model.text));
   if (model.detail) cell.append(el(doc, 'span', 'ledger-state-detail', ` ${model.detail}`));
   if (model.code) cell.append(el(doc, 'code', 'ledger-state-code', ` ${model.code}`));
@@ -417,21 +426,12 @@ export function ledgerRowElement(doc, row, { selected = new Map(), body = null, 
   tr.tabIndex = 0;
   tr.setAttribute('role', 'row');
 
-  const selectCell = el(doc, 'td', 'ledger-select');
-  const box = doc.createElement('input');
-  box.type = 'checkbox';
-  box.className = 'ledger-row-check';
-  box.checked = selected.has(entityKey);
-  box.setAttribute('aria-label', `Select ${row.type || 'event'} at ${row.ts || 'unknown time'}`);
-  box.addEventListener('click', event => {
-    event.stopPropagation();
-    onSelect?.(row, { mode: event.altKey ? 'exclude' : 'include' });
-  });
-  selectCell.append(box);
-  tr.append(selectCell);
-
   for (const column of COLUMNS) {
-    tr.append(el(doc, 'td', column.cost ? 'numeric ledger-cost' : '', column.cost ? formatRowCost(row) : cellText(row, column.field)));
+    const text = column.cost ? formatRowCost(row) : (column.remaining ? pathEventText(row) : cellText(row, column.field));
+    const td = el(doc, 'td', column.cost ? 'numeric ledger-cost' : '', text);
+    td.dataset.key = column.field;
+    if (text !== '—') td.title = text;
+    tr.append(td);
   }
   tr.addEventListener('click', event => {
     if (event.target.closest('input,button,a')) return;

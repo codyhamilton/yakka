@@ -1,8 +1,8 @@
-// `/plans` explorer: a server-sorted, cursor-paged ranked table of plans plus
-// the delivered `scatter-plan` panel over the same scope. One plan identity is
-// `(repo_id, plan)`; inspect opens the plan inspector, a scatter rectangle
-// becomes a typed plan cohort in the shared tray. It adds no route, grain, join,
-// chart type or gesture, and reuses the shared frame, chips, tray and inspector.
+// `/plans` explorer: a table-only, server-sorted, cursor-paged ranked list of
+// plans. One plan identity is `(repo_id, plan)`; inspect opens the plan
+// inspector and Open preserves the committed scope. It adds no route, grain,
+// join, chart type or gesture, and reuses the shared frame, chips, tray and
+// inspector.
 
 import { decodeUrlState } from '../../contract/url-state.js';
 import { createScheduler } from '../core/request-scheduler.js';
@@ -10,15 +10,15 @@ import { createTransport } from '../../contract/transport.js';
 import { rememberedTenant } from '../../contract/session-gate.js';
 import { createPanelFrame } from '../panels/panel-frame.js';
 import { hasPanel, registerPanel } from '../panels/registry.js';
-import { addFilterChip, createChips, stateUrl } from '../core/chips.js';
+import { addFilterChip, createChips, resetScopeState, stateUrl } from '../core/chips.js';
 import { createSelectionTray } from '../core/selection-tray.js';
 import { createInspector } from '../core/inspector.js';
 import { decodeCohort, encodeCohort } from '../core/selection-model.js';
-import { cancelledState, emptyCauses, emptyState, errorState, unsupportedState } from '../core/panel-state.js';
+import { emptyCauses, emptyState, errorState, unsupportedState } from '../core/panel-state.js';
 import { formatMoney, formatNumber, formatPercent } from '../charts/formatters.js';
-import { resolveWindow } from '../panels/ledger-table.js';
+import { resolveWindow, sanitizeApiCode } from '../panels/ledger-table.js';
 import { parseRoute } from '../core/router.js';
-import { SCATTER_PLAN_PANEL, planDestination, planIdentity, planOverlap } from '../panels/scatter-plan.js';
+import { planDestination, planIdentity, planOverlap } from '../panels/scatter-plan.js';
 import { canonicalRowKey } from '../panels/scatter-shared.js';
 import { artifactKind, bandFor, createBaselineCache, fetchArtifactText } from './artifact-content.js';
 import { PLAN_TIMELINE_PANEL } from '../panels/plan-timeline.js';
@@ -26,14 +26,26 @@ import { PLAN_TIMELINE_PANEL } from '../panels/plan-timeline.js';
 export const title = 'Plans';
 export const phase = 12;
 
+// S-plans offers only these measures in its server sort, in contract order.
 export const PLAN_MEASURES = [
-  'artifacts', 'versions', 'sessions', 'shared_sessions', 'associated_cost_usd', 'unpriced_calls',
-  'executions_complete', 'executions_unreported', 'executions_started', 'complete_share',
-  'span_days', 'first_ts', 'last_ts'
+  'associated_cost_usd', 'sessions', 'shared_sessions', 'artifacts', 'versions',
+  'executions_complete', 'complete_share', 'last_ts'
 ];
 
+// Visible labels for the sort control; the value on the wire stays the measure.
+export const PLAN_MEASURE_LABELS = {
+  associated_cost_usd: 'Associated cost USD',
+  sessions: 'Sessions',
+  shared_sessions: 'Shared sessions',
+  artifacts: 'Files',
+  versions: 'Versions',
+  executions_complete: 'Complete executions',
+  complete_share: 'Complete share %',
+  last_ts: 'Last observed'
+};
+
 export const PLAN_FILTERS = ['repo_id', 'harness', 'session_model', 'id'];
-export const DEFAULT_SORT = 'last_ts:desc';
+export const DEFAULT_SORT = 'associated_cost_usd:desc';
 
 export const PLANS_LIST_PANEL = {
   id: 'plans-list',
@@ -67,17 +79,20 @@ export function parseSort(raw, allowed = PLAN_MEASURES) {
   const at = text.lastIndexOf(':');
   const measure = at === -1 ? text : text.slice(0, at);
   const dir = at === -1 ? '' : text.slice(at + 1);
-  const fallback = allowed.includes('last_ts') ? 'last_ts' : (allowed[0] || 'last_ts');
+  const fallback = allowed.includes('associated_cost_usd') ? 'associated_cost_usd' : (allowed[0] || 'associated_cost_usd');
   if (!text) return { measure: fallback, dir: 'desc', raw: `${fallback}:desc` };
   if (!allowed.includes(measure)) return { measure: fallback, dir: 'desc', raw: `${fallback}:desc` };
   const direction = dir === 'asc' ? 'asc' : 'desc';
   return { measure, dir: direction, raw: `${measure}:${direction}` };
 }
 
+// The capability intersection: only contract measures the schema publishes, in
+// the contract's order. A schema that publishes none gets the contract list.
 export function allowedMeasures(schema) {
   const published = schema?.grains?.plan?.measures;
   if (!Array.isArray(published) || !published.length) return PLAN_MEASURES.slice();
-  const filtered = published.filter(name => typeof name === 'string' && name && name !== 'id');
+  const names = new Set(published.filter(name => typeof name === 'string' && name));
+  const filtered = PLAN_MEASURES.filter(name => names.has(name));
   return filtered.length ? filtered : PLAN_MEASURES.slice();
 }
 
@@ -186,14 +201,14 @@ export function identityFromKey(key = '') {
 
 export function mapPlanListResponse({ status = 0, body = null } = {}) {
   const payload = body && typeof body === 'object' ? body : {};
-  if (!status) return errorState({ message: 'The server did not answer.', code: '' });
+  if (!status) return { ...errorState({ message: 'The server did not answer.', code: '' }), status };
   if (status === 404) {
     return unsupportedState({
       feature: '/entities?grain=plan', reason: 'this server does not serve it', source: 'the analytics server',
       nearest: 'the workflow board over the same window'
     });
   }
-  if (status >= 400) return errorState({ message: payload.error || `The server returned ${status}.`, code: payload.code || String(status) });
+  if (status >= 400) return { ...errorState({ message: payload.error || `The server returned ${status}.`, code: payload.code || String(status) }), status };
   const rows = Array.isArray(payload.rows) ? payload.rows : [];
   const next = typeof payload.next === 'string' && payload.next ? payload.next : null;
   const population = payload.population && typeof payload.population === 'object' ? payload.population : null;
@@ -286,8 +301,8 @@ export function planCoverageNotes({ population = null, rows = [] } = {}) {
   return notes;
 }
 
-// The plan scatter spec is the delivered panel's canonical configuration. The
-// same `scatter-plan` panel is mounted, never a second implementation.
+// The plan scatter spec remains the delivered panel's canonical configuration
+// for the Scatter route; the Plans list itself is table-only.
 export function planScatterSpec() {
   return {
     grain: 'plan',
@@ -347,17 +362,30 @@ function register() {
   if (!hasPanel(PLANS_LIST_PANEL.id)) registerPanel(PLANS_LIST_PANEL);
 }
 
-const COLUMNS = [
-  { key: 'associated_cost_usd', label: 'Associated cost' },
-  { key: 'sessions', label: 'Sessions' },
-  { key: 'shared_sessions', label: 'Shared sessions' },
-  { key: 'artifacts', label: 'Artifacts' },
-  { key: 'versions', label: 'Versions' },
-  { key: 'executions', label: 'Exec / unreported / started' },
-  { key: 'complete_share', label: 'Complete share' },
-  { key: 'design_score', label: 'Latest design score(s)' },
-  { key: 'last_ts', label: 'Last observed' }
+export const PLAN_LIST_COLUMNS = [
+  { key: 'identity', label: 'Plan identity', width: '220px', text: true },
+  { key: 'associated_cost_usd', label: 'Associated cost USD', width: '110px' },
+  { key: 'sessions', label: 'Sessions', width: '70px' },
+  { key: 'shared_sessions', label: 'Shared sessions', width: '80px' },
+  { key: 'artifacts', label: 'Files', width: '60px' },
+  { key: 'versions', label: 'Versions', width: '70px' },
+  { key: 'executions', label: 'Complete/unreported/started executions', width: '160px' },
+  { key: 'complete_share', label: 'Complete share %', width: '100px' },
+  { key: 'design_score', label: 'Latest design score / scorer', width: '180px' },
+  { key: 'last_ts', label: 'Last observed', width: '150px', text: true },
+  { key: 'open', label: 'Open', width: '70px' }
 ];
+
+function observedText(value) {
+  if (value === null || value === undefined || value === '') return '—';
+  const seconds = Number(value);
+  if (!Number.isFinite(seconds)) return String(value);
+  const date = new Date(seconds * 1000);
+  if (Number.isNaN(date.getTime())) return String(value);
+  return new Intl.DateTimeFormat('en-AU', {
+    day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'UTC'
+  }).format(date);
+}
 
 function columnText(row, key) {
   const m = row.m || {};
@@ -365,67 +393,124 @@ function columnText(row, key) {
   if (key === 'executions') return executionShapeText(row);
   if (key === 'complete_share') return completeShareText(row);
   if (key === 'design_score') return designScoreText(row);
+  if (key === 'last_ts') return observedText(m[key]);
   return cellText(m[key]);
 }
 
-function renderPlanTable(container, { rows = [], doc = globalThis.document, onInspect, onOpen } = {}) {
+// T1–T3 vocabulary for the plans table. The sentence names the table, the
+// code is sanitized, and Retry repeats the committed scope.
+export function planStateModel(state = 'loading', { status = 0, code = '', retry = false } = {}) {
+  if (state === 'loading') return { state, text: 'Loading Plans…', busy: true, detail: '', code: '', actions: [] };
+  if (state === 'empty') {
+    return { state, text: 'No records match these filters.', busy: false, detail: '', code: '', actions: [
+      { id: 'all-history', label: 'All history' }, { id: 'reset-filters', label: 'Reset filters' }
+    ] };
+  }
+  const clean = sanitizeApiCode(code);
+  const numeric = Number(status) || 0;
+  const failure = (detail, actions = []) => ({ state: 'error', text: 'Could not load Plans.', busy: false, detail, code: clean, actions });
+  if (numeric === 401) return failure('', [{ id: 'sign-in', label: 'Sign in', href: '/login' }]);
+  if (numeric === 403) return failure('You do not have access to this tenant');
+  if (numeric === 503 || state === 'busy') return failure('The server is busy; retry shortly.', retry ? [{ id: 'retry', label: 'Retry' }] : []);
+  if (state === 'timeout' || /timeout/i.test(clean)) return failure('The read timed out; retry.', retry ? [{ id: 'retry', label: 'Retry' }] : []);
+  return failure('', retry ? [{ id: 'retry', label: 'Retry' }] : []);
+}
+
+function planStateRow(doc, model, handlers = {}) {
+  const tr = el(doc, 'tr', 'plans-state-row');
+  tr.dataset.state = model.state;
+  const cell = el(doc, 'td', 'plans-state-cell');
+  cell.colSpan = PLAN_LIST_COLUMNS.length;
+  cell.append(el(doc, 'span', 'plans-state-text', model.text));
+  if (model.detail) cell.append(el(doc, 'span', 'plans-state-detail', ` ${model.detail}`));
+  if (model.code) cell.append(el(doc, 'code', 'plans-state-code', ` ${model.code}`));
+  for (const item of model.actions || []) {
+    const button = item.href ? el(doc, 'a', 'plans-state-action', item.label) : el(doc, 'button', 'plans-state-action', item.label);
+    if (item.href) button.href = item.href;
+    else { button.type = 'button'; button.addEventListener('click', () => handlers[item.id]?.()); }
+    button.dataset.action = item.id;
+    cell.append(doc.createTextNode(' '), button);
+  }
+  tr.append(cell);
+  return tr;
+}
+
+function renderPlanTable(container, { rows = [], doc = globalThis.document, onInspect, onOpen, status = null, handlers = {} } = {}) {
   container.replaceChildren();
+  const wrapper = el(doc, 'div', 'plans-table-wrap');
   const table = doc.createElement('table');
   table.className = 'plans-table';
-  table.append(el(doc, 'caption', '', `Plans, ${formatNumber(rows.length)} rows shown. Identity is repo/plan; open one for its detail.`));
+  table.append(el(doc, 'caption', 'plans-caption', `Plans, ${formatNumber(rows.length)} rows shown. Identity is repo/plan; open one for its detail.`));
+  const colgroup = doc.createElement('colgroup');
+  for (const column of PLAN_LIST_COLUMNS) {
+    const col = doc.createElement('col');
+    col.setAttribute('width', String(parseInt(column.width, 10)));
+    colgroup.append(col);
+  }
   const thead = doc.createElement('thead');
   const head = doc.createElement('tr');
-  for (const label of ['Plan', ...COLUMNS.map(column => column.label), 'Open']) {
-    const th = el(doc, 'th', '', label); th.scope = 'col'; head.append(th);
+  for (const column of PLAN_LIST_COLUMNS) {
+    const th = el(doc, 'th', '', column.label); th.scope = 'col'; head.append(th);
   }
   thead.append(head);
   const tbody = doc.createElement('tbody');
   tbody.className = 'plans-body';
-  for (const row of rows) {
-    const key = planRowKey(row);
-    const malformed = isMalformedPlanRow(row);
-    const identity = planIdentity(row);
-    const tr = doc.createElement('tr');
-    tr.className = 'plan-row';
-    tr.dataset.entityKey = key;
-    tr.dataset.planIdentity = `${identity.repo_id}/${identity.plan}`;
-    tr.tabIndex = 0;
-    if (malformed) tr.dataset.malformed = 'true';
-    tr.append(el(doc, 'td', 'plans-id', malformed ? 'invalid plan identity' : `${identity.repo_id}/${identity.plan}`));
-    for (const column of COLUMNS) {
-      const td = el(doc, 'td', 'numeric', malformed ? '—' : columnText(row, column.key));
-      td.dataset.key = column.key;
-      tr.append(td);
-    }
-    const openCell = el(doc, 'td', 'plans-open-cell');
-    if (!malformed) {
-      const open = el(doc, 'button', 'plan-open', 'Open');
-      open.type = 'button';
-      open.addEventListener('click', event => { event.stopPropagation(); onOpen?.(row); });
-      openCell.append(open);
-    } else {
-      openCell.append(doc.createTextNode('—'));
-    }
-    tr.append(openCell);
-    tr.addEventListener('click', event => {
-      if (malformed || event.target.closest('input,button,a')) return;
-      onInspect?.(row, tr);
-    });
-    tr.addEventListener('keydown', event => {
-      if (malformed) return;
-      if (event.key === 'Enter') { event.preventDefault(); onInspect?.(row, tr); }
-      else if (event.key === 'o' || event.key === 'O') { event.preventDefault(); onOpen?.(row); }
-      else if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
-        event.preventDefault();
-        const all = [...tbody.querySelectorAll('.plan-row:not([data-malformed])')];
-        const at = all.indexOf(tr);
-        all[Math.max(0, Math.min(all.length - 1, at + (event.key === 'ArrowDown' ? 1 : -1)))]?.focus();
+  if (status) {
+    tbody.append(planStateRow(doc, status, handlers));
+    if (status.busy) tbody.setAttribute('aria-busy', 'true');
+  } else {
+    for (const row of rows) {
+      const key = planRowKey(row);
+      const malformed = isMalformedPlanRow(row);
+      const identity = planIdentity(row);
+      const identityText = malformed ? 'invalid plan identity' : `${identity.repo_id}/${identity.plan}`;
+      const tr = doc.createElement('tr');
+      tr.className = 'plan-row';
+      tr.dataset.entityKey = key;
+      tr.dataset.planIdentity = `${identity.repo_id}/${identity.plan}`;
+      tr.tabIndex = 0;
+      if (malformed) tr.dataset.malformed = 'true';
+      for (const column of PLAN_LIST_COLUMNS) {
+        if (column.key === 'open') {
+          const openCell = el(doc, 'td', 'plans-open-cell');
+          if (!malformed) {
+            const open = el(doc, 'button', 'plan-open', 'Open');
+            open.type = 'button';
+            open.addEventListener('click', event => { event.stopPropagation(); onOpen?.(row); });
+            openCell.append(open);
+          } else {
+            openCell.append(doc.createTextNode('—'));
+          }
+          tr.append(openCell);
+          continue;
+        }
+        const text = column.key === 'identity' ? identityText : (malformed ? '—' : columnText(row, column.key));
+        const td = el(doc, 'td', column.key === 'identity' ? 'plans-id' : 'numeric', text);
+        td.dataset.key = column.key;
+        if (text !== '—') td.title = text;
+        tr.append(td);
       }
-    });
-    tbody.append(tr);
+      tr.addEventListener('click', event => {
+        if (malformed || event.target.closest('input,button,a')) return;
+        onInspect?.(row, tr);
+      });
+      tr.addEventListener('keydown', event => {
+        if (malformed) return;
+        if (event.key === 'Enter') { event.preventDefault(); onInspect?.(row, tr); }
+        else if (event.key === 'o' || event.key === 'O') { event.preventDefault(); onOpen?.(row); }
+        else if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+          event.preventDefault();
+          const all = [...tbody.querySelectorAll('.plan-row:not([data-malformed])')];
+          const at = all.indexOf(tr);
+          all[Math.max(0, Math.min(all.length - 1, at + (event.key === 'ArrowDown' ? 1 : -1)))]?.focus();
+        }
+      });
+      tbody.append(tr);
+    }
   }
-  table.append(thead, tbody);
-  container.append(table);
+  table.append(colgroup, thead, tbody);
+  wrapper.append(table);
+  container.append(wrapper);
   return container;
 }
 
@@ -1272,7 +1357,7 @@ export function renderList(root, doc = globalThis.document, { signal, tenant = '
   register();
   root.replaceChildren();
   root.append(el(doc, 'h1', '', title));
-  root.append(el(doc, 'p', 'plans-intro', 'Plans sorted by any published plan measure, paged by the server cursor, beside the delivered plan scatter over the same scope. Totals come from the server population, never a partial page; associated cost is a sum of associated sessions and is non-additive across plans.'));
+  root.append(el(doc, 'p', 'plans-intro', 'Plans sorted by a published plan measure, paged by the server cursor. Totals come from the server population, never a partial page; associated cost is a sum of associated sessions and is non-additive across plans.'));
 
   const router = routeAdapter();
   const state = readScope(decodeUrlState(globalThis.location?.search || ''));
@@ -1293,10 +1378,6 @@ export function renderList(root, doc = globalThis.document, { signal, tenant = '
   const tray = createSelectionTray({ doc, router, path: '/plans' });
   root.append(tray.element, inspector.element);
 
-  const scatterSection = el(doc, 'section', 'plans-scatter');
-  scatterSection.append(el(doc, 'h2', '', 'Associated cost against artifacts'));
-  root.append(scatterSection);
-
   let schema = null;
   let measures = PLAN_MEASURES.slice();
   let filters = PLAN_FILTERS.slice();
@@ -1309,12 +1390,9 @@ export function renderList(root, doc = globalThis.document, { signal, tenant = '
   let disposed = false;
   let runId = 0;
   let controller = new AbortController();
-  let scatterFrame = null;
   let selection = null;
-  // The shared scatter request seam sends the FILTER_KEYS it knows; a plan
-  // `session_model` lens is not among them, so it is named as not applied to
-  // the scatter rather than dropped silently.
-  let scatterNote = '';
+  let pending = false;
+  let nextPageError = '';
   if (signal) {
     if (signal.aborted) controller.abort();
     else signal.addEventListener('abort', () => controller.abort(), { once: true });
@@ -1339,10 +1417,18 @@ export function renderList(root, doc = globalThis.document, { signal, tenant = '
     });
   }
 
+  function detailDestination(identity) {
+    const params = new URLSearchParams(globalThis.location?.search || '');
+    params.delete('sort');
+    params.delete('cursor');
+    const query = params.toString();
+    return `${planDestination(identity)}${query ? `?${query}` : ''}`;
+  }
+
   function openRow(row) {
     const identity = planIdentity(row);
     if (!identity.repo_id || !identity.plan) return;
-    router.push(planDestination(identity));
+    router.push(detailDestination(identity));
   }
 
   function inspectRow(row, opener) {
@@ -1367,7 +1453,7 @@ export function renderList(root, doc = globalThis.document, { signal, tenant = '
         { label: 'Latest design score(s)', value: designScoreText(row) },
         { label: 'Last observed (epoch s)', value: m.last_ts }
       ],
-      destination: planDestination(identity),
+      destination: detailDestination(identity),
       unit: 'plan', population: selectedPopulation(), opener: opener || null, url: globalThis.location?.href || ''
     });
   }
@@ -1378,12 +1464,19 @@ export function renderList(root, doc = globalThis.document, { signal, tenant = '
     notes.append(el(doc, 'p', 'plans-population', populationText(population, rows)));
     const coverage = planCoverageNotes({ population, rows });
     if (coverage.length) notes.append(el(doc, 'p', 'plans-coverage', coverage.join(' · ')));
-    notes.append(el(doc, 'p', 'plans-note', cursor ? 'More plans remain; use Load more.' : 'End of the server result.'));
+    notes.append(el(doc, 'p', 'plans-note', cursor ? 'More plans remain; load another page.' : 'End of the server result.'));
     body.append(notes);
-    if (cursor) {
-      const more = el(doc, 'button', 'plans-load-more', 'Load more');
+    if (nextPageError) {
+      const failure = el(doc, 'p', 'plans-next-error', nextPageError);
+      const retry = el(doc, 'button', 'plans-load-more plans-retry-next', 'Retry next page');
+      retry.type = 'button';
+      retry.addEventListener('click', () => { nextPageError = ''; loadMore(); });
+      body.append(failure, retry);
+    } else if (cursor) {
+      const more = el(doc, 'button', 'plans-load-more', pending ? 'Loading…' : 'Load more plans');
       more.type = 'button';
-      more.addEventListener('click', () => { more.disabled = true; loadMore(); });
+      more.disabled = pending;
+      more.addEventListener('click', () => loadMore());
       body.append(more);
     }
     paintBanner();
@@ -1406,7 +1499,7 @@ export function renderList(root, doc = globalThis.document, { signal, tenant = '
     for (const name of measures) {
       const option = doc.createElement('option');
       option.value = name;
-      option.textContent = name === 'associated_cost_usd' ? 'by associated cost' : name;
+      option.textContent = PLAN_MEASURE_LABELS[name] || name;
       option.selected = name === sort.measure;
       measure.append(option);
     }
@@ -1417,7 +1510,7 @@ export function renderList(root, doc = globalThis.document, { signal, tenant = '
     for (const value of ['desc', 'asc']) {
       const option = doc.createElement('option');
       option.value = value;
-      option.textContent = value;
+      option.textContent = value === 'desc' ? 'Descending' : 'Ascending';
       option.selected = value === sort.dir;
       direction.append(option);
     }
@@ -1426,56 +1519,44 @@ export function renderList(root, doc = globalThis.document, { signal, tenant = '
     sortBar.append(el(doc, 'span', 'plans-sort-current', `server sort: ${sort.raw}`));
   }
 
-  function mountScatter() {
-    const scope = currentScope();
-    if (scope.filters?.session_model?.length) scatterNote = 'session_model is not applied here: the shared plan scatter request seam carries repo_id, harness, excludes and cohort only.';
-    if (schema?.features && schema.features.entities_plan === false) {
-      scatterSection.append(el(doc, 'p', 'plans-scatter-unsupported', 'scatter-plan is not supported (not advertised by this server). Supplied by Plan 20 Phase 6 entities_plan.'));
-      return;
+  function commitScope(next) {
+    router.pushScope(stateUrl(next, '', '/plans'));
+  }
+
+  function allHistory() {
+    return { ...currentScope(), win: 'all', from: '', to: '' };
+  }
+
+  function resetFilters() {
+    return resetScopeState(currentScope());
+  }
+
+  function stateHandlers() {
+    return {
+      'all-history': () => commitScope(allHistory()),
+      'reset-filters': () => commitScope(resetFilters()),
+      retry: () => firstPage()
+    };
+  }
+
+  function renderState(kind, result = {}) {
+    rows = [];
+    population = null;
+    cursor = '';
+    pending = false;
+    nextPageError = '';
+    notes.replaceChildren();
+    body.replaceChildren();
+    paintBanner();
+    renderPlanTable(body, {
+      rows: [], doc,
+      status: planStateModel(kind, { status: result.status, code: result.code, retry: kind === 'error' }),
+      handlers: stateHandlers()
+    });
+    if (kind === 'empty') {
+      body.append(el(doc, 'p', 'plans-state-hint', 'Loaded rows are never presented as a total.'));
     }
-    if (scatterNote) scatterSection.append(el(doc, 'p', 'plans-scatter-not-applied', scatterNote));
-    const frozen = readContext?.window || null;
-    const scatterScope = { ...flatScope(scope), ...(frozen ? { from: frozen.from || '', to: frozen.to || '' } : {}) };
-    scatterFrame = createPanelFrame({
-      panel: SCATTER_PLAN_PANEL, spec: planScatterSpec(), scope: scatterScope,
-      transport, scheduler, tenant, schema, doc
-    });
-    scatterSection.append(scatterFrame.element);
-    scatterFrame.element.addEventListener('inspect', event => {
-      const detail = event.detail || {};
-      const entity = event.target?.spec?.entities?.[detail.key] || null;
-      const identity = entity?.identity || identityFromKey(detail.key);
-      if (!identity.repo_id || !identity.plan) return;
-      const values = detail.values || {};
-      const value = name => (values[name] === null || values[name] === undefined ? '—' : values[name]);
-      inspector.open({
-        grain: 'plan', key: detail.key,
-        title: `Plan ${identity.repo_id}/${identity.plan}`,
-        facts: [
-          { label: 'Repo', value: identity.repo_id },
-          { label: 'Plan', value: identity.plan },
-          { label: 'Associated cost', value: formatPlanCost({ m: values, flags: { associated_cost_lower_bound: Number(values.unpriced_calls) > 0 } }) },
-          { label: 'Artifacts', value: value('artifacts') },
-          { label: 'Versions', value: value('versions') },
-          { label: 'Sessions', value: value('sessions') },
-          { label: 'Shared sessions', value: value('shared_sessions') },
-          { label: 'Unpriced calls', value: value('unpriced_calls') }
-        ],
-        destination: entity?.destination || planDestination(identity),
-        unit: 'plan', population: selectedPopulation(),
-        selection, opener: event.target, url: globalThis.location?.href || ''
-      });
-    });
-    scatterFrame.element.addEventListener('select', event => {
-      const detail = event.detail || {};
-      const next = detail.selection || null;
-      // The raw rectangle has no exact count yet; use the re-emitted predicate
-      // with its server counts, and never expand sampled marks into identities.
-      if (detail.source === 'scatter-rectangle' || !next || !next.predicate) return;
-      selection = next;
-      updateTray();
-    });
-    scatterFrame.load().catch(() => {});
+    frame.setState(kind, { ...result, renderStatus: false });
   }
 
   async function firstPage() {
@@ -1484,7 +1565,12 @@ export function renderList(root, doc = globalThis.document, { signal, tenant = '
     controller = new AbortController();
     if (signal?.aborted) controller.abort();
     else signal?.addEventListener('abort', () => controller.abort(), { once: true });
-    frame.setState('loading', { inFlight: 1 });
+    rows = []; population = null; cursor = ''; pending = false; nextPageError = '';
+    notes.replaceChildren();
+    body.replaceChildren();
+    paintBanner();
+    renderPlanTable(body, { rows: [], doc, status: planStateModel('loading'), handlers: stateHandlers() });
+    frame.setState('loading', { inFlight: 1, renderStatus: false });
     base = planListParams({ state: currentScope(), filters, measures, sort: sort.raw, limit: pageLimit, window: readContext?.window || null });
     try {
       const { response, body: payload } = await transport.get('entities', base, { tenant, signal: controller.signal, stateKey: 'plans' });
@@ -1494,13 +1580,14 @@ export function renderList(root, doc = globalThis.document, { signal, tenant = '
         rows = result.rows;
         population = result.population;
         cursor = result.next || '';
+        nextPageError = '';
         frame.setState('ready', {});
         frame.setPopulation(population);
         show();
       } else if (result.state === 'empty') {
-        rows = []; population = null; cursor = '';
-        body.replaceChildren(); notes.replaceChildren();
-        frame.setState('empty', { causes: listCauses(currentScope(), url => router.pushScope(url)) });
+        renderState('empty');
+      } else if (result.state === 'error') {
+        renderState('error', result);
       } else {
         result.retry = firstPage;
         body.replaceChildren();
@@ -1508,34 +1595,37 @@ export function renderList(root, doc = globalThis.document, { signal, tenant = '
       }
     } catch (error) {
       if (disposed || id !== runId) return;
-      const result = error?.name === 'AbortError'
-        ? cancelledState({ retry: firstPage })
-        : errorState({ message: error?.message || 'The plans request failed.', retry: firstPage });
-      frame.setState(result.state, result);
+      if (error?.name === 'AbortError') return;
+      renderState('error', { status: Number(error?.status) || 0, code: error?.code || '' });
     }
   }
 
   async function loadMore() {
-    if (!cursor) return;
-    const id = ++runId;
-    frame.setState('loading', { inFlight: 1 });
+    if (!cursor || pending) return;
+    pending = true;
+    nextPageError = '';
+    show();
     try {
       const { response, body: payload } = await transport.get('entities', planPageParams(base, { cursor, limit: pageLimit }), { tenant, signal: controller.signal, stateKey: 'plans' });
-      if (disposed || id !== runId) return;
+      if (disposed) return;
       const result = mapPlanListResponse({ status: response.status, body: payload });
-      if (result.state !== 'ready') { result.retry = loadMore; frame.setState(result.state, result); return; }
+      pending = false;
+      if (result.state !== 'ready') {
+        if (result.state === 'cancelled') return;
+        nextPageError = 'Could not load the next page.';
+        show();
+        return;
+      }
       rows = mergePlanRows(rows, result.rows).rows;
       population = result.population || population;
       cursor = result.next || '';
-      frame.setState('ready', {});
-      frame.setPopulation(population);
       show();
     } catch (error) {
-      if (disposed || id !== runId) return;
-      const result = error?.name === 'AbortError'
-        ? cancelledState({ retry: loadMore })
-        : errorState({ message: error?.message || 'The next page failed.', retry: loadMore });
-      frame.setState(result.state, result);
+      if (disposed) return;
+      pending = false;
+      if (error?.name === 'AbortError') return;
+      nextPageError = 'Could not load the next page.';
+      show();
     }
   }
 
@@ -1571,17 +1661,15 @@ export function renderList(root, doc = globalThis.document, { signal, tenant = '
     pageLimit = Number.isFinite(max) && max > 0 ? Math.floor(max) : null;
     if (schema?.features && schema.features.entities_plan === false) {
       frame.setState('unsupported', { missing: 'entities_plan', reason: 'not advertised by this server', source: 'Plan 20 Phase 6 (entities_plan)', nearest: 'the workflow board' });
-      scatterSection.append(el(doc, 'p', 'plans-scatter-unsupported', 'scatter-plan is not supported (not advertised by this server). Supplied by Plan 20 Phase 6 entities_plan.'));
       return;
     }
     paintScope();
-    mountScatter();
     firstPage();
   }
 
   start();
 
-  return () => { disposed = true; controller.abort(); inspector.destroy(); scatterFrame?.destroy(); };
+  return () => { disposed = true; controller.abort(); inspector.destroy(); };
 }
 
 export default { title, phase, render };

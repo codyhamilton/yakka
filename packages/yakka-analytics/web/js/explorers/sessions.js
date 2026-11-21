@@ -11,12 +11,12 @@ import { createScheduler } from '../core/request-scheduler.js';
 import { createTransport } from '../../contract/transport.js';
 import { createPanelFrame } from '../panels/panel-frame.js';
 import { hasPanel, registerPanel } from '../panels/registry.js';
-import { addFilterChip, createChips, stateUrl } from '../core/chips.js';
+import { addFilterChip, createChips, resetScopeState, stateUrl } from '../core/chips.js';
 import { buildCohort, createSelectionTray, nextCohortSlot, writeCohort } from '../core/selection-tray.js';
 import { createInspector } from '../core/inspector.js';
 import { cancelledState, emptyCauses, emptyState, errorState, unsupportedState } from '../core/panel-state.js';
 import { formatNumber } from '../charts/formatters.js';
-import { resolveWindow } from '../panels/ledger-table.js';
+import { resolveWindow, sanitizeApiCode } from '../panels/ledger-table.js';
 import { hasUnsafeLegacyRecordFilters, LEGACY_RECORD_FILTER_MESSAGE } from '../core/record-filter-capability.js';
 import {
   SESSION_LANES_PANEL, conversationCoverage, coverageLines, ensureSessionsStyles, fetchConversation,
@@ -26,14 +26,28 @@ import {
 export const title = 'Sessions';
 export const phase = 11;
 
+// S-sessions offers only these measures in its server sort, in contract order.
 export const SESSION_MEASURES = [
-  'cost_usd', 'unpriced_calls', 'model_calls', 'tokens_in', 'tokens_out', 'tokens_cache_read',
-  'tokens_cache_write', 'tokens_reasoning', 'hook_events', 'commits', 'artifact_versions',
-  'distinct_content', 'duration_s', 'first_ts', 'last_ts'
+  'cost_usd', 'model_calls', 'unpriced_calls', 'hook_events', 'commits', 'artifact_versions', 'duration_s'
+];
+
+export const SESSION_MEASURE_LABELS = {
+  cost_usd: 'Cost',
+  model_calls: 'Calls',
+  unpriced_calls: 'Unpriced',
+  hook_events: 'Hook events',
+  commits: 'Commits',
+  artifact_versions: 'Artifact versions',
+  duration_s: 'Span seconds'
+};
+
+export const SESSION_FIELDS = [
+  'id', 'l.harness', 'session_model', 'session_repo', 'm.cost_usd', 'model_calls', 'unpriced_calls',
+  'hook_events', 'commits', 'artifact_versions', 'duration_s'
 ];
 
 export const SESSION_FILTERS = ['harness', 'session_model', 'session_repo', 'origin', 'has_artifacts', 'id'];
-export const DEFAULT_SORT = 'last_ts:desc';
+export const DEFAULT_SORT = 'cost_usd:desc';
 
 export const SESSIONS_LIST_PANEL = {
   id: 'sessions-list',
@@ -51,18 +65,23 @@ export const SESSIONS_LIST_PANEL = {
 const scheduler = createScheduler();
 const transport = createTransport(scheduler);
 
-const LIST_COLUMNS = [
-  { key: 'harness', label: 'Harness', lens: true },
-  { key: 'session_model', label: 'Session model', lens: true },
-  { key: 'session_repo', label: 'Session repo', lens: true },
-  { key: 'cost_usd', label: 'Cost', measure: true },
-  { key: 'model_calls', label: 'Calls', measure: true },
-  { key: 'unpriced_calls', label: 'Unpriced', measure: true },
-  { key: 'hook_events', label: 'Events', measure: true },
-  { key: 'commits', label: 'Commits', measure: true },
-  { key: 'artifact_versions', label: 'Artifacts', measure: true },
-  { key: 'duration_s', label: 'Span (s)', measure: true }
+export const SESSION_LIST_COLUMNS = [
+  { key: 'select', label: 'Select', width: '32px' },
+  { key: 'id', label: 'Session ID', width: '180px', text: true },
+  { key: 'harness', label: 'Harness', width: '90px', lens: true },
+  { key: 'session_model', label: 'Model', width: '140px', lens: true },
+  { key: 'session_repo', label: 'Repository', width: '180px', lens: true },
+  { key: 'cost_usd', label: 'Cost USD', width: '100px', measure: true },
+  { key: 'model_calls', label: 'Calls', width: '70px', measure: true },
+  { key: 'unpriced_calls', label: 'Unpriced', width: '70px', measure: true },
+  { key: 'hook_events', label: 'Hook events', width: '80px', measure: true },
+  { key: 'commits', label: 'Commits', width: '70px', measure: true },
+  { key: 'artifact_versions', label: 'Artifact versions', width: '80px', measure: true },
+  { key: 'duration_s', label: 'Span seconds', width: '90px', measure: true },
+  { key: 'open', label: 'Open', width: '70px' }
 ];
+
+const LIST_COLUMNS = SESSION_LIST_COLUMNS.filter(column => column.lens || column.measure);
 
 // `sort` is not a shared-filter key, so decodeUrlState keeps it under `unknown`.
 export function parseSort(raw, allowed = SESSION_MEASURES) {
@@ -70,17 +89,19 @@ export function parseSort(raw, allowed = SESSION_MEASURES) {
   const at = text.lastIndexOf(':');
   const measure = at === -1 ? text : text.slice(0, at);
   const dir = at === -1 ? '' : text.slice(at + 1);
-  const fallback = allowed.includes('last_ts') ? 'last_ts' : (allowed[0] || 'last_ts');
+  const fallback = allowed.includes('cost_usd') ? 'cost_usd' : (allowed[0] || 'cost_usd');
   if (!text) return { measure: fallback, dir: 'desc', raw: `${fallback}:desc` };
   if (!allowed.includes(measure)) return { measure: fallback, dir: 'desc', raw: `${fallback}:desc` };
   const direction = dir === 'asc' ? 'asc' : 'desc';
   return { measure, dir: direction, raw: `${measure}:${direction}` };
 }
 
+// The capability intersection, in the contract's visible order.
 export function allowedMeasures(schema) {
   const published = schema?.grains?.session?.measures;
   if (!Array.isArray(published) || !published.length) return SESSION_MEASURES.slice();
-  const filtered = published.filter(name => SESSION_MEASURES.includes(name));
+  const names = new Set(published.filter(name => typeof name === 'string' && name));
+  const filtered = SESSION_MEASURES.filter(name => names.has(name));
   return filtered.length ? filtered : SESSION_MEASURES.slice();
 }
 
@@ -132,6 +153,7 @@ export function sessionListParams({ state = {}, filters = SESSION_FILTERS, measu
   const tz = scope.tz || Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
   params.set('tz', tz);
   params.set('grain', 'session');
+  params.set('fields', SESSION_FIELDS.join(','));
   for (const key of filters) {
     for (const value of scope.filters?.[key] || []) params.append(key, value);
   }
@@ -154,14 +176,14 @@ export function sessionPageParams(base, { cursor = '', limit = null } = {}) {
 
 export function mapSessionListResponse({ status = 0, body = null } = {}) {
   const payload = body && typeof body === 'object' ? body : {};
-  if (!status) return errorState({ message: 'The server did not answer.', code: '' });
+  if (!status) return { ...errorState({ message: 'The server did not answer.', code: '' }), status };
   if (status === 404) {
     return unsupportedState({
       feature: '/entities?grain=session', reason: 'this server does not serve it', source: 'the analytics server',
       nearest: 'the LEDGER over the same window'
     });
   }
-  if (status >= 400) return errorState({ message: payload.error || `The server returned ${status}.`, code: payload.code || String(status) });
+  if (status >= 400) return { ...errorState({ message: payload.error || `The server returned ${status}.`, code: payload.code || String(status) }), status };
   const rows = Array.isArray(payload.rows) ? payload.rows : [];
   const next = typeof payload.next === 'string' && payload.next ? payload.next : null;
   const population = payload.population && typeof payload.population === 'object' ? payload.population : null;
@@ -322,80 +344,130 @@ function register() {
 
 // --- List ----------------------------------------------------------------
 
-function renderSessionsTable(container, { rows = [], selected = new Map(), doc = globalThis.document, onInspect, onSelect, onOpen } = {}) {
+// T1–T3 vocabulary for the sessions table.
+export function sessionStateModel(state = 'loading', { status = 0, code = '', retry = false } = {}) {
+  if (state === 'loading') return { state, text: 'Loading Sessions…', busy: true, detail: '', code: '', actions: [] };
+  if (state === 'empty') {
+    return { state, text: 'No records match these filters.', busy: false, detail: '', code: '', actions: [
+      { id: 'all-history', label: 'All history' }, { id: 'reset-filters', label: 'Reset filters' }
+    ] };
+  }
+  const clean = sanitizeApiCode(code);
+  const numeric = Number(status) || 0;
+  const failure = (detail, actions = []) => ({ state: 'error', text: 'Could not load Sessions.', busy: false, detail, code: clean, actions });
+  if (numeric === 401) return failure('', [{ id: 'sign-in', label: 'Sign in', href: '/login' }]);
+  if (numeric === 403) return failure('You do not have access to this tenant');
+  if (numeric === 503 || state === 'busy') return failure('The server is busy; retry shortly.', retry ? [{ id: 'retry', label: 'Retry' }] : []);
+  if (state === 'timeout' || /timeout/i.test(clean)) return failure('The read timed out; retry.', retry ? [{ id: 'retry', label: 'Retry' }] : []);
+  return failure('', retry ? [{ id: 'retry', label: 'Retry' }] : []);
+}
+
+function sessionStateRow(doc, model, handlers = {}) {
+  const tr = el(doc, 'tr', 'sessions-state-row');
+  tr.dataset.state = model.state;
+  const cell = el(doc, 'td', 'sessions-state-cell');
+  cell.colSpan = SESSION_LIST_COLUMNS.length;
+  cell.append(el(doc, 'span', 'sessions-state-text', model.text));
+  if (model.detail) cell.append(el(doc, 'span', 'sessions-state-detail', ` ${model.detail}`));
+  if (model.code) cell.append(el(doc, 'code', 'sessions-state-code', ` ${model.code}`));
+  for (const item of model.actions || []) {
+    const button = item.href ? el(doc, 'a', 'sessions-state-action', item.label) : el(doc, 'button', 'sessions-state-action', item.label);
+    if (item.href) button.href = item.href;
+    else { button.type = 'button'; button.addEventListener('click', () => handlers[item.id]?.()); }
+    button.dataset.action = item.id;
+    cell.append(doc.createTextNode(' '), button);
+  }
+  tr.append(cell);
+  return tr;
+}
+
+function renderSessionsTable(container, { rows = [], selected = new Map(), doc = globalThis.document, onInspect, onSelect, onOpen, status = null, handlers = {} } = {}) {
   container.replaceChildren();
+  const wrapper = el(doc, 'div', 'sessions-table-wrap');
   const table = doc.createElement('table');
   table.className = 'sessions-table';
-  table.append(el(doc, 'caption', '', `Sessions, ${formatNumber(rows.length)} rows shown. Identity is the conversation id; open one for its bounded timeline.`));
+  table.append(el(doc, 'caption', 'sessions-caption', `Sessions, ${formatNumber(rows.length)} rows shown. Identity is the conversation id; open one for its bounded timeline.`));
+  const colgroup = doc.createElement('colgroup');
+  for (const column of SESSION_LIST_COLUMNS) {
+    const col = doc.createElement('col');
+    col.setAttribute('width', String(parseInt(column.width, 10)));
+    colgroup.append(col);
+  }
   const thead = doc.createElement('thead');
   const head = doc.createElement('tr');
-  for (const label of ['Select', 'Conversation', ...LIST_COLUMNS.map(column => column.label), 'Open']) {
-    const th = el(doc, 'th', '', label); th.scope = 'col'; head.append(th);
+  for (const column of SESSION_LIST_COLUMNS) {
+    const th = el(doc, 'th', '', column.label); th.scope = 'col'; head.append(th);
   }
   thead.append(head);
   const tbody = doc.createElement('tbody');
   tbody.className = 'sessions-body';
-  for (const row of rows) {
-    const key = String(row.id);
-    const state = selected.get(key) === 'exclude' ? 'exclude' : selected.has(key) ? 'include' : '';
-    const tr = doc.createElement('tr');
-    tr.className = 'session-row';
-    tr.dataset.sessionId = key;
-    tr.dataset.entityKey = key;
-    if (state) tr.dataset.selected = state;
-    tr.tabIndex = 0;
+  if (status) {
+    tbody.append(sessionStateRow(doc, status, handlers));
+    if (status.busy) tbody.setAttribute('aria-busy', 'true');
+  } else {
+    for (const row of rows) {
+      const key = String(row.id);
+      const state = selected.get(key) === 'exclude' ? 'exclude' : selected.has(key) ? 'include' : '';
+      const tr = doc.createElement('tr');
+      tr.className = 'session-row';
+      tr.dataset.sessionId = key;
+      tr.dataset.entityKey = key;
+      if (state) tr.dataset.selected = state;
+      tr.tabIndex = 0;
 
-    const selectCell = el(doc, 'td', 'sessions-select');
-    const box = doc.createElement('input');
-    box.type = 'checkbox';
-    box.className = 'session-row-check';
-    box.checked = selected.has(key);
-    box.setAttribute('aria-label', `Select session ${key}`);
-    box.addEventListener('click', event => {
-      event.stopPropagation();
-      onSelect?.(row, { mode: event.altKey ? 'exclude' : 'include' });
-    });
-    selectCell.append(box);
-    tr.append(selectCell);
-    tr.append(el(doc, 'td', 'sessions-id', key));
-
-    for (const column of LIST_COLUMNS) {
-      const text = column.key === 'cost_usd' ? formatSessionCost(row) : cellText(row.m?.[column.key] ?? row.l?.[column.key]);
-      const td = el(doc, 'td', column.measure ? 'numeric' : '', text);
-      td.dataset.key = column.key;
-      tr.append(td);
-    }
-
-    const openCell = el(doc, 'td', 'sessions-open-cell');
-    const open = el(doc, 'button', 'session-open', 'Open');
-    open.type = 'button';
-    open.addEventListener('click', event => { event.stopPropagation(); onOpen?.(row); });
-    openCell.append(open);
-    tr.append(openCell);
-
-    tr.addEventListener('click', event => {
-      if (event.target.closest('input,button,a')) return;
-      if (event.shiftKey || event.ctrlKey || event.metaKey || event.altKey) {
+      const selectCell = el(doc, 'td', 'sessions-select');
+      const box = doc.createElement('input');
+      box.type = 'checkbox';
+      box.className = 'session-row-check';
+      box.checked = selected.has(key);
+      box.setAttribute('aria-label', `Select session ${key}`);
+      box.addEventListener('click', event => {
+        event.stopPropagation();
         onSelect?.(row, { mode: event.altKey ? 'exclude' : 'include' });
-        return;
+      });
+      selectCell.append(box);
+      tr.append(selectCell, el(doc, 'td', 'sessions-id', key));
+
+      for (const column of LIST_COLUMNS) {
+        const text = column.key === 'cost_usd' ? formatSessionCost(row) : cellText(row.m?.[column.key] ?? row.l?.[column.key]);
+        const td = el(doc, 'td', column.measure ? 'numeric' : '', text);
+        td.dataset.key = column.key;
+        if (text !== '—') td.title = text;
+        tr.append(td);
       }
-      onInspect?.(row, tr);
-    });
-    tr.addEventListener('keydown', event => {
-      if (event.key === 'Enter') { event.preventDefault(); onInspect?.(row, tr); }
-      else if (event.key === ' ') { event.preventDefault(); onSelect?.(row, { mode: event.altKey ? 'exclude' : 'include' }); }
-      else if (event.key === 'o' || event.key === 'O') { event.preventDefault(); onOpen?.(row); }
-      else if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
-        event.preventDefault();
-        const all = [...tbody.querySelectorAll('.session-row')];
-        const at = all.indexOf(tr);
-        all[Math.max(0, Math.min(all.length - 1, at + (event.key === 'ArrowDown' ? 1 : -1)))]?.focus();
-      }
-    });
-    tbody.append(tr);
+
+      const openCell = el(doc, 'td', 'sessions-open-cell');
+      const open = el(doc, 'button', 'session-open', 'Open');
+      open.type = 'button';
+      open.addEventListener('click', event => { event.stopPropagation(); onOpen?.(row); });
+      openCell.append(open);
+      tr.append(openCell);
+
+      tr.addEventListener('click', event => {
+        if (event.target.closest('input,button,a')) return;
+        if (event.shiftKey || event.ctrlKey || event.metaKey || event.altKey) {
+          onSelect?.(row, { mode: event.altKey ? 'exclude' : 'include' });
+          return;
+        }
+        onInspect?.(row, tr);
+      });
+      tr.addEventListener('keydown', event => {
+        if (event.key === 'Enter') { event.preventDefault(); onInspect?.(row, tr); }
+        else if (event.key === ' ') { event.preventDefault(); onSelect?.(row, { mode: event.altKey ? 'exclude' : 'include' }); }
+        else if (event.key === 'o' || event.key === 'O') { event.preventDefault(); onOpen?.(row); }
+        else if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+          event.preventDefault();
+          const all = [...tbody.querySelectorAll('.session-row')];
+          const at = all.indexOf(tr);
+          all[Math.max(0, Math.min(all.length - 1, at + (event.key === 'ArrowDown' ? 1 : -1)))]?.focus();
+        }
+      });
+      tbody.append(tr);
+    }
   }
-  table.append(thead, tbody);
-  container.append(table);
+  table.append(colgroup, thead, tbody);
+  wrapper.append(table);
+  container.append(wrapper);
   return container;
 }
 
@@ -454,6 +526,8 @@ function renderList(root, doc, { signal, tenant = '', readContext = null } = {})
   let disposed = false;
   let runId = 0;
   let controller = new AbortController();
+  let pending = false;
+  let nextPageError = '';
   if (signal) {
     if (signal.aborted) controller.abort();
     else signal.addEventListener('abort', () => controller.abort(), { once: true });
@@ -507,13 +581,22 @@ function renderList(root, doc, { signal, tenant = '', readContext = null } = {})
     updateSelectionUI();
   }
 
+  function detailDestination(row) {
+    const params = new URLSearchParams(globalThis.location?.search || '');
+    params.delete('sort');
+    params.delete('cursor');
+    params.delete('pick');
+    const query = params.toString();
+    return `/sessions/${encodeURIComponent(String(row.id))}${query ? `?${query}` : ''}`;
+  }
+
   function openRow(row) {
-    router.push(`/sessions/${encodeURIComponent(String(row.id))}`);
+    router.push(detailDestination(row));
   }
 
   function inspectRow(row, opener) {
     inspector.open({
-      grain: 'session', key: String(row.id), title: `Session ${row.id}`,
+      grain: 'session', key: String(row.id), title: `Session ${row.id}`, destination: detailDestination(row),
       facts: [
         { label: 'Conversation', value: row.id },
         { label: 'Harness', value: row.l?.harness },
@@ -572,13 +655,20 @@ function renderList(root, doc, { signal, tenant = '', readContext = null } = {})
     notes.append(el(doc, 'p', 'sessions-population', populationText(population, rows)));
     const coverage = sessionCoverageNotes({ population, rows });
     if (coverage.length) notes.append(el(doc, 'p', 'sessions-coverage', coverage.join(' · ')));
-    notes.append(el(doc, 'p', 'sessions-note', cursor ? 'More sessions remain; use Load more.' : 'End of the server result.'));
+    notes.append(el(doc, 'p', 'sessions-note', cursor ? 'More sessions remain; load another page.' : 'End of the server result.'));
     body.append(notes);
     updateSelectionUI();
-    if (cursor) {
-      const more = el(doc, 'button', 'sessions-load-more', 'Load more');
+    if (nextPageError) {
+      const failure = el(doc, 'p', 'sessions-next-error', nextPageError);
+      const retry = el(doc, 'button', 'sessions-load-more sessions-retry-next', 'Retry next page');
+      retry.type = 'button';
+      retry.addEventListener('click', () => { nextPageError = ''; loadMore(); });
+      body.append(failure, retry);
+    } else if (cursor) {
+      const more = el(doc, 'button', 'sessions-load-more', pending ? 'Loading…' : 'Load more sessions');
       more.type = 'button';
-      more.addEventListener('click', () => { more.disabled = true; loadMore(); });
+      more.disabled = pending;
+      more.addEventListener('click', () => loadMore());
       body.append(more);
     }
   }
@@ -592,7 +682,7 @@ function renderList(root, doc, { signal, tenant = '', readContext = null } = {})
     for (const name of measures) {
       const option = doc.createElement('option');
       option.value = name;
-      option.textContent = name;
+      option.textContent = SESSION_MEASURE_LABELS[name] || name;
       option.selected = name === sort.measure;
       measure.append(option);
     }
@@ -603,13 +693,48 @@ function renderList(root, doc, { signal, tenant = '', readContext = null } = {})
     for (const value of ['desc', 'asc']) {
       const option = doc.createElement('option');
       option.value = value;
-      option.textContent = value;
+      option.textContent = value === 'desc' ? 'Descending' : 'Ascending';
       option.selected = value === sort.dir;
       direction.append(option);
     }
     direction.addEventListener('change', () => pushSort(sort.measure, direction.value));
     sortBar.append(measure, direction);
     sortBar.append(el(doc, 'span', 'session-sort-current', `server sort: ${sort.raw}`));
+  }
+
+  function commitScope(next) {
+    router.pushScope(stateUrl(next, '', '/sessions'));
+  }
+
+  function allHistory() {
+    return { ...currentScope(), win: 'all', from: '', to: '' };
+  }
+
+  function resetFilters() {
+    return resetScopeState(currentScope());
+  }
+
+  function stateHandlers() {
+    return {
+      'all-history': () => commitScope(allHistory()),
+      'reset-filters': () => commitScope(resetFilters()),
+      retry: () => firstPage()
+    };
+  }
+
+  function renderState(kind, result = {}) {
+    rows = []; population = null; cursor = ''; pending = false; nextPageError = '';
+    notes.replaceChildren();
+    body.replaceChildren();
+    renderSessionsTable(body, {
+      rows: [], selected, doc,
+      status: sessionStateModel(kind, { status: result.status, code: result.code, retry: kind === 'error' }),
+      handlers: stateHandlers()
+    });
+    if (kind === 'empty') {
+      body.append(el(doc, 'p', 'sessions-state-hint', 'Loaded rows are never presented as a total.'));
+    }
+    frame.setState(kind, { ...result, renderStatus: false });
   }
 
   async function firstPage() {
@@ -626,7 +751,11 @@ function renderList(root, doc, { signal, tenant = '', readContext = null } = {})
       if (status) status.textContent = LEGACY_RECORD_FILTER_MESSAGE;
       return;
     }
-    frame.setState('loading', { inFlight: 1 });
+    rows = []; population = null; cursor = ''; pending = false; nextPageError = '';
+    notes.replaceChildren();
+    body.replaceChildren();
+    renderSessionsTable(body, { rows: [], selected, doc, status: sessionStateModel('loading'), handlers: stateHandlers() });
+    frame.setState('loading', { inFlight: 1, renderStatus: false });
     base = sessionListParams({ state: currentScope(), filters, measures, sort: sort.raw, limit: pageLimit, window: readContext?.window || null });
     try {
       const { response, body: payload } = await transport.get('entities', base, { tenant, signal: controller.signal, stateKey: 'sessions' });
@@ -636,13 +765,14 @@ function renderList(root, doc, { signal, tenant = '', readContext = null } = {})
         rows = result.rows;
         population = result.population;
         cursor = result.next || '';
+        nextPageError = '';
         frame.setState('ready', {});
         frame.setPopulation(population);
         show();
       } else if (result.state === 'empty') {
-        rows = []; population = null; cursor = '';
-        body.replaceChildren(); notes.replaceChildren();
-        frame.setState('empty', { causes: listCauses(currentScope(), url => router.pushScope(url)) });
+        renderState('empty');
+      } else if (result.state === 'error') {
+        renderState('error', result);
       } else {
         result.retry = firstPage;
         body.replaceChildren();
@@ -650,34 +780,37 @@ function renderList(root, doc, { signal, tenant = '', readContext = null } = {})
       }
     } catch (error) {
       if (disposed || id !== runId) return;
-      const result = error?.name === 'AbortError'
-        ? cancelledState({ retry: firstPage })
-        : errorState({ message: error?.message || 'The sessions request failed.', retry: firstPage });
-      frame.setState(result.state, result);
+      if (error?.name === 'AbortError') return;
+      renderState('error', { status: Number(error?.status) || 0, code: error?.code || '' });
     }
   }
 
   async function loadMore() {
-    if (!cursor) return;
-    const id = ++runId;
-    frame.setState('loading', { inFlight: 1 });
+    if (!cursor || pending) return;
+    pending = true;
+    nextPageError = '';
+    show();
     try {
       const { response, body: payload } = await transport.get('entities', sessionPageParams(base, { cursor, limit: pageLimit }), { tenant, signal: controller.signal, stateKey: 'sessions' });
-      if (disposed || id !== runId) return;
+      if (disposed) return;
       const result = mapSessionListResponse({ status: response.status, body: payload });
-      if (result.state !== 'ready') { result.retry = loadMore; frame.setState(result.state, result); return; }
+      pending = false;
+      if (result.state !== 'ready') {
+        if (result.state === 'cancelled') return;
+        nextPageError = 'Could not load the next page.';
+        show();
+        return;
+      }
       rows = mergeSessionRows(rows, result.rows).rows;
       population = result.population || population;
       cursor = result.next || '';
-      frame.setState('ready', {});
-      frame.setPopulation(population);
       show();
     } catch (error) {
-      if (disposed || id !== runId) return;
-      const result = error?.name === 'AbortError'
-        ? cancelledState({ retry: loadMore })
-        : errorState({ message: error?.message || 'The next page failed.', retry: loadMore });
-      frame.setState(result.state, result);
+      if (disposed) return;
+      pending = false;
+      if (error?.name === 'AbortError') return;
+      nextPageError = 'Could not load the next page.';
+      show();
     }
   }
 

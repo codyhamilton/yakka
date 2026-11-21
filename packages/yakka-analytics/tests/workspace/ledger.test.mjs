@@ -6,6 +6,8 @@ import { watchPage } from '../gallery/harness.mjs';
 import { validatePanelEntry } from '../../web/js/panels/registry.js';
 import {
   DECLARED_FILTERS,
+  LEDGER_CAPTION,
+  LEDGER_COLUMNS,
   LEDGER_PANEL,
   appendPage,
   costNote,
@@ -173,7 +175,7 @@ test('the ledger pages beyond 20,000 with no duplicates, chips that restore, ins
       t.skip('the workspace stub has no /explore route (owned by 9-01, outside this unit); see gate');
       return;
     }
-    const page = await browser.newPage();
+    const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
     const diagnostics = await watchPage(page);
 
     await page.goto(`${harness.origin}/ledger?win=all`);
@@ -181,6 +183,12 @@ test('the ledger pages beyond 20,000 with no duplicates, chips that restore, ins
     const panel = page.locator('[data-panel="ledger-table"]');
     assert.equal(await panel.getAttribute('data-state'), 'ready');
     assert.equal(await panel.getAttribute('data-chart'), 'table');
+    assert.deepEqual(await page.locator('.ledger-table thead th').allInnerTexts(), LEDGER_COLUMNS.map(column => column.label));
+    assert.equal(await page.locator('.ledger-table thead th', { hasText: 'Select' }).count(), 0, 'the ledger has no Select column');
+    assert.equal((await page.locator('.ledger-table caption').innerText()).trim(), LEDGER_CAPTION);
+    assert.equal(await page.locator('.ledger-table').evaluate(table => getComputedStyle(table).minWidth), '1416px');
+    const heights = await page.locator('.ledger-row').evaluateAll(items => items.map(item => item.getBoundingClientRect().height));
+    for (const height of heights) assert.ok(Math.abs(height - 30) <= 1, `ledger row height ${height}`);
 
     let guard = 0;
     while (await page.locator('.ledger-load-more').count() && guard++ < 200) {
@@ -268,7 +276,9 @@ test('empty and error follow the frame vocabulary; legacy servers are the server
     await page.goto(`${harness.origin}/ledger?win=all`);
     await settle(page);
     assert.equal(await panel.getAttribute('data-state'), 'empty');
-    assert.match(await panel.innerText(), /No rows match/);
+    assert.match(await panel.innerText(), /No records match these filters\./);
+    assert.deepEqual(await panel.locator('.ledger-state-action').allInnerTexts(), ['All history', 'Reset filters']);
+    assert.deepEqual(await page.locator('.ledger-table thead th').allInnerTexts(), LEDGER_COLUMNS.map(column => column.label));
 
     await control(harness.origin, { scenario: 'legacy' });
     await page.goto(`${harness.origin}/ledger?win=all`);

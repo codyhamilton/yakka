@@ -21,7 +21,7 @@ import {
   renderLedgerTable, retryNextPage, rowKey, selectionGrain
 } from '../panels/ledger-table.js';
 
-export const title = 'Ledger';
+export const title = 'Event ledger';
 export const phase = 9;
 
 const scheduler = createScheduler();
@@ -258,11 +258,32 @@ export function render(root, doc = globalThis.document, { signal, tenant = '', r
     updateSelectionUI();
   }
 
+  // Open names an exact artifact only when the row carries repo and path, an
+  // exact session only when it carries a conversation id, and otherwise has no
+  // broader destination. The committed scope rides along.
+  function rowDestination(row) {
+    const scope = new URLSearchParams(globalThis.location?.search || '');
+    scope.delete('pick');
+    scope.delete('cursor');
+    const query = scope.toString();
+    const suffix = query ? `?${query}` : '';
+    if (row.repo_id && row.path) {
+      const exact = new URLSearchParams({ repo_id: String(row.repo_id), path: String(row.path) });
+      return `/artifact?${exact.toString()}${query ? `&${query}` : ''}`;
+    }
+    if (row.conversation_id) return `/sessions/${encodeURIComponent(String(row.conversation_id))}${suffix}`;
+    return '';
+  }
+
   function inspectRow(row, opener) {
-    const grain = selectionGrain([row]);
+    const destination = rowDestination(row);
+    const grain = destination.startsWith('/artifact')
+      ? 'artifact'
+      : destination.startsWith('/sessions/') ? 'session' : 'event';
     inspector.open({
-      grain: grain.grain,
-      key: grain.key || rowKey(row),
+      grain,
+      key: rowKey(row),
+      destination: destination || undefined,
       title: `${row.type || 'event'} at ${row.ts || 'unknown time'}`,
       facts: [
         { label: 'Type', value: row.type },

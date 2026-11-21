@@ -11,10 +11,11 @@ import { validatePanelEntry } from '../../web/js/panels/registry.js';
 import { cohortDefinition, encodeCohort } from '../../web/js/core/selection-model.js';
 import { parseRoute } from '../../web/js/core/router.js';
 import {
-  DEFAULT_SORT, PLAN_FILTERS, PLAN_MEASURES, PLANS_LIST_PANEL, allowedFilters, allowedMeasures,
-  cohortParam, completeShareText, designScoreText, formatPlanCost, identityFromKey, isMalformedPlanRow,
-  mapPlanListResponse, mergePlanRows, parseSort, planCoverageNotes, planListParams, planPageParams,
-  planRowKey, planScatterSpec, populationText, readScope, scatterSampleNote, title, unappliedFilter
+  DEFAULT_SORT, PLAN_FILTERS, PLAN_LIST_COLUMNS, PLAN_MEASURES, PLANS_LIST_PANEL, allowedFilters,
+  allowedMeasures, cohortParam, completeShareText, designScoreText, formatPlanCost, identityFromKey,
+  isMalformedPlanRow, mapPlanListResponse, mergePlanRows, parseSort, planCoverageNotes, planListParams,
+  planPageParams, planRowKey, planScatterSpec, planStateModel, populationText, readScope,
+  scatterSampleNote, title, unappliedFilter
 } from '../../web/js/explorers/plans.js';
 import { planDestination, planIdentity } from '../../web/js/panels/scatter-plan.js';
 
@@ -22,15 +23,36 @@ const environment = loadBrowserEnvironment();
 const schema = p12Schema();
 const plans = p12PlanRows();
 
-test('sort accepts only published plan measures and defaults to last_ts desc', () => {
-  assert.deepEqual(parseSort('', PLAN_MEASURES), { measure: 'last_ts', dir: 'desc', raw: 'last_ts:desc' });
-  assert.deepEqual(parseSort('associated_cost_usd:desc', PLAN_MEASURES), { measure: 'associated_cost_usd', dir: 'desc', raw: 'associated_cost_usd:desc' });
-  assert.deepEqual(parseSort('nope:asc', PLAN_MEASURES), { measure: 'last_ts', dir: 'desc', raw: 'last_ts:desc' });
-  assert.equal(DEFAULT_SORT, 'last_ts:desc');
-  assert.deepEqual(allowedMeasures(schema), schema.grains.plan.measures);
-  assert.ok(PLAN_MEASURES.every(name => allowedMeasures(schema).includes(name)));
+test('sort accepts only the contract plan measures and defaults to associated_cost_usd desc', () => {
+  assert.deepEqual(parseSort('', PLAN_MEASURES), { measure: 'associated_cost_usd', dir: 'desc', raw: 'associated_cost_usd:desc' });
+  assert.deepEqual(parseSort('sessions:asc', PLAN_MEASURES), { measure: 'sessions', dir: 'asc', raw: 'sessions:asc' });
+  assert.deepEqual(parseSort('nope:asc', PLAN_MEASURES), { measure: 'associated_cost_usd', dir: 'desc', raw: 'associated_cost_usd:desc' });
+  assert.equal(DEFAULT_SORT, 'associated_cost_usd:desc');
+  assert.deepEqual(allowedMeasures(schema), PLAN_MEASURES);
+  assert.ok(PLAN_MEASURES.every(name => schema.grains.plan.measures.includes(name)));
   assert.deepEqual(allowedFilters(schema), PLAN_FILTERS);
   assert.equal(title, 'Plans');
+});
+
+test('the plans list columns, widths and T1–T3 state vocabulary are the contract', () => {
+  assert.deepEqual(PLAN_LIST_COLUMNS.map(column => column.label), [
+    'Plan identity', 'Associated cost USD', 'Sessions', 'Shared sessions', 'Files', 'Versions',
+    'Complete/unreported/started executions', 'Complete share %', 'Latest design score / scorer',
+    'Last observed', 'Open'
+  ]);
+  assert.deepEqual(PLAN_LIST_COLUMNS.map(column => column.width), [
+    '220px', '110px', '70px', '80px', '60px', '70px', '160px', '100px', '180px', '150px', '70px'
+  ]);
+  assert.equal(planStateModel('loading').text, 'Loading Plans…');
+  assert.equal(planStateModel('loading').busy, true);
+  assert.equal(planStateModel('empty').text, 'No records match these filters.');
+  assert.deepEqual(planStateModel('empty').actions.map(item => item.label), ['All history', 'Reset filters']);
+  assert.equal(planStateModel('error', { status: 403, code: '<b>forbidden</b>' }).text, 'Could not load Plans.');
+  assert.match(planStateModel('error', { status: 403, code: '<b>forbidden</b>' }).detail, /do not have access/);
+  assert.equal(planStateModel('error', { status: 403, code: '<b>forbidden</b>' }).code, 'forbidden');
+  assert.equal(planStateModel('error', { status: 401 }).actions[0].label, 'Sign in');
+  assert.match(planStateModel('error', { status: 503, retry: true }).detail, /server is busy/);
+  assert.equal(planStateModel('error', { status: 503, retry: true }).actions[0].label, 'Retry');
 });
 
 test('the list request sends only contract names, the frozen window, sort, paging and the first valid cohort', () => {
@@ -157,40 +179,50 @@ async function settleList(page) {
   await page.waitForFunction(() => document.querySelector('[data-panel="plans-list"]')?.dataset.idle === 'true');
 }
 
-async function settleScatter(page) {
-  await page.waitForFunction(() => document.querySelector('[data-panel="scatter-plan"]')?.dataset.idle === 'true');
-}
-
-test('the plans list sorts server-side, appends a unique page and shows the overlap banner on cost sort', { skip: environment.ok ? false : SKIP_REASON }, async t => {
+test('the plans list is a table-only screen with contract columns, widths and default sort', { skip: environment.ok ? false : SKIP_REASON }, async t => {
   const harness = await startWorkspaceHarness();
   harness.api.set({ p12: true });
   const browser = await launchBrowser(environment);
   t.after(async () => { await browser.close(); await harness.close(); });
-  const page = await browser.newPage({ viewport: { width: 1280, height: 2600 } });
+  const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
   const diagnostics = await watchPage(page);
   const panel = page.locator('[data-panel="plans-list"]');
 
   await page.goto(`${harness.origin}/plans?win=all`);
   await settleList(page);
   assert.equal(await panel.getAttribute('data-state'), 'ready');
+  assert.equal(await panel.getAttribute('data-chart'), 'table');
+  assert.equal(await page.locator('[data-panel="scatter-plan"]').count(), 0, 'no chart on the plans list');
+  assert.equal(await page.locator('.plans-table caption').count(), 1);
+  assert.deepEqual(await page.locator('.plans-table thead th').allInnerTexts(), PLAN_LIST_COLUMNS.map(column => column.label));
+  assert.equal(await page.locator('.plans-table').evaluate(table => getComputedStyle(table).minWidth), '1416px');
   assert.equal(await page.locator('.plan-row').count(), 4);
   assert.match(await panel.innerText(), /4 of 10 plans shown/);
   const firstOrder = await page.locator('.plan-row').evaluateAll(rows => rows.map(row => row.dataset.entityKey));
   assert.equal(new Set(firstOrder).size, 4);
+  assert.equal(await page.locator('.plans-sort-measure').inputValue(), 'associated_cost_usd');
+  assert.equal(await page.locator('.plans-sort-direction').inputValue(), 'desc');
+  const heights = await page.locator('.plan-row').evaluateAll(rows => rows.map(row => row.getBoundingClientRect().height));
+  for (const height of heights) assert.ok(Math.abs(height - 30) <= 1, `plan row height ${height}`);
 
-  await page.selectOption('.plans-sort-measure', 'associated_cost_usd');
-  await page.waitForFunction(() => new URLSearchParams(location.search).get('sort') === 'associated_cost_usd:desc');
-  await settleList(page);
   assert.equal(await page.locator('.plans-overlap-banner').count(), 1);
   assert.match(await page.locator('.plans-overlap-banner').innerText(), /non-additive across plans/);
   const costs = await page.locator('.plan-row td[data-key="associated_cost_usd"]').evaluateAll(cells => cells.map(cell => cell.textContent));
   const values = costs.filter(text => !/unpriced/.test(text)).map(text => Number(text.replace(/[^0-9.]/g, '')));
   for (let index = 1; index < values.length; index += 1) assert.ok(values[index - 1] >= values[index], `cost desc at ${index}`);
 
+  await page.selectOption('.plans-sort-measure', 'sessions');
+  await page.waitForFunction(() => new URLSearchParams(location.search).get('sort') === 'sessions:desc');
+  await settleList(page);
+  await page.selectOption('.plans-sort-measure', 'associated_cost_usd');
+  await page.waitForFunction(() => new URLSearchParams(location.search).get('sort') === 'associated_cost_usd:desc');
+  await settleList(page);
+
   await page.locator('.plans-load-more').click();
   await page.waitForFunction(() => document.querySelectorAll('.plan-row').length === 8);
   const keys = await page.locator('.plan-row').evaluateAll(rows => rows.map(row => row.dataset.entityKey));
   assert.equal(new Set(keys).size, 8);
+  assert.equal((await page.locator('.plans-load-more').innerText()).trim(), 'Load more plans');
   await page.locator('.plans-load-more').click();
   await page.waitForFunction(() => document.querySelectorAll('.plan-row').length === 10);
   const all = await page.locator('.plan-row').evaluateAll(rows => rows.map(row => row.dataset.entityKey));
@@ -202,37 +234,7 @@ test('the plans list sorts server-side, appends a unique page and shows the over
   assert.ok(stats.maxInFlight <= 4, `max in flight ${stats.maxInFlight}`);
 });
 
-test('the scatter settles with whole-population marginals and labels its sampled state', { skip: environment.ok ? false : SKIP_REASON }, async t => {
-  const harness = await startWorkspaceHarness();
-  harness.api.set({ p12: true, planSampled: true });
-  const browser = await launchBrowser(environment);
-  t.after(async () => { await browser.close(); await harness.close(); });
-  const page = await browser.newPage({ viewport: { width: 1280, height: 2600 } });
-  const diagnostics = await watchPage(page);
-
-  await page.goto(`${harness.origin}/plans?win=all`);
-  await settleList(page);
-  await settleScatter(page);
-  const scatter = page.locator('[data-panel="scatter-plan"]');
-  assert.equal(await scatter.getAttribute('data-state'), 'ready');
-  assert.match(await scatter.innerText(), /sample of 5 of 10; marginals are the whole population/);
-  assert.equal(await scatter.locator('.yk-badge[data-kind="sampled"]').count(), 1);
-  const marginals = await page.locator('[data-panel="scatter-plan"] .scatter-marginal').count();
-  assert.ok(marginals >= 2, `whole-population marginals drawn: ${marginals}`);
-  const marks = await page.evaluate(() => document.querySelector('[data-panel="scatter-plan"] yk-chart').inspect().marks.length);
-  assert.equal(marks, 4, 'the null-axis plan stays in the population but out of the marks');
-
-  await control(harness.origin, { planSampled: false });
-  await page.goto(`${harness.origin}/plans?win=all`);
-  await settleScatter(page);
-  assert.equal(await page.locator('[data-panel="scatter-plan"] .yk-badge[data-kind="sampled"]').count(), 0);
-
-  await diagnostics.assertClean();
-  const stats = await (await fetch(`${harness.origin}/__test/stats`)).json();
-  assert.ok(stats.maxInFlight <= 4, `max in flight ${stats.maxInFlight}`);
-});
-
-test('a mark inspects and Open reaches the plan destination, and a rectangle makes a ca cohort the table refetches', { skip: environment.ok ? false : SKIP_REASON }, async t => {
+test('an Open row reaches the scoped plan destination', { skip: environment.ok ? false : SKIP_REASON }, async t => {
   const harness = await startWorkspaceHarness();
   harness.api.set({ p12: true });
   const browser = await launchBrowser(environment);
@@ -240,54 +242,50 @@ test('a mark inspects and Open reaches the plan destination, and a rectangle mak
   const page = await browser.newPage({ viewport: { width: 1280, height: 2600 } });
   const diagnostics = await watchPage(page);
 
-  await page.goto(`${harness.origin}/plans?win=all`);
+  await page.goto(`${harness.origin}/plans?win=all&repo_id=repo-a`);
   await settleList(page);
-  await settleScatter(page);
-
-  const point = await page.evaluate(() => {
-    const chart = document.querySelector('[data-panel="scatter-plan"] yk-chart');
-    const result = chart.inspect();
-    const mark = result.marks[0];
-    if (!mark) return null;
-    return { x: result.plot.left + mark.px, y: result.plot.top + mark.py };
-  });
-  assert.ok(point, 'a plan mark is drawn');
-  await page.mouse.click(point.x, point.y);
-  await page.waitForFunction(() => document.querySelector('.workspace-inspector')?.dataset.open === 'true');
-  await page.locator('.workspace-inspector-action[data-action="open"]').click();
+  const firstIdentity = await page.locator('.plan-row').first().getAttribute('data-plan-identity');
+  await page.locator('.plan-row .plan-open').first().click();
   await page.waitForFunction(() => /^\/plans\/[^/]+\/[^/]+$/.test(location.pathname));
-  const detailPath = await page.evaluate(() => location.pathname);
-  assert.match(detailPath, /^\/plans\/[^/]+\/[^/]+$/);
+  const destination = new URL(page.url());
+  assert.match(decodeURIComponent(destination.pathname), new RegExp(`^/plans/${firstIdentity.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`));
+  assert.equal(destination.searchParams.get('win'), 'all', 'Open preserves the committed scope');
+  assert.equal(destination.searchParams.get('repo_id'), 'repo-a');
+  assert.equal(destination.searchParams.has('sort'), false, 'sort does not ride to the detail');
   assert.doesNotMatch(await page.locator('main').innerText(), /Not found/);
-
-  await page.goto(`${harness.origin}/plans?win=all`);
-  await settleList(page);
-  await settleScatter(page);
-  const before = harness.api.state.requests.filter(item => /\/entities$/.test(item.path)).length;
-  const rect = await page.evaluate(() => {
-    const chart = document.querySelector('[data-panel="scatter-plan"] yk-chart');
-    const { plot } = chart.inspect();
-    return {
-      x0: plot.left + plot.width * 0.1, y0: plot.top + plot.height * 0.1,
-      x1: plot.left + plot.width * 0.9, y1: plot.top + plot.height * 0.9
-    };
-  });
-  await page.mouse.move(rect.x0, rect.y0);
-  await page.mouse.down();
-  await page.mouse.move(rect.x1, rect.y1, { steps: 6 });
-  await page.mouse.up();
-  await page.waitForFunction(() => document.querySelector('.selection-tray')?.dataset.open === 'true');
-  assert.match(await page.locator('.selection-tray-summary').innerText(), /3 plans of 10 in scope/);
-  await page.locator('.selection-tray-action[data-action="make-cohort"][data-slot="A"]').click();
-  await page.waitForFunction(() => new URLSearchParams(location.search).has('ca'));
-  await settleList(page);
-  const requests = harness.api.state.requests.filter(item => /\/entities$/.test(item.path));
-  assert.ok(requests.length > before);
-  assert.ok(requests.slice(before).some(item => item.search.includes('cohort=')), 'the table refetched under the cohort');
 
   await diagnostics.assertClean();
   const stats = await (await fetch(`${harness.origin}/__test/stats`)).json();
   assert.ok(stats.maxInFlight <= 4, `max in flight ${stats.maxInFlight}`);
+});
+
+test('a failed next page keeps loaded rows and offers Retry next page', { skip: environment.ok ? false : SKIP_REASON }, async t => {
+  const harness = await startWorkspaceHarness();
+  harness.api.set({ p12: true });
+  const browser = await launchBrowser(environment);
+  t.after(async () => { await browser.close(); await harness.close(); });
+  const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+
+  await page.goto(`${harness.origin}/plans?win=all`);
+  await settleList(page);
+  const loaded = await page.locator('.plan-row').count();
+  await page.route('**/v1/analytics/entities**', async route => {
+    const url = new URL(route.request().url());
+    if (!url.searchParams.get('cursor')) { await route.continue(); return; }
+    await route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ error: 'page read failed', code: 'read failed' }) });
+  });
+
+  await page.locator('.plans-load-more').click();
+  await page.waitForSelector('.plans-next-error');
+  assert.equal(await page.locator('.plan-row').count(), loaded, 'loaded rows are kept');
+  assert.match(await page.locator('.plans-next-error').innerText(), /Could not load the next page\./);
+  assert.equal((await page.locator('.plans-retry-next').innerText()).trim(), 'Retry next page');
+
+  await page.unroute('**/v1/analytics/entities**');
+  await page.locator('.plans-retry-next').click();
+  await page.waitForFunction(count => document.querySelectorAll('.plan-row').length > count, loaded);
+  assert.equal(await page.locator('.plans-next-error').count(), 0);
+  assert.equal(await page.locator('.plan-row').count(), loaded + 4);
 });
 
 test('empty and error states are named, and a legacy server names the missing capability', { skip: environment.ok ? false : SKIP_REASON }, async t => {
@@ -302,14 +300,18 @@ test('empty and error states are named, and a legacy server names the missing ca
   await page.goto(`${harness.origin}/plans?win=all`);
   await settleList(page);
   assert.equal(await panel.getAttribute('data-state'), 'empty');
-  assert.match(await panel.innerText(), /No rows match/);
+  assert.match(await panel.innerText(), /No records match these filters\./);
+  assert.deepEqual(await panel.locator('.plans-state-action').allInnerTexts(), ['All history', 'Reset filters']);
+  assert.deepEqual(await panel.locator('.plans-table thead th').allInnerTexts(), PLAN_LIST_COLUMNS.map(column => column.label));
+  assert.equal(await page.locator('.plan-row').count(), 0);
   await control(harness.origin, { empty: false });
 
   await control(harness.origin, { p12: true, planError: true });
   await page.goto(`${harness.origin}/plans?win=all`);
   await settleList(page);
   assert.equal(await panel.getAttribute('data-state'), 'error');
-  assert.match(await panel.innerText(), /plans read failed/);
+  assert.match(await panel.innerText(), /Could not load Plans\./);
+  assert.match(await panel.innerText(), /read failed/);
   assert.ok(await panel.locator('button', { hasText: 'Retry' }).count() > 0);
   await control(harness.origin, { planError: false });
 
