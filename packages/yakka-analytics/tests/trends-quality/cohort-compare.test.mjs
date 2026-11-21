@@ -270,10 +270,13 @@ test('a second compare panel issues both cohort requests and compare plus split 
 
     const requests = harness.api.state.requests;
     const callDistributions = requests.filter(item => /distribution/.test(item.path) && /grain=call/.test(item.search) && /dim=model/.test(item.search));
-    assert.ok(callDistributions.length >= 4, 'both distribution panels issued both sides: ' + JSON.stringify(callDistributions.map(r => r.search)));
+    // Compare fixes all three distribution panels to call/model, so the shared
+    // scheduler collapses their identical concurrent URLs to one request per
+    // cohort side. Both cohorts must still reach the wire.
+    assert.ok(callDistributions.length >= 2, 'the call/model distribution URL carries both cohorts: ' + JSON.stringify(callDistributions.map(r => r.search)));
     const values = callDistributions.map(item => new URLSearchParams(item.search.slice(1)).get('cohort'));
-    assert.ok(values.includes(a), 'Cohort A is requested for a second panel');
-    assert.ok(values.includes(b), 'Cohort B is requested for a second panel');
+    assert.ok(values.includes(a), 'Cohort A is requested');
+    assert.ok(values.includes(b), 'Cohort B is requested');
 
     const hist = await page.evaluate(() => document.querySelector('[data-panel="dist-hist"]').textContent);
     assert.match(hist, /Cohort A/, 'the histogram names the first population');

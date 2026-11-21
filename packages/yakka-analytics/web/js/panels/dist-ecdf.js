@@ -5,18 +5,98 @@
 // and the highest bin edge stay visible.
 
 import { cancelledState, emptyState, errorState, unsupportedState } from '../core/panel-state.js';
-import { currentWindow, table } from './pulse-strips.js';
+import { currentWindow, filterRefusal, table } from './pulse-strips.js';
+import { CAPTION_TEMPLATES, registerCaption } from './captions.js';
 import {
-  comparisonPlan, comparisonSummary, ensureP10Styles, measureMeta, populationLine, whenPanelBody, whenPanelSlot, renderChooser, wireChartScope
+  comparisonPlan, comparisonSummary, ensureP10Styles, measureMeta, mountPanelViews, populationLine,
+  whenPanelBody, whenPanelSlot, wireChartScope
 } from './p10-shared.js';
 import {
-  DIST_DIMS, DIST_MEASURES, PERIOD_UNSUPPORTED, distributionParams, distributionSpec, fetchDistribution, previousDistributionParams
+  DIST_DIMS, DIST_MEASURES, PERIOD_UNSUPPORTED, SHARED_BOUNDARY_NOTE, distDimensionLabel, distMeasureOptions, periodRank,
+  distributionParams, distributionSpec, fetchDistribution, previousDistributionParams, renderDistributionChooser
 } from './dist-ranges.js';
+
+export const DIST_ECDF_CAPTION = 'Each line shows the percentage of sessions at or below a cost; read up from a dollar amount to find that percentage.';
+export const COMPECDF_CAPTION = 'Each line shows the percentage of calls at or below a cost in one period; a higher line means more calls fall below that cost.';
+
+export const DIST_ECDF_CAPTIONS = {
+  'G-ecdf': DIST_ECDF_CAPTION,
+  'G-compecdf': COMPECDF_CAPTION
+};
+
+export const DIST_ECDF_DEFAULTS = { grain: 'conversation', dim: 'model' };
+
+const CAPTION_SHAPE = {
+  'G-ecdf': { grain: 'conversation', dim: 'model' },
+  'G-compecdf': { grain: 'call', dim: 'model' }
+};
 
 function edgeOf(bin) {
   const hi = bin.hi ?? bin.to;
   const lo = bin.lo ?? bin.from;
   return hi === null || hi === undefined ? Number(lo) : Number(hi);
+}
+
+export function ecdfTableColumns(unit = 'USD') {
+  return ['Group', 'Period', `Bin upper edge (${unit})`, 'Cumulative count', 'Cumulative share (%)'];
+}
+
+export function ecdfTableColumnSpecs(unit = 'USD') {
+  return ecdfTableColumns(unit).map((label, index) => ({ label, numeric: index >= 2 }));
+}
+
+function edgeText(bin) {
+  const hi = bin.hi ?? bin.to;
+  if (hi === null || hi === undefined) {
+    const lo = bin.lo ?? bin.from;
+    return lo === null || lo === undefined ? '—' : `${lo}+`;
+  }
+  return String(hi);
+}
+
+export function cumulativeBins(bins = []) {
+  const total = bins.reduce((sum, bin) => sum + Number(bin.n || 0), 0);
+  let cumulative = 0;
+  return bins
+    .map(bin => ({ bin, edge: edgeOf(bin) }))
+    .sort((a, b) => a.edge - b.edge)
+    .map(item => {
+      cumulative += Number(item.bin.n || 0);
+      return {
+        edge: item.edge,
+        bin: item.bin,
+        count: cumulative,
+        share: total ? (cumulative / total) * 100 : null
+      };
+    });
+}
+
+// Group ascending, current before previous, then bin upper edge ascending.
+// The current block is built first, so a stable group sort keeps current above
+// previous within one group.
+export function orderEcdfSides(sides = []) {
+  return [...sides].sort((a, b) => String(a.group).localeCompare(String(b.group)) || periodRank(a.period) - periodRank(b.period));
+}
+
+export function ecdfTableRows(sides = []) {
+  return orderEcdfSides(sides).flatMap(side => cumulativeBins(side.bins).map(item => [
+    side.group,
+    side.period || 'current',
+    edgeText(item.bin),
+    String(item.count),
+    item.share === null ? '—' : String(Math.round(item.share * 10) / 10)
+  ]));
+}
+
+function aggregateBins(rows = []) {
+  const byIndex = new Map();
+  for (const row of rows) {
+    (row.bins || []).forEach((bin, index) => {
+      if (!byIndex.has(index)) byIndex.set(index, { lo: bin.lo ?? bin.from, hi: bin.hi ?? bin.to, n: 0 });
+      byIndex.get(index).n += Number(bin.n || 0);
+    });
+  }
+  return [...byIndex.values()].sort((a, b) => edgeOf(a) - edgeOf(b));
 }
 
 // One sample per observed value. Bins are fixed, so repeating each edge by its
@@ -55,6 +135,42 @@ function splitValuesOf(...bodies) {
   return values;
 }
 
+function filterScopeFor(scope = {}) {
+  const rest = { ...scope };
+  delete rest.grain;
+  delete rest.dim;
+  delete rest.captionKey;
+  return rest;
+}
+
+function ignoredList(body) {
+  return Array.isArray(body?.ignored_filters) ? body.ignored_filters.map(String) : [];
+}
+
+function renderChooser(panel, spec, schema, doc) {
+  whenPanelSlot(panel.id, 'chooser', doc, slot => {
+    slot.replaceChildren(renderDistributionChooser({ panelId: panel.id, panel, spec, schema, doc }));
+  });
+}
+
+registerCaption('dist-ecdf', ({ spec = {}, scope = {}, schema = null } = {}) => {
+  const key = spec?.scope?.captionKey || 'G-ecdf';
+  const measure = (spec?.measures || [])[0] || 'cost_usd';
+  const resolved = distributionSpec(spec, DIST_ECDF_DEFAULTS);
+  const shape = CAPTION_SHAPE[key] || CAPTION_SHAPE['G-ecdf'];
+  const compare = String(scope?.cmp || 'off') === 'period';
+  const single = !scope?.cmp || scope.cmp === 'off';
+  const mode = key === 'G-compecdf' ? compare : single;
+  if (mode && measure === 'cost_usd' && resolved.ok && resolved.grain === shape.grain && resolved.dim === shape.dim) {
+    return DIST_ECDF_CAPTIONS[key] || DIST_ECDF_CAPTION;
+  }
+  return CAPTION_TEMPLATES['cumulative distribution']({
+    measure,
+    population: key === 'G-compecdf' ? 'model_calls' : 'conversations',
+    unit: measureMeta(schema, measure).unit || ''
+  });
+});
+
 export async function load(context = {}) {
   const { scope = {}, spec = {}, transport, tenant = '', signal } = context;
   const doc = context.doc || globalThis.document;
@@ -66,9 +182,21 @@ export async function load(context = {}) {
   try {
     const schema = context.schema || (await transport.schema(tenant)).body;
     const panel = context.panel || DIST_ECDF_PANEL;
-    const measure = (spec.measures || [])[0] && DIST_MEASURES.includes((spec.measures || [])[0]) ? spec.measures[0] : 'cost_usd';
-    const distributed = distributionSpec(spec);
+    const filterScope = filterScopeFor(scope);
+    const refusal = filterRefusal({ panel, spec, scope: filterScope, schema });
+    if (refusal) return refusal;
+    const measures = distMeasureOptions(schema);
+    const requestedMeasure = (spec.measures || [])[0] || '';
+    if (requestedMeasure && !measures.includes(requestedMeasure)) {
+      return unsupportedState({
+        missing: requestedMeasure, reason: 'not published for the session grain', source: 'server /schema',
+        nearest: measures[0] || null
+      });
+    }
+    const measure = requestedMeasure || (measures.includes('cost_usd') ? 'cost_usd' : (measures[0] || 'cost_usd'));
+    const distributed = distributionSpec(spec, DIST_ECDF_DEFAULTS);
     if (!distributed.ok) {
+      renderChooser(panel, spec, schema, doc);
       return unsupportedState({
         missing: `${measure} by ${distributed.dim} at ${distributed.grain} grain`,
         reason: distributed.reason,
@@ -77,7 +205,10 @@ export async function load(context = {}) {
       });
     }
     const { grain, dim } = distributed;
-    if (compare && !currentWindow(scope)) return unsupportedState({ missing: 'period comparison', reason: PERIOD_UNSUPPORTED, source: 'scope' });
+    if (compare && !currentWindow(scope)) {
+      renderChooser(panel, spec, schema, doc);
+      return unsupportedState({ missing: 'period comparison', reason: PERIOD_UNSUPPORTED, source: 'scope' });
+    }
     const meta = measureMeta(schema, measure);
     let body;
     let other = null;
@@ -90,12 +221,19 @@ export async function load(context = {}) {
       body = await fetchDistribution(transport, distributionParams({ scope, measure, grain, dim }), { tenant, signal, stateKey: 'dist-ecdf' });
       other = compare ? await fetchDistribution(transport, previousDistributionParams({ scope, measure, grain, dim }), { tenant, signal, stateKey: 'dist-ecdf-previous' }) : null;
     }
+    const post = filterRefusal({
+      panel, spec, scope: filterScope, schema,
+      ignoredFilters: [...ignoredList(body), ...ignoredList(other)]
+    });
+    if (post) return post;
     const binCount = Math.max(0, ...(body.rows || []).map(row => (row.bins || []).length), ...((other?.rows || []).map(row => (row.bins || []).length)));
     if (!binCount) {
       whenPanelBody(panel.id, doc, host => host.replaceChildren());
+      renderChooser(panel, { ...spec, measures: [measure], scope: { ...(spec.scope || {}), grain, dim } }, schema, doc);
       return emptyState([{ kind: 'scope', label: 'the server returned no bins for this distribution', clear: null }]);
     }
     const charts = [];
+    let sides = [];
     if (cohortCompare) {
       for (const group of splitValuesOf(body, other)) {
         const series = [];
@@ -107,6 +245,7 @@ export async function load(context = {}) {
           edgeValues.push(...samples.edges.filter(Number.isFinite));
           series.push({ key: side.key, label: side.label, unit: meta.unit, kind: 'percent' });
           data.push(...samples.samples.map(sample => ({ x: sample.x, group: side.key })));
+          sides.push({ group, period: side.label, bins: row?.bins || [] });
         }
         if (!series.length) continue;
         charts.push({ group, series, data, highest: Math.max(...edgeValues), n: [body, other].map(item => (item?.rows || []).find(row => String(row.k) === group)).map(row => Number(row?.n || 0)) });
@@ -114,6 +253,10 @@ export async function load(context = {}) {
     } else if (compare) {
       const current = samplesFor(body.rows, binCount);
       const before = samplesFor(other?.rows || [], binCount);
+      sides = [
+        { group: 'all', period: 'current', bins: aggregateBins(body.rows) },
+        { group: 'all', period: 'previous', bins: aggregateBins(other?.rows || []) }
+      ];
       charts.push({
         group: '', highest: Math.max(...current.edges.filter(Number.isFinite), ...before.edges.filter(Number.isFinite)),
         series: [
@@ -130,6 +273,7 @@ export async function load(context = {}) {
       const groups = body.rows || [];
       const perGroup = groups.map(row => ({ key: `${dim}:${row.k}`, label: String(row.k), row }));
       const edges = perGroup.flatMap(item => (item.row.bins || []).map(edgeOf)).filter(Number.isFinite);
+      sides = perGroup.map(item => ({ group: String(item.row.k), period: 'current', bins: item.row.bins || [] }));
       charts.push({
         group: '', highest: Math.max(...edges),
         series: perGroup.map(item => ({ key: item.key, label: item.label, unit: meta.unit, kind: 'percent' })),
@@ -139,19 +283,18 @@ export async function load(context = {}) {
     }
     if (!charts.some(chart => chart.data.length)) {
       whenPanelBody(panel.id, doc, host => host.replaceChildren());
+      renderChooser(panel, { ...spec, measures: [measure], scope: { ...(spec.scope || {}), grain, dim } }, schema, doc);
       return emptyState([{ kind: 'scope', label: `no ${measure} values in window ${scope.win || 'all'}`, clear: null }]);
     }
     const summary = cohortCompare
       ? comparisonSummary({ plan, sides: { a: withUnpriced(body), b: withUnpriced(other) }, unit: meta.unit }).text
       : '';
+    const highestEdge = Math.max(...charts.map(chart => chart.highest).filter(Number.isFinite));
     whenPanelBody(panel.id, doc, host => {
       const wrapper = doc.createElement('div');
       wrapper.className = 'p10-dist p10-ecdf';
-      const basis = doc.createElement('p');
-      basis.className = 'p10-basis';
-      const highest = Math.max(...charts.map(chart => chart.highest).filter(Number.isFinite));
-      basis.textContent = `Basis: ECDF from fixed distribution bins (cumulative count / n). ${populationLine(body)}. Highest bin edge ${Number.isFinite(highest) ? highest : '—'} ${meta.unit}.${cohortCompare ? ` ${summary}` : ''}`;
-      wrapper.append(basis);
+      const chartHost = doc.createElement('div');
+      chartHost.className = 'p10-dist-charts';
       for (const item of charts) {
         const node = doc.createElement('yk-chart');
         node.className = 'p10-dist-chart';
@@ -159,7 +302,7 @@ export async function load(context = {}) {
         node.spec = {
           chart: 'ecdf',
           type: 'ecdf',
-          title: `${measure} ECDF by ${dim}${cohortCompare ? ` · ${item.group}` : compare ? ' (current and previous period)' : ''}`,
+          title: `${meta.label} ECDF by ${distDimensionLabel(dim)}${cohortCompare ? ` · ${item.group}` : compare ? ' (current and previous period)' : ''}`,
           timeBasis: 'priced calls only; the scope window',
           units: meta.unit,
           x: { label: meta.label, kind: 'number', unit: meta.unit },
@@ -168,34 +311,37 @@ export async function load(context = {}) {
         };
         node.data = item.data;
         wireChartScope(node, panel.id, doc);
-        wrapper.append(node);
+        chartHost.append(node);
       }
+      const tableNode = table(doc, {
+        caption: `${meta.label} ECDF populations`,
+        columns: ecdfTableColumnSpecs(meta.unit || 'USD'),
+        rows: ecdfTableRows(sides)
+      });
+      const views = mountPanelViews({
+        panelId: panel.id, chart: chartHost, table: tableNode, doc,
+        defaultView: 'chart', label: 'Distribution ECDF view'
+      });
+      views.element.removeAttribute('data-panel');
+      const basis = doc.createElement('p');
+      basis.className = 'p10-basis';
+      const boundary = plan.mode === 'period' ? ` ${SHARED_BOUNDARY_NOTE}` : '';
+      basis.textContent = `Basis: ECDF from fixed distribution bins (cumulative count / n). ${populationLine(body)}. Highest bin edge ${Number.isFinite(highestEdge) ? highestEdge : '—'} ${meta.unit}.${cohortCompare ? ` ${summary}` : ''}${boundary}`;
       const note = doc.createElement('p');
       note.className = 'p10-note';
       note.textContent = cohortCompare
         ? `Both cohorts are listed by sample size; the ECDF steps each population separately.`
-        : `n ${(body.rows || []).reduce((sum, row) => sum + Number(row.n || 0), 0)}${other ? `; previous period n ${(other.rows || []).reduce((sum, row) => sum + Number(row.n || 0), 0)}` : ''}. Highest bin edge ${Number.isFinite(Math.max(...charts.map(chart => chart.highest).filter(Number.isFinite))) ? Math.max(...charts.map(chart => chart.highest).filter(Number.isFinite)) : '—'} ${meta.unit}.`;
-      const columns = cohortCompare
-        ? [{ label: 'Group' }, { label: 'Cohort' }, { label: 'n', numeric: true }]
-        : [{ label: 'Group' }, { label: 'n', numeric: true }];
-      const tableRows = cohortCompare
-        ? charts.flatMap(item => [0, 1].map(index => [item.group, item.series[index]?.label || '—', String(item.n[index] ?? 0)]))
-        : compare
-          ? [['Current period', String((body.rows || []).reduce((sum, row) => sum + Number(row.n || 0), 0))], ['Previous period', String((other?.rows || []).reduce((sum, row) => sum + Number(row.n || 0), 0))]]
-          : (body.rows || []).map(row => [String(row.k), String(row.n ?? '—')]);
-      wrapper.append(note, table(doc, { caption: `${measure} ECDF populations`, columns, rows: tableRows }));
+        : `n ${(body.rows || []).reduce((sum, row) => sum + Number(row.n || 0), 0)}${other ? `; previous period n ${(other.rows || []).reduce((sum, row) => sum + Number(row.n || 0), 0)}` : ''}. Highest bin edge ${Number.isFinite(highestEdge) ? highestEdge : '—'} ${meta.unit}.`;
+      wrapper.append(views.element, note, basis);
       host.replaceChildren(wrapper);
     });
-    whenPanelSlot(panel.id, 'chooser', doc, slot => {
-      const rendered = renderChooser({ panelId: panel.id, panel, spec: { ...spec, measures: [measure], split: dim, chart: 'ecdf' }, schema, doc });
-      slot.replaceChildren(rendered.element);
-    });
+    renderChooser(panel, { ...spec, measures: [measure], scope: { ...(spec.scope || {}), grain, dim } }, schema, doc);
     return {
       state: 'ready', measure, split: dim, grain, compare, cohortCompare,
       population: body.population || null,
       previousPopulation: other?.population || null,
-      highest: Math.max(...charts.map(chart => chart.highest).filter(Number.isFinite)),
-      basis: `${measure} ECDF by ${dim}${compare ? '; current and previous period' : cohortCompare ? `; ${plan.aLabel} and ${plan.bLabel}` : ''}`
+      highest: highestEdge,
+      basis: `${measure} ECDF by ${dim}${compare ? `; current and previous period. ${SHARED_BOUNDARY_NOTE}` : cohortCompare ? `; ${plan.aLabel} and ${plan.bLabel}` : ''}`
     };
   } catch (error) {
     if (error?.name === 'AbortError') return cancelledState();
@@ -214,7 +360,7 @@ export const DIST_ECDF_PANEL = {
   requires: [],
   caveats: 'ECDF from the server’s fixed bins; n and the highest bin edge are shown. Compare draws both populations as two series.',
   measureBasis: 'call or conversation priced values in the scope window',
-  requests: () => [{ route: '/v1/analytics/distribution', method: 'GET', params: { measure: 'cost_usd', grain: 'call', dim: 'model' } }],
+  requests: () => [{ route: '/v1/analytics/distribution', method: 'GET', params: { measure: 'cost_usd', grain: 'conversation', dim: 'model' } }],
   load
 };
 

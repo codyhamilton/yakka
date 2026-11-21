@@ -48,7 +48,9 @@ test('box rows expose quartiles, sample size and unpriced calls without blending
   assert.equal(row.label, 'claude · current');
   assert.deepEqual([row.values.min, row.values.q1, row.values.median, row.values.q3, row.values.p95], [0, 1, 2, 3, 4]);
   assert.equal(row.values.unpriced, 2);
-  assert.deepEqual(boxTableRows([row])[0].slice(0, 2), ['claude · current', '0']);
+  assert.deepEqual(boxTableRows([row])[0].slice(0, 3), ['claude', 'current', '0']);
+  assert.deepEqual(boxTableRows([row])[0].slice(2, 8), ['0', '1', '2', '3', '4', '5']);
+  assert.equal(boxTableRows([row])[0].at(-2), '18');
   assert.equal(boxTableRows([row])[0].at(-1), '2');
 });
 
