@@ -33,6 +33,7 @@ function makeIdentityHost() {
     revoked: [],
     errors: [],
     failRevoke: false,
+    failLogout: false,
     meError: false,
     tokenListError: false
   };
@@ -61,7 +62,11 @@ function makeIdentityHost() {
         state.signedIn = true;
         return json(200, { ok: true, return: '/profile' }, { 'Set-Cookie': 'workflow_session=fixture-session; Path=/; Secure; HttpOnly; SameSite=Lax' });
       }
-      if (url.pathname === '/logout') { state.signedIn = false; return json(204, null, { 'Set-Cookie': 'workflow_session=; Path=/; Max-Age=0; Secure; HttpOnly; SameSite=Lax' }); }
+      if (url.pathname === '/logout') {
+        if (state.failLogout) return json(500, { error: 'logout failed' });
+        state.signedIn = false;
+        return json(204, null, { 'Set-Cookie': 'workflow_session=; Path=/; Max-Age=0; Secure; HttpOnly; SameSite=Lax' });
+      }
       if (url.pathname === '/v1/device/grant') return authed && url.searchParams.get('user_code') === 'ABCD-EFGH' ? json(200, { host: 'fixture-terminal' }) : json(404, { error: 'unknown_code' });
       if (url.pathname === '/v1/device/authorize') { if (!authed) return json(401, { error: 'unauthorized' }); state.device.push(JSON.parse(body)); return json(200, body.includes('"deny"') ? { denied: true } : { approved: true }); }
       if (url.pathname === '/v1/tenants' && req.method === 'POST') {
@@ -117,7 +122,7 @@ function makeIdentityHost() {
     const csp = readFileSync(resolve(webRoot, '_headers'), 'utf8').split(/\r?\n/).map(x => x.trim()).filter(x => x.startsWith('Content-Security-Policy:'))[0]?.slice('Content-Security-Policy:'.length).trim();
     res.writeHead(200, { 'Content-Type': types[extname(target)] || 'application/octet-stream', 'Cache-Control': 'no-cache', ...(csp ? { 'Content-Security-Policy': csp } : {}) }); res.end(data);
   });
-  return { server, state, maxInFlight: () => maxInFlight, setPageOrigin(value) { pageOrigin = value; }, reset() { state.signedIn = false; state.tenants = [tenants[0]]; state.tokens = defaultTokens(); state.failRevoke = false; state.meError = false; state.tokenListError = false; state.requests.length = state.callbacks.length = state.device.length = state.revoked.length = state.errors.length = 0; maxInFlight = 0; } };
+  return { server, state, maxInFlight: () => maxInFlight, setPageOrigin(value) { pageOrigin = value; }, reset() { state.signedIn = false; state.tenants = [tenants[0]]; state.tokens = defaultTokens(); state.failRevoke = false; state.failLogout = false; state.meError = false; state.tokenListError = false; state.requests.length = state.callbacks.length = state.device.length = state.revoked.length = state.errors.length = 0; maxInFlight = 0; } };
 }
 
 test('Pages-mapped identity account flows and their API requests', async t => {
@@ -138,10 +143,15 @@ test('Pages-mapped identity account flows and their API requests', async t => {
     const context = await browser.newContext({ ignoreHTTPSErrors: true, viewport: { width: 1440, height: 900 } });
     await context.addInitScript(({ origin, base }) => {
       if (location.origin !== origin) return;
-      try { localStorage.setItem('yakka-analytics-base', base); } catch {}
+      try {
+        if (!sessionStorage.getItem('identity-base-seeded')) {
+          localStorage.setItem('yakka-analytics-base', base);
+          sessionStorage.setItem('identity-base-seeded', '1');
+        }
+      } catch {}
     }, { origin: pageOrigin, base: apiOrigin });
     const diagnostics = [];
-    const expectedResource = /^Failed to load resource: the server responded with a status of (401|403|409|500) /;
+    const expectedResource = /^Failed to load resource: the server responded with a status of (401|403|404|409|500) /;
     context.on('page', page => { page.on('pageerror', e => diagnostics.push(`pageerror: ${e.message}`)); page.on('console', m => { if (m.type() === 'error' && !expectedResource.test(m.text())) diagnostics.push(`console: ${m.text()}`); }); });
     const page = await context.newPage();
     const visit = async path => { rig.reset(); await context.clearCookies(); await page.goto(`${pageOrigin}${path}`); };
@@ -166,39 +176,60 @@ test('Pages-mapped identity account flows and their API requests', async t => {
       await page.waitForURL(/\/login\?return=/);
       assert.equal(new URL(page.url()).searchParams.get('return'), '/device?user_code=abcd-efgh');
       assert.equal(await page.locator('[data-testid="identity-login"]').getAttribute('href'), 'https://api.yakka.build/oauth/login?return=%2Fdevice%3Fuser_code%3Dabcd-efgh');
+      assert.equal(await page.getByText('Sign in to your Yakka account to continue.').count(), 1);
+      assert.equal(await page.locator('#tenant-select').isDisabled(), true);
+      assert.match(await page.locator('#tenant-select option').textContent(), /Sign in to select a tenant/);
     });
     await t.test('callback success forwards query and returns to profile', async () => {
       await visit('/oauth/callback?code=success&state=nonce');
       await page.waitForURL(`${pageOrigin}/profile`);
       assert.equal(rig.state.callbacks[0]?.search, '?code=success&state=nonce');
     });
-    await t.test('callback denial stays on callback with a message', async () => {
-      await visit('/oauth/callback?code=denied&state=nonce');
+    await t.test('callback denial shows exact failure copy and a safe retry link', async () => {
+      await visit('/oauth/callback?code=denied&state=nonce&return=%2Fdevice%3Fuser_code%3DABCD-EFGH');
       await page.locator('[data-identity-status]').waitFor();
-      assert.match(await page.locator('[data-identity-status]').textContent(), /denied/);
+      assert.equal(await page.locator('[data-identity-status]').textContent(), 'Sign in failed. Please try again.');
       assert.match(page.url(), /oauth\/callback/);
+      assert.equal(await page.getByRole('link', { name: 'Try sign in again' }).getAttribute('href'), '/login?return=%2Fdevice%3Fuser_code%3DABCD-EFGH');
+      const text = await page.locator('#app').innerText();
+      assert.doesNotMatch(text, /denied|nonce|code|synthetic/);
     });
-    await t.test('callback API error stays on callback with a message', async () => {
+    await t.test('callback API error shows the same exact failure copy', async () => {
       await visit('/oauth/callback?code=error&state=nonce');
       await page.locator('[data-identity-status]').waitFor();
-      assert.match(await page.locator('[data-identity-status]').textContent(), /exchange failed/);
+      assert.equal(await page.locator('[data-identity-status]').textContent(), 'Sign in failed. Please try again.');
       assert.match(page.url(), /oauth\/callback/);
+      assert.equal(await page.getByRole('link', { name: 'Try sign in again' }).getAttribute('href'), '/login');
+      assert.doesNotMatch(await page.locator('#app').innerText(), /exchange failed/);
     });
-    await t.test('device code is preserved and approval posts documented fields', async () => {
-      rig.reset(); rig.state.signedIn = true; await context.addCookies([{ name: 'workflow_session', value: 'fixture-session', domain: 'api.yakka.build', path: '/', secure: true, httpOnly: true, sameSite: 'Lax' }]);
-      await page.goto(`${pageOrigin}/device?user_code=abcd-efgh`);
+    await t.test('device code is preserved and the global tenant approves with documented fields', async () => {
+      await signIn();
+      await page.goto(`${pageOrigin}/device?user_code=abcd-efgh&tenant=tenant-b`);
       await page.getByText('Request from fixture-terminal').waitFor();
       assert.equal(new URL(page.url()).searchParams.get('user_code'), 'ABCD-EFGH');
+      assert.equal(await page.locator('[data-testid="device-tenant"]').count(), 0);
+      assert.equal(await page.locator('[data-testid="device-token-name"]').inputValue(), '');
+      assert.equal(await page.locator('#tenant-select').inputValue(), 'tenant-b');
+      assert.equal(await page.locator('[data-testid="device-submit"]').isDisabled(), true);
       await page.locator('[data-testid="device-grant"]').selectOption('read_write');
+      assert.equal(await page.locator('[data-testid="device-submit"]').isDisabled(), false);
       await page.locator('[data-testid="device-submit"]').click();
-      await page.getByText('Approved.').waitFor();
-      assert.deepEqual(rig.state.device[0], { user_code: 'ABCD-EFGH', tenant: 'tenant-a', scope: 'read_write', lifetime: '3m' });
+      await page.getByText('Device approved.').waitFor();
+      assert.deepEqual(rig.state.device[0], { user_code: 'ABCD-EFGH', tenant: 'tenant-b', scope: 'read_write', lifetime: '3m' });
     });
-    await t.test('device denial keeps the normalized code', async () => {
-      rig.reset(); rig.state.signedIn = true; await context.clearCookies(); await context.addCookies([{ name: 'workflow_session', value: 'fixture-session', domain: 'api.yakka.build', path: '/', secure: true, httpOnly: true, sameSite: 'Lax' }]);
+    await t.test('device denial keeps the normalized code and posts no scope', async () => {
+      await signIn();
       await page.goto(`${pageOrigin}/device?user_code=abcd-efgh`); await page.getByText('Request from fixture-terminal').waitFor();
-      await page.locator('[data-testid="device-deny"]').click(); await page.getByText('Denied.').waitFor();
+      await page.locator('[data-testid="device-deny"]').click(); await page.getByText('Device denied.').waitFor();
       assert.deepEqual(rig.state.device[0], { user_code: 'ABCD-EFGH', action: 'deny' });
+    });
+    await t.test('device unknown code keeps the form and shows the inline reason', async () => {
+      await signIn();
+      await page.goto(`${pageOrigin}/device?user_code=zzzz-yyyy`);
+      await page.locator('[data-identity-status]').waitFor();
+      assert.match(await page.locator('[data-identity-status]').textContent(), /unknown_code/);
+      assert.equal(await page.locator('[data-testid="device-authorize-form"]').isHidden(), false);
+      assert.equal(await page.locator('[data-testid="device-submit"]').isDisabled(), true);
     });
     await t.test('A1 account nav, owned membership inventory and lifecycle boundary', async () => {
       await openProfile();
@@ -364,14 +395,92 @@ test('Pages-mapped identity account flows and their API requests', async t => {
       await page.waitForFunction(() => document.querySelector('[data-token-row="token-a4"] td:nth-child(6)')?.textContent === 'Revoked');
       assert.equal(calls('/v1/tokens/token-a4/revoke', 'POST').length, 2);
     });
-    await t.test('Settings saves base and bearer, then signs out', async () => {
+    await t.test('not-found performs no analytics read and keeps tenant and committed scope', async () => {
+      await signIn();
+      await page.goto(`${pageOrigin}/missing?tenant=tenant-b&win=90d&repo_id=acme`);
+      await page.getByText('No page matches this address.').waitFor();
+      assert.equal(rig.state.requests.filter(request => request.path.startsWith('/v1/analytics/')).length, 0);
+      assert.equal(await page.locator('#tenant-select').inputValue(), 'tenant-b');
+      assert.equal(await page.getByRole('button', { name: 'Theme' }).count(), 1);
+      assert.equal(await page.locator('.scope-bar, .coverage-strip, .yk-chart').count(), 0);
+      const start = await page.getByRole('link', { name: 'Open Start' }).getAttribute('href');
+      const pulse = await page.getByRole('link', { name: 'Open Pulse' }).getAttribute('href');
+      assert.match(start, /^\/\?/);
+      assert.match(pulse, /^\/b\/pulse\?/);
+      for (const href of [start, pulse]) {
+        const url = new URL(href, pageOrigin);
+        assert.equal(url.searchParams.get('tenant'), 'tenant-b');
+        assert.equal(url.searchParams.get('win'), '90d');
+        assert.equal(url.searchParams.get('repo_id'), 'acme');
+      }
+      assert.equal(await page.locator('.not-found-routes a').count(), 2);
+      await page.goto(`${pageOrigin}/missing%3Cb%3Enot-injected%3C%2Fb%3E`);
+      await page.getByText('No page matches this address.').waitFor();
+      assert.equal(await page.locator('.not-found-path b').count(), 0);
+      assert.match(await page.locator('.not-found-path').textContent(), /not-injected/);
+    });
+    await t.test('signed-out not-found keeps navigation and reads no analytics', async () => {
+      await visit('/missing?tenant=tenant-a');
+      await page.getByText('No page matches this address.').waitFor();
+      assert.equal(await page.locator('#tenant-select').inputValue(), '');
+      assert.match(await page.locator('#tenant-select option').textContent(), /Sign in to select a tenant/);
+      assert.equal(rig.state.requests.filter(request => request.path.startsWith('/v1/analytics/')).length, 0);
+      assert.equal(await page.locator('.not-found-routes a').count(), 2);
+    });
+    await t.test('Settings saves base and key, preserves a blank key, validates, clears and signs out non-optimistically', async () => {
       await visit('/settings');
-      await page.getByTestId('settings-base').fill(`${apiOrigin}/`); await page.getByTestId('settings-key').fill('fixture-key'); await page.getByTestId('settings-save').click();
-      await page.getByText('Settings saved.').waitFor();
+      await page.getByRole('heading', { name: 'Connection settings' }).waitFor();
+      assert.equal(await page.getByTestId('settings-key').inputValue(), '');
+      assert.equal(await page.getByTestId('settings-base').inputValue(), apiOrigin);
+      const save = async () => {
+        const navigation = page.waitForNavigation();
+        await page.getByTestId('settings-save').click();
+        await navigation;
+        await page.getByTestId('settings-base').waitFor();
+      };
+      await page.getByTestId('settings-base').fill(`${apiOrigin}/`);
+      await page.getByTestId('settings-key').fill('fixture-key');
+      await save();
       assert.equal(await page.evaluate(() => localStorage.getItem('yakka-analytics-base')), apiOrigin);
       assert.equal(await page.evaluate(() => localStorage.getItem('yakka-analytics-key')), 'fixture-key');
-      await page.getByRole('button', { name: 'Sign out' }).click(); await page.waitForURL(`${pageOrigin}/login`);
-      assert.ok(rig.state.requests.some(r => r.path === '/logout' && r.method === 'POST'));
+      assert.equal(await page.getByTestId('settings-key').inputValue(), '');
+      assert.ok(!(await page.content()).includes('fixture-key'));
+      assert.ok(!page.url().includes('fixture-key'));
+      assert.ok(rig.state.requests.every(request => !(request.search || '').includes('fixture-key')));
+      await page.getByTestId('settings-base').fill(`${apiOrigin}/`);
+      await page.getByTestId('settings-key').fill('');
+      await save();
+      assert.equal(await page.evaluate(() => localStorage.getItem('yakka-analytics-key')), 'fixture-key');
+      await page.getByTestId('settings-base').fill('javascript:alert(1)');
+      await page.getByTestId('settings-key').fill('');
+      await page.getByTestId('settings-save').click();
+      await page.getByText('Enter an absolute http(s) API base URL.').waitFor();
+      assert.equal(await page.evaluate(() => localStorage.getItem('yakka-analytics-base')), apiOrigin);
+      // Clear blanks the base, so the post-reload default-origin /me is stubbed
+      // to keep this harness's port-bound API quiet.
+      await page.route('https://api.yakka.build/v1/**', route => route.fulfill({ status: 401, headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': pageOrigin, 'Access-Control-Allow-Credentials': 'true' }, body: '{"error":"unauthorized"}' }));
+      const cleared = page.waitForNavigation();
+      await page.getByTestId('settings-clear').click();
+      await cleared;
+      await page.getByTestId('settings-base').waitFor();
+      assert.equal(await page.evaluate(() => localStorage.getItem('yakka-analytics-base')), null);
+      assert.equal(await page.evaluate(() => localStorage.getItem('yakka-analytics-key')), null);
+      await page.unroute('https://api.yakka.build/v1/**');
+      await page.evaluate(base => localStorage.setItem('yakka-analytics-base', base), apiOrigin);
+      const restored = page.waitForNavigation();
+      await page.reload();
+      await restored;
+      await page.getByTestId('settings-base').waitFor();
+      rig.state.failLogout = true;
+      await page.getByRole('button', { name: 'Sign out' }).click();
+      await page.getByText('Sign out failed.').waitFor();
+      assert.match(page.url(), /\/settings/);
+      rig.state.failLogout = false;
+      await page.getByRole('button', { name: 'Sign out' }).click();
+      await page.waitForURL(`${pageOrigin}/login`);
+      const logout = rig.state.requests.filter(request => request.path === '/logout' && request.method === 'POST');
+      assert.equal(logout.length, 2);
+      assert.deepEqual(JSON.parse(logout[1].body), {});
     });
     assert.equal(diagnostics.length, 0, diagnostics.join('\n'));
     assert.ok(rig.maxInFlight() <= 4, `max in flight ${rig.maxInFlight()}`);

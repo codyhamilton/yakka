@@ -68,8 +68,17 @@ function teardownActiveRoute() {
 const tenantSelect = document.querySelector('#tenant-select');
 const tenantNote = document.querySelector('#tenant-note');
 
-function mountTenantHeader({ me = null, meStatus = 0, auth = null, state = {}, localMode = false } = {}) {
+function mountTenantHeader({ me = null, meStatus = 0, auth = null, state = {}, localMode = false, signedOut = false } = {}) {
   tenantSelect.replaceChildren();
+  if (signedOut) {
+    const option = element('option', '', 'Sign in to select a tenant');
+    option.value = '';
+    option.selected = true;
+    tenantSelect.append(option);
+    tenantSelect.disabled = true;
+    tenantNote.hidden = true;
+    return;
+  }
   const tenants = Array.isArray(me?.tenants) ? me.tenants : [];
   let selected = auth?.tenant || state.tenant || '';
   if (meStatus !== 200 && tenants.length === 0) {
@@ -415,16 +424,28 @@ function renderNamedDestination(container, record) {
   container.append(notice);
 }
 
-function renderNotFound(container, record) {
-  container.append(element('h1', '', 'Not found'));
-  container.append(element('p', 'notice', `No workspace route matches ${record.path}.`));
+function notFoundHref(path, search = '', tenant = '') {
+  const params = new URLSearchParams(search);
+  params.delete('tenant');
+  if (tenant) params.set('tenant', tenant);
+  const query = params.toString();
+  return query ? `${path}?${query}` : path;
+}
+
+function renderNotFound(container, record, tenant = '') {
+  container.append(element('h1', '', record.title || 'Not found'));
+  container.append(element('p', 'account-context', 'Account controls use the selected tenant. Time, repository and kind filters apply on analytics pages.'));
+  container.append(element('p', 'not-found-message', 'No page matches this address.'));
+  const pathLine = element('p', 'not-found-path');
+  pathLine.append(element('code', '', record.path));
+  container.append(pathLine);
   const nav = element('nav', 'not-found-routes');
-  nav.setAttribute('aria-label', 'Workspace routes');
-  for (const route of SHELL_ROUTES) {
-    const link = element('a', '', route);
-    link.href = route;
-    nav.append(link);
-  }
+  nav.setAttribute('aria-label', 'Not found navigation');
+  const start = element('a', '', 'Open Start');
+  start.href = notFoundHref('/', record.search, tenant);
+  const pulse = element('a', '', 'Open Pulse');
+  pulse.href = notFoundHref('/b/pulse', record.search, tenant);
+  nav.append(start, pulse);
   container.append(nav);
 }
 
@@ -579,7 +600,7 @@ async function renderBoard(container, record, state, schema, context, scopeContr
   const tenant = context?.tenant || '';
   const board = assembleBoard({ presetId: record.presetId, state });
   if (board.kind === 'named') { renderNamedDestination(container, { ...record, label: board.label, title: board.title, phase: board.phase }); return; }
-  if (board.kind !== 'board') { renderNotFound(container, record); container.append(element('p', 'notice', board.reason)); return; }
+  if (board.kind !== 'board') { renderNotFound(container, { ...record, title: 'Page not found' }, tenant); container.append(element('p', 'notice', board.reason)); return; }
   container.append(element('h1', '', board.title));
   if (scopeControls) container.append(scopeControls.element);
   renderScopeBar(container, state);
@@ -857,7 +878,7 @@ async function render(record) {
   setShellState('loading', 'false');
   markActiveNav(path, globalThis.location?.hash || '');
   const exempt = isAccountRoute(path);
-  const sessionExempt = ['/login', '/oauth/callback', '/settings'].includes(path);
+  const sessionExempt = ['/login', '/oauth/callback'].includes(path);
   let me = null, meStatus = 0, hint = '';
   if (!sessionExempt) {
     const result = await loadSessionOnce();
@@ -866,12 +887,24 @@ async function render(record) {
   }
   if (!renderIsCurrent(generation)) return;
   const decision = sessionGateDecision({ path, search: record.search, meStatus });
-  if (!decision.stay) { location.replace(decision.redirect); return; }
+  if (!decision.stay && record.kind !== 'not-found') { location.replace(decision.redirect); return; }
   const noServer = meStatus !== 200;
   const localMode = noServer && isCollectorMode() && !resolvedBase();
   let bearer = '';
   try { bearer = (localStorage.getItem('yakka-analytics-key') || '').trim(); } catch {}
   const tokenBound = noServer && !isCollectorMode() && Boolean(bearer);
+
+  // A not-found path performs no analytics read, so it renders before the
+  // schema/facet/scope pipeline and without the signed-out data-route redirect.
+  if (record.kind === 'not-found') {
+    const authed = meStatus === 200 && Boolean(me);
+    const auth = authorizedTenant({ me, urlTenant: state.tenant });
+    mountTenantHeader({ me, meStatus, auth, state, localMode, signedOut: !authed && !tokenBound });
+    renderNotFound(root, record, auth.tenant);
+    setShellState('ready', 'true');
+    return;
+  }
+
   if (!exempt && noServer && !localMode && !tokenBound) hint = decision.hint || '';
   if (hint) {
     root.dataset.route = path;
@@ -883,38 +916,39 @@ async function render(record) {
   }
 
   if (exempt) {
-    if (path === '/profile') {
+    const account = ['/profile', '/settings', '/device'].includes(path) ? {
+      api: transport,
+      me,
+      meStatus,
+      tenant: '',
+      onRefreshMe: refreshAccountSession,
+      onSelectTenant: selectAccountTenant,
+      onStatus: (text, error = false) => {
+        if (!text) { root.querySelector('[data-account-status]')?.remove(); return; }
+        let out = root.querySelector('[data-account-status]');
+        if (!out) { out = element('p', 'account-status', ''); out.dataset.accountStatus = ''; root.append(out); }
+        out.textContent = text;
+        out.classList.toggle('error', error);
+      }
+    } : null;
+    if (account) {
       const auth = authorizedTenant({ me, urlTenant: state.tenant });
+      account.tenant = auth.tenant;
       mountTenantHeader({ me, meStatus, auth, state, localMode });
-      if (!state.tenant && auth.tenant) {
+      if (path === '/profile' && !state.tenant && auth.tenant) {
         const next = { ...state, tenant: auth.tenant };
         globalThis.history.replaceState(null, '', stateUrl(next, record.search, path));
         state = decodeUrlState(globalThis.location?.search || '');
         try { localStorage.setItem('yakka-analytics-tenant', auth.tenant); } catch {}
       }
       root.append(element('h1', '', record.title));
-      const account = {
-        api: transport,
-        me,
-        meStatus,
-        tenant: auth.tenant,
-        onRefreshMe: refreshAccountSession,
-        onSelectTenant: selectAccountTenant,
-        onStatus: (text, error = false) => {
-          if (!text) { root.querySelector('[data-account-status]')?.remove(); return; }
-          let out = root.querySelector('[data-account-status]');
-          if (!out) { out = element('p', 'account-status', ''); out.dataset.accountStatus = ''; root.append(out); }
-          out.textContent = text;
-          out.classList.toggle('error', error);
-        }
-      };
       await renderIdentity(root, path, transport, me, () => renderIsCurrent(generation), account);
       if (!renderIsCurrent(generation)) return;
       if (pendingAccountFocus) { const id = pendingAccountFocus; pendingAccountFocus = ''; focusAccountRow(id); }
       setShellState('ready', 'true');
       return;
     }
-    mountTenantHeader({ me, meStatus, state, localMode });
+    mountTenantHeader({ me, meStatus, state, localMode, signedOut: true });
     root.append(element('h1', '', record.title));
     await renderIdentity(root, path, transport, me, () => renderIsCurrent(generation));
     if (!renderIsCurrent(generation)) return;
@@ -1037,7 +1071,7 @@ async function render(record) {
     else root.prepend(scopeControls.element);
     scopeControls.update(state, { schema, context });
   } else {
-    renderNotFound(root, record);
+    renderNotFound(root, record, context?.tenant || '');
   }
   if (!renderIsCurrent(generation)) return;
   setShellState('ready', 'true');
@@ -1052,6 +1086,10 @@ document.querySelector('#theme-toggle').addEventListener('click', () => {
   try { localStorage.setItem('yakka-analytics-theme', next); } catch {}
 });
 
+globalThis.addEventListener('hashchange', () => {
+  const record = lastRecord || router.current();
+  markActiveNav(record.path, globalThis.location?.hash || '');
+});
 globalThis.addEventListener('focus', () => { revalidateSession().catch(() => {}); });
 globalThis.addEventListener('pageshow', event => { if (event.persisted) revalidateSession().catch(() => {}); });
 

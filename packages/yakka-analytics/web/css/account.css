@@ -294,3 +294,59 @@
     width: 100%;
   }
 }
+
+/* S-settings, S-login, S-callback, S-device: full-width sections with a
+   left-aligned 480px control column; no centred cards or animation. */
+.account-form-column {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  width: 480px;
+  max-width: 100%;
+}
+
+.account-form-column label {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  width: 100%;
+  color: var(--yk-muted);
+}
+
+.account-form-column input {
+  width: 100%;
+}
+
+.account-form-column select {
+  width: 260px;
+  max-width: 100%;
+}
+
+.account-form-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.not-found-message,
+.not-found-path {
+  margin: 0;
+}
+
+.not-found-path {
+  color: var(--yk-muted);
+}
+
+.not-found-routes {
+  display: flex;
+  gap: 16px;
+  margin-top: 8px;
+}
+
+@media (max-width: 900px) {
+  .account-form-column {
+    width: 100%;
+  }
+}

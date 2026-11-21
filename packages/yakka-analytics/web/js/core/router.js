@@ -31,7 +31,7 @@ export function parseRoute(pathname = '/', search = '') {
   const board = /^\/b\/([^/]+)$/.exec(path);
   if (board) {
     const presetId = board[1];
-    if (!isPresetId(presetId) && !lookupPreset(presetId)) return { kind: 'not-found', path, search, title: 'Not found' };
+    if (!isPresetId(presetId) && !lookupPreset(presetId)) return { kind: 'not-found', path, search, title: 'Page not found' };
     const destination = presetDestination(presetId);
     if (destination?.kind === 'named') {
       return { kind: 'named', path, search, title: destination.title, phase: destination.phase, label: destination.label, presetId };
@@ -46,7 +46,7 @@ export function parseRoute(pathname = '/', search = '') {
   if (planDetail) {
     const repo_id = decodeSegment(planDetail[1]);
     const plan = decodeSegment(planDetail[2]);
-    if (!repo_id || !plan) return { kind: 'not-found', path, search, title: 'Not found' };
+    if (!repo_id || !plan) return { kind: 'not-found', path, search, title: 'Page not found' };
     return { kind: 'explorer', path, search, explorer: 'plans', plan: { repo_id, plan }, title: 'Plan' };
   }
   if (EXPLORER_PATHS.has(path)) {
@@ -55,13 +55,13 @@ export function parseRoute(pathname = '/', search = '') {
     return { kind: 'explorer', path, search, explorer, title };
   }
   if (ACCOUNT_PATHS.includes(path)) return { kind: 'account', path, search, title: accountTitle(path) };
-  return { kind: 'not-found', path, search, title: 'Not found' };
+  return { kind: 'not-found', path, search, title: 'Page not found' };
 }
 
 function accountTitle(path) {
   return {
-    '/login': 'Sign in', '/oauth/callback': 'Sign in callback', '/device': 'Device approval',
-    '/profile': 'Account, tenants & tokens', '/settings': 'Settings'
+    '/login': 'Sign in', '/oauth/callback': 'Completing sign in', '/device': 'Device approval',
+    '/profile': 'Account, tenants & tokens', '/settings': 'Connection settings'
   }[path] || 'Account';
 }
 
