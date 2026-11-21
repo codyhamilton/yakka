@@ -4,16 +4,34 @@
 // Phase 11 request, marginal and rectangle-to-predicate seam; it adds no chart
 // type, route, grain, join or gesture. The inspector opens the artifact reader.
 
-import { cancelledState, emptyState, errorState, unsupportedState } from '../core/panel-state.js';
+import { applicabilityState, cancelledState, emptyState, errorState, unsupportedState } from '../core/panel-state.js';
 import { formatMoney, formatNumber, formatPercent } from '../charts/formatters.js';
-import { formatP10Value, measureMeta, schemaGrain, whenPanelBody, whenPanelSlot } from './p10-shared.js';
+import { registerCaption } from './captions.js';
+import { formatP10Value, measureMeta, mountPanelViews, schemaGrain, whenPanelBody, whenPanelSlot } from './p10-shared.js';
 import { table } from './pulse-strips.js';
 import {
-  canonicalRowKey, countSelection, marginalModel, regionPredicate, renderMarginals,
-  renderScatterChooser, scatterCaveat, scatterParams, scatterPopulationText, subtractRegion, unionRegion
+  canonicalRowKey, countSelection, formatScatterCell, marginalModel, regionPredicate,
+  renderMarginals, renderScatterChooser, resolveScatterFields, scatterAxes, scatterCaveat,
+  scatterDefaults, scatterFilterScope, scatterLabel, scatterParams, scatterPopulationText, scatterTableColumns,
+  scatterTemplate, scatterUnit, subtractRegion, unionRegion
 } from './scatter-shared.js';
 import { ensureScatterStyles } from './scatter-session.js';
-import { QUALITY_KINDS, catalogueChecks } from './score-ranges.js';
+import {
+  MULTI_KIND_REFUSAL, catalogueChecks, defaultCheck, fetchContentBaselines, fetchScoreCatalogue, resolveScorer,
+  scoreApplicabilityRefusal, scoreKind, scorerNames
+} from './score-ranges.js';
+
+export const ARTIFACT_CAPTION = 'Each dot is a file, with its writing session’s spend across and its clarity score up; this association does not prove that spending improves quality.';
+
+registerCaption('scatter-artifact', ({ spec = {} } = {}) => {
+  const scope = spec?.scope || {};
+  const check = scope.check || 'clarity';
+  const x = scope.x || 'writing_session_cost_usd';
+  const y = scope.y || `score:${check}`;
+  const size = scope.size !== undefined ? scope.size : '';
+  if (check === 'clarity' && x === 'writing_session_cost_usd' && y === 'score:clarity' && !size) return ARTIFACT_CAPTION;
+  return scatterTemplate({ entity: 'file', x, y, size });
+});
 
 const ARTIFACT_FIXED = new Set(['versions', 'distinct_writing_sessions', 'first_ts', 'last_ts', 'content_bytes']);
 const ARTIFACT_COLOUR_NAMES = ['kind', 'plan', 'repo_id', 'harness', 'session_model', 'source', 'screen_verdict', 'scorer'];
@@ -200,35 +218,43 @@ export async function load(context = {}) {
   try {
     const schema = context.schema || (await transport.schema(tenant)).body;
     const panel = context.panel || SCATTER_ARTIFACT_PANEL;
+    const resolvedKind = scoreKind(scope, spec);
+    if (resolvedKind.multi) {
+      return applicabilityState({
+        labels: ['document kind'], filters: ['kind'],
+        message: MULTI_KIND_REFUSAL
+      });
+    }
+    const refusal = scoreApplicabilityRefusal({ panel, spec, scope: scatterFilterScope(scope), schema, grain: 'artifact' });
+    if (refusal) return refusal;
     const requested = spec?.scope || {};
-    const kind = QUALITY_KINDS.includes(requested.kind) ? requested.kind : 'design';
-    const catalogue = await transport.get('scores', new URLSearchParams({ kind }), { tenant, signal, stateKey: 'scatter-artifact-catalogue' });
+    const kind = resolvedKind.kind;
+    const catalogue = await fetchScoreCatalogue(transport, kind, { tenant, signal, stateKey: 'scatter-artifact-catalogue' });
     if (!catalogue.response.ok) {
       return errorState({ message: catalogue.body?.error || `The server returned ${catalogue.response.status}.`, code: catalogue.body?.code || String(catalogue.response.status || '') });
     }
-    const checks = catalogueChecks(catalogue.body);
+    const checks = catalogue.checks;
     if (!checks.length) return emptyState([{ kind: 'scope', label: `no checks are catalogued for ${kind}`, clear: null }]);
     if (requested.check && !checks.includes(requested.check)) {
       return unsupportedState({ measure: `check ${requested.check}`, reason: 'not in the score catalogue for this kind', source: 'server /scores', nearest: checks[0] });
     }
-    const check = requested.check || checks[0];
+    const check = requested.check || defaultCheck(checks);
+    const baselines = await fetchContentBaselines(transport, { kind, check, scorer: requested.scorer, tenant, signal, stateKey: 'scatter-artifact-baseline' });
+    if (!baselines.response.ok) {
+      return errorState({ message: baselines.body?.error || `The server returned ${baselines.response.status}.`, code: baselines.body?.code || String(baselines.response.status || '') });
+    }
+    const resolved = resolveScorer(baselines.body, check, requested.scorer);
+    if (resolved.unknown) {
+      return unsupportedState({ measure: `scorer ${requested.scorer}`, reason: 'not in the content baseline for this check', source: 'server /baselines', nearest: scorerNames(baselines.body)[0] || null });
+    }
+    if (!resolved.scorer) {
+      return unsupportedState({ measure: `a scorer for ${check}`, reason: 'no scorer is published for this check', source: 'server /baselines', nearest: null });
+    }
     const axisModel = artifactAxes(schema, catalogue.body);
     const colourModel = artifactColours(schema);
-    const axes = axisModel.axes;
-    const measureList = Array.isArray(spec.measures) ? spec.measures : [];
-    const roleX = requested.x || measureList[0] || '';
-    const roleY = requested.y || measureList[1] || '';
-    const roleSize = requested.size !== undefined ? requested.size : (measureList[2] || '');
-    const roleColour = spec.split || requested.colour || '';
-    const x = axes.includes(roleX) ? roleX : (axes.includes('writing_session_cost_usd') ? 'writing_session_cost_usd' : (axes[0] || ''));
-    const defaultY = `score:${check}`;
-    const y = axes.includes(roleY) && roleY !== x
-      ? roleY
-      : ((axes.includes(defaultY) && defaultY !== x) ? defaultY : (axes.find(name => name !== x && name.startsWith('score:')) || axes.find(name => name !== x) || ''));
-    const size = axes.includes(roleSize) && roleSize !== x && roleSize !== y ? roleSize : '';
-    const colour = colourModel.colours.includes(roleColour)
-      ? roleColour
-      : (colourModel.colours.includes('session_model') ? 'session_model' : (colourModel.colours[0] || ''));
+    const rolePanel = { ...panel, measures: axisModel.axes, lenses: colourModel.colours };
+    const defaults = { ...scatterDefaults(panel), y: `score:${check}` };
+    const { x, y, size, colour } = resolveScatterFields({ spec, schema, panel: rolePanel, defaults });
     if (!x || !y) {
       return unsupportedState({
         grain: 'artifact', reason: 'the server publishes fewer than two numeric artifact measures',
@@ -237,9 +263,11 @@ export async function load(context = {}) {
     }
     const sandbox = {
       grain: 'artifact', measures: [x, y, size].filter(Boolean), split: colour,
-      scope: { ...(spec.scope || {}), x, y, size, colour, kind, check }
+      scope: { ...(spec.scope || {}), x, y, size, colour, kind, check, scorer: resolved.scorer }
     };
     const params = scatterParams({ scope: { ...scope, kind }, spec: sandbox, grain: 'artifact', fields: [x, y, size].filter(Boolean) });
+    params.set('check', check);
+    params.set('scorer', resolved.scorer);
     const { response, body } = await transport.get('entities', params, { tenant, signal, stateKey: 'scatter-artifact' });
     if (!response.ok) {
       if (response.status === 400 && /unsupported|not defined|not published|invalid/i.test(body?.error || '')) {
@@ -247,6 +275,11 @@ export async function load(context = {}) {
       }
       return errorState({ message: body?.error || `The server returned ${response.status}.`, code: body?.code || String(response.status || '') });
     }
+    const post = scoreApplicabilityRefusal({
+      panel, spec, scope: scatterFilterScope(scope), schema, grain: 'artifact',
+      ignoredFilters: Array.isArray(body?.ignored_filters) ? body.ignored_filters.map(String) : []
+    });
+    if (post) return post;
     const points = (Array.isArray(body.rows) ? body.rows : []).map(row => artifactPoint(row, sandbox));
     const drawn = points.filter(point => point.drawn);
     const population = body.population || null;
@@ -258,9 +291,9 @@ export async function load(context = {}) {
     const populationText = scatterPopulationText(body);
     const missing = artifactMissing(body.rows || [], body, check);
     const unsupported = [...axisModel.unsupported, ...colourModel.unsupported];
-    const xMeta = measureInfo(schema, x);
-    const yMeta = measureInfo(schema, y);
-    const sizeMeta = size ? measureInfo(schema, size) : null;
+    const xMeta = { label: scatterLabel(x), unit: scatterUnit(x), kind: measureMeta(schema, x).kind };
+    const yMeta = { label: scatterLabel(y), unit: scatterUnit(y), kind: 'number' };
+    const sizeMeta = size ? { label: scatterLabel(size), unit: scatterUnit(size) } : null;
     const entities = {};
     for (const point of drawn) {
       entities[point.key] = {
@@ -290,32 +323,43 @@ export async function load(context = {}) {
       empty: 'no eligible artifact has both axes'
     };
     const marginals = marginalModel(body.marginals, [x, y, size].filter(Boolean));
-    const columns = [
-      { label: 'File' }, { label: 'Repo' },
-      { label: xMeta.label, numeric: true }, { label: yMeta.label, numeric: true }, { label: 'Group' }
-    ];
-    const tableRows = points.map(point => [
-      point.identity.path || '—',
-      point.identity.repo_id || '—',
-      formatCell(point.x, xMeta),
-      formatCell(point.y, yMeta),
-      point.group === null || point.group === undefined ? '—' : String(point.group)
+    const ordered = [...points].sort((a, b) => String(a.key).localeCompare(String(b.key)));
+    const tableRows = ordered.map(point => [
+      `${point.identity.repo_id || '—'}/${point.identity.path || '—'}`,
+      formatScatterCell(point.x, x),
+      formatScatterCell(point.y, y),
+      ...(size ? [formatScatterCell(point.size, size)] : []),
+      ...(colour ? [point.group === null || point.group === undefined ? '—' : String(point.group)] : [])
     ]);
     let painted = null;
     whenPanelBody(panel.id, doc, host => {
       const wrapper = doc.createElement('div');
       wrapper.className = 'p11-scatter';
+      const node = doc.createElement('yk-chart');
+      node.className = 'p11-scatter-chart';
+      node.spec = chartSpec;
+      node.data = ordered.filter(point => point.drawn);
+      const tableNode = table(doc, {
+        caption: `Files by ${xMeta.label} and ${yMeta.label}`,
+        columns: scatterTableColumns({ x, y, size, colour }),
+        rows: tableRows
+      });
+      const views = mountPanelViews({ panelId: panel.id, chart: node, table: tableNode, doc, label: 'Scatter view' });
+      views.element.removeAttribute('data-panel');
+      const details = doc.createElement('details');
+      details.className = 'p10-details';
+      const summary = doc.createElement('summary');
+      summary.textContent = 'Data details';
       const basis = doc.createElement('p');
       basis.className = 'p11-scatter-basis';
       basis.textContent = `Basis: ${xMeta.label} (${xMeta.unit || 'count'}) against ${yMeta.label} (${yMeta.unit || 'count'})${colour ? ` coloured by ${colour}` : ''}${size ? `, sized by ${sizeMeta.label}` : ''}. ${populationText}. ${missing.text}.`;
       const caveats = doc.createElement('p');
       caveats.className = 'p11-scatter-caveat';
       caveats.textContent = caveat.text;
-      const node = doc.createElement('yk-chart');
-      node.className = 'p11-scatter-chart';
-      node.spec = chartSpec;
-      node.data = drawn;
-      wrapper.append(basis, caveats);
+      const note = doc.createElement('p');
+      note.className = 'p11-scatter-note';
+      note.textContent = `${missing.text}. ${ARTIFACT_READER_NOTICE}`;
+      details.append(summary, basis, caveats, note);
       if (unsupported.length) {
         const list = doc.createElement('ul');
         list.className = 'p11-unsupported';
@@ -326,16 +370,12 @@ export async function load(context = {}) {
           entry.textContent = `${item.kind} ${item.name} is unsupported: ${item.reason}. Try ${item.try}.`;
           list.append(entry);
         }
-        wrapper.append(list);
+        details.append(list);
       }
-      wrapper.append(node);
-      const note = doc.createElement('p');
-      note.className = 'p11-scatter-note';
-      note.textContent = `${missing.text}. ${ARTIFACT_READER_NOTICE}`;
-      wrapper.append(note);
+      wrapper.append(views.element);
       const strip = renderMarginals(body, [x, y, size].filter(Boolean), { doc, schema });
       if (strip.childNodes.length) wrapper.append(strip);
-      wrapper.append(table(doc, { caption: `${x} against ${y} (artifact)`, columns, rows: tableRows }));
+      wrapper.append(details);
       host.replaceChildren(wrapper);
       painted = node;
 
@@ -373,22 +413,18 @@ export async function load(context = {}) {
     });
     await painted?.whenSettled?.();
     whenPanelSlot(panel.id, 'chooser', doc, slot => {
-      const chooserPanel = { ...panel, measures: axes, lenses: colourModel.colours };
-      const rendered = renderScatterChooser({ panelId: panel.id, panel: chooserPanel, spec: sandbox, schema, doc });
-      const kindField = chooseOption(doc, 'Kind', QUALITY_KINDS.map(value => ({ value, label: value })), kind,
-        value => rendered.dispatch({ scope: { kind: value, check: '', y: '' } }));
-      const checkField = chooseOption(doc, 'Check', checks.map(value => ({ value, label: value })), check,
-        value => {
-          const yName = `score:${value}`;
-          const measures = [rendered.fields.x, yName, rendered.fields.size].filter(Boolean);
-          rendered.dispatch({ measures, scope: { check: value, y: yName } });
-        });
+      const rendered = renderScatterChooser({ panelId: panel.id, panel: rolePanel, spec: sandbox, schema, doc, defaults });
+      const checkField = chooseOption(doc, 'Check', checks.map(value => ({ value, label: scatterLabel(`score:${value}`).replace(/ score$/, '') })), check,
+        value => rendered.dispatch({ scope: { check: value, y: `score:${value}` } }));
+      const scorerOptions = scorerNames(baselines.body);
+      const scorerField = chooseOption(doc, 'Scorer', scorerOptions.map(value => ({ value, label: value })), resolved.scorer,
+        value => rendered.dispatch({ scope: { scorer: value } }));
+      rendered.element.insertBefore(scorerField, rendered.element.firstChild);
       rendered.element.insertBefore(checkField, rendered.element.firstChild);
-      rendered.element.insertBefore(kindField, rendered.element.firstChild);
       slot.replaceChildren(rendered.element);
     });
     return {
-      state: 'ready', grain: 'artifact', kind, check, axes: [x, y, size].filter(Boolean), colour,
+      state: 'ready', grain: 'artifact', kind, check, scorer: resolved.scorer, axes: [x, y, size].filter(Boolean), colour,
       sampled: body.sampled === true, population, missing,
       basis: `scatter ${x} × ${y}; ${caveat.sample}`,
       populationText, marginalCount: marginals.length, drawn: drawn.length,

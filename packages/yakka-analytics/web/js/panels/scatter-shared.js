@@ -4,10 +4,100 @@
 // count. Pure helpers stay free of the DOM; the one render seam (the chooser)
 // only dispatches a composed `spec` event and never touches the router.
 
-import { measureMeta, requestParams, schemaGrain } from './p10-shared.js';
+import { canonicalPanelSpec } from '../core/view-spec.js';
+import { CAPTION_TEMPLATES, LABELS } from './captions.js';
+import { requestParams, schemaGrain } from './p10-shared.js';
 import { table } from './pulse-strips.js';
 import { canonicalJson, canonicalPredicate } from '../core/selection-model.js';
-import { formatCount } from '../charts/formatters.js';
+import { formatCount, formatMoney, formatNumber } from '../charts/formatters.js';
+
+const SCORE_UNIT = 'normalized score 0–1';
+
+const FIELD_LABELS = {
+  cost_usd: 'Priced spend',
+  writing_session_cost_usd: 'Writing-session spend',
+  associated_cost_usd: 'Associated spend',
+  commits: 'Commits',
+  artifacts: 'Files',
+  unpriced_calls: 'Unpriced calls',
+  model_calls: 'Model calls',
+  writing_session_model_calls: 'Writing-session model calls',
+  writing_session_tokens_in: 'Writing-session input tokens',
+  writing_session_tokens_out: 'Writing-session output tokens',
+  writing_session_tokens_cache_read: 'Writing-session cached input tokens',
+  writing_session_tokens_cache_write: 'Writing-session cache-write tokens',
+  writing_session_tokens_reasoning: 'Writing-session reasoning tokens',
+  writing_session_hook_events: 'Writing-session hook events',
+  sessions: 'Associated sessions',
+  shared_sessions: 'Shared sessions',
+  versions: 'Versions',
+  content_bytes: 'Content bytes',
+  duration_s: 'Duration',
+  first_ts: 'First seen',
+  last_ts: 'Last seen',
+  executions_complete: 'Executions complete',
+  executions_unreported: 'Executions unreported',
+  executions_started: 'Executions started',
+  complete_share: 'Complete share',
+  span_days: 'Span days',
+  distinct_writing_sessions: 'Distinct writing sessions',
+  conversations: 'Sessions',
+  rejections: 'Rejections',
+  artifact_versions: 'Artifact versions',
+  distinct_content: 'Distinct content',
+  hook_events: 'Hook events'
+};
+
+function titleCase(text = '') {
+  return text ? text.charAt(0).toUpperCase() + text.slice(1) : text;
+}
+
+// The controlled label dictionary is the only place an identifier becomes
+// prose. A `score:<check>` axis is a score, never a percentage.
+export function scatterLabel(name = '') {
+  if (!name) return '';
+  if (String(name).startsWith('score:')) return `${titleCase(String(name).slice(6).replace(/_/g, ' '))} score`;
+  if (String(name).startsWith('design_score:')) return `Design score (${String(name).slice(13)})`;
+  if (FIELD_LABELS[name]) return FIELD_LABELS[name];
+  const dictionary = LABELS.measures[name] || LABELS.entities[name];
+  if (dictionary) return titleCase(dictionary);
+  return String(name).replace(/_/g, ' ').replace(/\b[a-z]/g, letter => letter.toUpperCase());
+}
+
+export function scatterUnit(name = '') {
+  if (!name) return '';
+  if (['cost_usd', 'writing_session_cost_usd', 'associated_cost_usd'].includes(name)) return 'USD';
+  if (name === 'commits') return 'commits';
+  if (name === 'artifacts') return 'files';
+  if (name === 'versions') return 'versions';
+  if (name === 'sessions' || name === 'shared_sessions') return 'sessions';
+  if (name === 'content_bytes') return 'bytes';
+  if (String(name).startsWith('score:')) return SCORE_UNIT;
+  if (['unpriced_calls', 'model_calls', 'writing_session_model_calls'].includes(name)) return 'calls';
+  if (['tokens_in', 'tokens_out', 'tokens_cache_read', 'tokens_cache_write', 'tokens_reasoning',
+    'writing_session_tokens_in', 'writing_session_tokens_out', 'writing_session_tokens_cache_read',
+    'writing_session_tokens_cache_write', 'writing_session_tokens_reasoning'].includes(name)) return 'tokens';
+  if (name === 'hook_events' || name === 'writing_session_hook_events') return 'events';
+  if (name === 'conversations') return 'sessions';
+  if (name === 'artifact_versions') return 'versions';
+  if (name === 'rejections') return 'rejections';
+  if (name === 'complete_share') return 'percent';
+  if (name === 'duration_s') return 'seconds';
+  if (name === 'span_days') return 'days';
+  if (name === 'distinct_writing_sessions') return 'sessions';
+  return '';
+}
+
+export function scatterColourLabel(name = '') {
+  if (!name) return '';
+  return titleCase(LABELS.entities[name] || name.replace(/_/g, ' '));
+}
+
+// Prose inside a caption is never title-cased mid-sentence.
+export function scatterProseLabel(name = '') {
+  const text = scatterLabel(name);
+  return text ? text.charAt(0).toLowerCase() + text.slice(1) : text;
+}
 
 const CATEGORICAL = new Set([
   'id', 'model', 'harness', 'session_model', 'session_repo', 'origin', 'has_artifacts',
@@ -119,6 +209,101 @@ export function scatterSpecFields(spec = {}, schema = null) {
   };
 }
 
+// The four G contracts fix the defaults. A panel falls back to its own default
+// only when the committed spec does not select a role; an explicit None stays
+// None so a user can clear Size or Colour.
+export const SCATTER_DEFAULTS = {
+  'scatter-session': { x: 'cost_usd', y: 'commits', size: 'unpriced_calls', colour: '' },
+  'scatter-artifact': { x: 'writing_session_cost_usd', y: 'score:clarity', size: '', colour: '' },
+  'scatter-plan': { x: 'associated_cost_usd', y: 'artifacts', size: '', colour: 'repo_id' },
+  'scatter-day': { x: 'cost_usd', y: 'commits', size: '', colour: '' }
+};
+
+export function scatterDefaults(panel = {}) {
+  return SCATTER_DEFAULTS[panel?.id] || { x: '', y: '', size: '', colour: '' };
+}
+
+// Intersect the committed roles with the panel's advertised numeric/categorical
+// options. X and Y stay distinct, Size/Colour may be None, and a raw id/model is
+// never a numeric axis because `scatterAxes` already excludes it.
+export function resolveScatterFields({ spec = {}, schema = null, panel = null, defaults = null } = {}) {
+  const fallback = defaults || scatterDefaults(panel);
+  const axes = scatterAxes(panel, schema).axes;
+  const colours = scatterColours(panel, schema).colours;
+  const scope = spec?.scope || {};
+  // With no schema the caller's defaults are the only evidence; never drop them.
+  const valid = name => Boolean(name) && (axes.length ? axes.includes(name) : true);
+  const pick = (value, candidate) => {
+    if (value !== undefined) {
+      if (value === '') return '';
+      if (valid(value)) return value;
+    }
+    return valid(candidate) ? candidate : '';
+  };
+  let x = pick(scope.x, fallback.x) || axes[0] || '';
+  let y = pick(scope.y, fallback.y);
+  if (!y || y === x) y = axes.find(name => name !== x) || '';
+  let size = pick(scope.size, fallback.size);
+  if (size === x || size === y) size = '';
+  let colour = '';
+  if (scope.colour !== undefined) colour = scope.colour === '' ? '' : (colours.includes(scope.colour) ? scope.colour : '');
+  else if (spec.split && colours.includes(spec.split)) colour = spec.split;
+  else if (fallback.colour && colours.includes(fallback.colour)) colour = fallback.colour;
+  return { x, y, size, colour, axes, colours };
+}
+
+// The route filters each scatter entity source declares. They are declared here
+// rather than on the panel entry so the shared frame never treats P6/P5 roles
+// (which ride in the effective scope) as applied filters.
+export const SCATTER_APPLIES = {
+  'scatter-session': ['repo_id', 'session_repo', 'harness', 'session_model', 'origin', 'has_artifacts'],
+  'scatter-artifact': ['kind', 'plan', 'repo_id', 'harness', 'session_model', 'source', 'screen_verdict', 'scorer'],
+  'scatter-plan': ['repo_id', 'harness', 'session_model'],
+  'scatter-day': ['repo_id', 'harness', 'session_repo', 'session_model']
+};
+
+export function scatterApplies(panel = {}) {
+  return SCATTER_APPLIES[panel?.id] || [];
+}
+
+// Panel-local roles live in the effective scope after assembly; strip them
+// before the F check so they are never mistaken for shared filters.
+export function scatterFilterScope(scope = {}) {
+  const out = { ...scope };
+  for (const key of ['x', 'y', 'size', 'colour', 'captionKey', 'check', 'scorer']) delete out[key];
+  return out;
+}
+
+// A scatter caption is the literal G sentence for the exact default roles and
+// the P10 template for any alternate axis or size. Colour never changes it.
+export function scatterTemplate({ entity = 'entity', x = '', y = '', size = '' } = {}) {
+  return CAPTION_TEMPLATES.scatter({
+    entity, entityLabel: entity,
+    x, xLabel: scatterProseLabel(x),
+    y, yLabel: scatterProseLabel(y),
+    size, sizeLabel: size ? scatterProseLabel(size) : ''
+  });
+}
+
+// The P10 scatter table: Identity, X, Y, Size if selected, Colour if selected.
+export function scatterTableColumns({ x = '', y = '', size = '', colour = '' } = {}) {
+  const columns = [
+    { label: 'Identity' },
+    { label: `X (${scatterUnit(x) || 'count'})`, numeric: true },
+    { label: `Y (${scatterUnit(y) || 'count'})`, numeric: true }
+  ];
+  if (size) columns.push({ label: `Size (${scatterUnit(size) || 'count'})`, numeric: true });
+  if (colour) columns.push({ label: 'Colour' });
+  return columns;
+}
+
+export function formatScatterCell(value, field = '') {
+  if (value === null || value === undefined) return '—';
+  if (scatterUnit(field) === 'USD') return formatMoney(Number(value));
+  if (String(field).startsWith('score:')) return formatNumber(Number(value), { digits: 2 });
+  return formatNumber(Number(value), { digits: 0 });
+}
+
 // One request seam. Bounds come from the shared window parser; only the
 // published scatter mode, grain and fields are added, never an invented
 // measure, dim or window.
@@ -192,44 +377,73 @@ export function marginalModel(marginals, fields = []) {
       to: bin.hi === null || bin.hi === undefined ? null : Number(bin.hi ?? bin.to),
       n: Number(bin.n ?? bin.count ?? 0)
     }));
+    const missing = item.missing ?? item.missing_n ?? item.n_missing;
     return {
       field,
-      label: item.label || field,
-      unit: item.unit || '',
+      label: item.label || scatterLabel(field),
+      unit: item.unit || scatterUnit(field),
+      missing: missing === undefined || missing === null ? null : Number(missing),
       bins,
       total: bins.reduce((sum, bin) => sum + bin.n, 0)
     };
   });
 }
 
-function dimensionMeta(schema, field) {
-  const meta = measureMeta(schema, field);
-  return { label: meta.label && meta.label !== field ? meta.label : field, unit: meta.unit || '' };
+export function marginalTableColumns() {
+  return [
+    { label: 'Axis' },
+    { label: 'From', numeric: true },
+    { label: 'To', numeric: true },
+    { label: 'Count', numeric: true },
+    { label: 'Missing count', numeric: true }
+  ];
+}
+
+// X then Y, bin lower edge ascending. Missing count is an axis total, stated on
+// the first row only so it is never summed twice.
+export function marginalTableRows(model = []) {
+  const rows = [];
+  for (const marginal of model) {
+    marginal.bins.forEach((bin, index) => {
+      rows.push([
+        scatterLabel(marginal.field),
+        String(bin.from),
+        bin.to === null ? 'and above' : String(bin.to),
+        formatCount(bin.n),
+        index === 0 ? (marginal.missing === null ? '—' : formatCount(marginal.missing)) : '—'
+      ]);
+    });
+  }
+  return rows;
 }
 
 // Marginal strips are the whole population, not the sample. They reuse the
-// existing `<yk-ranges type="histogram">` element and offer a table each.
+// existing `<yk-ranges type="histogram">` element and add one shared table in
+// axis order (X then Y) with the fixed columns from the G contracts.
 export function renderMarginals(body = {}, fields = [], { doc = globalThis.document, schema = null } = {}) {
   const wrapper = doc.createElement('div');
   wrapper.className = 'scatter-marginals';
   const model = marginalModel(body.marginals, fields);
   if (!model.length) return wrapper;
+  const strips = doc.createElement('div');
+  strips.className = 'scatter-marginal-strips';
   for (const marginal of model) {
     const figure = doc.createElement('section');
     figure.className = 'scatter-marginal';
     figure.dataset.field = marginal.field;
-    const meta = dimensionMeta(schema, marginal.field);
+    figure.dataset.axis = marginal.field === fields[0] ? 'x' : marginal.field === fields[1] ? 'y' : 'size';
+    const meta = { label: marginal.label || scatterLabel(marginal.field), unit: marginal.unit || scatterUnit(marginal.field) };
     const heading = doc.createElement('h3');
-    heading.textContent = `${meta.label || marginal.label} — whole population`;
+    heading.textContent = `${meta.label} — whole population`;
     const chart = doc.createElement('yk-ranges');
     chart.setAttribute('type', 'histogram');
     chart.spec = {
       chart: 'ranges',
       type: 'histogram',
-      units: meta.unit || marginal.unit,
-      series: [{ key: 'count', label: 'Marks', unit: meta.unit || marginal.unit, kind: 'count' }],
+      units: meta.unit,
+      series: [{ key: 'count', label: 'Count', unit: meta.unit, kind: 'count' }],
       bins: marginal.bins.map(bin => ({ from: bin.from, to: bin.to })),
-      x: { label: meta.label || marginal.label, kind: 'number' },
+      x: { label: meta.label, kind: 'number' },
       sample: 'whole population'
     };
     chart.data = marginal.bins.map((bin, index) => ({
@@ -238,17 +452,14 @@ export function renderMarginals(body = {}, fields = [], { doc = globalThis.docum
       values: { count: bin.n },
       n: bin.n
     }));
-    figure.append(heading, chart, table(doc, {
-      caption: `${meta.label || marginal.label} (whole population)`,
-      columns: [{ label: 'From', numeric: true }, { label: 'To', numeric: true }, { label: 'Marks', numeric: true }],
-      rows: marginal.bins.map(bin => [
-        String(bin.from),
-        bin.to === null ? 'and above' : String(bin.to),
-        formatCount(bin.n)
-      ])
-    }));
-    wrapper.append(figure);
+    figure.append(heading, chart);
+    strips.append(figure);
   }
+  wrapper.append(strips, table(doc, {
+    caption: 'Marginal distributions (whole population)',
+    columns: marginalTableColumns(),
+    rows: marginalTableRows(model)
+  }));
   return wrapper;
 }
 
@@ -352,58 +563,50 @@ function select(doc, labelText, options, value, onChange) {
   return label;
 }
 
-// Numeric x, numeric y, optional colour, optional size and chart. Every list
-// comes from the schema; a change dispatches a composed `spec` event from the
-// panel host exactly like `renderChooser`.
-export function renderScatterChooser({ panelId, spec = {}, schema = null, panel = null, doc = globalThis.document, onSpec = null } = {}) {
+// P6: X axis, Y axis, Size (None then numeric fields) and Colour (None then
+// categorical lenses). Numeric-only X/Y, deterministic panel-list order, and a
+// change writes scope.x/y/size/colour and keeps measures by codec.
+export function renderScatterChooser({ panelId, spec = {}, schema = null, panel = null, doc = globalThis.document, onSpec = null, defaults = null } = {}) {
   const axes = scatterAxes(panel, schema);
   const colours = scatterColours(panel, schema);
-  const fields = scatterSpecFields(spec, schema);
+  const fields = resolveScatterFields({ spec, schema, panel, defaults });
   const grain = spec.grain || panel?.grain || '';
   const wrapper = doc.createElement('div');
   wrapper.className = 'p11-chooser';
   const unsupported = [...axes.unsupported, ...colours.unsupported];
-  const axisOptions = axes.axes.map(name => ({ value: name, label: measureMeta(schema, name).label }));
-  const x = axes.axes.includes(fields.x) ? fields.x : (axes.axes[0] || '');
-  const y = axes.axes.includes(fields.y) && fields.y !== x ? fields.y : (axes.axes.find(name => name !== x) || '');
-  const size = axes.axes.includes(fields.size) ? fields.size : '';
-  const colour = colours.colours.includes(fields.colour) ? fields.colour : '';
-
-  const nextSpec = {
-    grain,
-    measures: [x, y, size].filter(Boolean),
-    split: colour,
-    chart: 'scatter',
-    scope: { ...(spec.scope || {}), x, y, size, colour }
-  };
+  const axisOptions = fields.axes.map(name => ({ value: name, label: scatterLabel(name) }));
+  const sizeOptions = [{ value: '', label: 'None' }, ...axisOptions];
+  const colourOptions = [{ value: '', label: 'None' }, ...fields.colours.map(name => ({ value: name, label: scatterColourLabel(name) }))];
 
   const dispatch = patch => {
-    const merged = {
-      ...nextSpec,
-      ...patch,
-      scope: { ...nextSpec.scope, ...(patch.scope || {}) }
-    };
+    const scope = { ...(spec.scope || {}), ...(patch.scope || {}) };
+    const next = canonicalPanelSpec({
+      grain,
+      measures: [scope.x, scope.y, scope.size].filter(Boolean),
+      split: scope.colour || '',
+      chart: 'scatter',
+      scope
+    }) || { grain, measures: [], chart: 'scatter', scope };
     const host = doc.querySelector(`[data-panel="${panelId}"]`) || doc;
-    host.dispatchEvent(new CustomEvent('spec', { bubbles: true, composed: true, detail: { spec: merged } }));
-    if (typeof onSpec === 'function') onSpec(merged);
+    host.dispatchEvent(new CustomEvent('spec', { bubbles: true, composed: true, detail: { spec: next } }));
+    if (typeof onSpec === 'function') onSpec(next);
   };
 
+  const other = (value, current) => fields.axes.find(name => name !== value && name !== current) || '';
+
   wrapper.append(
-    select(doc, 'X measure', axisOptions, x, value => {
+    select(doc, 'X axis', axisOptions, fields.x, value => {
       const scope = { x: value };
-      if (value === y) scope.y = axes.axes.find(name => name !== value) || '';
+      if (value === fields.y) scope.y = other(value, fields.x);
       dispatch({ scope });
     }),
-    select(doc, 'Y measure', axisOptions, y, value => {
+    select(doc, 'Y axis', axisOptions, fields.y, value => {
       const scope = { y: value };
-      if (value === x) scope.x = axes.axes.find(name => name !== value) || '';
+      if (value === fields.x) scope.x = other(value, fields.y);
       dispatch({ scope });
     }),
-    select(doc, 'Colour', [{ value: '', label: '(none)' }, ...colours.colours.map(name => ({ value: name, label: name }))], colour,
-      value => dispatch({ split: value, scope: { colour: value } })),
-    select(doc, 'Size', [{ value: '', label: '(none)' }, ...axisOptions], size,
-      value => dispatch({ scope: { size: value } })),
-    select(doc, 'Chart', (panel?.charts || ['scatter']).map(name => ({ value: name, label: name })), 'scatter', () => {})
+    select(doc, 'Size', sizeOptions, fields.size, value => dispatch({ scope: { size: value } })),
+    select(doc, 'Colour', colourOptions, fields.colour, value => dispatch({ scope: { colour: value } }))
   );
 
   if (unsupported.length) {
@@ -418,5 +621,5 @@ export function renderScatterChooser({ panelId, spec = {}, schema = null, panel 
     }
     wrapper.append(list);
   }
-  return { element: wrapper, fields: { x, y, size, colour }, unsupported, dispatch };
+  return { element: wrapper, fields, unsupported, dispatch };
 }

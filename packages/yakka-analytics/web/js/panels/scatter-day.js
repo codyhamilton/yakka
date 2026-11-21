@@ -8,15 +8,28 @@
 
 import { cancelledState, emptyState, errorState, unsupportedState } from '../core/panel-state.js';
 import { formatMoney, formatNumber } from '../charts/formatters.js';
-import { measureMeta, whenPanelBody, whenPanelSlot } from './p10-shared.js';
-import { table } from './pulse-strips.js';
+import { filterRefusal, table } from './pulse-strips.js';
+import { registerCaption } from './captions.js';
+import { measureMeta, mountPanelViews, whenPanelBody, whenPanelSlot } from './p10-shared.js';
 import {
-  canonicalRowKey, countSelection, marginalModel, regionPredicate, renderMarginals,
-  renderScatterChooser, scatterAxes, scatterCaveat, scatterParams, scatterPopulationText,
-  scatterSpecFields, subtractRegion, unionRegion
+  canonicalRowKey, countSelection, formatScatterCell, marginalModel, regionPredicate,
+  renderMarginals, renderScatterChooser, resolveScatterFields, scatterAxes, scatterCaveat,
+  scatterApplies, scatterDefaults, scatterFilterScope, scatterLabel, scatterParams, scatterPopulationText, scatterSpecFields,
+  scatterTableColumns, scatterTemplate, scatterUnit, subtractRegion, unionRegion
 } from './scatter-shared.js';
 import { ensureScatterStyles } from './scatter-session.js';
 import { timeCohortSource } from '../core/selection-model.js';
+
+export const DAY_CAPTION = 'Each dot is a time bucket, with priced spend across and commits up; buckets without prices remain marked as incomplete.';
+
+registerCaption('scatter-day', ({ spec = {} } = {}) => {
+  const scope = spec?.scope || {};
+  const x = scope.x || 'cost_usd';
+  const y = scope.y || 'commits';
+  const size = scope.size !== undefined ? scope.size : '';
+  if (x === 'cost_usd' && y === 'commits' && !size) return DAY_CAPTION;
+  return scatterTemplate({ entity: 'time bucket', x, y, size });
+});
 
 export const TIME_MEASURES = [
   'cost_usd', 'model_calls', 'unpriced_calls', 'tokens_in', 'tokens_out', 'tokens_cache_read',
@@ -101,17 +114,6 @@ export function timeScatterParams({ scope = {}, spec = {}, grain = 'time', field
   return params;
 }
 
-function chosenAxes(axes, fields) {
-  const has = name => Boolean(name) && axes.includes(name);
-  const x = has(fields.x) ? fields.x : (axes.includes('cost_usd') ? 'cost_usd' : (axes[0] || ''));
-  const preferred = ['commits', 'model_calls', 'tokens_in', 'rejections'];
-  const y = has(fields.y) && fields.y !== x
-    ? fields.y
-    : (preferred.find(name => name !== x && axes.includes(name)) || axes.find(name => name !== x) || '');
-  const size = has(fields.size) && fields.size !== x && fields.size !== y ? fields.size : '';
-  return { x, y, size };
-}
-
 // A bucket point keeps the bucket identity and both measures. A null axis is
 // counted in the bucket population but not drawn; only a server-supplied zero
 // is plotted as zero. The partial flag comes from the response, or from the
@@ -171,9 +173,10 @@ export async function load(context = {}) {
   try {
     const schema = context.schema || (await transport.schema(tenant)).body;
     const panel = context.panel || SCATTER_DAY_PANEL;
+    const refusal = filterRefusal({ panel: { ...panel, applies: scatterApplies(panel) }, spec, scope: scatterFilterScope(scope), schema });
+    if (refusal) return refusal;
     const axes = scatterAxes(panel, schema);
-    const fields = scatterSpecFields(spec, schema);
-    const { x, y, size } = chosenAxes(axes.axes, fields);
+    const { x, y, size, colour } = resolveScatterFields({ spec, schema, panel });
     if (!x || !y) {
       return unsupportedState({
         grain: 'time',
@@ -195,6 +198,11 @@ export async function load(context = {}) {
       }
       return errorState({ message: body?.error || `The server returned ${response.status}.`, code: body?.code || String(response.status || '') });
     }
+    const post = filterRefusal({
+      panel: { ...panel, applies: scatterApplies(panel) }, spec, scope: scatterFilterScope(scope), schema,
+      ignoredFilters: Array.isArray(body?.ignored_filters) ? body.ignored_filters.map(String) : []
+    });
+    if (post) return post;
     const info = timeBucketInfo(body);
     const points = (Array.isArray(body.rows) ? body.rows : []).map(row => timePoint(row, sandbox, body));
     const drawn = points.filter(point => point.drawn);
@@ -206,10 +214,14 @@ export async function load(context = {}) {
     const caveat = scatterCaveat(sandbox, body);
     const populationText = scatterPopulationText(body);
     const source = timeCohortSource(body, names);
-    const partial = points.some(point => point.partial);
-    const xMeta = measureInfo(schema, x);
-    const yMeta = measureInfo(schema, y);
-    const sizeMeta = size ? measureInfo(schema, size) : null;
+    // A bucket with no priced cost is incomplete even when the server did not
+    // flag it partial: it must stay marked, never become a zero.
+    const priceMissing = point => point.values?.cost_usd === null || point.values?.cost_usd === undefined;
+    const incompletePoint = point => point.partial || !point.drawn || priceMissing(point);
+    const incomplete = points.some(incompletePoint);
+    const xMeta = { label: scatterLabel(x), unit: scatterUnit(x), kind: measureMeta(schema, x).kind };
+    const yMeta = { label: scatterLabel(y), unit: scatterUnit(y), kind: measureMeta(schema, y).kind };
+    const sizeMeta = size ? { label: scatterLabel(size), unit: scatterUnit(size) } : null;
     const entities = {};
     for (const point of points) {
       entities[point.key] = { grain: 'time', key: point.key, destination: '/ledger', label: timeLabel(point.interval ? { t: point.interval.start } : null) };
@@ -234,25 +246,36 @@ export async function load(context = {}) {
       empty: 'no eligible bucket has both axes'
     };
     const marginals = marginalModel(body.marginals, names);
-    const columns = [
-      { label: `Bucket (${info.bucket || 'unit'})` }, { label: 'tz' },
-      { label: `${xMeta.label} (${xMeta.unit || 'count'})`, numeric: true },
-      { label: `${yMeta.label} (${yMeta.unit || 'count'})`, numeric: true },
-      ...(size ? [{ label: `${sizeMeta.label} (${sizeMeta.unit || 'count'})`, numeric: true }] : []),
-      { label: 'Partial' }
-    ];
-    const tableRows = points.map(point => [
-      timeLabel(point.interval ? { t: point.interval.start } : null),
-      body.window?.tz || scope.tz || 'UTC',
-      formatCell(point.x, xMeta),
-      formatCell(point.y, yMeta),
-      ...(size ? [formatCell(point.size, sizeMeta)] : []),
-      point.partial ? 'partial' : '—'
+    const ordered = [...points].sort((a, b) => String(a.key).localeCompare(String(b.key)));
+    const identityText = point => {
+      const label = timeLabel(point.interval ? { t: point.interval.start } : null);
+      return incompletePoint(point) ? `${label} · incomplete` : label;
+    };
+    const tableRows = ordered.map(point => [
+      identityText(point),
+      formatScatterCell(point.x, x),
+      formatScatterCell(point.y, y),
+      ...(size ? [formatScatterCell(point.size, size)] : [])
     ]);
     let painted = null;
     whenPanelBody(panel.id, doc, host => {
       const wrapper = doc.createElement('div');
       wrapper.className = 'p11-scatter';
+      const node = doc.createElement('yk-chart');
+      node.className = 'p11-scatter-chart';
+      node.spec = chartSpec;
+      node.data = ordered.filter(point => point.drawn);
+      const tableNode = table(doc, {
+        caption: `Time buckets by ${xMeta.label} and ${yMeta.label}`,
+        columns: scatterTableColumns({ x, y, size, colour: '' }),
+        rows: tableRows
+      });
+      const views = mountPanelViews({ panelId: panel.id, chart: node, table: tableNode, doc, label: 'Scatter view' });
+      views.element.removeAttribute('data-panel');
+      const details = doc.createElement('details');
+      details.className = 'p10-details';
+      const summary = doc.createElement('summary');
+      summary.textContent = 'Data details';
       const basis = doc.createElement('p');
       basis.className = 'p11-scatter-basis';
       const grid = `${info.bucket || 'bucket'} grid, step ${info.bucket_step}${info.coarsened ? ', coarsened by the server' : ''}`;
@@ -260,20 +283,17 @@ export async function load(context = {}) {
       const caveats = doc.createElement('p');
       caveats.className = 'p11-scatter-caveat';
       caveats.textContent = caveat.text;
-      const node = doc.createElement('yk-chart');
-      node.className = 'p11-scatter-chart';
-      node.spec = chartSpec;
-      node.data = drawn;
-      wrapper.append(basis, caveats, node);
-      if (partial) {
+      details.append(summary, basis, caveats);
+      if (incomplete) {
         const note = doc.createElement('p');
         note.className = 'p11-scatter-note';
-        note.textContent = 'A partial bucket is covered only at the source-window edge; its measures are not a full interval.';
-        wrapper.append(note);
+        note.textContent = 'A partial or price-missing bucket stays marked as incomplete; it is not zero-filled. A partial bucket is covered only at the source-window edge and its measures are not a full interval.';
+        details.append(note);
       }
+      wrapper.append(views.element);
       const strip = renderMarginals(body, names, { doc, schema });
       if (strip.childNodes.length) wrapper.append(strip);
-      wrapper.append(table(doc, { caption: `${x} against ${y} (time buckets)`, columns, rows: tableRows }));
+      wrapper.append(details);
       host.replaceChildren(wrapper);
       painted = node;
 
@@ -328,13 +348,13 @@ export async function load(context = {}) {
     });
     await painted?.whenSettled?.();
     whenPanelSlot(panel.id, 'chooser', doc, slot => {
-      const rendered = renderScatterChooser({ panelId: panel.id, panel, spec: sandbox, schema, doc });
+      const rendered = renderScatterChooser({ panelId: panel.id, panel, spec: sandbox, schema, doc, defaults: scatterDefaults(panel) });
       slot.replaceChildren(rendered.element);
     });
     return {
       state: 'ready', grain: 'time', axes: [x, y, size].filter(Boolean),
       bucket: info.bucket, bucket_step: info.bucket_step, coarsened: info.coarsened,
-      window: info.window, partial, population, source,
+      window: info.window, partial: incomplete, population, source,
       sampled: body.sampled === true,
       basis: `scatter ${x} × ${y} on the shared ${info.bucket || 'bucket'} grid`,
       populationText, marginalCount: marginals.length, drawn: drawn.length,
