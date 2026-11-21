@@ -7,15 +7,60 @@ import '../charts/yk-bars.js';
 import { cancelledState, emptyState, errorState, unsupportedState } from '../core/panel-state.js';
 import { canonicalPanelSpec } from '../core/view-spec.js';
 import { formatCount, formatMoney } from '../charts/formatters.js';
-import { currentWindow, previousWindow, table } from './pulse-strips.js';
+import { currentWindow, filterRefusal, previousWindow, table } from './pulse-strips.js';
+import { CAPTION_TEMPLATES, registerCaption } from './captions.js';
 import { canonicalRowKey } from './scatter-shared.js';
 import { planDestination, planIdentity } from './scatter-plan.js';
 import {
   cohortParams, comparisonPlan, comparisonSummary, ensureP10Styles, honestJoinGuard, measureMeta,
-  populationLine, rankRows, requestParams, schemaGrain, whenPanelBody, whenPanelSlot, renderChooser, windowParams
+  mountPanelViews, offeredMeasures, populationLine, rankRows, requestParams, schemaGrain, whenPanelBody, whenPanelSlot,
+  renderChooser, windowParams
 } from './p10-shared.js';
+import { dimensionLabel, renderChooserFields } from './trend-columns.js';
 
 const PERIOD_UNSUPPORTED = 'Choose a finite period to compare periods.';
+
+export const rankTableColumns = (unit = 'USD') => ['Group', `Value (${unit})`];
+export const slopeTableColumns = (unit = 'USD') => ['Group', `Previous (${unit})`, `Current (${unit})`, `Change (${unit})`];
+export const planRankTableColumns = (unit = 'USD') => ['Group', `Value (${unit})`];
+
+export const RANK_CAPTION = 'Each bar shows a model’s total priced spend; models are ordered from most to least dollars spent.';
+export const TOOLS_RANK_CAPTION = 'Each bar counts hook events for a tool; tools are ordered from most to least events.';
+export const PLAN_RANK_CAPTION = 'Each bar shows spend from sessions associated with a plan; shared sessions can contribute to more than one plan, so do not add the bars.';
+export const SLOPE_CAPTION = 'Each segment joins a model’s previous and selected-period spend; an upward segment means that model cost more in the selected period.';
+
+function rankCaptionKey(spec = {}) {
+  return spec?.scope?.captionKey || '';
+}
+
+function ignoredFrom(body) {
+  return Array.isArray(body?.ignored_filters) ? body.ignored_filters.map(String) : [];
+}
+
+function isToolsRank(spec = {}) {
+  return rankCaptionKey(spec) === 'G-toolsrank' ||
+    ((spec.measures || [])[0] === 'hook_events' && (spec.split || '') === 'tool' && (spec.chart || 'rank') === 'rank');
+}
+
+function isSlope(spec = {}, scope = {}) {
+  return rankCaptionKey(spec) === 'G-slope' || spec.chart === 'slope' || scope.cmp === 'period';
+}
+
+registerCaption('rank', ({ spec = {}, schema = null, scope = null } = {}) => {
+  const key = rankCaptionKey(spec);
+  const grain = spec.grain || spec.scope?.grain || '';
+  const measure = (spec.measures || [])[0] || 'cost_usd';
+  const split = spec.split || (isToolsRank(spec) ? 'tool' : 'model');
+  if (key === 'G-planrank' || grain === 'plan') return PLAN_RANK_CAPTION;
+  if (key === 'G-toolsrank' || isToolsRank(spec)) return TOOLS_RANK_CAPTION;
+  if (key === 'G-slope' || isSlope(spec, scope || {})) return SLOPE_CAPTION;
+  if (key === 'G-rank' || (measure === 'cost_usd' && split === 'model' && (spec.chart || 'rank') === 'rank')) return RANK_CAPTION;
+  const meta = measureMeta(schema, measure);
+  if ((spec.chart || 'rank') === 'slope') {
+    return CAPTION_TEMPLATES.slope({ measure, group: split, unit: meta.unit || '' });
+  }
+  return CAPTION_TEMPLATES['rank/bars']({ measure, group: split, unit: meta.unit || '' });
+});
 
 export const RANK_MEASURES = [
   'cost_usd', 'model_calls', 'tokens_in', 'tokens_out', 'tokens_cache_read', 'tokens_cache_write',
@@ -360,33 +405,18 @@ async function loadPlanRank(context = {}) {
         note.textContent = `All ${mapped.rows.length} plan rows have a null ${meta.label}; no bar is drawn and no $0 is shown.`;
         wrapper.append(note);
       }
-      const columns = [{ label: 'Repo' }, { label: 'Plan' }];
-      if (measure !== 'associated_cost_usd') columns.push({ label: meta.label, numeric: true });
-      columns.push(
-        { label: 'Associated cost', numeric: true }, { label: 'Shared sessions', numeric: true },
-        { label: 'Unpriced calls', numeric: true }, { label: 'Sessions', numeric: true },
-        { label: 'Executions' }, { label: 'Last seen' }
-      );
-      const tableRows = mapped.rows.map(row => {
-        const cells = [row.identity.repo_id || '—', row.identity.plan || '—'];
-        if (measure !== 'associated_cost_usd') {
-          cells.push(row.nullValue ? '—' : formatCount(row.values[measure], { unit: meta.unit || '' }));
-        }
-        const count = value => value === null || value === undefined ? '—' : formatCount(value);
-        cells.push(
-          planRankCostText(row.values.associated_cost_usd, { lowerBound: row.lowerBound, allUnpriced: row.allUnpriced }),
-          count(row.values.shared_sessions), count(row.values.unpriced_calls), count(row.values.sessions),
-          row.values.executions, planLastSeen(row.values.last_ts)
-        );
-        return cells;
-      });
-      wrapper.append(table(doc, { caption: `${meta.label} per plan`, columns, rows: tableRows }));
-      host.replaceChildren(wrapper);
+      const columns = planRankTableColumns(meta.unit || 'USD').map((label, index) => ({ label, numeric: index === 1 }));
+      const tableRows = mapped.rows.map(row => [
+        row.label,
+        row.nullValue ? '—' : planRankCostText(row.values.associated_cost_usd, { lowerBound: row.lowerBound, allUnpriced: row.allUnpriced })
+      ]);
+      const tableNode = table(doc, { caption: `${meta.label} per plan`, columns, rows: tableRows });
+      const views = mountPanelViews({ panelId: panel.id, chart: wrapper, table: tableNode, doc, defaultView: 'chart', label: 'Plan associated spend view' });
+      views.element.removeAttribute('data-panel');
+      host.replaceChildren(views.element);
     });
     await painted?.whenSettled?.();
-    whenPanelSlot(panel.id, 'chooser', doc, slot => {
-      slot.replaceChildren(renderPlanChooser({ panelId: panel.id, measure, offered: chosen.offered, schema, spec, doc }));
-    });
+    whenPanelSlot(panel.id, 'chooser', doc, slot => slot.replaceChildren());
     return {
       state: 'ready', grain: 'plan', measure, limit,
       rows: mapped.rows.length, drawn: mapped.drawn.length, nulls: mapped.nulls.length,
@@ -412,22 +442,39 @@ export async function load(context = {}) {
   try {
     const schema = context.schema || (await transport.schema(tenant)).body;
     const panel = context.panel || RANK_PANEL;
+    const key = rankCaptionKey(spec);
+    const toolsRank = key === 'G-toolsrank' || isToolsRank(spec);
     const offered = (schema?.grains?.time?.measures || []);
-    const measure = (spec.measures || [])[0] && (!offered.length || offered.includes(spec.measures[0])) ? spec.measures[0] : 'cost_usd';
+    const requested = (spec.measures || [])[0] || '';
+    if (toolsRank && offered.length && !offered.includes('hook_events')) {
+      return unsupportedState({ missing: 'hook_events', reason: 'not published for the time grain', source: 'server /schema' });
+    }
+    const measure = toolsRank ? 'hook_events' : (requested && (!offered.length || offered.includes(requested)) ? requested : 'cost_usd');
     if (offered.length && !offered.includes(measure)) {
       return unsupportedState({ missing: measure, reason: 'not published for the time grain', source: 'server /schema' });
     }
     const rankSplits = ['model', 'harness', 'session_model', 'session_repo', 'repo_id', 'tool', 'tool_kind', 'kind', 'plan'];
     const dims = measureMeta(schema, measure).dims;
     const validSplits = dims.length ? dims : rankSplits;
-    if (spec.split && dims.length && !validSplits.includes(spec.split)) {
-      return unsupportedState({ missing: `${measure} by ${spec.split}`, reason: 'not a published dimension for this measure', source: 'server /schema', nearest: validSplits.find(name => rankSplits.includes(name)) || null });
+    const requestedSplit = toolsRank ? 'tool' : (spec.split || '');
+    if (requestedSplit && dims.length && !validSplits.includes(requestedSplit)) {
+      const nearest = toolsRank ? 'tool_kind' : (validSplits.find(name => rankSplits.includes(name)) || null);
+      if (!(toolsRank && requestedSplit === 'tool' && validSplits.includes('tool_kind'))) {
+        return unsupportedState({ missing: `${measure} by ${requestedSplit}`, reason: 'not a published dimension for this measure', source: 'server /schema', nearest });
+      }
     }
-    const split = spec.split && validSplits.includes(spec.split)
-      ? spec.split
-      : (validSplits.find(name => rankSplits.includes(name)) || 'model');
+    const split = toolsRank
+      ? (validSplits.includes('tool') ? 'tool' : 'tool_kind')
+      : (requestedSplit && validSplits.includes(requestedSplit)
+        ? requestedSplit
+        : (validSplits.find(name => rankSplits.includes(name)) || 'model'));
     const guard = honestJoinGuard(measure, [split]);
     if (guard) return unsupportedState({ missing: guard.missing, reason: guard.reason, source: 'contract 17.3', nearest: guard.try });
+    const requestedChart = String(spec.chart || '');
+    if (requestedChart === 'slope' && !compare && !cohortCompare) {
+      return unsupportedState({ missing: 'slope comparison', reason: PERIOD_UNSUPPORTED, source: 'scope' });
+    }
+    const chart = toolsRank ? 'rank' : (compare || cohortCompare) ? 'slope' : 'rank';
     if (compare && !currentWindow(scope)) return unsupportedState({ missing: 'period comparison', reason: PERIOD_UNSUPPORTED, source: 'scope' });
     const topMax = Number(schema?.budgets?.top_max) || 0;
     const extra = topMax ? { top: String(Math.min(100, topMax)) } : null;
@@ -485,9 +532,12 @@ export async function load(context = {}) {
       whenPanelBody(panel.id, doc, host => host.replaceChildren());
       return emptyState([{ kind: 'scope', label: `no ${measure} groups in window ${scope.win || 'all'}`, clear: null }]);
     }
+    let painted = null;
     whenPanelBody(panel.id, doc, host => {
       const wrapper = doc.createElement('div');
       wrapper.className = 'p10-rank';
+      const chartHost = doc.createElement('div');
+      chartHost.className = 'p10-rank-charts';
       const basis = doc.createElement('p');
       basis.className = 'p10-basis';
       basis.textContent = cohortCompare
@@ -504,8 +554,7 @@ export async function load(context = {}) {
           node.className = 'p10-rank-chart';
           node.dataset.split = item.group;
           node.spec = {
-            chart: 'bars',
-            type: 'slope',
+            chart: 'bars', type: 'slope',
             title: `${meta.label} by ${split} · ${item.group} (${plan.aLabel} against ${plan.bLabel})`,
             timeBasis: 'both cohorts in the scope window',
             units: meta.unit,
@@ -515,7 +564,8 @@ export async function load(context = {}) {
           };
           node.data = item.rows;
           section.append(node);
-          wrapper.append(section);
+          chartHost.append(section);
+          painted = node;
         }
       } else {
         const node = doc.createElement('yk-bars');
@@ -531,34 +581,75 @@ export async function load(context = {}) {
           ...(compare ? { deltaRamp: true } : {})
         };
         node.data = rows;
-        wrapper.append(node);
+        chartHost.append(node);
+        painted = node;
       }
-      const columns = charts
-        ? [{ label: 'Group' }, { label: plan.aLabel, numeric: true }, { label: plan.bLabel, numeric: true }, { label: 'Change', numeric: true }]
-        : compare
-          ? [{ label: 'Group' }, { label: 'Previous period', numeric: true }, { label: 'Current period', numeric: true }, { label: 'Change', numeric: true }]
-          : [{ label: 'Group' }, { label: meta.label, numeric: true }];
-      const tableRows = charts
-        ? charts.map(item => {
+      let columns;
+      let tableRows;
+      if (charts) {
+        columns = [{ label: 'Group' }, { label: plan.aLabel, numeric: true }, { label: plan.bLabel, numeric: true }, { label: 'Change', numeric: true }];
+        tableRows = charts.map(item => {
           const row = item.rows[0];
           return [item.group, String(row.values.a ?? '—'), String(row.values.b ?? '—'), String(Number(row.values.b) - Number(row.values.a))];
-        })
-        : compare
-          ? rows.map(row => [row.label, String(row.values.previous ?? '—'), String(row.values.current ?? '—'), String(Number(row.values.current) - Number(row.values.previous))])
-          : rows.map(row => [row.label, String(row.values[measure] ?? '—')]);
+        });
+      } else if (compare) {
+        const unit = meta.unit || 'USD';
+        columns = slopeTableColumns(unit).map((label, index) => ({ label, numeric: index > 0 }));
+        tableRows = [...rows]
+          .sort((a, b) => (b.values.current ?? -Infinity) - (a.values.current ?? -Infinity) || String(a.label).localeCompare(String(b.label)))
+          .map(row => [
+            row.label,
+            String(row.values.previous ?? '—'),
+            String(row.values.current ?? '—'),
+            row.values.current === undefined || row.values.previous === undefined ? '—' : String(Number(row.values.current) - Number(row.values.previous))
+          ]);
+      } else {
+        const unit = meta.unit || (measure === 'hook_events' ? 'events' : 'USD');
+        columns = rankTableColumns(unit).map((label, index) => ({ label, numeric: index === 1 }));
+        tableRows = [...rows]
+          .sort((a, b) => (b.values[measure] ?? -Infinity) - (a.values[measure] ?? -Infinity) || String(a.label).localeCompare(String(b.label)))
+          .map(row => [row.label, row.values[measure] === undefined || row.values[measure] === null ? '—' : String(row.values[measure])]);
+      }
       const note = doc.createElement('p');
       note.className = 'p10-note';
       note.textContent = cohortCompare
         ? 'Both cohorts are listed per group with their sample sizes; the change is shown beside them, never as a lone delta.'
         : compare
           ? 'Both periods are listed; the change is shown beside them, never as a lone delta. Up is the committed positive diverging token and down the negative one.'
-          : 'Top groups are bounded by the published top budget; (other) folds the rest.';
-      wrapper.append(basis, note, table(doc, { caption: `${measure} by ${split}`, columns, rows: tableRows }));
+          : toolsRank
+            ? 'Tools are ranked by hook-event count; no cost measure is joined.'
+            : 'Top groups are bounded by the published top budget; (other) folds the rest.';
+      const tableNode = table(doc, { caption: `${measure} by ${split}`, columns, rows: tableRows });
+      const views = mountPanelViews({ panelId: panel.id, chart: chartHost, table: tableNode, doc, defaultView: 'chart', label: 'Rank view' });
+      views.element.removeAttribute('data-panel');
+      wrapper.append(basis, views.element, note);
       host.replaceChildren(wrapper);
     });
+    await painted?.whenSettled?.();
+    const post = filterRefusal({ panel, spec, scope, schema, ignoredFilters: ignoredFrom(current.body) });
+    if (post) return post;
     whenPanelSlot(panel.id, 'chooser', doc, slot => {
-      const rendered = renderChooser({ panelId: panel.id, panel, spec: { ...spec, measures: [measure], split, chart: compare || cohortCompare ? 'slope' : 'ranked' }, schema, doc });
-      slot.replaceChildren(rendered.element);
+      if (toolsRank) { slot.replaceChildren(); return; }
+      const fields = [
+        {
+          label: 'Measure', value: measure,
+          options: offeredMeasures(panel, schema).map(name => ({ value: name, label: measureMeta(schema, name).label })),
+          patch: value => ({ measures: [value] })
+        },
+        {
+          label: 'Group by', value: split,
+          options: [{ value: '', label: 'No grouping' }, ...validSplits.map(name => ({ value: name, label: dimensionLabel(name) }))],
+          patch: value => ({ split: value })
+        }
+      ];
+      if (key !== 'G-slope' && !compare && !cohortCompare) {
+        fields.push({
+          label: 'Chart', value: chart,
+          options: [{ value: 'rank', label: 'Rank' }, { value: 'slope', label: 'Slope' }],
+          patch: value => ({ chart: value })
+        });
+      }
+      slot.replaceChildren(renderChooserFields({ panelId: panel.id, spec: { ...spec, measures: [measure], split, chart }, doc, fields }));
     });
     return {
       state: 'ready', measure, split, compare, cohortCompare,
@@ -581,6 +672,7 @@ export const RANK_PANEL = {
   measures: RANK_MEASURES,
   lenses: ['model', 'harness', 'session_model', 'session_repo', 'repo_id', 'tool', 'tool_kind', 'kind', 'plan'],
   charts: ['rank', 'slope'],
+  applies: ['repo_id', 'harness', 'kind', 'plan', 'model', 'tool', 'tool_kind', 'session_model', 'session_repo', 'source'],
   requires: [],
   caveats: 'Compare is a two-series slope with the committed diverging ramp; more than two periods or no previous period is unsupported, never an invented baseline.',
   measureBasis: 'the scope window at bucket=none; compare uses the equal length immediately before',

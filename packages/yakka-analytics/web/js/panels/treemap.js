@@ -9,11 +9,43 @@
 
 import '../charts/yk-treemap.js';
 import { cancelledState, emptyState, errorState, unsupportedState } from '../core/panel-state.js';
-import { table } from './pulse-strips.js';
+import { filterRefusal, table } from './pulse-strips.js';
 import {
-  ensureP10Styles, honestJoinGuard, measureMeta, offeredMeasures, offeredSplit, populationLine,
+  ensureP10Styles, honestJoinGuard, measureMeta, mountPanelViews, offeredMeasures, offeredSplit, populationLine,
   requestParams, whenPanelBody, whenPanelSlot
 } from './p10-shared.js';
+import { CAPTION_TEMPLATES, registerCaption } from './captions.js';
+import { dimensionLabel, renderChooserFields } from './trend-columns.js';
+
+export const treemapTableColumns = (unit = 'USD') => ['Parent', 'Child', `Value (${unit})`];
+
+export const COSTMAP_CAPTION = 'Each rectangle shows priced spend for a model within a harness; larger rectangles mean more dollars spent.';
+export const TOOLSMAP_CAPTION = 'Each rectangle counts hook events for a tool within a harness; larger rectangles mean more events.';
+export const TOOLSMAP_CATEGORY_CAPTION = 'Each rectangle counts hook events for a tool category within a harness; larger rectangles mean more events.';
+
+function treemapKey(spec = {}) {
+  return spec?.scope?.captionKey || '';
+}
+
+function isToolsMap(spec = {}) {
+  return treemapKey(spec) === 'G-toolsmap' || (spec.measures || [])[0] === 'hook_events';
+}
+
+registerCaption('treemap', ({ spec = {}, schema = null, result = null } = {}) => {
+  const key = treemapKey(spec);
+  const measure = (spec.measures || [])[0] || (isToolsMap(spec) ? 'hook_events' : 'cost_usd');
+  const child = result?.child || spec.split || (isToolsMap(spec) ? 'tool' : 'model');
+  if (key === 'G-costmap' || (measure === 'cost_usd' && child === 'model')) return COSTMAP_CAPTION;
+  if (key === 'G-toolsmap' || isToolsMap(spec)) {
+    return child === 'tool_kind' ? TOOLSMAP_CATEGORY_CAPTION : TOOLSMAP_CAPTION;
+  }
+  return CAPTION_TEMPLATES.treemap({
+    measure,
+    parent: spec?.scope?.parent || 'harness',
+    child,
+    unit: measureMeta(schema, measure).unit || ''
+  });
+});
 import { canonicalPanelSpec } from '../core/view-spec.js';
 import { formatCount, formatMoney } from '../charts/formatters.js';
 
@@ -176,17 +208,32 @@ export async function load(context = {}) {
   try {
     const schema = context.schema || (await transport.schema(tenant)).body;
     const panel = context.panel || TREEMAP_PANEL;
+    const key = treemapKey(spec);
+    const tools = isToolsMap(spec);
     const measures = offeredMeasures(panel, schema);
-    const measure = (spec.measures || [])[0] && measures.includes(spec.measures[0]) ? spec.measures[0] : 'cost_usd';
-    if (!measures.includes(measure)) {
-      return unsupportedState({ missing: measure, reason: 'not published for the time grain', source: 'server /schema' });
+    if (tools && !measures.includes('hook_events')) {
+      return unsupportedState({ missing: 'hook_events', reason: 'not published for the time grain', source: 'server /schema' });
     }
-    const { parent, child: requestedChild } = treemapDimsFromSpec(spec);
+    const requestedMeasure = (spec.measures || [])[0] || '';
+    const measure = tools
+      ? 'hook_events'
+      : (requestedMeasure && measures.includes(requestedMeasure) ? requestedMeasure : (measures.includes('cost_usd') ? 'cost_usd' : (measures[0] || '')));
+    if (!measure || !measures.includes(measure)) {
+      return unsupportedState({ missing: measure || 'a published measure', reason: 'not published for the time grain', source: 'server /schema' });
+    }
+    const filterScope = { ...scope };
+    delete filterScope.parent;
+    delete filterScope.captionKey;
+    const refusal = filterRefusal({ panel, spec, scope: filterScope, schema });
+    if (refusal) return refusal;
+    const parent = 'harness';
+    const { child: requestedChild } = treemapDimsFromSpec(spec);
     const dims = treemapDims(panel, measure, schema);
     // Fall back to the next published child rather than requesting an
     // unpublished dim; the basis text labels the fallback.
-    const child = !dims.includes(requestedChild) && requestedChild === 'tool' && dims.includes('tool_kind')
-      ? 'tool_kind' : requestedChild;
+    const wantedChild = tools ? 'tool' : (requestedChild || 'model');
+    const child = !dims.includes(wantedChild) && wantedChild === 'tool' && dims.includes('tool_kind')
+      ? 'tool_kind' : wantedChild;
     const guard = costJoinGuard(measure, [parent, child]);
     if (guard) return unsupportedState({ missing: guard.missing, reason: guard.reason, source: 'contract 17.3', nearest: guard.try });
     for (const dim of [parent, child]) {
@@ -229,6 +276,7 @@ export async function load(context = {}) {
     }
     const honesty = costHonesty({ summary, measure });
     const omitted = costOmitted(body);
+    let painted = null;
     whenPanelBody(panel.id, doc, host => {
       const wrapper = doc.createElement('div');
       wrapper.className = 'p10-cost p10-treemap';
@@ -238,8 +286,7 @@ export async function load(context = {}) {
       const node = doc.createElement('yk-treemap');
       node.className = 'p10-cost-chart';
       node.spec = {
-        chart: 'treemap',
-        type: 'treemap',
+        chart: 'treemap', type: 'treemap',
         title: `${meta.label} by ${parent} then ${child}`,
         units: meta.unit,
         series: [{ key: measure, label: meta.label, unit: meta.unit, kind: meta.kind }],
@@ -247,6 +294,7 @@ export async function load(context = {}) {
         empty: 'no positive values in the current window'
       };
       node.data = data;
+      painted = node;
       const note = doc.createElement('p');
       note.className = 'p10-note p10-pricing';
       note.dataset.state = honesty?.state || 'measured';
@@ -254,15 +302,37 @@ export async function load(context = {}) {
         pricedNote(summary, measure),
         mapped.twoLevel ? '' : `The server returned only the ${parent} dimension; child cells mirror the parent totals.`,
         omitted,
+        child === 'tool_kind' && tools ? 'The schema publishes no tool lens; child cells use the published tool category.' : '',
         summary ? '' : measure === 'cost_usd' ? 'The server did not report a cost summary; the priced total cannot be called complete.' : ''
       ].filter(Boolean).join(' ');
-      const columns = [{ label: 'Parent' }, { label: 'Child' }, { label: meta.label, numeric: true }];
-      const rows = data.map(row => [row.parentLabel, row.label, String(row.value)]);
-      wrapper.append(basis, node, note, table(doc, { caption: `${measure} by ${parent} then ${child}`, columns, rows }));
+      const columns = treemapTableColumns(meta.unit || 'USD').map((label, index) => ({ label, numeric: index === 2 }));
+      const rows = [...data]
+        .sort((a, b) => b.value - a.value || String(a.parent).localeCompare(String(b.parent)) || String(a.label).localeCompare(String(b.label)))
+        .map(row => [row.parentLabel, row.label, String(row.value)]);
+      const tableNode = table(doc, { caption: `${measure} by ${parent} then ${child}`, columns, rows });
+      const views = mountPanelViews({ panelId: panel.id, chart: node, table: tableNode, doc, defaultView: 'chart', label: 'Treemap view' });
+      views.element.removeAttribute('data-panel');
+      wrapper.append(basis, views.element, note);
       host.replaceChildren(wrapper);
     });
+    await painted?.whenSettled?.();
+    const post = filterRefusal({ panel, spec, scope: filterScope, schema, ignoredFilters: Array.isArray(body?.ignored_filters) ? body.ignored_filters.map(String) : [] });
+    if (post) return post;
     whenPanelSlot(panel.id, 'chooser', doc, slot => {
-      slot.replaceChildren(renderTreemapChooser({ panelId: panel.id, panel, spec: { ...spec, measures: [measure], split: child }, schema, measure, parent, child, doc }));
+      if (tools) { slot.replaceChildren(); return; }
+      const fields = [
+        {
+          label: 'Measure', value: measure,
+          options: measures.map(name => ({ value: name, label: measureMeta(schema, name).label })),
+          patch: value => ({ measures: [value] })
+        },
+        {
+          label: 'Group by', value: child,
+          options: dims.map(name => ({ value: name, label: dimensionLabel(name) })),
+          patch: value => ({ split: value })
+        }
+      ];
+      slot.replaceChildren(renderChooserFields({ panelId: panel.id, spec: { ...spec, measures: [measure], split: child, scope: { ...(spec.scope || {}), parent } }, doc, fields }));
     });
     return {
       state: 'ready', measure, parent, child,
@@ -270,7 +340,9 @@ export async function load(context = {}) {
       pricing: honesty?.state || null,
       twoLevel: mapped.twoLevel,
       omitted,
-      tableRows: data.map(row => [row.parentLabel, row.label, String(row.value)]),
+      tableRows: [...data]
+        .sort((a, b) => b.value - a.value || String(a.parent).localeCompare(String(b.parent)) || String(a.label).localeCompare(String(b.label)))
+        .map(row => [row.parentLabel, row.label, String(row.value)]),
       basis: `${measure} by ${parent} then ${child}, bucket=none`
     };
   } catch (error) {

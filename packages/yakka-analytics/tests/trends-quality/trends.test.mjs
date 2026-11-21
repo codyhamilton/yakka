@@ -69,19 +69,19 @@ test('query rows stay sparse and never invent a bucket the server did not return
 });
 
 test('the trend chart shape follows the chooser and its table keeps the same buckets', () => {
-  assert.deepEqual(chartShape('cumulative'), { chart: 'cumulative', type: 'columns', mode: 'cumulative' });
-  assert.deepEqual(chartShape('share'), { chart: 'share', type: 'columns', mode: 'share' });
   assert.deepEqual(chartShape('lines'), { chart: 'lines', type: 'line', mode: 'absolute' });
+  assert.deepEqual(chartShape('area'), { chart: 'area', type: 'area', mode: 'absolute' });
+  assert.deepEqual(chartShape('columns'), { chart: 'columns', type: 'columns', mode: 'absolute' });
   const model = buildTrendChart({
     body: { rows: [{ t: '2026-09-01T00:00:00Z', k: [], v: 2 }, { t: '2026-09-02T00:00:00Z', k: [], v: 4 }] },
-    measure: 'cost_usd', split: '', schema, chart: 'cumulative'
+    measure: 'cost_usd', split: '', schema, chart: 'lines'
   });
-  assert.equal(model.chart, 'cumulative');
+  assert.equal(model.chart, 'lines');
   assert.equal(model.spec.stacked, false);
   assert.equal(model.spec.series[0].unit, 'USD');
   assert.deepEqual(trendTableRows(model), [
-    ['2026-09-01T00:00:00.000Z', '2'],
-    ['2026-09-02T00:00:00.000Z', '4']
+    ['2026-09-01T00:00:00.000Z', 'Cost', '2'],
+    ['2026-09-02T00:00:00.000Z', 'Cost', '4']
   ]);
 });
 
@@ -175,7 +175,7 @@ test('trends settles five panels, offers only schema measures, writes a panel sp
     });
     assert.equal(columns.measures.includes('gpu_hours'), false);
     assert.ok(columns.measures.includes('commits') && columns.measures.includes('cost_usd'));
-    assert.deepEqual(columns.charts, ['columns', 'lines', 'cumulative', 'share']);
+    assert.deepEqual(columns.charts, ['columns', 'lines', 'area']);
     assert.ok(columns.rows > 0, 'the chart has rows');
     assert.match(columns.basis, /bucket/);
 

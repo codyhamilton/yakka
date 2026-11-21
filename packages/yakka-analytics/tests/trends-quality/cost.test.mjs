@@ -188,7 +188,8 @@ test('cost settles six panels, matches the fixture and names unsupported cost jo
 
     const phase = p10Phase({ to: new Date().toISOString() });
     const expectedTreemap = p10Query({ measure: 'cost_usd', dims: ['harness', 'model'], bucket: 'none', to: new Date().toISOString() })
-      .rows.map(row => [String(row.k[0]), String(row.k[1]), String(row.v)]);
+      .rows.map(row => [String(row.k[0]), String(row.k[1]), String(row.v)])
+      .sort((a, b) => Number(b[2]) - Number(a[2]) || a[0].localeCompare(b[0]) || a[1].localeCompare(b[1]));
     const expectedRank = p10Query({ measure: 'cost_usd', dims: ['model'], bucket: 'none', to: new Date().toISOString() })
       .rows.map(row => [String(row.k[0]), String(row.v)]);
     assert.deepEqual(await rowsOf(page, 'treemap'), expectedTreemap);
@@ -268,14 +269,13 @@ test('cost settles six panels, matches the fixture and names unsupported cost jo
     const requests = harness.api.state.requests.filter(item => /distribution|query|summary/.test(item.path));
     assert.ok(requests.length > 0);
 
-    // Unsupported cost joins are named with the alternative, never faked.
+    // G-costmap fixes the parent to harness; a stale parent override is not used.
     const repoSpec = { grain: 'time', measures: ['cost_usd'], split: 'model', chart: 'treemap', scope: { parent: 'session_repo' } };
     await page.goto(`${harness.origin}/b/cost?win=30d&p3=${encodeURIComponent(JSON.stringify(repoSpec))}`);
     await page.waitForFunction(() => document.querySelector('[data-panel="treemap"]')?.dataset.idle === 'true');
     const repoText = await page.evaluate(() => document.querySelector('[data-panel="treemap"]').textContent);
-    assert.equal(await page.evaluate(() => document.querySelector('[data-panel="treemap"]').dataset.state), 'unsupported');
-    assert.match(repoText, /session_repo is not served on \/query for cost/);
-    assert.match(repoText, /\/distribution\?dim=session_repo/);
+    assert.equal(await page.evaluate(() => document.querySelector('[data-panel="treemap"]').dataset.state), 'ready');
+    assert.match(repoText, /over harness → model/);
 
     const toolSpec = { grain: 'time', measures: ['cost_usd'], split: 'tool', chart: 'treemap', scope: { parent: 'harness' } };
     await page.goto(`${harness.origin}/b/cost?win=30d&p3=${encodeURIComponent(JSON.stringify(toolSpec))}`);

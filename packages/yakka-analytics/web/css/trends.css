@@ -61,10 +61,36 @@
 .p10-trend-chart,
 .p10-dist-chart,
 .p10-rhythm-matrix,
-.p10-rank-chart {
+.p10-rank-chart,
+.p10-multiple-chart,
+.p10-cost-chart {
   display: block;
   min-width: 0;
+  min-height: 160px;
   width: 100%;
+}
+
+.p10-rank-charts,
+.p10-rhythm {
+  display: grid;
+  gap: 0.75rem;
+  min-width: 0;
+}
+
+.p10-cumulative-refusal {
+  border-left-color: var(--yk-chart-status-warning, var(--yk-chart-border));
+}
+
+.p10-choose-columns {
+  align-self: flex-start;
+  min-height: 30px;
+  padding: 0 10px;
+  border: 1px solid var(--yk-chart-border);
+  border-radius: 2px;
+  background: var(--yk-chart-surface);
+  color: var(--yk-chart-text);
+  font: inherit;
+  cursor: pointer;
 }
 
 .p10-multiples {
