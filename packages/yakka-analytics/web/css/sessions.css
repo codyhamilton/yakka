@@ -53,3 +53,170 @@
 @media (max-width: 900px) {
   .session-detail-facts dl, .session-totals dl { grid-template-columns: 1fr; }
 }
+
+/* S-session-detail (Plan 30 U9): identity plus the two measure strips, the
+   G-sessionlanes panel and the full-width Session records table. */
+.session-detail-section {
+  width: 100%;
+  margin-top: 1.1rem;
+}
+
+.session-detail-section h2 {
+  font-size: 1rem;
+  margin: 0 0 0.35rem;
+}
+
+.session-detail-status {
+  margin: 0.2rem 0;
+  color: var(--yk-muted);
+  font-size: 0.92rem;
+}
+
+.session-detail-section[data-state="error"] .session-detail-status {
+  color: var(--yk-danger);
+}
+
+.session-detail-section[data-state="unsupported"] .session-detail-status {
+  font-style: italic;
+}
+
+.session-measure-strips {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 0.75rem;
+  width: 100%;
+  margin-top: 1rem;
+}
+
+.session-measure-strip {
+  border: 1px solid var(--yk-border);
+  border-radius: 2px;
+  padding: 8px 10px;
+}
+
+.session-measure-strip h3 {
+  font-size: 0.95rem;
+  margin: 0 0 0.35rem;
+}
+
+.session-strip-note {
+  margin: 0 0 0.35rem;
+  color: var(--yk-muted);
+  font-size: 0.88rem;
+}
+
+.session-strip-body dl {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 0.2rem 0.75rem;
+  margin: 0;
+}
+
+.session-strip-body dt {
+  color: var(--yk-muted);
+}
+
+.session-strip-body dd {
+  margin: 0;
+}
+
+.session-measure-whole {
+  border-left: 3px solid var(--yk-warning);
+  background: var(--yk-warning-bg);
+}
+
+.session-lanes-caption,
+.session-lanes-plotted,
+.session-lanes-basis {
+  margin: 0.25rem 0;
+  font-size: 0.92rem;
+}
+
+.session-lanes-caption {
+  color: var(--yk-text);
+}
+
+.session-lanes-plotted,
+.session-lanes-basis {
+  color: var(--yk-muted);
+}
+
+.session-records-wrap {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  border: 1px solid var(--yk-border);
+  border-radius: 2px;
+}
+
+.session-records {
+  width: 100%;
+  min-width: 1416px;
+  table-layout: fixed;
+  border-collapse: collapse;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.session-records caption,
+.session-lanes-table caption {
+  caption-side: top;
+  text-align: left;
+  color: var(--yk-muted);
+  padding: 6px 8px;
+}
+
+.session-records th,
+.session-records td,
+.session-lanes-table th,
+.session-lanes-table td {
+  height: 30px;
+  max-height: 30px;
+  padding: 0 8px;
+  border-bottom: 1px solid var(--yk-border);
+  text-align: left;
+  vertical-align: middle;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.session-records thead th,
+.session-lanes-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--yk-surface);
+}
+
+.session-records td.numeric {
+  text-align: left;
+  font-variant-numeric: tabular-nums;
+}
+
+.session-records-state-cell {
+  text-align: left;
+}
+
+.session-records-state-text {
+  font-weight: 600;
+}
+
+.session-records-more,
+.session-records-retry {
+  margin-top: 0.5rem;
+  font: inherit;
+  min-height: 28px;
+  padding: 2px 8px;
+  border: 1px solid var(--yk-border);
+  border-radius: 2px;
+  background: transparent;
+  color: var(--yk-text);
+  cursor: pointer;
+}
+
+.session-lanes-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}

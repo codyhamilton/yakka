@@ -273,3 +273,38 @@
     min-height: 44px;
   }
 }
+
+/* S-plan-detail (Plan 30 U9): full-width regions in contract order, fixed
+   tables with a 1416px internal scroll, 30px left-aligned rows and ellipsised
+   identities whose titles expose the full value. */
+.plans-detail-section {
+  width: 100%;
+}
+
+.plans-detail-table {
+  width: 100%;
+  min-width: 1416px;
+  table-layout: fixed;
+}
+
+.plans-detail-table th,
+.plans-detail-table td {
+  height: 30px;
+  max-height: 30px;
+  padding: 0 8px;
+  vertical-align: middle;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.plans-detail-table td.numeric,
+.plans-detail-table th.numeric {
+  text-align: left;
+  font-variant-numeric: tabular-nums;
+}
+
+.plans-detail-table td.plans-detail-id {
+  font-family: ui-monospace, monospace;
+}

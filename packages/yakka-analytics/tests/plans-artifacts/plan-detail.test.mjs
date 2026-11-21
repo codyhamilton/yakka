@@ -154,12 +154,12 @@ async function settleDetail(page) {
   });
 }
 
-test('a fixed plan detail shows all collections, the timeline and stored design phases for an encoded repo', { skip: environment.ok ? false : SKIP_REASON }, async t => {
+test('a fixed plan detail shows the exact regions, tables and G-planline for an encoded repo', { skip: environment.ok ? false : SKIP_REASON }, async t => {
   const harness = await startWorkspaceHarness();
   harness.api.set({ p12: true });
   const browser = await launchBrowser(environment);
   t.after(async () => { await browser.close(); await harness.close(); });
-  const page = await browser.newPage({ viewport: { width: 1280, height: 2800 } });
+  const page = await browser.newPage({ viewport: { width: 1440, height: 2800 } });
   const diagnostics = await watchPage(page);
 
   await page.goto(`${harness.origin}/plans/acme%2Fwidgets/20-analytics-reset?win=all`);
@@ -167,27 +167,41 @@ test('a fixed plan detail shows all collections, the timeline and stored design 
   await page.waitForFunction(() => document.querySelector('[data-panel="plan-timeline"]')?.dataset.idle === 'true');
 
   assert.match(await page.locator('.plans-detail-identity').innerText(), /acme\/widgets \/ 20-analytics-reset/);
+  const order = await page.$$eval('.plans-detail-section', nodes => nodes.map(node => node.dataset.section));
+  assert.deepEqual(order, ['summary', 'planline', 'artifacts', 'executions', 'sessions', 'events']);
   assert.equal(await page.locator('[data-section="summary"]').getAttribute('data-state'), 'ready');
   assert.match(await page.locator('[data-section="summary"]').innerText(), /non-additive and overlapping/);
   assert.match(await page.locator('[data-section="summary"]').innerText(), /process completion, not success/);
+  assert.match(await page.locator('[data-section="planline"] [data-panel="plan-timeline"]').innerText(),
+    /Each marker shows a recorded plan event at its event time; rows separate plans and do not imply continuous work between markers\./);
 
+  const headers = selector => page.$$eval(`${selector} thead th`, cells => cells.map(cell => cell.textContent));
   const artifacts = page.locator('[data-section="artifacts"]');
   assert.equal(await artifacts.getAttribute('data-state'), 'ready');
   assert.equal(await artifacts.locator('tbody tr').count(), 4);
-  const artifactText = await artifacts.innerText();
-  assert.match(artifactText, /design/);
-  assert.match(artifactText, /brief/);
-  assert.match(artifactText, /latest version/i);
+  assert.deepEqual(await headers('[data-section="artifacts"]'),
+    ['Kind', 'Path', 'Latest version', 'Score/scorer/band', 'Content', 'Screen verdict', 'Writing session cost USD', 'Open']);
+  assert.match(await artifacts.innerText(), /design/);
+  assert.match(await artifacts.innerText(), /brief/);
+  assert.match(await artifacts.innerText(), /latest version/i);
+  assert.ok(await artifacts.locator('td[data-key="path"]').first().getAttribute('title'), 'the path cell carries its full identity as a title');
 
   const executions = page.locator('[data-section="executions"]');
   assert.equal(await executions.getAttribute('data-state'), 'ready');
+  assert.deepEqual(await headers('[data-section="executions"]'),
+    ['Shape', 'Brief path', 'Time', 'Session cost USD', 'Brief/report scores', 'Session']);
   assert.match(await executions.innerText(), /complete/);
   assert.match(await executions.innerText(), /unreported/);
   assert.match(await executions.innerText(), /started/);
-  assert.match(await executions.innerText(), /Execution completion, not success/);
+  const executionOpen = await page.locator('[data-section="executions"] .plans-execution-session').first().getAttribute('href');
+  assert.match(executionOpen, /^\/sessions\/conv-detail-[ab]\?/, 'Open targets the exact session');
+  const openParams = new URL(executionOpen, 'http://localhost').searchParams;
+  assert.equal(openParams.get('win'), 'all', 'Open preserves the committed window');
 
   const sessions = page.locator('[data-section="sessions"]');
   assert.equal(await sessions.getAttribute('data-state'), 'ready');
+  assert.deepEqual(await headers('[data-section="sessions"]'),
+    ['Conversation', 'Last observed', 'Cost USD', 'Unpriced calls']);
   assert.match(await sessions.innerText(), /conv-detail-a/);
   assert.match(await sessions.innerText(), /conv-detail-b/);
   assert.match(await sessions.innerText(), /session detail unavailable/);
@@ -195,34 +209,17 @@ test('a fixed plan detail shows all collections, the timeline and stored design 
 
   const events = page.locator('[data-section="events"]');
   assert.equal(await events.getAttribute('data-state'), 'ready');
+  assert.deepEqual(await headers('[data-section="events"]'),
+    ['Time', 'Type', 'Event', 'Path', 'Conversation']);
   assert.match(await events.innerText(), /not only plan files/);
   assert.match(await events.innerText(), /commit|hook/);
+  const heights = await page.$$eval('.plans-detail-table tbody tr', rows => rows.map(row => Math.round(row.getBoundingClientRect().height)));
+  assert.ok(heights.length > 0);
+  assert.ok(heights.every(height => Math.abs(height - 30) <= 1), `table rows are 30±1px: ${JSON.stringify(heights)}`);
 
-  const design = page.locator('[data-section="design"]');
-  assert.equal(await design.getAttribute('data-state'), 'ready');
-  const phaseText = await design.locator('.plans-phases').innerText();
-  assert.match(phaseText, /Phase 3/);
-  assert.match(phaseText, /Phase 7/);
-  assert.match(phaseText, /Phase 12/);
-  assert.match(phaseText, /Outcome:/);
-  assert.match(phaseText, /complete/, 'the prose word complete is rendered as text');
-  assert.doesNotMatch(phaseText, /Fenced decoy/);
-  assert.equal(await design.locator('.plans-phase[data-phase="99"]').count(), 0);
-  assert.match(await design.locator('.plans-phase[data-phase="7"] .plans-phase-briefs').innerText(), /no brief path observed/);
-  assert.match(await design.locator('.plans-unpaired-briefs').innerText(), /99-01-orphan\.md/);
-  const completionMarkers = await page.evaluate(() => {
-    const node = document.querySelector('.plans-phase[data-phase="7"]');
-    if (!node) return 1;
-    return [node, ...node.querySelectorAll('*')].filter(element =>
-      /complete|completion/i.test(element.className || '') ||
-      element.hasAttribute('data-complete') ||
-      /complete|completion/i.test(element.getAttribute('data-state') || '')
-    ).length;
-  });
-  assert.equal(completionMarkers, 0, 'a "complete" outcome never becomes a completion marker or state');
-
-  assert.equal(await page.locator('[data-section="design"] .plans-design-open').count(), 1);
-  assert.equal((await page.locator('.plans-design-open').getAttribute('href')).includes('hash='), false);
+  const back = await page.locator('.plans-detail-back').count();
+  assert.equal(back, 0, 'a served plan shows no absent back link');
+  assert.equal(await page.locator('[data-section="design"]').count(), 0, 'no out-of-contract design section is rendered');
 
   const requests = harness.api.state.requests;
   const entityRequests = requests.filter(item => /\/analytics\/(entity|entities)$/.test(item.path));
@@ -230,6 +227,8 @@ test('a fixed plan detail shows all collections, the timeline and stored design 
   assert.ok(entityRequests.every(item => !item.search.includes('cohort=')), 'the fixed plan page never sends cohort=');
   const sessionResolve = requests.filter(item => /\/entities$/.test(item.path) && /grain=session/.test(item.search));
   assert.ok(sessionResolve.some(item => new URLSearchParams(item.search).getAll('id').length >= 1));
+  const artifactsRequest = requests.find(item => /\/entities$/.test(item.path) && /grain=artifact/.test(item.search));
+  assert.ok(artifactsRequest, 'artifacts come from /entities?grain=artifact');
 
   await diagnostics.assertClean();
   const stats = await (await fetch(`${harness.origin}/__test/stats`)).json();
@@ -268,29 +267,30 @@ test('each Load more appends its own section without resetting another', { skip:
   assert.ok(stats.maxInFlight <= 4, `max in flight ${stats.maxInFlight}`);
 });
 
-test('an unavailable design shows its exact reason and empty collections are named', { skip: environment.ok ? false : SKIP_REASON }, async t => {
+test('an active kind names the exact F refusal on regions that cannot apply it', { skip: environment.ok ? false : SKIP_REASON }, async t => {
   const harness = await startWorkspaceHarness();
   harness.api.set({ p12: true });
   const browser = await launchBrowser(environment);
   t.after(async () => { await browser.close(); await harness.close(); });
-  const page = await browser.newPage({ viewport: { width: 1280, height: 2200 } });
+  const page = await browser.newPage({ viewport: { width: 1440, height: 2200 } });
   const diagnostics = await watchPage(page);
 
-  await page.goto(`${harness.origin}/plans/repo-a/21-empty?win=all`);
+  await page.goto(`${harness.origin}/plans/acme%2Fwidgets/20-analytics-reset?win=all&kind=brief`);
   await settleDetail(page);
-  const design = page.locator('[data-section="design"]');
-  assert.equal(await design.getAttribute('data-state'), 'ready');
-  assert.match(await design.innerText(), /content unavailable: not_stored/);
-  assert.equal(await page.locator('[data-section="executions"]').getAttribute('data-state'), 'empty');
-  assert.equal(await page.locator('[data-section="sessions"]').getAttribute('data-state'), 'empty');
-  assert.equal(await page.locator('[data-section="events"]').getAttribute('data-state'), 'empty');
-  assert.match(await page.locator('[data-section="executions"]').innerText(), /No executions/);
+  const refusal = 'This chart cannot apply document kind. Change the filters to view it.';
+  assert.equal(await page.locator('[data-section="artifacts"]').getAttribute('data-state'), 'ready', 'kind applies to artifacts');
+  assert.equal(await page.locator('[data-section="executions"]').getAttribute('data-state'), 'unsupported');
+  assert.match(await page.locator('[data-section="executions"]').innerText(), /document kind/);
+  assert.equal(await page.locator('[data-section="sessions"]').getAttribute('data-state'), 'unsupported');
+  assert.match(await page.locator('[data-section="sessions"]').innerText(), new RegExp(refusal.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  assert.equal(await page.locator('[data-section="events"]').getAttribute('data-state'), 'unsupported');
+  assert.match(await page.locator('[data-section="events"]').innerText(), new RegExp(refusal.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  assert.equal(await page.locator('[data-section="sessions"] tbody tr').count(), 0, 'no unfiltered session rows are shown');
+  assert.equal(await page.locator('[data-section="events"] tbody tr').count(), 0, 'no unfiltered event rows are shown');
+  const artifactRequests = harness.api.state.requests.filter(item => /grain=artifact/.test(item.search));
+  assert.ok(artifactRequests.some(item => new URLSearchParams(item.search).getAll('kind').includes('brief')), 'the applied kind rides the artifact read');
 
-  // The design content route answers a deliberate 404 for the unavailable
-  // version; Chromium records that failed resource as a console error.
-  assert.ok(diagnostics.consoleErrors.every(text => /Failed to load resource.*(404|413|500)/.test(text)), `unexpected console errors: ${JSON.stringify(diagnostics.consoleErrors)}`);
-  assert.deepEqual(diagnostics.pageErrors, []);
-  assert.deepEqual(await diagnostics.cspViolations(), []);
+  await diagnostics.assertClean();
   const stats = await (await fetch(`${harness.origin}/__test/stats`)).json();
   assert.ok(stats.maxInFlight <= 4, `max in flight ${stats.maxInFlight}`);
 });
@@ -308,7 +308,7 @@ test('an absent plan is named, links back to /plans and never falls back to anot
   const summary = page.locator('[data-section="summary"]');
   assert.equal(await summary.getAttribute('data-state'), 'empty');
   assert.match(await summary.innerText(), /No served plan \(repo-a, no-such-plan\)/);
-  assert.equal(await page.locator('.plans-detail-back').getAttribute('href'), '/plans');
+  assert.match(await page.locator('.plans-detail-back').getAttribute('href'), /^\/plans(\?.*)?$/);
   assert.doesNotMatch(await page.locator('main').innerText(), /acme\/widgets/);
   assert.equal(await page.locator('[data-section="artifacts"] tbody tr').count(), 0);
 

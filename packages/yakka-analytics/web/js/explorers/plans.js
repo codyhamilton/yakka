@@ -15,12 +15,13 @@ import { createSelectionTray } from '../core/selection-tray.js';
 import { createInspector } from '../core/inspector.js';
 import { decodeCohort, encodeCohort } from '../core/selection-model.js';
 import { emptyCauses, emptyState, errorState, unsupportedState } from '../core/panel-state.js';
+import { filterLabel, refusalMessage } from '../core/filter-applicability.js';
 import { formatMoney, formatNumber, formatPercent } from '../charts/formatters.js';
 import { resolveWindow, sanitizeApiCode } from '../panels/ledger-table.js';
 import { parseRoute } from '../core/router.js';
 import { planDestination, planIdentity, planOverlap } from '../panels/scatter-plan.js';
 import { canonicalRowKey } from '../panels/scatter-shared.js';
-import { artifactKind, bandFor, createBaselineCache, fetchArtifactText } from './artifact-content.js';
+import { artifactKind, bandFor, createBaselineCache } from './artifact-content.js';
 import { PLAN_TIMELINE_PANEL } from '../panels/plan-timeline.js';
 
 export const title = 'Plans';
@@ -549,6 +550,116 @@ export function parsePlanDetailPath(pathname = '') {
   } catch { return null; }
 }
 
+// S-plan-detail region order: identity/summary, G-planline, then the four
+// collections. Each collection keeps its own source and paging.
+export const PLAN_DETAIL_REGIONS = ['summary', 'planline', 'artifacts', 'executions', 'sessions', 'events'];
+
+// Exact table columns. `identity`/path columns are 240px and time columns are
+// 150px; the remaining columns split the rest equally under table-layout.
+export const PLAN_DETAIL_COLUMNS = {
+  artifacts: [
+    { key: 'kind', label: 'Kind' },
+    { key: 'path', label: 'Path', width: 240, identity: true },
+    { key: 'versions', label: 'Latest version' },
+    { key: 'scores', label: 'Score/scorer/band' },
+    { key: 'content', label: 'Content' },
+    { key: 'screen_verdict', label: 'Screen verdict' },
+    { key: 'writing_cost', label: 'Writing session cost USD' },
+    { key: 'open', label: 'Open' }
+  ],
+  executions: [
+    { key: 'shape', label: 'Shape' },
+    { key: 'brief_path', label: 'Brief path', width: 240, identity: true },
+    { key: 'time', label: 'Time', width: 150, time: true },
+    { key: 'session_cost', label: 'Session cost USD' },
+    { key: 'scores', label: 'Brief/report scores' },
+    { key: 'session', label: 'Session' }
+  ],
+  sessions: [
+    { key: 'conversation', label: 'Conversation', width: 240, identity: true },
+    { key: 'last_observed', label: 'Last observed', width: 150, time: true },
+    { key: 'cost', label: 'Cost USD' },
+    { key: 'unpriced', label: 'Unpriced calls' }
+  ],
+  events: [
+    { key: 'time', label: 'Time', width: 150, time: true },
+    { key: 'type', label: 'Type' },
+    { key: 'event', label: 'Event' },
+    { key: 'path', label: 'Path', width: 240, identity: true },
+    { key: 'conversation', label: 'Conversation' }
+  ]
+};
+
+// Which shared filter each entity region can apply. Exact collections accept
+// identity and window only, so any other active filter refuses that region.
+const REGION_FILTERS = {
+  artifacts: new Set(['kind', 'harness', 'session_model']),
+  executions: new Set(['harness', 'session_model']),
+  sessions: new Set(),
+  events: new Set()
+};
+
+const SCOPE_KEYS = new Set(['win', 'from', 'to', 'tz', 'all', 'cohorts', 'sel', 'pick', 'hide', 'cmp', 'exclude']);
+
+function activeFilterNames(state = {}) {
+  const names = new Set();
+  for (const key of Object.keys(state.filters || {})) {
+    if (!SCOPE_KEYS.has(key) && (state.filters[key] || []).length) names.add(key);
+  }
+  for (const [key, values] of Object.entries(state.unknown || {})) {
+    if (key === 'sort' || SCOPE_KEYS.has(key)) continue;
+    if ((values || []).length) names.add(key);
+  }
+  for (const raw of state.exclude || []) {
+    const at = String(raw).indexOf(':');
+    if (at > 0) names.add(String(raw).slice(0, at));
+  }
+  return names;
+}
+
+function cohortActive(state = {}) {
+  return Object.values(state.cohorts || {}).some(text => Boolean(text));
+}
+
+// A region shows the one F refusal sentence when an active scope cannot be
+// applied faithfully; it never shows unfiltered rows.
+export function planRegionRefusal(region, identity = {}, state = {}) {
+  const labels = new Set();
+  if (cohortActive(state)) labels.add('cohort');
+  const repos = state.filters?.repo_id || [];
+  if (repos.some(value => String(value) !== String(identity.repo_id || ''))) labels.add(filterLabel('repo_id'));
+  const applies = REGION_FILTERS[region] || new Set();
+  for (const name of activeFilterNames(state)) {
+    if (name === 'repo_id') continue;
+    if (applies.has(name)) continue;
+    labels.add(filterLabel(name));
+  }
+  const sorted = [...labels].sort();
+  if (!sorted.length) return null;
+  return { labels: sorted, message: refusalMessage(sorted) };
+}
+
+function appendRegionFilters(params, state = {}, region = '') {
+  const applies = REGION_FILTERS[region] || new Set();
+  for (const key of applies) {
+    for (const value of state.filters?.[key] || []) params.append(key, value);
+  }
+  for (const raw of state.exclude || []) {
+    const at = String(raw).indexOf(':');
+    const lens = at === -1 ? '' : String(raw).slice(0, at);
+    if (applies.has(lens)) params.append('exclude', raw);
+  }
+  return params;
+}
+
+export function planBackDestination(search = '') {
+  return `/plans${String(search || '')}`;
+}
+
+export function planSessionDestination(id = '', search = '') {
+  return `/sessions/${encodeURIComponent(String(id || ''))}${String(search || '')}`;
+}
+
 function windowParams(state = {}, now = Date.now(), window = null) {
   const params = new URLSearchParams();
   const resolved = resolveWindow(state, now, window);
@@ -586,6 +697,7 @@ export function planArtifactsParams(identity = {}, { state = {}, window = null, 
   const params = windowParams(state, Date.now(), window);
   params.set('grain', 'artifact');
   for (const [key, value] of identityParams(identity)) params.set(key, value);
+  appendRegionFilters(params, state, 'artifacts');
   return withPaging(params, { limit, cursor });
 }
 
@@ -593,6 +705,7 @@ export function planExecutionsParams(identity = {}, { state = {}, window = null,
   const params = windowParams(state, Date.now(), window);
   params.set('grain', 'execution');
   for (const [key, value] of identityParams(identity)) params.set(key, value);
+  appendRegionFilters(params, state, 'executions');
   return withPaging(params, { limit, cursor });
 }
 
@@ -749,10 +862,15 @@ export function detailMoney(amount, lower = false, nullReason = '') {
 
 // The artifact entity row does not expose a version content_hash; the reader is
 // linked at its latest version, labelled as such. No hash is invented.
-export function artifactLatestDestination(identity = {}, path = '') {
+export function artifactLatestDestination(identity = {}, path = '', search = '') {
   const params = new URLSearchParams();
   if (identity.repo_id) params.set('repo_id', identity.repo_id);
   if (path) params.set('path', path);
+  const scope = new URLSearchParams(String(search || '').replace(/^\?/, ''));
+  for (const [key, value] of scope) {
+    if (key === 'repo_id' || key === 'path' || key === 'hash') continue;
+    params.append(key, value);
+  }
   const query = params.toString();
   return `/artifact${query ? `?${query}` : ''}`;
 }
@@ -809,23 +927,42 @@ function detailTable(doc, { caption, columns, rows }) {
   const table = doc.createElement('table');
   table.className = 'plans-detail-table';
   const cap = el(doc, 'caption', '', caption);
-  table.append(cap);
+  const colgroup = doc.createElement('colgroup');
+  for (const column of columns) {
+    const col = doc.createElement('col');
+    if (column.width) col.setAttribute('width', String(column.width));
+    colgroup.append(col);
+  }
   const thead = doc.createElement('thead');
   const head = doc.createElement('tr');
-  for (const label of columns) { const th = el(doc, 'th', '', label); th.scope = 'col'; head.append(th); }
+  for (const column of columns) {
+    const th = el(doc, 'th', column.time ? 'numeric' : '', column.label);
+    th.scope = 'col';
+    if (column.width) th.setAttribute('width', String(column.width));
+    head.append(th);
+  }
   thead.append(head);
   const tbody = doc.createElement('tbody');
   for (const cells of rows) {
     const tr = doc.createElement('tr');
-    for (const cell of cells) {
+    cells.forEach((cell, index) => {
+      const column = columns[index] || {};
       const td = doc.createElement('td');
-      if (cell && typeof cell === 'object' && cell.node) td.append(cell.node);
-      else td.textContent = cell === null || cell === undefined || cell === '' ? '—' : String(cell);
+      td.className = column.time ? 'numeric' : (column.identity ? 'plans-detail-id' : '');
+      td.dataset.key = column.key || '';
+      if (cell && typeof cell === 'object' && cell.node) {
+        td.append(cell.node);
+        if (cell.title) td.title = cell.title;
+      } else {
+        const text = cell === null || cell === undefined || cell === '' ? '—' : String(cell);
+        td.textContent = text;
+        if (text !== '—' && String(text).length > 18) td.title = text;
+      }
       tr.append(td);
-    }
+    });
     tbody.append(tr);
   }
-  table.append(thead, tbody);
+  table.append(cap, colgroup, thead, tbody);
   return table;
 }
 
@@ -851,24 +988,18 @@ function detailTimestamp(value) {
 async function renderDetail(root, doc, { signal, identity, tenant = '', readContext = null } = {}) {
   ensurePlansStyles(doc);
   root.replaceChildren();
-  const state = readScope(decodeUrlState(globalThis.location?.search || ''));
+  const search = globalThis.location?.search || '';
+  const state = readScope(decodeUrlState(search));
   root.append(el(doc, 'h1', '', 'Plan'));
   root.append(el(doc, 'p', 'plans-detail-identity', `${identity.repo_id} / ${identity.plan}`));
-  const notApplied = planDetailNotApplied(state);
-  if (notApplied.length) {
-    const note = el(doc, 'p', 'plans-detail-not-applied', `Not applied here: ${notApplied.join(', ')}. This fixed plan page sends only the shared window; it never sends cohort= to /entity.`);
-    note.setAttribute('role', 'note');
-    root.append(note);
-  }
 
   const header = detailSection(doc, 'summary', 'Plan measures');
+  const timeline = detailSection(doc, 'planline', 'Plan activity over time');
   const artifacts = detailSection(doc, 'artifacts', 'Artifacts by kind');
   const executions = detailSection(doc, 'executions', 'Executions');
-  const sessions = detailSection(doc, 'sessions', 'Sessions');
-  const events = detailSection(doc, 'events', 'Events');
-  const timeline = detailSection(doc, 'timeline', 'Version and execution timeline');
-  const design = detailSection(doc, 'design', 'Stored design context');
-  for (const section of [header, artifacts, executions, sessions, events, timeline, design]) root.append(section.section);
+  const sessions = detailSection(doc, 'sessions', 'Associated sessions');
+  const events = detailSection(doc, 'events', 'Plan events');
+  for (const section of [header, timeline, artifacts, executions, sessions, events]) root.append(section.section);
 
   const controller = new AbortController();
   if (signal) {
@@ -887,7 +1018,6 @@ async function renderDetail(root, doc, { signal, identity, tenant = '', readCont
   const executionsState = { rows: [], next: '', population: null };
   const sessionsState = { rows: [], next: '', population: null, resolved: new Map() };
   const eventsState = { rows: [], next: '', population: null };
-  let designState = { row: null, text: null, failure: '' };
   let planRow = null;
 
   const get = (route, params, stateKey) => fetchJson(route, params, { tenant, signal: controller.signal, stateKey });
@@ -953,7 +1083,7 @@ async function renderDetail(root, doc, { signal, identity, tenant = '', readCont
         ? 'content_unavailable'
         : `${formatNumber(Number(row.m.content_bytes))} bytes`;
       const open = doc.createElement('a');
-      open.href = artifactLatestDestination(identity, path);
+      open.href = artifactLatestDestination(identity, path, search);
       open.className = 'plans-artifact-open';
       open.textContent = 'Open (latest version)';
       return [
@@ -970,7 +1100,7 @@ async function renderDetail(root, doc, { signal, identity, tenant = '', readCont
     artifacts.state('ready', '');
     artifacts.body.append(detailTable(doc, {
       caption: 'Artifacts by kind. Scores, scorers and bands are latest-version only; the reader opens the latest version, no hash is invented.',
-      columns: ['Kind', 'Path', 'Latest version', 'Score · scorer · band', 'Content', 'Screen verdict', 'Writing session cost', 'Open'],
+      columns: PLAN_DETAIL_COLUMNS.artifacts,
       rows
     }));
     artifacts.body.append(el(doc, 'p', 'plans-detail-population', detailPopulationText(artifactsState.population, artifactsState.rows)));
@@ -986,7 +1116,7 @@ async function renderDetail(root, doc, { signal, identity, tenant = '', readCont
         ...scores.report.map(item => `report ${item.check} ${item.score === null ? '—' : Number(item.score).toFixed(2)}`)].join('; ') || 'no scores';
       const conv = String(row.id?.conversation_id || '');
       const link = doc.createElement('a');
-      link.href = `/sessions/${encodeURIComponent(conv)}`;
+      link.href = planSessionDestination(conv, search);
       link.className = 'plans-execution-session';
       link.textContent = conv || '—';
       return [
@@ -1001,7 +1131,7 @@ async function renderDetail(root, doc, { signal, identity, tenant = '', readCont
     executions.state('ready', '');
     executions.body.append(detailTable(doc, {
       caption: 'Execution completion, not success.',
-      columns: ['Shape', 'Brief path', 'Time', 'Session cost', 'Brief / report scores', 'Session'],
+      columns: PLAN_DETAIL_COLUMNS.executions,
       rows
     }));
     executions.body.append(el(doc, 'p', 'plans-detail-population', detailPopulationText(executionsState.population, executionsState.rows)));
@@ -1015,7 +1145,7 @@ async function renderDetail(root, doc, { signal, identity, tenant = '', readCont
       const conv = String(row.conversation_id || row.conversationId || '');
       const resolved = sessionsState.resolved.get(conv) || null;
       const link = doc.createElement('a');
-      link.href = `/sessions/${encodeURIComponent(conv)}`;
+      link.href = planSessionDestination(conv, search);
       link.className = 'plans-session-link';
       link.textContent = conv || '—';
       return [
@@ -1031,7 +1161,7 @@ async function renderDetail(root, doc, { signal, identity, tenant = '', readCont
     sessions.body.append(note);
     sessions.body.append(detailTable(doc, {
       caption: 'Sessions with a lifetime artifact under this plan; last observed ts from the sessions collection.',
-      columns: ['Conversation', 'Last observed', 'Cost', 'Unpriced calls'],
+      columns: PLAN_DETAIL_COLUMNS.sessions,
       rows
     }));
     sessions.body.append(el(doc, 'p', 'plans-detail-population', detailPopulationText(sessionsState.population, sessionsState.rows)));
@@ -1054,7 +1184,7 @@ async function renderDetail(root, doc, { signal, identity, tenant = '', readCont
     ]);
     events.body.append(detailTable(doc, {
       caption: 'Time-ordered events; paged independently of every other section.',
-      columns: ['Time', 'Event type', 'Event', 'Path', 'Conversation'],
+      columns: PLAN_DETAIL_COLUMNS.events,
       rows
     }));
     events.body.append(el(doc, 'p', 'plans-detail-population', detailPopulationText(eventsState.population, eventsState.rows)));
@@ -1070,51 +1200,6 @@ async function renderDetail(root, doc, { signal, identity, tenant = '', readCont
       try { await loader(store.next); } finally { button.disabled = false; }
     });
     section.body.append(button);
-  }
-
-  function paintDesign() {
-    design.body.replaceChildren();
-    design.state('ready', '');
-    if (designState.row) {
-      const link = doc.createElement('a');
-      link.className = 'plans-design-open';
-      link.href = artifactLatestDestination(identity, designState.row.id?.path || `docs/plans/${identity.plan}/DESIGN.md`);
-      link.textContent = 'Open design content (latest version)';
-      design.body.append(link);
-    }
-    if (!designState.row) {
-      design.body.append(el(doc, 'p', 'plans-design-missing', 'no stored design content'));
-    } else if (designState.failure) {
-      design.body.append(el(doc, 'p', 'plans-design-failure', designState.failure));
-    } else if (designState.text !== null) {
-      const phases = parseDesignPhases(designState.text);
-      const briefs = parseBriefPaths(artifactsState.rows);
-      const { phases: paired, unpaired } = pairBriefs(phases, briefs);
-      if (!phases.length) design.body.append(el(doc, 'p', 'plans-design-no-phases', 'no `### Phase <n>` headings observed in the stored design content'));
-      const list = doc.createElement('ol');
-      list.className = 'plans-phases';
-      for (const phase of paired.slice(0, 100)) {
-        const item = doc.createElement('li');
-        item.className = 'plans-phase';
-        item.dataset.phase = String(phase.number);
-        item.append(el(doc, 'strong', 'plans-phase-heading', `Phase ${phase.number} — ${phase.heading}`));
-        item.append(el(doc, 'p', 'plans-phase-outcome', phase.outcome === null ? 'Outcome: not observed in the design body' : `Outcome: ${phase.outcome}`));
-        item.append(el(doc, 'p', 'plans-phase-briefs', phase.briefs.length
-          ? `Brief paths: ${phase.briefs.map(brief => `phase ${brief.phase}, unit ${brief.unitText}, ${brief.slug} (${brief.path})`).join('; ')}`
-          : 'no brief path observed in the loaded artifact rows'));
-        list.append(item);
-      }
-      if (paired.length) design.body.append(list);
-      if (phases.length > 100) design.body.append(el(doc, 'p', 'plans-design-more', 'more phases not shown'));
-      if (unpaired.length) {
-        design.body.append(el(doc, 'h3', '', 'Unpaired briefs'));
-        const ul = doc.createElement('ul');
-        ul.className = 'plans-unpaired-briefs';
-        for (const brief of unpaired) ul.append(el(doc, 'li', '', `${brief.path} (phase ${brief.phase}, unit ${brief.unitText}, slug ${brief.slug})`));
-        design.body.append(ul);
-      }
-      design.body.append(el(doc, 'p', 'plans-design-basis', 'Parsed in the browser for display only; phases and brief paths are never counted as measures.'));
-    }
   }
 
   function paintTimeline() {
@@ -1144,7 +1229,6 @@ async function renderDetail(root, doc, { signal, identity, tenant = '', readCont
     artifactsState.population = body.population || artifactsState.population;
     artifactsState.bands = await bandsFor(artifactsState.rows);
     paintArtifacts();
-    if (designState.row || designState.text !== null || designState.failure) paintDesign();
   }
 
   async function loadExecutions(cursor = '') {
@@ -1251,7 +1335,6 @@ async function renderDetail(root, doc, { signal, identity, tenant = '', readCont
       for (const section of [header, artifacts, executions, sessions, events, timeline]) {
         section.state('unsupported', 'entities_plan is not advertised by this server; supplied by Plan 20 Phase 6.');
       }
-      design.state('unsupported', 'entities_plan is not advertised by this server; supplied by Plan 20 Phase 6.');
       return;
     }
 
@@ -1280,48 +1363,35 @@ async function renderDetail(root, doc, { signal, identity, tenant = '', readCont
     }
     paintHeader();
 
-    // Artifacts settle first: the design row is found among the artifact rows
-    // the page already loaded, and the phases/briefs pairing reads them.
-    await Promise.allSettled([loadArtifacts()]);
-    if (disposed) return;
-    await Promise.allSettled([loadDesign(), loadExecutions(), loadSessions(), loadEvents()]);
+    const refusals = {
+      artifacts: planRegionRefusal('artifacts', identity, state),
+      executions: planRegionRefusal('executions', identity, state),
+      sessions: planRegionRefusal('sessions', identity, state),
+      events: planRegionRefusal('events', identity, state)
+    };
+    const regions = { artifacts, executions, sessions, events };
+    for (const [key, refusal] of Object.entries(refusals)) {
+      if (refusal) regions[key].state('unsupported', refusal.message);
+    }
+    const loaders = [];
+    if (!refusals.artifacts) loaders.push(loadArtifacts());
+    if (!refusals.executions) loaders.push(loadExecutions());
+    if (!refusals.sessions) loaders.push(loadSessions());
+    if (!refusals.events) loaders.push(loadEvents());
+    await Promise.allSettled(loaders);
     if (disposed) return;
     paintTimeline();
   }
 
   function showAbsent(message) {
-    for (const section of [artifacts, executions, sessions, events, timeline, design]) {
+    for (const section of [artifacts, executions, sessions, events, timeline]) {
       section.state('empty', message);
     }
     const link = doc.createElement('a');
-    link.href = '/plans';
+    link.href = planBackDestination(search);
     link.className = 'plans-detail-back';
     link.textContent = 'Back to plans';
     header.body.append(el(doc, 'p', 'plans-detail-absent', message), link);
-  }
-
-  async function loadDesign() {
-    design.state('loading', 'Loading stored design content…');
-    const designPath = `docs/plans/${identity.plan}/DESIGN.md`;
-    // The design row is found among the artifact rows the page already loads;
-    // its exact blob comes from the artifact entity route, then /content.
-    const artifactRows = artifactsState.rows;
-    const row = artifactRows.find(item => String(item.id?.path || '') === designPath) || null;
-    designState = { row, text: null, failure: '' };
-    if (!row) { paintDesign(); return; }
-    try {
-      const entity = await get('entity', planDesignArtifactParams(identity), 'plan-detail-design-entity');
-      if (!entity.response.ok) { designState.failure = errorText(entity.response, entity.body, 'The design artifact request failed.'); paintDesign(); return; }
-      const hash = entity.body?.latest?.content_hash || '';
-      if (!hash) { designState.failure = 'no stored design content'; paintDesign(); return; }
-      const content = await fetchArtifactText({ scheduler, repo: identity.repo_id, path: designPath, hash, tenant, signal: controller.signal, stateKey: 'plan-detail-design-content' });
-      if (content.ok) designState.text = content.text;
-      else designState.failure = detailContentFailure(content);
-    } catch (error) {
-      if (error?.name === 'AbortError') return;
-      designState.failure = error?.message || 'The design content request failed.';
-    }
-    paintDesign();
   }
 
   start().catch(error => {
@@ -1336,13 +1406,6 @@ async function renderDetail(root, doc, { signal, identity, tenant = '', readCont
   };
 }
 
-function detailContentFailure(result = {}) {
-  if (result.code === 'content_unavailable') return `content unavailable: ${result.reason || 'no reason given'}`;
-  if (result.code === 'content_too_large') return `content too large: ${result.size_bytes ?? 'unknown'} bytes exceeds the ${result.limit_bytes ?? 'unknown'}-byte limit`;
-  if (result.code === 'content_integrity') return 'content integrity check failed';
-  if (result.status === 404) return 'not found';
-  return result.message || 'The content request failed.';
-}
 
 export function render(root, doc = globalThis.document, { signal, tenant = '', readContext = null } = {}) {
   const route = parseRoute(globalThis.location?.pathname || '/', globalThis.location?.search || '');

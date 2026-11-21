@@ -10,17 +10,20 @@ import { parseRoute } from '../core/router.js';
 import { createScheduler } from '../core/request-scheduler.js';
 import { createTransport } from '../../contract/transport.js';
 import { createPanelFrame } from '../panels/panel-frame.js';
+import { mountPanelViews } from '../panels/p10-shared.js';
 import { hasPanel, registerPanel } from '../panels/registry.js';
 import { addFilterChip, createChips, resetScopeState, stateUrl } from '../core/chips.js';
 import { buildCohort, createSelectionTray, nextCohortSlot, writeCohort } from '../core/selection-tray.js';
 import { createInspector } from '../core/inspector.js';
 import { cancelledState, emptyCauses, emptyState, errorState, unsupportedState } from '../core/panel-state.js';
 import { formatNumber } from '../charts/formatters.js';
-import { resolveWindow, sanitizeApiCode } from '../panels/ledger-table.js';
+import { DECLARED_FILTERS, filterToParameters, ledgerPageLimit, pageParameters, resolveWindow, sanitizeApiCode } from '../panels/ledger-table.js';
+import { filterLabel, refusalMessage } from '../core/filter-applicability.js';
 import { hasUnsafeLegacyRecordFilters, LEGACY_RECORD_FILTER_MESSAGE } from '../core/record-filter-capability.js';
 import {
-  SESSION_LANES_PANEL, conversationCoverage, coverageLines, ensureSessionsStyles, fetchConversation,
-  renderSessionLanes
+  SESSION_LANES_PANEL, SESSION_LANES_CAPTION, SESSION_LANES_TABLE_COLUMNS, SESSION_RECORD_COLUMNS,
+  SESSION_MARK_LIMIT, conversationCoverage, coverageLines, ensureSessionsStyles, fetchConversation,
+  plottedStatement, renderSessionLanes, sessionLaneModelFromRows, sessionRecordCells, sessionRecordsModel
 } from '../panels/session-lanes.js';
 
 export const title = 'Sessions';
@@ -310,6 +313,112 @@ export function planHref(link = {}) {
 // on the board. `cohort=` is never sent to /conversation.
 export function conversationScope(state = {}) {
   return { from: state.from || '', to: state.to || '' };
+}
+
+// --- Session detail sources ----------------------------------------------
+
+// The selected-window read is the session grain's own exact identity; the
+// explore read is the retained-event ledger for that exact conversation.
+const SESSION_GRAIN_FILTERS = new Set(['harness', 'session_model', 'session_repo', 'model']);
+const SESSION_EXPLORE_FILTERS = new Set(DECLARED_FILTERS);
+const SESSION_SCOPE_KEYS = new Set(['win', 'from', 'to', 'tz', 'all', 'cohorts', 'sel', 'pick', 'hide', 'cmp', 'exclude', 'sort', 'id']);
+
+export const SESSION_RECORDS_MORE = 'Load more session events';
+export const SESSION_RECORDS_EMPTY = 'No records match these filters.';
+
+function activeSessionFilters(state = {}) {
+  const names = new Set();
+  for (const key of Object.keys(state.filters || {})) {
+    if (!SESSION_SCOPE_KEYS.has(key) && (state.filters[key] || []).length) names.add(key);
+  }
+  for (const [key, values] of Object.entries(state.unknown || {})) {
+    if (SESSION_SCOPE_KEYS.has(key)) continue;
+    if ((values || []).length) names.add(key);
+  }
+  for (const raw of state.exclude || []) {
+    const at = String(raw).indexOf(':');
+    if (at > 0) names.add(String(raw).slice(0, at));
+  }
+  return names;
+}
+
+function sessionCohortActive(state = {}) {
+  return Object.values(state.cohorts || {}).some(text => Boolean(text));
+}
+
+function sessionRefusal(state, supported) {
+  const labels = new Set();
+  if (sessionCohortActive(state)) labels.add('cohort');
+  for (const name of activeSessionFilters(state)) {
+    if (supported.has(name)) continue;
+    labels.add(filterLabel(name));
+  }
+  const sorted = [...labels].sort();
+  if (!sorted.length) return null;
+  return { labels: sorted, message: refusalMessage(sorted) };
+}
+
+// The records/timeline read. The exact conversation id is forced; shared
+// filters ride only when the event grain declares them.
+export function sessionExploreParams(id, state = {}, { window = null, limit = null, cursor = '' } = {}) {
+  const params = filterToParameters(state, { window });
+  params.delete('conversation_id');
+  params.set('conversation_id', String(id || ''));
+  if (Number.isFinite(Number(limit)) && Number(limit) > 0) params.set('limit', String(Math.floor(Number(limit))));
+  if (cursor) params.set('cursor', cursor);
+  return params;
+}
+
+export function sessionRecordsRefusal(state = {}) {
+  return sessionRefusal(state, SESSION_EXPLORE_FILTERS);
+}
+
+// The selected-window summary read: `/entities?grain=session&id=` with only the
+// session grain's declared filters and the applied window.
+export function sessionWindowParams(id, state = {}, { window = null, limit = null } = {}) {
+  const params = new URLSearchParams();
+  const resolved = resolveWindow(state, Date.now(), window);
+  if (resolved.all) params.set('all', '1');
+  if (resolved.from) params.set('from', resolved.from);
+  if (resolved.to) params.set('to', resolved.to);
+  params.set('tz', state.tz || Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC');
+  params.set('grain', 'session');
+  params.set('id', String(id || ''));
+  for (const key of SESSION_GRAIN_FILTERS) {
+    for (const value of state.filters?.[key] || []) params.append(key, value);
+  }
+  if (Number.isFinite(Number(limit)) && Number(limit) > 0) params.set('limit', String(Math.floor(Number(limit))));
+  return params;
+}
+
+export function sessionSelectedRefusal(state = {}) {
+  return sessionRefusal(state, SESSION_GRAIN_FILTERS);
+}
+
+// The whole-session exception read. `/conversation` accepts the exact identity
+// and absolute bounds only; it is never presented as filtered.
+export function sessionWholeParams(id, state = {}, { window = null } = {}) {
+  const params = new URLSearchParams();
+  const resolved = resolveWindow(state, Date.now(), window);
+  if (resolved.from) params.set('from', resolved.from);
+  if (resolved.to) params.set('to', resolved.to);
+  params.set('id', String(id || ''));
+  return params;
+}
+
+export function sessionBackDestination(search = '') {
+  return `/sessions${String(search || '')}`;
+}
+
+export function sessionLedgerDestination(id, search = '') {
+  const params = new URLSearchParams();
+  params.set('conversation_id', String(id || ''));
+  const scope = new URLSearchParams(String(search || '').replace(/^\?/, ''));
+  for (const [key, value] of scope) {
+    if (key === 'conversation_id') continue;
+    params.append(key, value);
+  }
+  return `/ledger?${params.toString()}`;
 }
 
 function routeAdapter() {
@@ -890,23 +999,125 @@ function renderLinks(host, conversation, doc) {
   host.append(section);
 }
 
+function detailSection(doc, className, title) {
+  const section = el(doc, 'section', `session-detail-section ${className}`);
+  section.dataset.section = className;
+  section.dataset.state = 'loading';
+  const status = el(doc, 'p', 'session-detail-status', 'Loading…');
+  status.setAttribute('aria-live', 'polite');
+  const body = el(doc, 'div', 'session-detail-body');
+  section.append(el(doc, 'h2', '', title), status, body);
+  return {
+    section, status, body,
+    state(next, text) {
+      section.dataset.state = next;
+      status.textContent = text || '';
+      if (next !== 'loading' && next !== 'ready') body.replaceChildren();
+    }
+  };
+}
+
+function measureStrip(doc, key, title) {
+  const strip = el(doc, 'section', `session-measure-strip session-measure-${key}`);
+  strip.dataset.strip = key;
+  strip.dataset.state = 'loading';
+  strip.append(el(doc, 'h3', '', title));
+  const note = el(doc, 'p', 'session-strip-note', '');
+  const body = el(doc, 'div', 'session-strip-body');
+  strip.append(note, body);
+  return { strip, note, body, state(next, text) { strip.dataset.state = next; note.textContent = text || ''; if (next !== 'ready') body.replaceChildren(); } };
+}
+
+function recordsTable(doc, columns, rows, stateModel = null) {
+  const wrapper = el(doc, 'div', 'session-records-wrap');
+  const table = el(doc, 'table', 'session-records');
+  table.append(el(doc, 'caption', '', 'Session records'));
+  const colgroup = doc.createElement('colgroup');
+  for (const column of columns) {
+    const col = doc.createElement('col');
+    if (column.width) col.setAttribute('width', String(column.width));
+    colgroup.append(col);
+  }
+  const thead = doc.createElement('thead');
+  const head = doc.createElement('tr');
+  for (const column of columns) {
+    const th = el(doc, 'th', column.time ? 'numeric' : '', column.label);
+    th.scope = 'col';
+    if (column.width) th.setAttribute('width', String(column.width));
+    head.append(th);
+  }
+  thead.append(head);
+  const tbody = doc.createElement('tbody');
+  if (stateModel) {
+    const row = el(doc, 'tr', 'session-records-state-row');
+    row.dataset.state = stateModel.state;
+    const cell = el(doc, 'td', 'session-records-state-cell');
+    cell.colSpan = columns.length;
+    cell.append(el(doc, 'span', 'session-records-state-text', stateModel.text));
+    if (stateModel.detail) cell.append(el(doc, 'span', 'session-detail-state-detail', ` ${stateModel.detail}`));
+    row.append(cell);
+    tbody.append(row);
+    if (stateModel.state === 'loading') tbody.setAttribute('aria-busy', 'true');
+  } else {
+    for (const source of rows) {
+      const tr = el(doc, 'tr', 'session-record-row');
+      const cells = sessionRecordCells(source);
+      cells.forEach((value, index) => {
+        const td = el(doc, 'td', columns[index]?.cost || columns[index]?.time ? 'numeric' : '', value);
+        if (value !== '—') td.title = value;
+        tr.append(td);
+      });
+      tbody.append(tr);
+    }
+  }
+  table.append(colgroup, thead, tbody);
+  wrapper.append(table);
+  return { wrapper, table, tbody };
+}
+
+function laneTableView(doc, model) {
+  const table = el(doc, 'table', 'session-lanes-table');
+  table.append(el(doc, 'caption', '', 'Session event marks'));
+  const thead = doc.createElement('thead');
+  const head = doc.createElement('tr');
+  for (const label of SESSION_LANES_TABLE_COLUMNS) { const th = el(doc, 'th', '', label); th.scope = 'col'; head.append(th); }
+  thead.append(head);
+  const tbody = doc.createElement('tbody');
+  for (const row of model.tableRows) {
+    const tr = doc.createElement('tr');
+    for (const value of [row.time, row.type, row.repo_id || '—', row.plan || '—', row.path || '—', row.conversation_id || '—', row.cost]) {
+      tr.append(el(doc, 'td', '', value === null || value === undefined || value === '' ? '—' : value));
+    }
+    tbody.append(tr);
+  }
+  table.append(thead, tbody);
+  return table;
+}
+
 function renderDetail(root, doc, { signal, id, tenant = '', readContext = null } = {}) {
   ensureSessionsStyles(doc);
   register();
   root.replaceChildren();
+  const search = globalThis.location?.search || '';
+  const state = readScope(decodeUrlState(search));
   const heading = el(doc, 'h1', '', `Session ${id}`);
   const back = el(doc, 'a', 'sessions-back', 'Back to sessions');
-  back.href = '/sessions';
+  back.href = sessionBackDestination(search);
   root.append(heading, back);
 
   const frame = createPanelFrame({ panel: SESSION_LANES_PANEL, scope: { id }, transport, scheduler, doc });
   frame.element.dataset.chart = 'lanes';
   root.append(frame.element);
   const body = frame.element.querySelector('.workspace-panel-body');
-  const header = el(doc, 'div', 'session-detail-facts');
-  const coverageSlot = el(doc, 'div', 'session-coverage');
-  const ledgerSlot = el(doc, 'p', 'session-ledger');
-  frame.chipSlot.append(header, coverageSlot, ledgerSlot);
+
+  const identity = detailSection(doc, 'session-detail-identity', 'Identity');
+  const strips = el(doc, 'div', 'session-measure-strips');
+  const selected = measureStrip(doc, 'selected', 'Selected window');
+  const whole = measureStrip(doc, 'whole', 'Whole session');
+  strips.append(selected.strip, whole.strip);
+  const lanesSection = detailSection(doc, 'session-detail-lanes', 'Session events over time');
+  const recordsSection = detailSection(doc, 'session-detail-records', 'Session records');
+  body.replaceChildren(identity.section, strips, lanesSection.section, recordsSection.section);
 
   let disposed = false;
   let controller = new AbortController();
@@ -914,20 +1125,165 @@ function renderDetail(root, doc, { signal, id, tenant = '', readContext = null }
     if (signal.aborted) controller.abort();
     else signal.addEventListener('abort', () => controller.abort(), { once: true });
   }
+  let schema = null;
+  let pageLimit = 100;
+  let baseParams = null;
+  let rows = [];
+  let next = '';
+  let pending = false;
+  let recordsState = 'loading';
+  let lanesState = 'loading';
+
+  const get = (route, params, stateKey) => transport.get(route, params, { tenant, signal: controller.signal, stateKey });
+
+  function renderSelected(row) {
+    selected.body.replaceChildren();
+    if (!row) {
+      selected.state('empty', 'This session is not in the selected window.');
+      return;
+    }
+    const dl = doc.createElement('dl');
+    for (const item of formatTotals(row.m || {})) dl.append(el(doc, 'dt', '', item.label), el(doc, 'dd', '', item.value));
+    selected.body.append(dl);
+    selected.state('ready', `Selected window totals from /entities?grain=session&id=${encodeURIComponent(id)} with the applied filters.`);
+  }
+
+  function renderWhole(conversation) {
+    whole.body.replaceChildren();
+    const totals = conversation?.totals || null;
+    if (!totals) {
+      whole.state('error', 'Whole-session totals are unavailable.');
+      return;
+    }
+    const dl = doc.createElement('dl');
+    for (const item of formatTotals(totals)) dl.append(el(doc, 'dt', '', item.label), el(doc, 'dd', '', item.value));
+    whole.body.append(dl);
+    whole.state('ready', 'Whole session exception: these totals cover the whole run; the analytics filters do not narrow them.');
+  }
+
+  function renderRecords() {
+    const table = recordsTable(doc, SESSION_RECORD_COLUMNS, rows);
+    recordsSection.body.replaceChildren(table.wrapper);
+    recordsSection.state('ready', '');
+    if (next) {
+      const more = el(doc, 'button', 'session-records-more', pending ? 'Loading…' : SESSION_RECORDS_MORE);
+      more.type = 'button';
+      more.disabled = pending;
+      more.addEventListener('click', () => loadMore());
+      recordsSection.body.append(more);
+    }
+    return table;
+  }
+
+  function renderRecordsState(nextState, text, detail = '') {
+    recordsState = nextState;
+    recordsSection.state(nextState === 'error' ? 'error' : nextState, '');
+    const table = recordsTable(doc, SESSION_RECORD_COLUMNS, [], { state: nextState, text, detail });
+    recordsSection.body.replaceChildren(table.wrapper);
+    if (nextState === 'error' && next) {
+      const retry = el(doc, 'button', 'session-records-retry', 'Retry next page');
+      retry.type = 'button';
+      retry.addEventListener('click', () => loadMore());
+      recordsSection.body.append(retry);
+    }
+  }
+
+  function renderLanes() {
+    lanesSection.body.replaceChildren();
+    if (!rows.length) {
+      lanesSection.state('empty', 'No records match these filters.');
+      lanesState = 'empty';
+      return;
+    }
+    const model = sessionLaneModelFromRows(rows.slice(0, SESSION_MARK_LIMIT));
+    const chart = doc.createElement('yk-lanes');
+    chart.className = 'session-lanes-chart';
+    chart.setAttribute('aria-label', 'Session events over time, one marker per loaded matching event');
+    chart.spec = model.spec;
+    chart.data = model.data;
+    const views = mountPanelViews({ panelId: 'session-lanes-chart', chart, table: laneTableView(doc, model), doc, defaultView: 'chart', label: 'Session events view' });
+    lanesSection.body.append(el(doc, 'p', 'session-lanes-caption', SESSION_LANES_CAPTION));
+    lanesSection.body.append(el(doc, 'p', 'session-lanes-plotted', plottedStatement(model.data.length)));
+    lanesSection.body.append(el(doc, 'p', 'session-lanes-basis', 'Each mark is one retained event; no duration is inferred between marks.'));
+    lanesSection.body.append(views.element);
+    lanesSection.state('ready', '');
+    lanesState = 'ready';
+  }
+
+  async function loadMore() {
+    if (pending || !next || !baseParams) return;
+    pending = true;
+    renderRecords();
+    try {
+      const params = pageParameters(baseParams, { cursor: next, limit: pageLimit });
+      const { response, body: payload } = await get('explore', params, 'session-detail-events');
+      if (disposed) return;
+      if (!response.ok) {
+        renderRecordsState('error', 'Could not load Session records.', sanitizeApiCode(payload?.code) || String(response.status));
+        return;
+      }
+      const incoming = Array.isArray(payload.rows) ? payload.rows : [];
+      rows = sessionRecordsModel(mergeRecordRows(rows, incoming));
+      next = payload.next || '';
+      renderRecords();
+      renderLanes();
+    } catch (error) {
+      if (disposed || error?.name === 'AbortError') return;
+      renderRecordsState('error', 'Could not load Session records.', sanitizeApiCode(error?.message) || '');
+    } finally {
+      pending = false;
+    }
+  }
 
   async function loadDetail() {
     controller.abort();
     controller = new AbortController();
     if (signal?.aborted) controller.abort();
     else signal?.addEventListener('abort', () => controller.abort(), { once: true });
-    frame.setState('loading', { inFlight: 1 });
+    frame.setState('loading', { inFlight: 3 });
+    identity.state('loading', 'Loading…');
+    selected.state('loading', 'Loading…');
+    whole.state('loading', 'Loading…');
+    rows = [];
+    next = '';
+    recordsState = 'loading';
+    lanesState = 'loading';
+    renderRecordsState('loading', 'Loading Session records…');
+    lanesSection.state('loading', 'Loading session events…');
+
     try {
-      const result = await fetchConversation({ transport, id, scope: conversationScope(decodeUrlState(globalThis.location?.search || '')), signal: controller.signal, tenant, stateKey: 'sessions-detail' });
-      if (disposed) return;
-      if (result.state !== 'ready') { result.retry = loadDetail; frame.setState(result.state, result); return; }
-      const conversation = result.conversation;
-      const coverage = conversationCoverage(conversation);
-      header.replaceChildren();
+      const result = await transport.schema(tenant);
+      if (result?.response?.ok) schema = result.body;
+    } catch { schema = null; }
+    if (disposed) return;
+    pageLimit = ledgerPageLimit(schema?.budgets?.explore_page_max);
+
+    const recordsRefusal = sessionRecordsRefusal(state);
+    const selectedRefusal = sessionSelectedRefusal(state);
+    if (recordsRefusal) {
+      renderRecordsState('unsupported', recordsRefusal.message);
+      lanesSection.state('unsupported', recordsRefusal.message);
+      lanesState = 'unsupported';
+    }
+
+    const wholeRequest = get('conversation', sessionWholeParams(id, state, { window: readContext?.window || null }), 'session-detail-whole');
+    const selectedRequest = selectedRefusal ? null : get('entities', sessionWindowParams(id, state, { window: readContext?.window || null, limit: 1 }), 'session-detail-window');
+    const recordsRequest = recordsRefusal ? null : (() => {
+      baseParams = sessionExploreParams(id, state, { window: readContext?.window || null, limit: pageLimit });
+      return get('explore', baseParams, 'session-detail-events');
+    })();
+
+    const [wholeResult, selectedResult, recordsResult] = await Promise.allSettled([
+      wholeRequest, selectedRequest || Promise.resolve(null), recordsRequest || Promise.resolve(null)
+    ]);
+    if (disposed) return;
+
+    // Whole-session identity and the labelled exception strip.
+    const wholeAnswer = wholeResult.status === 'fulfilled' ? wholeResult.value : null;
+    let frameError = null;
+    if (wholeAnswer && wholeAnswer.response?.ok) {
+      const conversation = wholeAnswer.body || {};
+      identity.body.replaceChildren();
       const dl = doc.createElement('dl');
       dl.append(el(doc, 'dt', '', 'Conversation'), el(doc, 'dd', '', conversation.conversation_id || id));
       dl.append(el(doc, 'dt', '', 'Harness'), el(doc, 'dd', '', cellText(conversation.harness)));
@@ -935,33 +1291,75 @@ function renderDetail(root, doc, { signal, id, tenant = '', readContext = null }
       dl.append(el(doc, 'dt', '', 'Repos'), el(doc, 'dd', '', (conversation.repos || []).join(', ') || '—'));
       dl.append(el(doc, 'dt', '', 'First'), el(doc, 'dd', '', cellText(conversation.first_ts)));
       dl.append(el(doc, 'dt', '', 'Last'), el(doc, 'dd', '', cellText(conversation.last_ts)));
-      header.append(dl);
-
-      coverageSlot.replaceChildren();
-      for (const line of coverageLines(coverage)) coverageSlot.append(el(doc, 'p', 'session-coverage-line', line));
-      renderTotals(coverageSlot, 'Whole-run totals', conversation.totals, doc);
-      if (conversation.window_totals) renderTotals(coverageSlot, 'Window totals', conversation.window_totals, doc);
-      renderLinks(coverageSlot, conversation, doc);
-
-      ledgerSlot.replaceChildren();
-      const ledger = el(doc, 'a', 'session-ledger-link', 'Paged ledger for omitted events');
-      ledger.href = `/ledger?conversation_id=${encodeURIComponent(conversation.conversation_id || id)}`;
-      ledgerSlot.append(ledger, doc.createTextNode(' — reaches events beyond the /conversation cap.'));
-
-      renderSessionLanes(body, conversation, doc);
-      frame.setState('ready', {});
-      frame.setBasis('event ts (UTC); marks are returned events only; whole-run totals and the cap are stated separately');
-    } catch (error) {
-      if (disposed) return;
-      const result = error?.name === 'AbortError'
-        ? cancelledState({ retry: loadDetail })
-        : errorState({ message: error?.message || 'The conversation request failed.', retry: loadDetail });
-      frame.setState(result.state, result);
+      identity.body.append(dl);
+      identity.state('ready', '');
+      renderWhole(conversation);
+    } else {
+      const status = wholeAnswer?.response?.status;
+      const message = wholeAnswer?.body?.error || `Could not load this session (${status || 'no response'}).`;
+      identity.body.replaceChildren(el(doc, 'p', 'session-detail-identity-id', `Conversation ${id}`));
+      identity.state('error', message);
+      whole.state('error', 'Whole-session totals are unavailable.');
+      frameError = { message, retry: loadDetail };
     }
+
+    // Selected-window summary, never substituted by the whole-run totals.
+    if (selectedRefusal) {
+      selected.body.replaceChildren();
+      selected.state('unsupported', selectedRefusal.message);
+    } else {
+      const answer = selectedResult.status === 'fulfilled' ? selectedResult.value : null;
+      if (answer && answer.response?.ok) {
+        renderSelected((Array.isArray(answer.body?.rows) ? answer.body.rows : [])[0] || null);
+      } else {
+        selected.body.replaceChildren();
+        selected.state('error', 'Could not load the selected window.');
+      }
+    }
+
+    // Records and lanes, both from the same /explore read.
+    if (!recordsRefusal) {
+      const answer = recordsResult.status === 'fulfilled' ? recordsResult.value : null;
+      if (answer && answer.response?.ok) {
+        const incoming = Array.isArray(answer.body?.rows) ? answer.body.rows : [];
+        rows = sessionRecordsModel(incoming);
+        next = answer.body?.next || '';
+        if (!rows.length) {
+          renderRecordsState('empty', SESSION_RECORDS_EMPTY);
+          lanesSection.state('empty', SESSION_RECORDS_EMPTY);
+          lanesState = 'empty';
+        } else {
+          renderRecords();
+          renderLanes();
+        }
+      } else {
+        renderRecordsState('error', 'Could not load Session records.', sanitizeApiCode(answer?.body?.code) || String(answer?.response?.status || ''));
+        lanesSection.state('error', 'Could not load Session events.');
+        lanesState = 'error';
+      }
+    }
+
+    if (frameError) frame.setState('error', frameError);
+    else if (recordsRefusal) frame.setState('unsupported', { message: recordsRefusal.message });
+    else if (recordsState === 'error') frame.setState('error', { message: 'Could not load Session records.', retry: loadDetail });
+    else frame.setState('ready', {});
+    frame.setBasis('event ts (UTC); one marker per loaded matching event; whole-session totals are a labelled exception');
   }
 
   loadDetail();
   return () => { disposed = true; controller.abort(); };
+}
+
+function mergeRecordRows(existing = [], incoming = []) {
+  const seen = new Set(existing.map(row => `${row.ts}|${row.type}|${row.path || ''}|${row.event || ''}|${row.sha || ''}`));
+  const merged = existing.slice();
+  for (const row of incoming) {
+    const key = `${row.ts}|${row.type}|${row.path || ''}|${row.event || ''}|${row.sha || ''}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    merged.push(row);
+  }
+  return merged;
 }
 
 export function render(root, doc = globalThis.document, { signal, tenant = '', readContext = null } = {}) {
