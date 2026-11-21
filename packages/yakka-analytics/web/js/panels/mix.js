@@ -6,13 +6,22 @@
 
 import '../charts/yk-bars.js';
 import { cancelledState, emptyState, errorState, unsupportedState } from '../core/panel-state.js';
-import { table } from './pulse-strips.js';
+import { filterRefusal, table } from './pulse-strips.js';
 import {
-  ensureP10Styles, measureMeta, offeredMeasures, offeredSplit, populationLine, requestParams,
+  ensureP10Styles, measureMeta, mountPanelViews, offeredMeasures, offeredSplit, populationLine, requestParams,
   whenPanelBody, whenPanelSlot
 } from './p10-shared.js';
-import { canonicalPanelSpec } from '../core/view-spec.js';
-import { costHonesty, costJoinGuard, costOmitted } from './treemap.js';
+import { registerCaption } from './captions.js';
+import { costJoinGuard, costOmitted } from './treemap.js';
+
+// G-mix is fixed: hook events by tool category, split by harness, stacked.
+// There is no measure, split or mode chooser on the Tools board.
+export const MIX_CAPTION = 'Each bar counts hook events for a tool category, split by harness; longer segments mean more events.';
+export const MIX_TABLE_COLUMNS = ['Group', 'Series', 'Value (events)'];
+export const MIX_FIRST = 'tool_kind';
+export const MIX_SECOND = 'harness';
+
+registerCaption('mix', () => MIX_CAPTION);
 
 export const MIX_MEASURES = [
   'cost_usd', 'model_calls', 'unpriced_calls', 'tokens_in', 'tokens_out', 'tokens_cache_read',
@@ -78,11 +87,18 @@ export function buildMix({ rows = [], measure = '', dims = [], mode = 'stacked' 
   return { rows: data, series, twoLevel, mode };
 }
 
+// P10 stacked row: Group, Series, Value (events); group asc, series asc.
 export function mixTableRows(model) {
-  return model.rows.map(row => [row.label, ...model.series.map(series => {
-    const value = row.values[series.key];
-    return value === null || value === undefined ? '—' : String(value);
-  })]);
+  const groups = [...(model.rows || [])].sort((a, b) => String(a.label).localeCompare(String(b.label)));
+  const series = [...(model.series || [])].sort((a, b) => String(a.label).localeCompare(String(b.label)));
+  const rows = [];
+  for (const group of groups) {
+    for (const item of series) {
+      const value = group.values[item.key];
+      rows.push([group.label, item.label, value === null || value === undefined ? '—' : String(value)]);
+    }
+  }
+  return rows;
 }
 
 export async function load(context = {}) {
@@ -94,11 +110,13 @@ export async function load(context = {}) {
     const schema = context.schema || (await transport.schema(tenant)).body;
     const panel = context.panel || MIX_PANEL;
     const measures = offeredMeasures(panel, schema);
-    const measure = (spec.measures || [])[0] && measures.includes(spec.measures[0]) ? spec.measures[0] : (measures[0] || 'hook_events');
+    const measure = 'hook_events';
+    const first = MIX_FIRST;
+    const second = MIX_SECOND;
+    const mode = 'stacked';
     if (!measures.includes(measure)) {
       return unsupportedState({ missing: measure, reason: 'not published for the time grain', source: 'server /schema' });
     }
-    const { first, second } = mixDimsFromSpec(spec);
     const guard = costJoinGuard(measure, [first, second]);
     if (guard) return unsupportedState({ missing: guard.missing, reason: guard.reason, source: 'contract 17.3', nearest: guard.try });
     const dims = mixDims(panel, measure, schema);
@@ -112,9 +130,18 @@ export async function load(context = {}) {
         });
       }
     }
-    const mode = mixMode(spec);
+    const filterScope = { ...scope };
+    delete filterScope.captionKey;
+    delete filterScope.mode;
+    delete filterScope.second;
+    const refusal = filterRefusal({ panel, spec: { ...spec, measures: [measure] }, scope: filterScope, schema });
+    if (refusal) {
+      whenPanelBody(panel.id, doc, host => host.replaceChildren());
+      whenPanelSlot(panel.id, 'chooser', doc, slot => slot.replaceChildren());
+      return refusal;
+    }
     const meta = measureMeta(schema, measure);
-    const params = requestParams({ scope, spec, measure, bucket: 'none' });
+    const params = requestParams({ scope, spec: { ...spec, measures: [measure] }, measure, bucket: 'none' });
     params.append('dim', first);
     params.append('dim', second);
     const { response, body } = await transport.get('query', params, { tenant, signal, stateKey: 'mix' });
@@ -127,23 +154,13 @@ export async function load(context = {}) {
       whenPanelBody(panel.id, doc, host => host.replaceChildren());
       return emptyState([{ kind: 'scope', label: `no ${measure} groups in window ${scope.win || 'all'}`, clear: null }]);
     }
-    let summary = null;
-    if (measure === 'cost_usd') {
-      try {
-        const answer = await transport.get('summary', requestParams({ scope, spec }), { tenant, signal, stateKey: 'mix-summary' });
-        if (answer.response.ok) summary = answer.body;
-      } catch {
-        summary = null;
-      }
-    }
-    const honesty = costHonesty({ summary, measure });
     const omitted = costOmitted(body);
     whenPanelBody(panel.id, doc, host => {
       const wrapper = doc.createElement('div');
       wrapper.className = 'p10-cost p10-mix';
       const basis = doc.createElement('p');
       basis.className = 'p10-basis';
-      basis.textContent = `Basis: ${meta.label} (${meta.unit}) by ${first} × ${second}, ${mode === 'percent' ? '100 percent' : 'stacked'} bars, bucket=none. ${populationLine(body)}.`;
+      basis.textContent = `Basis: ${meta.label} (${meta.unit}) by ${first} × ${second}, stacked bars, bucket=none. ${populationLine(body)}.`;
       const node = doc.createElement('yk-bars');
       node.className = 'p10-cost-chart';
       node.spec = {
@@ -151,28 +168,27 @@ export async function load(context = {}) {
         type: mode,
         title: `${meta.label} by ${first} × ${second}`,
         units: meta.unit,
-        series: model.series.map(series => ({ ...series, unit: meta.unit, kind: mode === 'percent' ? 'percent' : meta.kind }))
+        series: model.series.map(series => ({ ...series, unit: meta.unit, kind: meta.kind }))
       };
       node.data = model.rows;
       const note = doc.createElement('p');
       note.className = 'p10-note p10-pricing';
-      note.dataset.state = honesty?.state || 'measured';
+      note.dataset.state = 'measured';
       note.textContent = [
-        honesty ? `Pricing: ${honesty.text}${honesty.money ? ` (${honesty.money})` : ''}.` : '',
         model.twoLevel ? '' : `The server returned only the ${first} dimension; the ${second} composition is unavailable and a single series is shown.`,
         omitted
       ].filter(Boolean).join(' ');
-      const columns = [{ label: first }, ...model.series.map(series => ({ label: series.label, numeric: true }))];
-      wrapper.append(basis, node, note, table(doc, { caption: `${measure} composition by ${first} × ${second}`, columns, rows: mixTableRows(model) }));
+      const columns = MIX_TABLE_COLUMNS.map((label, index) => ({ label, numeric: index === 2 }));
+      const tableNode = table(doc, { caption: 'Hook events by tool category and harness', columns, rows: mixTableRows(model) });
+      const views = mountPanelViews({ panelId: panel.id, chart: node, table: tableNode, doc, defaultView: 'chart', label: 'Hook events composition view' });
+      views.element.removeAttribute('data-panel');
+      wrapper.append(basis, views.element, note);
       host.replaceChildren(wrapper);
     });
-    whenPanelSlot(panel.id, 'chooser', doc, slot => {
-      slot.replaceChildren(renderMixChooser({ panelId: panel.id, panel, spec: { ...spec, measures: [measure], split: first }, schema, measure, first, second, mode, doc }));
-    });
+    whenPanelSlot(panel.id, 'chooser', doc, slot => slot.replaceChildren());
     return {
       state: 'ready', measure, first, second, mode,
       population: body.population || null,
-      pricing: honesty?.state || null,
       twoLevel: model.twoLevel,
       omitted
     };
@@ -183,51 +199,6 @@ export async function load(context = {}) {
   }
 }
 
-function select(doc, labelText, options, value, onChange) {
-  const label = doc.createElement('label');
-  label.className = 'p10-chooser-field';
-  label.append(doc.createTextNode(labelText));
-  const control = doc.createElement('select');
-  control.setAttribute('aria-label', labelText);
-  for (const option of options) {
-    const node = doc.createElement('option');
-    node.value = option.value;
-    node.textContent = option.label;
-    node.selected = option.value === value;
-    control.append(node);
-  }
-  control.addEventListener('change', () => onChange(control.value));
-  label.append(control);
-  return label;
-}
-
-export function renderMixChooser({ panelId, panel, spec = {}, schema = null, measure, first, second, mode, doc = globalThis.document } = {}) {
-  const measures = offeredMeasures(panel, schema);
-  const dims = mixDims(panel, measure, schema);
-  const wrapper = doc.createElement('div');
-  wrapper.className = 'p10-chooser';
-  const emit = patch => {
-    const merged = canonicalPanelSpec({
-      grain: spec.grain || panel?.grain || 'time',
-      measures: patch.measures || [measure],
-      split: patch.split ?? first,
-      chart: 'bars',
-      scope: { ...(spec.scope || {}), ...(patch.scope || {}) }
-    });
-    const host = doc.querySelector(`[data-panel="${panelId}"]`) || doc;
-    host.dispatchEvent(new CustomEvent('spec', { bubbles: true, composed: true, detail: { spec: merged } }));
-  };
-  wrapper.append(select(doc, 'Measure', measures.map(name => ({ value: name, label: measureMeta(schema, name).label })), measure,
-    value => emit({ measures: [value] })));
-  wrapper.append(select(doc, 'First', dims.map(name => ({ value: name, label: name })), first,
-    value => emit({ split: value })));
-  wrapper.append(select(doc, 'Second', dims.map(name => ({ value: name, label: name })), second,
-    value => emit({ scope: { second: value } })));
-  wrapper.append(select(doc, 'Mode', MIX_MODES.map(name => ({ value: name, label: name })), mode,
-    value => emit({ scope: { mode: value } })));
-  return wrapper;
-}
-
 export const MIX_PANEL = {
   id: 'mix',
   title: 'Composition',
@@ -236,8 +207,8 @@ export const MIX_PANEL = {
   lenses: MIX_LENSES,
   charts: ['bars'],
   requires: [],
-  caveats: 'One measure over one or two published lenses as stacked or 100-percent bars. Special groups stay separate; omitted and unpriced populations are named.',
-  measureBasis: 'the scope window at bucket=none over one or two lenses',
+  caveats: 'Hook events by tool category, split by harness, as stacked bars. Special groups stay separate and omitted populations are named. There is no measure, split or mode chooser on the Tools board.',
+  measureBasis: 'hook events in the scope window at bucket=none by tool_kind × harness',
   requests: () => [{ route: '/v1/analytics/query', method: 'GET', params: { measure: 'hook_events', bucket: 'none', dim: 'tool_kind' } }],
   load
 };
