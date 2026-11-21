@@ -43,11 +43,11 @@ Refined into twelve units by `refine` on 2026-11-22:
 | U6 — Quality score panels | `briefs/phase2-06-quality.md` | U1, U2 | 2 (parallel) |
 | U7 — Scatter panels | `briefs/phase2-07-scatter.md` | U1, U2 | 2 (parallel) |
 | U8 — Plans, Sessions and Event ledger lists | `briefs/phase2-08-explorers-list.md` | U1, U2 | 2 (parallel) |
-| U9 — Plan and session detail screens | `briefs/phase2-09-plans-session-detail.md` | U1, U2, U8 | 3 (parallel) |
-| U10 — Artifact and Operations screens | `briefs/phase2-10-artifact-ops.md` | U1, U2 | 3 (parallel) |
-| U11 — Tools and Workflow boards | `briefs/phase2-11-tools-workflow.md` | U1, U2, U3, U4, U7 | 3 (parallel) |
-| U12 — Phase 2 acceptance harness and proof | `briefs/phase2-12-proof-harness.md` | U1–U11 | 4 |
+| U9 — Plan and session detail screens | `briefs/phase2-09-plans-session-detail.md` | U1, U2, U8, U11 | 4 (parallel) |
+| U10 — Artifact and Operations screens | `briefs/phase2-10-artifact-ops.md` | U1, U2 | 4 (parallel) |
+| U11 — Tools and Workflow boards | `briefs/phase2-11-tools-workflow.md` | U1, U2, U3, U4, U7 | 3 |
+| U12 — Phase 2 acceptance harness and proof | `briefs/phase2-12-proof-harness.md` | U1–U11 | 5 |
 
 Phase 1 Carried placement: U2 owns the full S-start table; U3/U4 own the Pulse/Trends board layouts; U8 owns the nine-column S-ledger. No new Carried item was introduced.
 
-`artifact_feedback` (jev-1.13.0) delivered and screened every Phase 2 brief and this phase record as `pass`; scoring is not configured on the service. No design contradiction was found during refinement.
+`artifact_feedback` (jev-1.13.0) delivered and screened every Phase 2 brief and this phase record as `pass`; scoring is not configured on the service. One shape note was resolved in the brief rather than the design: G-sessionlanes' chart table (event/plan/conversation/session cost) and S-session-detail's full-width records table (time/type/repo/path/cost) are different column sets; U9 configures both explicitly instead of choosing one silently.
