@@ -1,0 +1,117 @@
+[
+  {
+    "key": "start",
+    "title": "Start",
+    "route": "/"
+  },
+  {
+    "key": "pulse",
+    "title": "Pulse",
+    "route": "/b/pulse"
+  },
+  {
+    "key": "trends",
+    "title": "Trends",
+    "route": "/b/trends"
+  },
+  {
+    "key": "cost",
+    "title": "Cost",
+    "route": "/b/cost"
+  },
+  {
+    "key": "quality",
+    "title": "Quality",
+    "route": "/b/quality"
+  },
+  {
+    "key": "tools",
+    "title": "Tools",
+    "route": "/b/tools"
+  },
+  {
+    "key": "workflow",
+    "title": "Workflow",
+    "route": "/b/workflow"
+  },
+  {
+    "key": "compare",
+    "title": "Compare",
+    "route": "/b/compare"
+  },
+  {
+    "key": "scatter",
+    "title": "Scatter",
+    "route": "/b/scatter"
+  },
+  {
+    "key": "plans",
+    "title": "Plans",
+    "route": "/plans"
+  },
+  {
+    "key": "plan-detail",
+    "title": "Plan: analytics-ui-rework",
+    "route": "/plans/codyhamilton%2Fyakka/29-analytics-ui-rework"
+  },
+  {
+    "key": "sessions",
+    "title": "Sessions",
+    "route": "/sessions"
+  },
+  {
+    "key": "session-detail",
+    "title": "Session: sess-c81e",
+    "route": "/sessions/sess-c81e"
+  },
+  {
+    "key": "ledger",
+    "title": "Event ledger",
+    "route": "/ledger"
+  },
+  {
+    "key": "artifact",
+    "title": "Artifact: DESIGN.md",
+    "route": "/artifact?repo_id=codyhamilton%2Fyakka&path=docs%2Fplans%2F30-analytics-operable-chrome%2FDESIGN.md"
+  },
+  {
+    "key": "ops",
+    "title": "Operations",
+    "route": "/ops"
+  },
+  {
+    "key": "profile",
+    "title": "Account, tenants & tokens",
+    "route": "/profile"
+  },
+  {
+    "key": "settings",
+    "title": "Connection settings",
+    "route": "/settings"
+  },
+  {
+    "key": "lifecycle",
+    "title": "Tenant lifecycle",
+    "route": "https://api.yakka.build/profile/lifecycle"
+  },
+  {
+    "key": "login",
+    "title": "Sign in",
+    "route": "/login"
+  },
+  {
+    "key": "callback",
+    "title": "Completing sign in",
+    "route": "/oauth/callback"
+  },
+  {
+    "key": "device",
+    "title": "Device approval",
+    "route": "/device"
+  },
+  {
+    "key": "notfound",
+    "title": "Page not found",
+    "route": "/missing"
+  }
+]

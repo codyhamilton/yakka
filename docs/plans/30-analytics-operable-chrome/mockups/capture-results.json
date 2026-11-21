@@ -1,0 +1,186 @@
+[
+  {
+    "screen": "start",
+    "viewport": "1440x900",
+    "rows": "28–32px",
+    "overflow": false,
+    "consoleErrors": 0,
+    "filterPreview": true
+  },
+  {
+    "screen": "pulse",
+    "viewport": "1440x900",
+    "rows": "28–32px",
+    "overflow": false,
+    "consoleErrors": 0,
+    "filterPreview": true
+  },
+  {
+    "screen": "trends",
+    "viewport": "1440x900",
+    "rows": "28–32px",
+    "overflow": false,
+    "consoleErrors": 0,
+    "filterPreview": true
+  },
+  {
+    "screen": "cost",
+    "viewport": "1440x900",
+    "rows": "28–32px",
+    "overflow": false,
+    "consoleErrors": 0,
+    "filterPreview": true
+  },
+  {
+    "screen": "quality",
+    "viewport": "1440x900",
+    "rows": "28–32px",
+    "overflow": false,
+    "consoleErrors": 0,
+    "filterPreview": true
+  },
+  {
+    "screen": "tools",
+    "viewport": "1440x900",
+    "rows": "28–32px",
+    "overflow": false,
+    "consoleErrors": 0,
+    "filterPreview": true
+  },
+  {
+    "screen": "workflow",
+    "viewport": "1440x900",
+    "rows": "28–32px",
+    "overflow": false,
+    "consoleErrors": 0,
+    "filterPreview": true
+  },
+  {
+    "screen": "compare",
+    "viewport": "1440x900",
+    "rows": "28–32px",
+    "overflow": false,
+    "consoleErrors": 0,
+    "filterPreview": true
+  },
+  {
+    "screen": "scatter",
+    "viewport": "1440x900",
+    "rows": "28–32px",
+    "overflow": false,
+    "consoleErrors": 0,
+    "filterPreview": true
+  },
+  {
+    "screen": "plans",
+    "viewport": "1440x900",
+    "rows": "28–32px",
+    "overflow": false,
+    "consoleErrors": 0,
+    "filterPreview": true
+  },
+  {
+    "screen": "plan-detail",
+    "viewport": "1440x900",
+    "rows": "28–32px",
+    "overflow": false,
+    "consoleErrors": 0,
+    "filterPreview": true
+  },
+  {
+    "screen": "sessions",
+    "viewport": "1440x900",
+    "rows": "28–32px",
+    "overflow": false,
+    "consoleErrors": 0,
+    "filterPreview": true
+  },
+  {
+    "screen": "session-detail",
+    "viewport": "1440x900",
+    "rows": "28–32px",
+    "overflow": false,
+    "consoleErrors": 0,
+    "filterPreview": true
+  },
+  {
+    "screen": "ledger",
+    "viewport": "1440x900",
+    "rows": "28–32px",
+    "overflow": false,
+    "consoleErrors": 0,
+    "filterPreview": true
+  },
+  {
+    "screen": "artifact",
+    "viewport": "1440x900",
+    "rows": "28–32px",
+    "overflow": false,
+    "consoleErrors": 0,
+    "filterPreview": true
+  },
+  {
+    "screen": "ops",
+    "viewport": "1440x900",
+    "rows": "28–32px",
+    "overflow": false,
+    "consoleErrors": 0,
+    "filterPreview": true
+  },
+  {
+    "screen": "profile",
+    "viewport": "1440x900",
+    "rows": "28–32px",
+    "overflow": false,
+    "consoleErrors": 0,
+    "filterPreview": false
+  },
+  {
+    "screen": "settings",
+    "viewport": "1440x900",
+    "rows": "28–32px",
+    "overflow": false,
+    "consoleErrors": 0,
+    "filterPreview": false
+  },
+  {
+    "screen": "lifecycle",
+    "viewport": "1440x900",
+    "rows": "28–32px",
+    "overflow": false,
+    "consoleErrors": 0,
+    "filterPreview": false
+  },
+  {
+    "screen": "login",
+    "viewport": "1440x900",
+    "rows": "28–32px",
+    "overflow": false,
+    "consoleErrors": 0,
+    "filterPreview": false
+  },
+  {
+    "screen": "callback",
+    "viewport": "1440x900",
+    "rows": "28–32px",
+    "overflow": false,
+    "consoleErrors": 0,
+    "filterPreview": false
+  },
+  {
+    "screen": "device",
+    "viewport": "1440x900",
+    "rows": "28–32px",
+    "overflow": false,
+    "consoleErrors": 0,
+    "filterPreview": false
+  },
+  {
+    "screen": "notfound",
+    "viewport": "1440x900",
+    "rows": "28–32px",
+    "overflow": false,
+    "consoleErrors": 0,
+    "filterPreview": false
+  }
+]
