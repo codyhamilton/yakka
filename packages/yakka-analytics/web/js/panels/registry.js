@@ -40,6 +40,17 @@ export function validatePanelEntry(entry) {
     if (!CHART_NAMES.has(chart)) fail(`panel ${entry.id} names unknown chart ${chart}`);
   }
   if (entry.load !== undefined && typeof entry.load !== 'function') fail(`panel ${entry.id} load must be a function`);
+  // Caption, applicability and metadata-exception declarations are optional;
+  // a caption may be registered later, and validateRegistry must not require it.
+  if (entry.caption !== undefined && typeof entry.caption !== 'string' && typeof entry.caption !== 'function') {
+    fail(`panel ${entry.id} caption must be a string or a function`);
+  }
+  if (entry.applies !== undefined && !Array.isArray(entry.applies) && typeof entry.applies !== 'object') {
+    fail(`panel ${entry.id} applies must be an array or a descriptor`);
+  }
+  if (entry.filterExceptions !== undefined && typeof entry.filterExceptions !== 'object') {
+    fail(`panel ${entry.id} filterExceptions must be a descriptor`);
+  }
   return entry;
 }
 

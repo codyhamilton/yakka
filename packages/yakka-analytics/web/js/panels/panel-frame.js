@@ -5,6 +5,8 @@
 
 import { badgeModel, createBadges } from '../charts/badges.js';
 import { classifyResult, isSettled, unsupportedText } from '../core/panel-state.js';
+import { applicability, applicabilityState as applicabilityResultState } from '../core/filter-applicability.js';
+import { captionFor } from './captions.js';
 
 function text(doc, tag, className, value) {
   const node = doc.createElement(tag);
@@ -33,7 +35,7 @@ function badgeInput(result = {}) {
   return meta;
 }
 
-export function createPanelFrame({ panel, spec = {}, scope = {}, transport, scheduler, tenant = '', schema = null, doc = globalThis.document } = {}) {
+export function createPanelFrame({ panel, spec = {}, scope = {}, transport, scheduler, tenant = '', schema = null, doc = globalThis.document, onEditFilters = null, editFilters = null } = {}) {
   if (!panel || !panel.id) throw new Error('panel frame needs a registered panel');
   const element = doc.createElement('section');
   element.className = 'workspace-panel';
@@ -48,6 +50,8 @@ export function createPanelFrame({ panel, spec = {}, scope = {}, transport, sche
   const badges = createBadges(doc, []);
   heading.append(badges.element);
   element.append(heading);
+
+  const caption = text(doc, 'p', 'workspace-panel-caption', '');
 
   const chipSlot = doc.createElement('div');
   chipSlot.className = 'workspace-panel-chips';
@@ -68,10 +72,47 @@ export function createPanelFrame({ panel, spec = {}, scope = {}, transport, sche
   const meta = doc.createElement('div');
   meta.className = 'workspace-panel-meta';
   meta.append(status, population, basis);
-  element.append(chipSlot, chooserSlot, body, meta, inspectorSlot);
+  element.append(caption, chipSlot, chooserSlot, body, meta, inspectorSlot);
 
   let controller = null;
   let state = 'loading';
+
+  const declaredApplies = panel.applies !== undefined || panel.scopeFilters !== undefined;
+
+  function renderCaption(result = null) {
+    caption.textContent = captionFor(panel, spec, { scope, schema, result });
+    return caption.textContent;
+  }
+
+  function ignoredFrom(result) {
+    const lists = [
+      result?.ignoredFilters,
+      result?.ignored_filters,
+      result?.body?.ignored_filters,
+      result?.raw?.ignored_filters,
+      result?.response?.ignored_filters
+    ];
+    return [...new Set(lists.flatMap(list => Array.isArray(list) ? list.map(String) : []))];
+  }
+
+  function addEditFilters() {
+    const handler = editFilters || onEditFilters || panel.editFilters;
+    if (typeof handler !== 'function') return;
+    const button = text(doc, 'button', 'workspace-panel-edit-filters', 'Edit filters');
+    button.type = 'button';
+    button.addEventListener('click', handler);
+    status.append(button);
+  }
+
+  function showApplicability(result) {
+    const next = applicabilityResultState(result);
+    if (!next) return false;
+    body.replaceChildren();
+    setState('unsupported', { renderStatus: false });
+    status.textContent = next.message;
+    addEditFilters();
+    return true;
+  }
 
   function setState(next, options = {}) {
     state = next;
@@ -162,9 +203,17 @@ export function createPanelFrame({ panel, spec = {}, scope = {}, transport, sche
   }
 
   async function load() {
+    renderCaption();
     if (!panel.load) {
       setState('unsupported', { missing: panel.id, reason: 'no loader', source: 'this phase' });
       return;
+    }
+    if (declaredApplies) {
+      const pre = applicability({ panel, spec, scope, schema });
+      if (!pre.applicable) {
+        showApplicability(pre);
+        return;
+      }
     }
     controller?.abort();
     controller = new AbortController();
@@ -181,9 +230,21 @@ export function createPanelFrame({ panel, spec = {}, scope = {}, transport, sche
     }
     if (signal.aborted) return;
     const classified = classifyResult(result);
+    renderCaption(result);
     const withRetry = (classified.state === 'error' || classified.state === 'cancelled') && typeof classified.retry !== 'function'
       ? { ...classified, retry: load }
       : classified;
+    if (withRetry.state === 'unsupported' && withRetry.applicability) {
+      showApplicability(withRetry);
+      return;
+    }
+    if (declaredApplies && withRetry.state !== 'error' && withRetry.state !== 'cancelled') {
+      const post = applicability({ panel, spec, scope, schema, ignoredFilters: ignoredFrom(result) });
+      if (!post.applicable) {
+        showApplicability(post);
+        return;
+      }
+    }
     setState(withRetry.state, withRetry);
     if (withRetry.population) setPopulation(withRetry.population);
     if (withRetry.basis) setBasis(withRetry.basis);
@@ -196,5 +257,6 @@ export function createPanelFrame({ panel, spec = {}, scope = {}, transport, sche
 
   setState('loading', { inFlight: 0 });
   setBasis(panel.measureBasis || '');
-  return { element, load, destroy, setState, setPopulation, setBasis, chipSlot, chooserSlot, inspectorSlot, get state() { return state; } };
+  renderCaption();
+  return { element, load, destroy, setState, setPopulation, setBasis, caption, chipSlot, chooserSlot, inspectorSlot, get state() { return state; } };
 }

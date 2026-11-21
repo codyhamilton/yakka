@@ -4,12 +4,43 @@
 
 import { formatValue, formatBasis, NULL_TEXT } from './formatters.js';
 
-export function tableModel({ spec = {}, data = [] } = {}) {
+function explicitColumns(columns = []) {
+  return columns.map((column, index) => ({
+    key: column.key || column.name || `column_${index}`,
+    label: column.label || column.key || column.name || '',
+    unit: column.unit || '',
+    numeric: column.numeric === true
+  }));
+}
+
+function cellValue(datum, column) {
+  if (datum && Object.prototype.hasOwnProperty.call(datum, column.key)) return datum[column.key];
+  if (datum?.raw && Object.prototype.hasOwnProperty.call(datum.raw, column.key)) return datum.raw[column.key];
+  if (datum?.cells && Object.prototype.hasOwnProperty.call(datum.cells, column.key)) return datum.cells[column.key];
+  return undefined;
+}
+
+export function tableModel({ spec = {}, data = [], columns = null } = {}) {
+  if (Array.isArray(columns) && columns.length) {
+    const model = explicitColumns(columns);
+    return {
+      caption: spec.title || 'Plotted values',
+      basis: spec.timeBasis ? formatBasis(spec.timeBasis) : '',
+      mode: 'columns',
+      columns: model,
+      rows: data.map((datum, index) => ({
+        key: datum?.key ?? datum?.__key ?? String(index),
+        cells: model.map(column => ({ key: column.key, value: cellValue(datum, column), numeric: column.numeric })),
+        raw: datum
+      }))
+    };
+  }
   const series = spec.series || [];
   const x = spec.x || { label: 'Time', kind: 'number' };
   return {
     caption: spec.title || 'Plotted values',
     basis: spec.timeBasis ? formatBasis(spec.timeBasis) : '',
+    mode: 'series',
     columns: [
       { key: '__entity', label: spec.table?.keyLabel || 'Entity' },
       { key: '__x', label: x.label || 'Time', unit: x.unit || '' },
@@ -24,20 +55,20 @@ export function tableModel({ spec = {}, data = [] } = {}) {
   };
 }
 
-export function createTable(doc, { spec = {}, data = [], onSelect = null, onInspect = null } = {}) {
+export function createTable(doc, { spec = {}, data = [], columns = null, select = true, onSelect = null, onInspect = null } = {}) {
   const wrap = doc.createElement('div');
   wrap.className = 'yk-table-wrap';
   const table = doc.createElement('table');
   table.className = 'yk-table';
   wrap.append(table);
-  let model = tableModel({ spec, data });
+  let model = tableModel({ spec, data, columns });
   render();
 
   return { element: wrap, table, update };
 
   function update(nextData = data) {
     data = nextData;
-    model = tableModel({ spec, data });
+    model = tableModel({ spec, data, columns });
     render();
     return model;
   }
@@ -48,8 +79,15 @@ export function createTable(doc, { spec = {}, data = [], onSelect = null, onInsp
     caption.textContent = model.basis ? `${model.caption} — ${model.basis}` : model.caption;
     table.append(caption);
 
+    const showSelect = select !== false;
     const thead = doc.createElement('thead');
     const headRow = doc.createElement('tr');
+    if (model.mode === 'columns' && showSelect) {
+      const th = doc.createElement('th');
+      th.scope = 'col';
+      th.textContent = spec.table?.keyLabel || 'Select';
+      headRow.append(th);
+    }
     for (const column of model.columns) {
       const th = doc.createElement('th');
       th.scope = 'col';
@@ -66,20 +104,19 @@ export function createTable(doc, { spec = {}, data = [], onSelect = null, onInsp
       tr.dataset.entityKey = row.key;
       tr.addEventListener('keydown', event => onKey(event, row, tr));
 
-      const selectCell = doc.createElement('th');
-      selectCell.scope = 'row';
-      const checkbox = doc.createElement('input');
-      checkbox.type = 'checkbox';
-      checkbox.className = 'yk-table-select';
-      checkbox.dataset.key = row.key;
-      checkbox.setAttribute('aria-label', `Select ${row.key}`);
-      checkbox.addEventListener('change', event => emitSelect(row.key, event.target.checked, event));
-      const key = doc.createElement('span');
-      key.className = 'yk-table-key';
-      key.textContent = row.key;
-      selectCell.append(checkbox, key);
-      tr.append(selectCell);
+      if (model.mode === 'columns') {
+        if (showSelect) tr.append(selectCell(row));
+        for (const cell of row.cells) {
+          const td = doc.createElement('td');
+          td.className = cell.numeric ? 'yk-table-value yk-table-number' : 'yk-table-cell';
+          td.textContent = cell.value === undefined || cell.value === null ? NULL_TEXT : String(cell.value);
+          tr.append(td);
+        }
+        tbody.append(tr);
+        continue;
+      }
 
+      tr.append(selectCell(row));
       const xCell = doc.createElement('td');
       xCell.className = 'yk-table-x';
       xCell.textContent = row.x;
@@ -94,6 +131,27 @@ export function createTable(doc, { spec = {}, data = [], onSelect = null, onInsp
       tbody.append(tr);
     }
     table.append(tbody);
+  }
+
+  function selectCell(row) {
+    const cell = doc.createElement('th');
+    cell.scope = 'row';
+    const key = doc.createElement('span');
+    key.className = 'yk-table-key';
+    key.textContent = row.key;
+    if (!select) {
+      key.textContent = row.key;
+      cell.append(key);
+      return cell;
+    }
+    const checkbox = doc.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.className = 'yk-table-select';
+    checkbox.dataset.key = row.key;
+    checkbox.setAttribute('aria-label', `Select ${row.key}`);
+    checkbox.addEventListener('change', event => emitSelect(row.key, event.target.checked, event));
+    cell.append(checkbox, key);
+    return cell;
   }
 
   function emitSelect(key, selected, event) {

@@ -129,6 +129,21 @@ export function unsupportedState({ feature = '', grain = '', measure = '', lens 
   return { state: 'unsupported', missing, reason, source, nearest };
 }
 
+// One applicability classification that reuses the unsupported state rather
+// than adding a second vocabulary. The exact refusal sentence is supplied by
+// the filter-applicability helper; the frame renders `message` verbatim.
+export function applicabilityState({ labels = [], message = '', filters = [] } = {}) {
+  const sorted = [...new Set(labels || [])].sort();
+  const text = message || `This chart cannot apply ${sorted.join(', ')}. Change the filters to view it.`;
+  return {
+    ...unsupportedState({ feature: sorted.join(', '), reason: 'active filter unsupported' }),
+    applicability: true,
+    labels: sorted,
+    unsupportedFilters: filters,
+    message: text
+  };
+}
+
 export function unsupportedText(result = {}) {
   const missing = result.missing || 'this capability';
   const reason = result.reason ? ` (${result.reason})` : '';
