@@ -35,6 +35,22 @@ export function windowParams(win) {
   return params;
 }
 
+// A comparison read keeps the committed scope (tenant, repository, kind,
+// timezone, excludes, cohorts) and replaces only the time bounds with the
+// previous equal-length period. Dropping the other parameters would mix an
+// unfiltered population into a filtered view.
+export function previousParams(baseParams, prev) {
+  const params = new URLSearchParams(baseParams);
+  params.delete('all');
+  params.delete('from');
+  params.delete('to');
+  if (prev) {
+    params.set('from', new Date(prev.from).toISOString());
+    params.set('to', new Date(prev.to).toISOString());
+  }
+  return params;
+}
+
 const SCOPE_ONLY_KEYS = new Set(['win', 'from', 'to', 'tz', 'cohorts', 'sel', 'hide', 'cmp', 'pick']);
 
 // Applied scope causes for an empty result: only the shared filters, excludes,
@@ -337,7 +353,8 @@ function previousFromContext(readContext) {
 export async function load({ scope = {}, transport, tenant, signal, doc = globalThis.document, clear = null, readContext = null } = {}) {
   ensurePulseStyles(doc);
   try {
-    const current = await fetchSummary(transport, readContext ? readContext.paramsFor() : scopeParams(scope), { tenant, signal, stateKey: 'pulse-summary' });
+    const currentParams = readContext ? readContext.paramsFor() : scopeParams(scope);
+    const current = await fetchSummary(transport, currentParams, { tenant, signal, stateKey: 'pulse-summary' });
     if (summaryIsEmpty(current)) {
       whenPanelBody('pulse-strips', doc, host => host.replaceChildren());
       const causes = emptyCausesFor(scope, clear);
@@ -347,7 +364,7 @@ export async function load({ scope = {}, transport, tenant, signal, doc = global
     const prev = readContext ? previousFromContext(readContext) : previousWindow(scope);
     let previous = null;
     if (prev) {
-      try { previous = await fetchSummary(transport, windowParams(prev), { tenant, signal, stateKey: 'pulse-summary-prev' }); } catch { previous = null; }
+      try { previous = await fetchSummary(transport, previousParams(currentParams, prev), { tenant, signal, stateKey: 'pulse-summary-prev' }); } catch { previous = null; }
     }
     let scores = null;
     try {
