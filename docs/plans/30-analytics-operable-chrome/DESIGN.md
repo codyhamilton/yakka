@@ -1060,6 +1060,17 @@ None that block this design. Unknown live authenticated counts and unstamped API
 - Surfaces: account/identity/lifecycle style/link and tests named above, plus nav integration. No lifecycle engine/auth gate changes.
 - Approach: **Known** — reuse current flows and owner UI. No invites, roles or membership-write API.
 - Depends on: phases 1 and 2. Refine required: account console and lifecycle visual preservation can be bounded units.
+- Units:
+
+| Unit | Brief | Depends on | May run alongside |
+|---|---|---|---|
+| U1 — Account console: Tokens, Tenants and Membership | [phase3-01-account-console](briefs/phase3-01-account-console.md) | — | U3 |
+| U2 — Account routes: Settings, login, callback, device and not-found | [phase3-02-account-routes](briefs/phase3-02-account-routes.md) | U1 | — |
+| U3 — Lifecycle page density, tenant link and return path | [phase3-03-lifecycle-page](briefs/phase3-03-lifecycle-page.md) | — | U1 |
+| U4 — Phase 3 proof and three-phase union regression | [phase3-04-proof-harness](briefs/phase3-04-proof-harness.md) | U1, U2, U3 | — |
+
+- Execution waves: Wave 1 — U1 and U3 in parallel. Wave 2 — U2. Wave 3 — U4.
+- Carried placement: none. Phase 2 leaves no unplaced Carried item; signed-in production checks and real lifecycle writes remain gates.
 
 ## Provenance Notes
 
