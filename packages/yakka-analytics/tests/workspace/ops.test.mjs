@@ -13,7 +13,7 @@ import { validatePanelEntry } from '../../web/js/panels/registry.js';
 const environment = loadBrowserEnvironment();
 
 async function settle(page) {
-  await page.waitForFunction(() => document.querySelector('[data-panel="ops-footprint"]')?.dataset.idle === 'true');
+  await page.waitForFunction(() => document.querySelector('section[data-panel="ops-footprint"]')?.dataset.idle === 'true');
   await page.waitForFunction(() => document.querySelector('.ops-health tbody td'));
   await page.waitForFunction(() => document.querySelectorAll('.ops-records tbody tr').length > 0);
 }
@@ -127,7 +127,7 @@ test('admin sees health, the exact-tenant storage state and recent records', { s
 
   await page.goto(`${harness.origin}/ops`);
   await settle(page);
-  const panel = page.locator('[data-panel="ops-footprint"]');
+  const panel = page.locator('section[data-panel="ops-footprint"]');
   assert.equal(await panel.getAttribute('data-chart'), 'bars');
   assert.match(await panel.innerText(), /Each bar shows retained bytes for one storage category in this tenant; longer bars mean more space used\./);
   assert.equal(await page.locator('.ops-tenant').count(), 0, 'all-tenant panels are removed');
@@ -153,11 +153,12 @@ test('the selected tenant being absent is stated, never replaced with another te
   const harness = await startWorkspaceHarness();
   const browser = await launchBrowser(environment);
   t.after(async () => { await browser.close(); await harness.close(); });
+  await control(harness.origin, { adminTenant: 'fixture-tenant' });
   const page = await browser.newPage();
   const diagnostics = await watchPage(page);
   await page.goto(`${harness.origin}/ops`);
   await settle(page);
-  const panel = page.locator('[data-panel="ops-footprint"]');
+  const panel = page.locator('section[data-panel="ops-footprint"]');
   assert.equal(await panel.getAttribute('data-state'), 'empty');
   assert.match(await panel.innerText(), /No records match these filters\./);
   assert.equal(await page.locator('.ops-footprint-table').count(), 0);
@@ -179,7 +180,7 @@ test('a member gets only the exact administrator-only state and no storage value
 
   await page.goto(`${harness.origin}/ops`);
   await settle(page);
-  const panel = page.locator('[data-panel="ops-footprint"]');
+  const panel = page.locator('section[data-panel="ops-footprint"]');
   assert.equal(await panel.getAttribute('data-state'), 'unsupported');
   assert.match(await panel.innerText(), /Storage information is available to server administrators only\./);
   assert.equal(await page.locator('.ops-footprint-table').count(), 0);
@@ -199,7 +200,7 @@ test('a status error shows the server message and code, and retry recovers after
 
   await page.goto(`${harness.origin}/ops`);
   await settle(page);
-  const panel = page.locator('[data-panel="ops-footprint"]');
+  const panel = page.locator('section[data-panel="ops-footprint"]');
   assert.equal(await panel.getAttribute('data-state'), 'error');
   assert.match(await panel.innerText(), /status read failed/);
   assert.match(await panel.innerText(), /read failed/);
@@ -209,7 +210,7 @@ test('a status error shows the server message and code, and retry recovers after
   await control(harness.origin, { statusError: false });
   await retry.click();
   await settle(page);
-  assert.notEqual(await page.locator('[data-panel="ops-footprint"]').getAttribute('data-state'), 'error');
+  assert.notEqual(await page.locator('section[data-panel="ops-footprint"]').getAttribute('data-state'), 'error');
   assert.equal(diagnostics.pageErrors.length, 0);
   assert.deepEqual(await diagnostics.cspViolations(), []);
 });
@@ -230,7 +231,7 @@ test('leaving /ops aborts the in-flight status request', { skip: environment.ok 
   });
   await page.waitForFunction(async () => (await (await fetch('/__test/control')).json()).statusAborted >= 1);
   await page.waitForFunction(() => document.querySelector('#app')?.dataset.route === '/ledger');
-  assert.equal(await page.locator('[data-panel="ops-footprint"]').count(), 0);
+  assert.equal(await page.locator('section[data-panel="ops-footprint"]').count(), 0);
   assert.equal(diagnostics.pageErrors.length, 0);
   assert.deepEqual(await diagnostics.cspViolations(), []);
 });

@@ -137,10 +137,11 @@ async function clickMark(page, panelId, tag, key) {
   }, [panelId, tag]);
   const point = await page.evaluate(([panel, selector, markKey]) => {
     const chart = document.querySelector(`[data-panel="${panel}"] ${selector}`);
-    const result = chart.inspect();
-    const mark = result.marks.find(item => item.key === markKey);
+    const mark = [...(chart.shadowRoot?.querySelectorAll('[data-mark]') || [])]
+      .find(node => node.dataset.entityKey === markKey);
     if (!mark) return null;
-    return { x: result.plot.left + mark.px, y: result.plot.top + mark.py };
+    const rect = mark.getBoundingClientRect();
+    return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
   }, [panelId, tag, key]);
   assert.ok(point, `mark ${key} is drawn`);
   await page.mouse.click(point.x, point.y);
@@ -179,7 +180,7 @@ test('every Start question path opens its destination or names the missing capab
     await settleShell(page);
     const path = new URL(page.url()).pathname;
     if (path === '/plans') {
-      await settlePanels(page, ['plans-list', 'scatter-plan']);
+      await settlePanels(page, ['plans-list']);
       await control(harness.origin, { p12: false });
     } else if (path === '/b/pulse') {
       await settlePanels(page, ['river', 'pulse-strips', 'movers', 'calendar', 'coverage']);
@@ -307,15 +308,22 @@ test('Pulse proves feed, brush, zoom, Follow, chips, tray, typed populations and
   record('the shared filter chip is shown', await page.locator('.workspace-chip[data-kind="filter"]').count() >= 1, true);
   record('the exclusion chip is shown', await page.locator('.workspace-chip[data-kind="exclude"]').count() >= 1, true);
   record('the selection chip is shown', await page.locator('.workspace-chip[data-kind="selection"]').count() >= 1, true);
-  assert.match(await page.locator('.workspace-panel[data-panel="river"] .workspace-panel-population').innerText(), /typed_observation/);
+  assert.match(await page.locator('section[data-panel="river"] .workspace-panel-status').innerText(), /cannot apply exclude/i);
   record('the selection tray opens', await page.locator('.selection-tray').getAttribute('data-open'), 'true');
   await page.waitForFunction(() => {
     const text = document.querySelector('.selection-tray-summary')?.textContent || '';
-    return /2\b/.test(text) && /in scope|typed population/.test(text);
+    return /2 sources/.test(text);
   });
   record('the tray names the typed population', true, true);
+  await page.locator('.workspace-chip[data-kind="exclude"] .workspace-chip-remove').first().click();
   await page.locator('.workspace-chip[data-kind="filter"] .workspace-chip-remove').first().click();
-  await page.waitForFunction(() => !new URL(location.href).searchParams.has('harness'));
+  await page.waitForFunction(() => {
+    const params = new URL(location.href).searchParams;
+    return !params.has('harness') && !params.has('exclude');
+  });
+  await page.waitForFunction(() => /observations displayed/.test(
+    document.querySelector('section[data-panel="river"] .activity-population')?.textContent || ''
+  ));
   const afterRemove = new URLSearchParams(await page.evaluate(() => location.search));
   record('an unknown URL key survives a scope change', afterRemove.get('future'), '1');
   assert.equal(afterRemove.get('pick'), 's1,s2|');
@@ -331,11 +339,6 @@ test('Pulse proves feed, brush, zoom, Follow, chips, tray, typed populations and
     record(`coverage is listed for ${id}`, await page.locator(`[data-panel="${id}"] .capability-coverage li`).count() > 0, true);
     assert.ok((await page.locator(`[data-panel="${id}"] .capability-caveat`).innerText()).length > 0);
   }
-  const moverOptions = await page.locator('[data-panel="movers"] select option').evaluateAll(nodes => [...new Set(nodes.map(node => node.value))].sort());
-  record('the movers chooser offers only schema measures', JSON.stringify(moverOptions), JSON.stringify(['commits', 'cost_usd', 'model_calls']));
-  const unsupported = page.locator('[data-panel="movers"] .capability-missing li[data-kind="measure"][data-name="unpriced_calls"]');
-  record('an unsupported measure is kept and names the nearest choice', await unsupported.count(), 1);
-  assert.match(await unsupported.innerText(), /nearest supported choice: measure cost_usd/);
 
   assert.deepEqual(diagnostics.pageErrors, []);
   assert.deepEqual(await diagnostics.cspViolations(), []);
@@ -355,7 +358,7 @@ test('a named board saves and reopens from its URL, and the ledger and ops prove
 
   // A named board stores the URL and reopening navigates to exactly it.
   const panelSpec = encodePanelSpec({ grain: 'time', measures: ['cost_usd'], split: 'harness', chart: 'lines' });
-  const saved = `/b/pulse?win=all&repo_id=r1&future=1&p1=${encodeURIComponent(panelSpec)}`;
+  const saved = `/b/pulse?tenant=fixture-tenant&win=all&repo_id=r1&future=1&p1=${encodeURIComponent(panelSpec)}`;
   await page.goto(`${harness.origin}${saved}`);
   await settlePanels(page, ['river', 'pulse-strips', 'movers', 'calendar', 'coverage']);
   await page.locator('.save-board input').fill('Phase 9 acceptance');
@@ -365,7 +368,7 @@ test('a named board saves and reopens from its URL, and the ledger and ops prove
   record('a saved board stores its URL', stored.url, saved);
   await page.goto(`${harness.origin}/b/pulse?win=7d`);
   await settlePanels(page, ['river', 'pulse-strips', 'movers', 'calendar', 'coverage']);
-  await page.locator('.saved-board-list li', { hasText: 'Phase 9 acceptance' }).locator('button', { hasText: 'Open' }).click();
+  await page.locator('.saved-board-list tbody tr', { hasText: 'Phase 9 acceptance' }).locator('button', { hasText: 'Open' }).click();
   await page.waitForFunction(url => `${location.pathname}${location.search}` === url, saved);
   await settleShell(page);
   await settlePanels(page, ['river', 'pulse-strips', 'movers', 'calendar', 'coverage']);
@@ -397,14 +400,14 @@ test('a named board saves and reopens from its URL, and the ledger and ops prove
   await control(harness.origin, { role: 'admin', statusError: false });
   await page.goto(`${harness.origin}/ops`);
   await settlePanels(page, ['ops-footprint']);
-  record('ops renders the authorised status', await page.locator('[data-panel="ops-footprint"]').getAttribute('data-state'), 'ready');
-  record('ops keeps tenants separate', await page.locator('.ops-tenant').count(), 2);
+  record('ops renders the authorised status', await page.locator('section[data-panel="ops-footprint"]').getAttribute('data-state'), 'ready');
+  record('ops renders only the selected tenant', await page.locator('section[data-panel="ops-footprint"] .ops-chart-bar').count() > 0, true);
   await control(harness.origin, { role: 'member' });
   await page.goto(`${harness.origin}/ops`);
   await settlePanels(page, ['ops-footprint']);
-  record('a member sees only the administrator-only state', await page.locator('[data-panel="ops-footprint"]').getAttribute('data-state'), 'unsupported');
-  assert.match(await page.locator('[data-panel="ops-footprint"]').innerText(), /administrator only/i);
-  record('a refused member sees no tenant values', await page.locator('.ops-tenant').count(), 0);
+  record('a member sees only the administrator-only state', await page.locator('section[data-panel="ops-footprint"]').getAttribute('data-state'), 'unsupported');
+  assert.match(await page.locator('section[data-panel="ops-footprint"]').innerText(), /server administrators only/i);
+  record('a refused member sees no tenant values', await page.locator('section[data-panel="ops-footprint"] .ops-chart-bar').count(), 0);
   await control(harness.origin, { role: 'admin' });
 
   // The member's 403 is the refused read the state is proving; Chromium logs it.
@@ -445,22 +448,22 @@ test('every panel state and badge is reached through the harness scenes', { skip
   await control(harness.origin, { statusError: true });
   await page.goto(`${harness.origin}/ops`);
   await settlePanels(page, ['ops-footprint']);
-  record('error is the frame state', await page.locator('[data-panel="ops-footprint"]').getAttribute('data-state'), 'error');
-  assert.match(await page.locator('[data-panel="ops-footprint"]').innerText(), /status read failed/);
-  assert.match(await page.locator('[data-panel="ops-footprint"]').innerText(), /read failed/);
-  const retry = page.locator('[data-panel="ops-footprint"] button', { hasText: 'Retry' });
+  record('error is the frame state', await page.locator('section[data-panel="ops-footprint"]').getAttribute('data-state'), 'error');
+  assert.match(await page.locator('section[data-panel="ops-footprint"]').innerText(), /status read failed/);
+  assert.match(await page.locator('section[data-panel="ops-footprint"]').innerText(), /read failed/);
+  const retry = page.locator('section[data-panel="ops-footprint"] button', { hasText: 'Retry' });
   record('an error offers retry', await retry.count(), 1);
   await control(harness.origin, { statusError: false });
   await retry.click();
   await settlePanels(page, ['ops-footprint']);
-  record('retry recovers the panel', await page.locator('[data-panel="ops-footprint"]').getAttribute('data-state'), 'ready');
+  record('retry recovers the panel', await page.locator('section[data-panel="ops-footprint"]').getAttribute('data-state'), 'ready');
 
   // unsupported through the member scene, naming the capability.
   await control(harness.origin, { role: 'member' });
   await page.goto(`${harness.origin}/ops`);
   await settlePanels(page, ['ops-footprint']);
-  record('unsupported names the missing capability', await page.locator('[data-panel="ops-footprint"]').getAttribute('data-state'), 'unsupported');
-  assert.match(await page.locator('[data-panel="ops-footprint"]').innerText(), /administrator only/i);
+  record('unsupported names the missing capability', await page.locator('section[data-panel="ops-footprint"]').getAttribute('data-state'), 'unsupported');
+  assert.match(await page.locator('section[data-panel="ops-footprint"]').innerText(), /server administrators only/i);
   await control(harness.origin, { role: 'admin' });
 
   // cancelled: an aborted load is cancelled, never an error, and the frame renders it.

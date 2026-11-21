@@ -745,6 +745,7 @@ async function renderBoard(container, record, state, schema, context, scopeContr
         opener: (event.composedPath?.() || []).find(node => node?.dataset?.mark !== undefined)
           || event.target?.shadowRoot?.activeElement
           || event.target,
+        openerHost: event.target,
         url: globalThis.location?.href || ''
       });
     });

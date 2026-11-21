@@ -1137,7 +1137,9 @@ function renderDetail(root, doc, { signal, id, tenant = '', readContext = null }
   const heading = el(doc, 'h1', '', `Session ${id}`);
   const back = el(doc, 'a', 'sessions-back', 'Back to sessions');
   back.href = sessionBackDestination(search);
-  root.append(heading, back);
+  const ledger = el(doc, 'a', 'session-ledger-link', 'Open full ledger');
+  ledger.href = sessionLedgerDestination(id, search);
+  root.append(heading, back, ledger);
 
   const frame = createPanelFrame({ panel: SESSION_LANES_PANEL, scope: { id }, transport, scheduler, doc });
   frame.element.dataset.chart = 'lanes';
@@ -1326,6 +1328,7 @@ function renderDetail(root, doc, { signal, id, tenant = '', readContext = null }
       dl.append(el(doc, 'dt', '', 'First'), el(doc, 'dd', '', cellText(conversation.first_ts)));
       dl.append(el(doc, 'dt', '', 'Last'), el(doc, 'dd', '', cellText(conversation.last_ts)));
       identity.body.append(dl);
+      renderLinks(identity.body, conversation, doc);
       identity.state('ready', '');
       renderWhole(conversation);
     } else {

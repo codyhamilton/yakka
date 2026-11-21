@@ -64,7 +64,7 @@ export function createStubApi() {
       const answer = () => {
         if (state.role !== 'admin') { json(response, 403, { error: 'forbidden' }); return; }
         if (state.statusError) { json(response, 500, { error: 'status read failed', code: 'read failed' }); return; }
-        json(response, 200, adminStatus());
+        json(response, 200, adminStatus({ omitTenant: state.adminTenant || '' }));
       };
       if (state.statusDelayMs > 0) {
         let aborted = false;

@@ -190,12 +190,22 @@ export function explorePage({ cursor = '', limit = 0 } = {}) {
 // The full `/v1/admin/status` shape (CONTRACTS.md 6): server summary, optional
 // volume, and two tenants so cross-tenant separation is visible. Times are Unix
 // seconds and sizes are bytes.
-export function adminStatus() {
+export function adminStatus({ omitTenant = '' } = {}) {
   return {
     version: 'fixture-2',
     scoring: { scorer: true, checks: false, rescorable: true },
     volume: { total_bytes: 1073741824, free_bytes: 536870912 },
     tenants: [
+      {
+        id: 'fixture-tenant',
+        name: 'Fixture',
+        facts: 30,
+        compaction: 'none',
+        footprint: { ledger_bytes: 3000, wal_bytes: 4, archive_bytes: 2048, archive_files: 2, blob_bytes: 3072, blobs: 3, pending_bytes: 8, pending: 1, other_bytes: 0 },
+        screens: { verdicts: {}, scored_content: 0, score_rows: 0, rejections: null, total_rejections: 0 },
+        failures: [],
+        rescore: { running: false, total: 0, done: 0, failed: 0, started: 0, finished: 0 }
+      },
       {
         id: 'alpha',
         name: 'Alpha',
@@ -222,7 +232,7 @@ export function adminStatus() {
         failures: [],
         rescore: { running: false, total: 2, done: 2, failed: 1, started: 1700000000, finished: 1700000100, error: 'one item failed' }
       }
-    ]
+    ].filter(tenant => tenant.id !== omitTenant)
   };
 }
 

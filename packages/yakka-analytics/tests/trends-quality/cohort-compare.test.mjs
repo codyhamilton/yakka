@@ -298,7 +298,7 @@ test('a second compare panel issues both cohort requests and compare plus split 
   }
 });
 
-test('the Cost preset mounts repo, harness and model investigations and Tools refuses a repo split', async t => {
+test('the Cost preset mounts repo, harness and model investigations and Tools keeps its fixed tool_kind × harness split', async t => {
   const environment = loadBrowserEnvironment();
   if (!environment.ok) { t.skip(environment.reason || SKIP_REASON); return; }
   const harness = await startWorkspaceHarness();
@@ -325,14 +325,18 @@ test('the Cost preset mounts repo, harness and model investigations and Tools re
     const override = encodeURIComponent(JSON.stringify({
       grain: 'time', measures: ['hook_events'], split: 'repo_id', chart: 'bars', scope: { second: 'harness', mode: 'stacked' }
     }));
+    const before = harness.api.state.requests.length;
     await page.goto(`${harness.origin}/b/tools?win=30d&p1=${override}`);
     await settle(page);
     const tools = await page.evaluate(() => ({
       state: document.querySelector('[data-panel="mix"]')?.dataset.state,
       text: document.querySelector('[data-panel="mix"]')?.textContent || ''
     }));
-    assert.equal(tools.state, 'unsupported');
-    assert.match(tools.text, /harness/);
+    assert.equal(tools.state, 'ready', 'G-mix ignores a deep-link split override');
+    assert.match(tools.text, /hook events for a tool category, split by harness/);
+    const reads = harness.api.state.requests.slice(before).filter(entry => entry.path === '/v1/analytics/query');
+    assert.ok(reads.some(entry => entry.search.includes('dim=tool_kind') && entry.search.includes('dim=harness')), 'fixed tool_kind × harness read');
+    assert.ok(!reads.some(entry => entry.search.includes('dim=repo_id')), 'no repo split read');
     await diagnostics.assertClean();
   } finally {
     if (browser) await browser.close();

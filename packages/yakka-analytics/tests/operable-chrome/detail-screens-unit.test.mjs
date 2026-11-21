@@ -143,7 +143,8 @@ test('the two session strips use distinct sources and applicable scope', () => {
   assert.deepEqual(sessionRecordsRefusal({ filters: { session_model: ['claude'] } }).labels, ['session model']);
   assert.deepEqual(sessionRecordsRefusal({ cohorts: { ca: 'x' } }).labels, ['cohort']);
   assert.equal(sessionSelectedRefusal({ filters: { harness: ['orca'] } }), null);
-  assert.deepEqual(sessionSelectedRefusal({ filters: { repo_id: ['r'] } }).labels, ['repository']);
+  assert.equal(sessionSelectedRefusal({ filters: { repo_id: ['r'] } }), null, 'the shared repository filter maps to session_repo');
+  assert.deepEqual(sessionWindowParams('sess-1', { filters: { repo_id: ['r'] } }).getAll('session_repo'), ['r']);
   assert.deepEqual(sessionSelectedRefusal({ filters: { kind: ['brief'] } }).labels, ['document kind']);
 });
 
