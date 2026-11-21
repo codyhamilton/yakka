@@ -15,7 +15,7 @@ Refined into four units by `refine` (commit `e8f91833`):
 
 ### Unit outcomes
 
-(Populated as each unit lands, against its brief name.)
+- **U1 — phase1-01-go-event-counts** (commit `80814ac4`): `GET /v1/analytics/event-counts` plus store `Tenant.EventCounts` (four `COUNT(*)` in one read transaction), the shared `retainedRecordRejWhere` predicate reused by `ExplorePage`, `event_counts`/`record_filters` schema flags, and store/serve tests (N1 12,480/8,406 facts, 9/4 rejections, all five fact types, Explore traversal reconciliation, unknown key 400, 503, foreign-tenant 403). `go test ./internal/store ./internal/serve` green; `go vet` clean. No deviations from contract; `Summary`/`Series`/`Activity` rejection semantics unchanged.
 
 ### Verification
 
