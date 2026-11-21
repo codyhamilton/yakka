@@ -5,6 +5,7 @@
 
 import { formatNumber } from '../charts/formatters.js';
 import { cancelledState, emptyState, errorState, unsupportedState } from '../core/panel-state.js';
+import { hasUnsafeLegacyRecordFilters, LEGACY_RECORD_FILTER_MESSAGE } from '../core/record-filter-capability.js';
 
 export const LEDGER_ROUTE = 'explore';
 
@@ -30,6 +31,8 @@ export const LEDGER_ERROR_TEXT = 'Could not load Event ledger.';
 export const LEDGER_MORE_TEXT = 'Load more events';
 export const LEDGER_LOADING_MORE_TEXT = 'Loading…';
 export const LEDGER_RETRY_NEXT_TEXT = 'Retry next page';
+
+export { hasUnsafeLegacyRecordFilters, LEGACY_RECORD_FILTER_MESSAGE };
 
 const WINDOW_MS = { h: 3600e3, d: 86400e3, w: 7 * 86400e3, m: 30 * 86400e3, y: 365 * 86400e3 };
 
@@ -190,6 +193,7 @@ export function ledgerStateModel(state = 'loading', {
   caption = 'Event ledger', status = 0, code = '', retry = null, actions = null
 } = {}) {
   if (state === 'loading') return { state: 'loading', text: `Loading ${caption}…`, busy: true, detail: '', code: '', actions: [] };
+  if (state === 'refused') return { state: 'refused', text: LEGACY_RECORD_FILTER_MESSAGE, busy: false, detail: '', code: '', actions: [] };
   if (state === 'empty') {
     const defaults = actions || [action('all-history', 'All history'), action('reset-filters', 'Reset filters')];
     return { state: 'empty', text: LEDGER_EMPTY_TEXT, busy: false, detail: '', code: '', actions: defaults };

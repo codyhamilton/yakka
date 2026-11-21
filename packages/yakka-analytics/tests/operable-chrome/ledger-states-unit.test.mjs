@@ -7,6 +7,7 @@ import {
   pageParameters, renderLedgerState, retryNextPage, rowKey
 } from '../../web/js/panels/ledger-table.js';
 import { resetScopeState } from '../../web/js/core/chips.js';
+import { hasUnsafeLegacyRecordFilters, LEGACY_RECORD_FILTER_MESSAGE } from '../../web/js/core/record-filter-capability.js';
 
 function node(tag, doc) {
   const item = {
@@ -67,6 +68,18 @@ test('denominator text: ready, loading, error, legacy and stale never turn a pag
   assert.equal(ledgerPopulationText({ loaded: 200, counts: { matched: { rows: 150 } } }), '200 rows displayed; counts may have changed — Refresh.');
   assert.equal(ledgerPopulationText({ loaded: 0, counts: null }), '0 rows displayed; matching record total unavailable.');
   assert.doesNotMatch(ledgerPopulationText({ loaded: 16, counts: null }), /of 0/);
+});
+
+test('legacy retained-record filters refuse unsafe rejection predicates', () => {
+  for (const field of ['conversation_id', 'event', 'norm_event', 'tool', 'model', 'source']) {
+    assert.equal(hasUnsafeLegacyRecordFilters({ filters: { [field]: ['value'] } }), true, `${field} include`);
+  }
+  assert.equal(hasUnsafeLegacyRecordFilters({ exclude: ['tool:Read'] }), true);
+  assert.equal(hasUnsafeLegacyRecordFilters({ exclude: ['repo_id:r1'] }), true);
+  assert.equal(hasUnsafeLegacyRecordFilters({ exclude: ['stage:screen'] }), false);
+  assert.equal(hasUnsafeLegacyRecordFilters({ filters: { repo_id: ['r1'], kind: ['brief'] } }), false);
+  assert.equal(LEGACY_RECORD_FILTER_MESSAGE, 'This server cannot apply these filters to rejection records.');
+  assert.equal(ledgerStateModel('refused').text, LEGACY_RECORD_FILTER_MESSAGE);
 });
 
 test('the initial page is 100 rows unless the schema publishes a lower explore budget', () => {

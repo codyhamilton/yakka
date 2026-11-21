@@ -62,11 +62,6 @@ export function filterApplies(key, { schema = null, grain = '', ignoredFilters =
   return filters.includes(key) || SHARED_DIMENSIONS.has(key);
 }
 
-function windowLabel(state) {
-  if (state.from || state.to) return `${state.from || 'start'} → ${state.to || 'now'}`;
-  return `window ${state.win || '30d'}`;
-}
-
 function cohortLabel(slot, text) {
   const definition = decodeCohort(text);
   const grain = definition?.grain ? ` · ${definition.grain}` : '';
@@ -81,8 +76,6 @@ function splitExclude(value) {
 
 export function chipModel({ state = {}, schema = null, grain = '', ignoredFilters = [], unmapped = '' } = {}) {
   const chips = [];
-  chips.push({ kind: 'scope', key: 'window', label: windowLabel(state), removable: false });
-  if (state.tz) chips.push({ kind: 'scope', key: 'tz', value: state.tz, label: `tz ${state.tz}`, removable: false });
   for (const [key, values] of Object.entries(state.filters || {})) {
     const applied = filterApplies(key, { schema, grain, ignoredFilters });
     for (const value of values || []) {

@@ -17,6 +17,7 @@ import { createInspector } from '../core/inspector.js';
 import { cancelledState, emptyCauses, emptyState, errorState, unsupportedState } from '../core/panel-state.js';
 import { formatNumber } from '../charts/formatters.js';
 import { resolveWindow } from '../panels/ledger-table.js';
+import { hasUnsafeLegacyRecordFilters, LEGACY_RECORD_FILTER_MESSAGE } from '../core/record-filter-capability.js';
 import {
   SESSION_LANES_PANEL, conversationCoverage, coverageLines, ensureSessionsStyles, fetchConversation,
   renderSessionLanes
@@ -441,6 +442,7 @@ function renderList(root, doc, { signal, tenant = '', readContext = null } = {})
   root.append(tray.element, inspector.element);
 
   let schema = null;
+  let recordFiltersSupported = false;
   let measures = SESSION_MEASURES.slice();
   let filters = SESSION_FILTERS.slice();
   let sort = parseSort(url.get('sort'), measures);
@@ -616,6 +618,14 @@ function renderList(root, doc, { signal, tenant = '', readContext = null } = {})
     controller = new AbortController();
     if (signal?.aborted) controller.abort();
     else signal?.addEventListener('abort', () => controller.abort(), { once: true });
+    if (!recordFiltersSupported && hasUnsafeLegacyRecordFilters(currentScope())) {
+      rows = []; population = null; cursor = '';
+      body.replaceChildren();
+      frame.setState('unsupported', { renderStatus: false });
+      const status = frame.element.querySelector('.workspace-panel-status');
+      if (status) status.textContent = LEGACY_RECORD_FILTER_MESSAGE;
+      return;
+    }
     frame.setState('loading', { inFlight: 1 });
     base = sessionListParams({ state: currentScope(), filters, measures, sort: sort.raw, limit: pageLimit, window: readContext?.window || null });
     try {
@@ -685,6 +695,7 @@ function renderList(root, doc, { signal, tenant = '', readContext = null } = {})
     } catch { body = null; }
     if (disposed) return;
     schema = body;
+    recordFiltersSupported = schema?.features?.record_filters === true;
     measures = allowedMeasures(schema);
     filters = allowedFilters(schema);
     sort = parseSort(url.get('sort'), measures);

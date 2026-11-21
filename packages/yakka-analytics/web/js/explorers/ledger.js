@@ -15,7 +15,7 @@ import { emptyCauses } from '../core/panel-state.js';
 import { currentEventCounts } from '../core/event-counts.js';
 import {
   BASIS, DECLARED_FILTERS, LEDGER_CAPTION, LEDGER_LOADING_MORE_TEXT, LEDGER_MORE_TEXT,
-  LEDGER_PANEL, LEDGER_RETRY_NEXT_TEXT, LEDGER_SCHEMA,
+  LEDGER_PANEL, LEDGER_RETRY_NEXT_TEXT, LEDGER_SCHEMA, hasUnsafeLegacyRecordFilters,
   appendPage, fetchLedgerPage, filterToParameters, formatRowCost, ledgerPageLimit, ledgerPopulationText,
   ledgerRowElement, mapLoadError, entityKeyForRow, pageParameters, renderLedgerNotes, renderLedgerState,
   renderLedgerTable, retryNextPage, rowKey, selectionGrain
@@ -159,6 +159,7 @@ export function render(root, doc = globalThis.document, { signal, tenant = '', r
   let populationNode = null;
   let countsWatch = null;
   let tableShell = null;
+  let recordFiltersSupported = false;
 
   function countsModel() {
     const state = doc.querySelector?.('.event-counts')?.dataset?.state || '';
@@ -402,6 +403,12 @@ export function render(root, doc = globalThis.document, { signal, tenant = '', r
     if (signal?.aborted) controller.abort();
     else signal?.addEventListener('abort', () => controller.abort(), { once: true });
     clearPageState();
+    if (!recordFiltersSupported && hasUnsafeLegacyRecordFilters(currentState())) {
+      frame.setState('unsupported', { renderStatus: false });
+      renderLedgerState(body, 'refused', { doc, caption: LEDGER_CAPTION });
+      attachPopulation();
+      return;
+    }
     frame.setState('loading', { inFlight: 1, renderStatus: false });
     renderLedgerState(body, 'loading', { doc, caption: LEDGER_CAPTION });
     base = readContext?.paramsFor
@@ -474,6 +481,7 @@ export function render(root, doc = globalThis.document, { signal, tenant = '', r
     try {
       const { response, body } = await transport.schema(tenant);
       if (!response.ok || !body) return undefined;
+      recordFiltersSupported = body.features?.record_filters === true;
       const budgets = body.budgets || {};
       const candidates = [budgets.explore_page_max, budgets.page_max].map(Number).filter(value => Number.isFinite(value) && value > 0);
       return candidates.length ? Math.min(...candidates) : undefined;

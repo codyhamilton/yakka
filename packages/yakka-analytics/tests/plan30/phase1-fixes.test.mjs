@@ -55,18 +55,12 @@ function find(node, predicate) {
   return null;
 }
 
-test('default scope chips name the window and tz but are never removable', () => {
+test('default window and timezone are displayed only by the shared controls', () => {
   const plain = chipModel({ state: { win: '30d' } });
-  const window = plain.filter(chip => chip.kind === 'scope');
-  assert.equal(window.length, 1);
-  assert.equal(window[0].key, 'window');
-  assert.equal(window[0].removable, false);
-  assert.equal(window.filter(chip => chip.removable).length, 0, 'a default state has no removable chip');
+  assert.deepEqual(plain.filter(chip => chip.kind === 'scope'), []);
 
   const zoned = chipModel({ state: { win: '30d', tz: 'UTC', filters: { tool: ['Read'] } } });
-  const scopes = zoned.filter(chip => chip.kind === 'scope');
-  assert.deepEqual(scopes.map(chip => chip.key).sort(), ['tz', 'window']);
-  assert.deepEqual(scopes.map(chip => chip.removable), [false, false]);
+  assert.deepEqual(zoned.filter(chip => chip.kind === 'scope'), []);
   assert.equal(zoned.find(chip => chip.kind === 'filter').removable, true);
 });
 
