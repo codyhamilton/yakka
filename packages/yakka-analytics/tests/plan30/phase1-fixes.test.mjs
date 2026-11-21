@@ -5,7 +5,7 @@ import {
   advancedScopeRows, chipModel, removeAdvancedRow, resetScopeState
 } from '../../web/js/core/chips.js';
 import {
-  absoluteScope, scopeTimezone
+  absoluteScope, buildCohort, scopeTimezone
 } from '../../web/js/core/selection-tray.js';
 import {
   createScopeControls, facetsParameters
@@ -115,6 +115,22 @@ test('a cohort scope always carries a non-empty IANA timezone', () => {
   }
   assert.equal(absoluteScope({ win: '7d', tz: 'Australia/Brisbane' }, now).tz, 'Australia/Brisbane');
   assert.equal(scopeTimezone({ tz: 'Europe/London' }), 'Europe/London');
+});
+
+test('a session cohort scope keeps only lenses the session grain defines', () => {
+  const now = Date.parse('2026-10-01T00:00:00Z');
+  const cohort = buildCohort({
+    state: {
+      from: '2026-01-01T00:00:00Z', to: '2026-02-01T00:00:00Z', tz: 'UTC',
+      filters: { harness: ['orca'], tool: ['Read'] }, exclude: ['stage:screen', 'harness:claude']
+    },
+    pick: { include: ['s1'], exclude: [] },
+    grain: 'session',
+    schema: null,
+    now
+  });
+  assert.deepEqual(cohort.scope.include, [{ lens: 'harness', values: ['orca'] }]);
+  assert.deepEqual(cohort.scope.exclude, [{ lens: 'harness', values: ['claude'] }]);
 });
 
 test('facets send only the frozen window and tz, never filters, excludes, cohorts, pick or sel', () => {
