@@ -192,6 +192,26 @@ async function changeTenant(nextTenant) {
 
 tenantSelect.addEventListener('change', () => { changeTenant(tenantSelect.value); });
 let sessionPromise;
+let pendingAccountFocus = '';
+function selectAccountTenant(id) {
+  if (!id) return;
+  pendingAccountFocus = id;
+  return changeTenant(id);
+}
+async function refreshAccountSession() {
+  sessionPromise = undefined;
+  const result = await loadSessionOnce();
+  lastMe = result.me;
+  lastMeStatus = result.status;
+  const state = decodeUrlState(globalThis.location?.search || '');
+  const auth = authorizedTenant({ me: result.me, urlTenant: state.tenant });
+  mountTenantHeader({ me: result.me, meStatus: result.status, auth, state });
+  return result.status === 200 ? result.me : null;
+}
+function focusAccountRow(id) {
+  const row = [...root.querySelectorAll('[data-account-tenant-row]')].find(el => el.dataset.accountTenantRow === id);
+  if (row) row.focus();
+}
 function loadSessionOnce() {
   if (!sessionPromise) sessionPromise = transport.request('me').then(result => {
     const valid = result.response.status !== 200 || (result.body && Array.isArray(result.body.tenants) && result.body.github_id !== undefined);
@@ -863,6 +883,37 @@ async function render(record) {
   }
 
   if (exempt) {
+    if (path === '/profile') {
+      const auth = authorizedTenant({ me, urlTenant: state.tenant });
+      mountTenantHeader({ me, meStatus, auth, state, localMode });
+      if (!state.tenant && auth.tenant) {
+        const next = { ...state, tenant: auth.tenant };
+        globalThis.history.replaceState(null, '', stateUrl(next, record.search, path));
+        state = decodeUrlState(globalThis.location?.search || '');
+        try { localStorage.setItem('yakka-analytics-tenant', auth.tenant); } catch {}
+      }
+      root.append(element('h1', '', record.title));
+      const account = {
+        api: transport,
+        me,
+        meStatus,
+        tenant: auth.tenant,
+        onRefreshMe: refreshAccountSession,
+        onSelectTenant: selectAccountTenant,
+        onStatus: (text, error = false) => {
+          if (!text) { root.querySelector('[data-account-status]')?.remove(); return; }
+          let out = root.querySelector('[data-account-status]');
+          if (!out) { out = element('p', 'account-status', ''); out.dataset.accountStatus = ''; root.append(out); }
+          out.textContent = text;
+          out.classList.toggle('error', error);
+        }
+      };
+      await renderIdentity(root, path, transport, me, () => renderIsCurrent(generation), account);
+      if (!renderIsCurrent(generation)) return;
+      if (pendingAccountFocus) { const id = pendingAccountFocus; pendingAccountFocus = ''; focusAccountRow(id); }
+      setShellState('ready', 'true');
+      return;
+    }
     mountTenantHeader({ me, meStatus, state, localMode });
     root.append(element('h1', '', record.title));
     await renderIdentity(root, path, transport, me, () => renderIsCurrent(generation));

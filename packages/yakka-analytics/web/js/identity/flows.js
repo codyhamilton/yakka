@@ -1,5 +1,6 @@
 import { oauthCallbackTarget, oauthLoginPath, safeReturnPath } from '../../contract/return-path.js';
-import { formTenant, rememberedTenant } from '../../contract/session-gate.js';
+import { formTenant } from '../../contract/session-gate.js';
+import { renderAccountConsole } from './account-console.js';
 
 const node = (tag, text, attrs = {}) => { const el = document.createElement(tag); if (text !== undefined) el.textContent = text; for (const [k, v] of Object.entries(attrs)) { if (k === 'className') el.className = v; else if (k.startsWith('on')) el.addEventListener(k.slice(2), v); else if (v !== undefined) el.setAttribute(k, v); } return el; };
 const field = (form, label, name, value = '', type = 'text') => { const wrap = node('label', `${label} `); const input = node('input', undefined, { name, type, value, autocomplete: name === 'key' ? 'off' : undefined }); wrap.append(input); form.append(wrap); return input; };
@@ -15,12 +16,12 @@ export function deviceApprovalPayload({ user_code, tenant, scope, lifetime, name
 }
 export const deviceDenialPayload = userCode => ({ user_code: normalizeUserCode(userCode), action: 'deny' });
 
-export async function renderIdentity(root, path, api, me, isCurrent = () => true) {
+export async function renderIdentity(root, path, api, me, isCurrent = () => true, account = null) {
   if (path === '/login') return login(root);
   if (path === '/oauth/callback') return callback(root, api, isCurrent);
   if (path === '/settings') return settings(root, api);
   if (path === '/device') return device(root, api, me);
-  if (path === '/profile') return profile(root, api, me);
+  if (path === '/profile') return profile(root, account || { api, me });
 }
 function login(root) {
   root.append(node('p', 'Sign in to your Yakka account to continue.'));
@@ -94,24 +95,6 @@ async function device(root, api, me) {
   else if (!tenants.length) root.append(node('a', 'Create a tenant in Profile', { href: '/profile' }));
 }
 
-async function profile(root, api, me) {
-  const tenants = Array.isArray(me?.tenants) ? me.tenants : [];
-  root.append(node('p', me?.github_login ? `Signed in as ${me.github_login}` : 'Profile and access tokens'));
-  if (tenants.length > 1) {
-    const active = node('select'); for (const t of tenants) active.append(node('option', t.name, { value: t.id })); active.value = rememberedTenant(me);
-    const label = node('label', 'Active tenant '); label.append(active); root.append(label);
-    active.addEventListener('change', () => { try { localStorage.setItem('yakka-analytics-tenant', active.value); } catch { status(root, 'Browser storage is unavailable.', true); } });
-  }
-  const tenantForm = node('form'); root.append(tenantForm); field(tenantForm, 'New tenant', 'name'); button(tenantForm, 'Create tenant');
-  tenantForm.addEventListener('submit', async e => { e.preventDefault(); try { const name = tenantForm.elements.name.value; const created = await call(api, 'tenants', { method: 'POST', body: { name } }); status(root, `Created ${created.name}.`); location.reload(); } catch(err) { status(root, err.message, true); } });
-  if (tenants.length) {
-    const tokenForm = node('form'); root.append(tokenForm);
-    const tenant = node('select'); for (const t of tenants) tenant.append(node('option', t.name, { value: t.id })); tenant.value = formTenant(me); tenant.addEventListener('change', () => { try { localStorage.setItem('yakka-analytics-tenant', tenant.value); } catch {} });
-    const label = node('label', 'Tenant '); label.append(tenant); tokenForm.append(label);
-    const scope = node('select'); for (const [v,l] of [['read','Read'],['read_write','Read and write']]) scope.append(node('option',l,{value:v})); const sl = node('label','Scope '); sl.append(scope); tokenForm.append(sl);
-    const life = node('select'); for (const [v,l] of lifetimeOptions) life.append(node('option',l,{value:v})); life.value='3m'; const ll=node('label','Lifetime ');ll.append(life);tokenForm.append(ll);
-    field(tokenForm,'Token name','name','token'); button(tokenForm,'Create token');
-    tokenForm.addEventListener('submit',async e=>{e.preventDefault();try{const body={tenant:tenant.value,scope:scope.value,lifetime:life.value};if(tokenForm.elements.name.value.trim())body.name=tokenForm.elements.name.value.trim();const minted=await call(api,'tokens',{method:'POST',body}); const out=node('code',minted.token); out.dataset.testid='issued-token-once'; status(root,'Copy this token now. It will not be shown again.'); root.append(out);}catch(err){status(root,err.message,true);}});
-  } else root.append(node('p','Create a tenant to issue a token.'));
-  try { const tokens = await call(api, 'tokens'); const list = node('ul'); for (const token of tokens) { const li = node('li', `${token.name || 'token'} · ${token.tenant_name} · ${token.scope}`); if (!token.revoked) { const revoke=node('button','Revoke',{type:'button'});revoke.addEventListener('click',async()=>{try{await call(api,`tokens/${encodeURIComponent(token.id)}/revoke`,{method:'POST',body:{}});li.textContent+=' · revoked';}catch(e){status(root,e.message,true);}});li.append(' ',revoke);} list.append(li); } root.append(node('h2','Tokens'),list); } catch(e) { status(root,e.message,true); }
+async function profile(root, account) {
+  return renderAccountConsole(root, account);
 }

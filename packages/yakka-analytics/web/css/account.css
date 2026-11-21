@@ -1,0 +1,296 @@
+/* S-profile account console: full-width sections, 30px table rows, native
+   controls and the shared --yk-* theme tokens. No cards, shadows or motion. */
+
+.account-console {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+}
+
+.account-context,
+.account-note,
+.account-token-tenant,
+.account-identity p {
+  margin: 0;
+  color: var(--yk-muted);
+}
+
+.account-identity {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  width: 100%;
+}
+
+.account-identity p {
+  color: var(--yk-text);
+}
+
+.account-identity button {
+  margin-left: auto;
+}
+
+.account-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  padding: 8px;
+  background: var(--yk-surface);
+  border: 1px solid var(--yk-border);
+  border-radius: 2px;
+}
+
+.account-section h2 {
+  margin: 0;
+}
+
+.account-anchor {
+  display: block;
+  height: 0;
+}
+
+.account-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.account-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+}
+
+.account-form label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--yk-muted);
+  white-space: nowrap;
+}
+
+.account-form input[name="name"] {
+  width: 220px;
+  max-width: 100%;
+}
+
+.account-status {
+  margin: 0;
+  color: var(--yk-muted);
+  min-height: 0;
+}
+
+.account-status:empty {
+  display: none;
+}
+
+.account-status.error {
+  color: var(--yk-danger, #a3262a);
+}
+
+.account-links {
+  margin: 0;
+}
+
+.account-table-wrap {
+  width: 100%;
+  overflow-x: auto;
+}
+
+.account-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+  font-variant-numeric: tabular-nums;
+}
+
+.account-table caption {
+  text-align: left;
+}
+
+.account-table th,
+.account-table td {
+  height: 30px;
+  padding: 0 6px;
+  border-bottom: 1px solid var(--yk-border);
+  text-align: left;
+  vertical-align: middle;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 30px;
+}
+
+.account-table thead th {
+  background: var(--yk-surface);
+  color: var(--yk-muted);
+  font-weight: 600;
+}
+
+.account-table tbody tr:nth-child(even) {
+  background: var(--yk-surface-alt);
+}
+
+.account-table td button {
+  min-height: 28px;
+  padding: 0 8px;
+  line-height: 26px;
+}
+
+.account-table tr[data-account-tenant-row]:focus,
+.account-table tr[data-account-tenant-row]:focus-visible {
+  outline: 2px solid var(--yk-focus, #176b87);
+  outline-offset: -2px;
+}
+
+.account-table .account-status-cell {
+  color: var(--yk-muted);
+}
+
+.account-table .account-status-cell button {
+  margin-left: 4px;
+  line-height: 26px;
+}
+
+.account-actions {
+  white-space: nowrap;
+}
+
+.account-lifecycle-link {
+  white-space: nowrap;
+}
+
+.account-tenants-table {
+  min-width: 900px;
+}
+
+.account-tenants-table th:nth-child(1),
+.account-tenants-table td:nth-child(1) {
+  width: 240px;
+}
+
+.account-tenants-table th:nth-child(2),
+.account-tenants-table td:nth-child(2) {
+  width: 260px;
+}
+
+.account-tenants-table th:nth-child(3),
+.account-tenants-table td:nth-child(3) {
+  width: 100px;
+}
+
+.account-tenants-table th:nth-child(4),
+.account-tenants-table td:nth-child(4) {
+  width: 160px;
+}
+
+.account-tenants-table th:nth-child(5),
+.account-tenants-table td:nth-child(5) {
+  width: 100px;
+}
+
+.account-tokens-table {
+  min-width: 980px;
+}
+
+.account-tokens-table th:nth-child(1),
+.account-tokens-table td:nth-child(1) {
+  width: 220px;
+}
+
+.account-tokens-table th:nth-child(2),
+.account-tokens-table td:nth-child(2) {
+  width: 180px;
+}
+
+.account-tokens-table th:nth-child(3),
+.account-tokens-table td:nth-child(3) {
+  width: 140px;
+}
+
+.account-tokens-table th:nth-child(4),
+.account-tokens-table td:nth-child(4) {
+  width: 160px;
+}
+
+.account-tokens-table th:nth-child(5),
+.account-tokens-table td:nth-child(5) {
+  width: 160px;
+}
+
+.account-tokens-table th:nth-child(6),
+.account-tokens-table td:nth-child(6) {
+  width: 120px;
+}
+
+.account-confirm-row td {
+  height: auto;
+  line-height: 1.35;
+  padding: 6px;
+  white-space: normal;
+  overflow: visible;
+  background: var(--yk-surface-alt);
+}
+
+.account-confirm-row p {
+  margin: 0 0 4px;
+}
+
+.account-issued {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  border: 1px solid var(--yk-border);
+  border-radius: 2px;
+  background: var(--yk-surface-alt);
+}
+
+.account-issued label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--yk-muted);
+}
+
+.account-token-plaintext {
+  width: 420px;
+  max-width: 100%;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.account-issued-notice {
+  margin: 0;
+  color: var(--yk-text);
+}
+
+.account-state-active {
+  color: var(--yk-text);
+}
+
+@media (max-width: 900px) {
+  .account-identity {
+    flex-wrap: wrap;
+  }
+
+  .account-identity button {
+    margin-left: 0;
+  }
+
+  .account-form input[name="name"],
+  .account-token-plaintext {
+    width: 100%;
+  }
+}

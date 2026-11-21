@@ -61,7 +61,7 @@ export function parseRoute(pathname = '/', search = '') {
 function accountTitle(path) {
   return {
     '/login': 'Sign in', '/oauth/callback': 'Sign in callback', '/device': 'Device approval',
-    '/profile': 'Profile', '/settings': 'Settings'
+    '/profile': 'Account, tenants & tokens', '/settings': 'Settings'
   }[path] || 'Account';
 }
 
