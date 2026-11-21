@@ -108,7 +108,7 @@ test('all-history, a long finite window, filters, a panel override and a saved c
   await page.goto(`${harness.origin}/no-such-route`);
   await settleShell(page);
   assert.equal(await page.locator('#app').getAttribute('data-route'), '/no-such-route');
-  assert.match(await page.locator('#app h1').innerText(), /Not found/);
+  assert.match(await page.locator('#app h1').innerText(), /Page not found/);
   assert.equal(await page.locator('.not-found-routes a').count() > 0, true);
 
   await diagnostics.assertClean();
