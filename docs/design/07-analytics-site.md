@@ -56,7 +56,8 @@ type** is the artifact kind plus its check distributions.
 
 The [Plan 23 amendment](../plans/23-llm-review-shadow.md) landed human-owner
 reset/delete controls in the profile. Only the human owner may reset or delete a tenant. Agents must not perform or attempt this on a user's behalf.
-The API-origin lifecycle view and the Pages navigation to it are implemented; there is no lifecycle
+The API-origin lifecycle view is implemented. The current workspace profile does not expose its
+navigation link; [Plan 30](../plans/30-analytics-operable-chrome/DESIGN.md) restores that link. There is no lifecycle
 MCP tool or key/bearer path.
 
 Each confirmation names the operation, display name and immutable tenant id, requires typing that
@@ -79,8 +80,8 @@ origins/browsers observe it on their next validation. Failed reads show completi
 after an ambiguous response; refresh state before a new typed confirmation.
 
 The lifecycle view is served at the **API origin**, including the production collector, which
-currently lacks the site bundle. This bounded view and a navigation link from the
-Pages profile are implemented; they do not require the paused analytics redesign or move other site routes.
+currently lacks the site bundle. This bounded view is implemented; the current Pages profile is missing its link. Plan 30 restores
+that navigation without moving lifecycle writes to Pages or changing their authority boundary.
 Its requests use only the owner cookie, exact API `Origin`, `Sec-Fetch-Site: same-origin` when
 present, `X-Yakka-UI: tenant-lifecycle`, JSON and exact `confirm_tenant_id`. It sends no bearer.
 Pages/configured CORS origins are rejected for these lifecycle fetches, despite remaining valid
