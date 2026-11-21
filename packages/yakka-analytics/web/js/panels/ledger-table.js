@@ -330,7 +330,9 @@ const COLUMNS = LEDGER_COLUMNS;
 // The Path/event cell names the exact path when the row has one, else the
 // stored event name (a rejection or a hook has no path).
 function pathEventText(row = {}) {
-  return cellText(row.path && String(row.path) ? row.path : (row.event || row.norm_event));
+  const value = row.path && String(row.path) ? row.path : (row.event || row.norm_event);
+  if (value === null || value === undefined || value === '') return '—';
+  return String(value);
 }
 
 // The table skeleton shared by ready rows and T1–T3 status rows: caption and

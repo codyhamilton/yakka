@@ -234,7 +234,6 @@ test('plan30 phase 2 acceptance', { skip: SKIP }, async t => {
         if (screen.id === 'S-plan-detail') pass('G-planline', 'S-plan-detail plan-timeline caption, events/executions sources and table order');
         if (screen.id === 'S-session-detail') pass('G-sessionlanes', 'S-session-detail session-lanes caption, marks sentence and 7-column table');
         if (screen.id === 'S-artifact') pass('G-artifactscore', 'S-artifact score-history caption and 5-column table (single version, no scorer values in fixture)');
-        if (screen.id === 'S-ops') fail('G-footprint', 'fixture session is not a server administrator: /v1/admin/status 403 leaves the footprint panel unsupported, so bytes bars/table cannot be proven; owner phase2-10 or the Plan 30 fixture');
         if (screen.regions) {
           const regions = await page.locator('main > *').evaluateAll(nodes => nodes.map(node => node.className).filter(Boolean));
           for (const region of screen.regions) assert.ok(regions.some(value => value.includes(region)), `region ${region} present in ${regions.join('|')}`);
@@ -473,7 +472,7 @@ test('plan30 phase 2 acceptance', { skip: SKIP }, async t => {
       assert.ok(!text.includes('model-b'), 'repo-a scope painted a repo-b-only model');
       const sessionMark = mark();
       await go('/sessions?repo_id=repo-a');
-      assert.ok(since(sessionMark).some(entry => entry.query.get('repo_id') === 'repo-a'), 'sessions read carries repo-a');
+      assert.ok(since(sessionMark).some(entry => entry.query.get('repo_id') === 'repo-a' || entry.query.get('session_repo') === 'repo-a'), 'sessions read carries repo-a');
       const rows = await page.locator('[data-panel="sessions-list"] tbody tr').evaluateAll(nodes => nodes.map(node => node.innerText));
       const leaked = rows.filter(row => !row.includes('repo-a'));
       assert.ok(rows.length > 0 && leaked.length === 0, `repo-a scope leaked ${leaked.length} unfiltered session row(s): ${leaked[0] || ''}`);
@@ -506,6 +505,25 @@ test('plan30 phase 2 acceptance', { skip: SKIP }, async t => {
       await idle();
       assert.ok((await page.locator('main').innerText()).includes('Storage information is available to server administrators only.'), 'B footprint refused');
     }, 'ops storage 403 names the administrator-only exception for both tenants');
+
+    await group('G-footprint', async () => {
+      await harness.installAdminSession(context);
+      await go('/ops');
+      await idle();
+      const panel = page.locator('section[data-panel="ops-footprint"]');
+      assert.equal(await panel.getAttribute('data-state'), 'ready', 'admin footprint state');
+      const bars = await panel.locator('svg .ops-chart-bar').count();
+      const rows = await panel.locator('table tbody tr').evaluateAll(nodes => nodes.map(node => node.innerText));
+      assert.ok(bars > 0, 'admin footprint bytes bars');
+      assert.ok(rows.length > 0 && rows.every(row => !row.startsWith('—')), 'admin footprint bytes table');
+      assert.ok((await panel.locator('.workspace-panel-caption').textContent()).trim()
+        === 'Each bar shows retained bytes for one storage category in this tenant; longer bars mean more space used.', 'footprint caption');
+      pass('G-footprint', 'admin session renders retained-bytes bars and the category/bytes/display-size table');
+      await harness.installSession(context, A);
+      await go('/ops');
+      await idle();
+      assert.ok((await page.locator('main').innerText()).includes('Storage information is available to server administrators only.'), 'member session restored to the 403 exception');
+    }, 'footprint bytes bars/table render for an administrator and the member refusal stays exact');
 
     await group('T1', async () => {
       await go('/b/pulse');

@@ -231,11 +231,29 @@ export async function startPlan30Harness() {
     return parseCookie(list[0]);
   };
 
-  const installSession = async (context, tenant) => {
-    const session = await cookie(tenant);
+  const adminCookie = async () => {
+    const response = await fetch(`${origin}/__plan30/admin-session`);
+    if (response.status !== 204) throw new Error(`admin session route: ${response.status}`);
+    const list = typeof response.headers.getSetCookie === 'function' ? response.headers.getSetCookie() : [response.headers.get('set-cookie')];
+    return parseCookie(list[0]);
+  };
+
+  const installCookie = async (context, session) => {
+    // A host-only cookie installed by the fixture does not always replace a
+    // Playwright-added cookie of the same name, so drop the jar before adding
+    // the role's session.
+    await context.clearCookies();
     await context.addCookies([{
       name: session.name, value: session.value, domain: '127.0.0.1', path: '/', httpOnly: true, sameSite: 'Lax'
     }]);
+  };
+
+  const installSession = async (context, tenant) => {
+    await installCookie(context, await cookie(tenant));
+  };
+
+  const installAdminSession = async context => {
+    await installCookie(context, await adminCookie());
   };
 
   const controlUrl = (route, tenant, extra = {}) => {
@@ -263,7 +281,8 @@ export async function startPlan30Harness() {
   const waitIdle = async page => {
     await page.waitForFunction(() => {
       const html = document.documentElement;
-      const panels = Array.from(document.querySelectorAll('[data-panel]'));
+      const panels = Array.from(document.querySelectorAll('[data-panel]'))
+        .filter(panel => !panel.parentElement?.closest('[data-panel]'));
       return html.dataset.idle === 'true' && html.dataset.state === 'ready'
         && panels.every(panel => panel.getAttribute('data-idle') === 'true');
     });
@@ -303,7 +322,9 @@ export async function startPlan30Harness() {
     waitIdle,
     tenantId: resolveTenant,
     cookie,
+    adminCookie,
     installSession,
+    installAdminSession,
     control,
     close
   };

@@ -134,6 +134,39 @@ function lensOf(raw) {
   return at === -1 ? '' : text.slice(0, at);
 }
 
+// The shared Repository control writes `repo_id`; the session grain names the
+// same lens `session_repo`. Carry the global value into the route's declared
+// filter so a repository selection cannot leak other repositories' rows.
+const REPO_SCOPE_FILTER = 'repo_id';
+const SESSION_REPO_FILTER = 'session_repo';
+
+function sessionRepoValues(scope = {}) {
+  return new Set([
+    ...(scope.filters?.[SESSION_REPO_FILTER] || []),
+    ...(scope.filters?.[REPO_SCOPE_FILTER] || [])
+  ]);
+}
+
+function appendSessionRepo(params, scope, filters) {
+  if (!filters.includes(SESSION_REPO_FILTER)) return;
+  for (const value of sessionRepoValues(scope)) params.append(SESSION_REPO_FILTER, value);
+}
+
+function appendSessionRepoExclude(params, raw, filters) {
+  const lens = lensOf(raw);
+  if (lens === REPO_SCOPE_FILTER && filters.includes(SESSION_REPO_FILTER)) {
+    params.append('exclude', `${SESSION_REPO_FILTER}:${String(raw).slice(lens.length + 1)}`);
+    return;
+  }
+  if (filters.includes(lens)) params.append('exclude', raw);
+}
+
+function declaredSessionFilters(filters) {
+  return filters.includes(SESSION_REPO_FILTER) && !filters.includes(REPO_SCOPE_FILTER)
+    ? [...filters, REPO_SCOPE_FILTER]
+    : filters;
+}
+
 export function unappliedFilter(state = {}, filters = SESSION_FILTERS) {
   const declared = new Set(filters);
   for (const key of Object.keys(state.filters || {})) if (!declared.has(key)) return key;
@@ -158,12 +191,11 @@ export function sessionListParams({ state = {}, filters = SESSION_FILTERS, measu
   params.set('grain', 'session');
   params.set('fields', SESSION_FIELDS.join(','));
   for (const key of filters) {
+    if (key === SESSION_REPO_FILTER) continue;
     for (const value of scope.filters?.[key] || []) params.append(key, value);
   }
-  for (const raw of scope.exclude || []) {
-    const lens = lensOf(raw);
-    if (filters.includes(lens)) params.append('exclude', raw);
-  }
+  appendSessionRepo(params, scope, filters);
+  for (const raw of scope.exclude || []) appendSessionRepoExclude(params, raw, filters);
   params.set('sort', parseSort(sort, measures).raw);
   if (Number.isFinite(Number(limit)) && Number(limit) > 0) params.set('limit', String(Math.floor(Number(limit))));
   if (cursor) params.set('cursor', cursor);
@@ -385,14 +417,16 @@ export function sessionWindowParams(id, state = {}, { window = null, limit = nul
   params.set('grain', 'session');
   params.set('id', String(id || ''));
   for (const key of SESSION_GRAIN_FILTERS) {
+    if (key === SESSION_REPO_FILTER) continue;
     for (const value of state.filters?.[key] || []) params.append(key, value);
   }
+  appendSessionRepo(params, state, [...SESSION_GRAIN_FILTERS]);
   if (Number.isFinite(Number(limit)) && Number(limit) > 0) params.set('limit', String(Math.floor(Number(limit))));
   return params;
 }
 
 export function sessionSelectedRefusal(state = {}) {
-  return sessionRefusal(state, SESSION_GRAIN_FILTERS);
+  return sessionRefusal(state, new Set([...SESSION_GRAIN_FILTERS, REPO_SCOPE_FILTER]));
 }
 
 // The whole-session exception read. `/conversation` accepts the exact identity
@@ -925,7 +959,7 @@ function renderList(root, doc, { signal, tenant = '', readContext = null } = {})
 
   function paintScope() {
     const scope = currentScope();
-    chips.update({ state: scope, search: '', schema: schema || { grains: { session: { filters } } }, grain: 'session', unmapped: unappliedFilter(scope, filters) });
+    chips.update({ state: scope, search: '', schema: schema || { grains: { session: { filters } } }, grain: 'session', unmapped: unappliedFilter(scope, declaredSessionFilters(filters)) });
     renderSort();
   }
 

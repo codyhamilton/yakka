@@ -14,7 +14,7 @@ import { loadBrowserEnvironment, launchBrowser, SKIP_REASON } from '../charts-ti
 import { startPlan30Harness } from './harness.mjs';
 import { encodeCohort } from '../../web/js/core/selection-model.js';
 import { encodePanelSpec } from '../../web/js/core/view-spec.js';
-import { LEDGER_CAPTION, ledgerStateModel } from '../../web/js/panels/ledger-table.js';
+import { LEDGER_CAPTION, LEDGER_COLUMNS, ledgerStateModel } from '../../web/js/panels/ledger-table.js';
 
 const environment = loadBrowserEnvironment();
 const SKIP = environment.ok ? false : (environment.reason || SKIP_REASON);
@@ -181,7 +181,7 @@ test('plan30 phase 1 acceptance', { skip: SKIP }, async t => {
       await go(`/b/pulse?win=30d&tenant=${A}`);
       await page.waitForFunction(text => (document.querySelector('[data-panel="river"] .activity-population')?.textContent || '').trim() === text, activityLine(expectedA.activity30d));
       assert.equal((await page.locator('[data-panel="river"] .activity-population').textContent()).trim(), activityLine(expectedA.activity30d));
-      assert.equal((await page.locator('[data-panel="river"] .activity-caption').textContent()).trim(), ACTIVITY_CAPTION);
+      assert.equal((await page.locator('[data-panel="river"] .workspace-panel-caption').textContent()).trim(), ACTIVITY_CAPTION);
       assert.equal(expectedA.activity30d, 16, 'fixture binds 16 in-window observations');
 
       const explore = lastExplore();
@@ -487,7 +487,7 @@ test('plan30 phase 1 acceptance', { skip: SKIP }, async t => {
       const labels = await page.locator('.scope-advanced-row > span').evaluateAll(nodes => nodes.map(node => node.textContent));
       assert.ok(labels.includes('tool: Read') && labels.includes('exclude stage:screen'), 'advanced scope shows both deep-link rows');
       await waitRows(100);
-      await page.locator('.ledger-row-check').first().click();
+      await page.locator('.ledger-row').first().click({ modifiers: ['Control'] });
       await page.waitForFunction(() => document.querySelector('.selection-tray')?.dataset.open === 'true');
       await page.getByRole('button', { name: 'Make cohort A' }).click();
       await waitUrl(() => new URL(location.href).searchParams.has('ca'));
@@ -603,7 +603,7 @@ test('plan30 phase 1 acceptance', { skip: SKIP }, async t => {
       assert.equal(loading.caption, LEDGER_CAPTION);
       assert.equal(loading.rows, 0, 'prior rows survived the loading state');
       checkTrue(failures, 'T1-no-prior', !loading.text.includes(markers.a), 'prior tenant marker remained');
-      checkTrue(failures, 'T1-full-span', loading.span >= 14, `status row colSpan ${loading.span}`);
+      checkTrue(failures, 'T1-full-span', loading.span === LEDGER_COLUMNS.length, `status row colSpan ${loading.span}, ledger columns ${LEDGER_COLUMNS.length}`);
       checkTrue(failures, 'T1-30px', Math.abs(loading.height - 30) <= 1, `status row ${loading.height}px`);
       await harness.waitIdle(page);
       await waitRows(100);

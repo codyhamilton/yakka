@@ -160,6 +160,31 @@ func TestPlan30Harness(t *testing.T) {
 		w.Header().Set("Cache-Control", "no-store")
 		w.WriteHeader(http.StatusNoContent)
 	})
+	// A second real session with the server administrator's verified email. The
+	// ordinary fixture session stays a non-admin so the 403 exception is also
+	// provable; the browser harness swaps this cookie in only for the admin
+	// footprint read.
+	mux.HandleFunc("/__plan30/admin-session", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		id, err := newSessionID()
+		if err != nil {
+			http.Error(w, "session id failed", http.StatusInternalServerError)
+			return
+		}
+		s.registry.PutSession(id, SessionRecord{
+			GitHubID: 3001, GitHubLogin: "plan30-owner",
+			VerifiedEmails: []string{adminEmail},
+			ExpiresAt:      time.Now().Add(sessionLifetime).UTC(),
+		})
+		http.SetCookie(w, &http.Cookie{
+			Name: cookieName, Value: id, Path: "/", HttpOnly: true, SameSite: http.SameSiteLaxMode,
+		})
+		w.Header().Set("Cache-Control", "no-store")
+		w.WriteHeader(http.StatusNoContent)
+	})
 	mux.HandleFunc("/__plan30/fixture", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)

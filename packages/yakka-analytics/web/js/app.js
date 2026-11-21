@@ -117,8 +117,11 @@ function navPath(value) {
   try { return new URL(value, globalThis.location.href).pathname.replace(/\/+$/, '') || '/'; } catch { return ''; }
 }
 
+const NAV_ALIASES = { '/artifact': '/ledger' };
+
 function markActiveNav(path, hash = '') {
-  const wanted = path.replace(/\/+$/, '') || '/';
+  const pathname = path.replace(/\/+$/, '') || '/';
+  const wanted = NAV_ALIASES[pathname] || pathname;
   for (const link of document.querySelectorAll('.analytics-nav a')) {
     const target = navPath(link.getAttribute('href') || '');
     if (target === wanted || (target !== '/' && wanted.startsWith(`${target}/`))) link.setAttribute('aria-current', 'page');
