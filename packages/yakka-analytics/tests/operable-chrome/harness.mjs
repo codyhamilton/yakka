@@ -80,7 +80,10 @@ export async function startPhase2Harness() {
       const html = document.documentElement;
       if (html.dataset.idle !== 'true' || html.dataset.state !== 'ready') return false;
       const top = Array.from(document.querySelectorAll('[data-panel]')).filter(node => !node.parentElement?.closest('[data-panel]'));
-      return top.length > 0 ? top.every(node => node.dataset.idle === 'true') : true;
+      const panelsIdle = top.length > 0 ? top.every(node => node.dataset.idle === 'true') : true;
+      const planRegions = Array.from(document.querySelectorAll('.plans-detail-section'));
+      const planRegionsReady = planRegions.length === 0 || planRegions.every(node => node.dataset.state !== 'loading');
+      return panelsIdle && planRegionsReady;
     });
   };
 

@@ -60,6 +60,7 @@ export const SESSIONS_LIST_PANEL = {
   lenses: SESSION_FILTERS,
   charts: [],
   table: true,
+  caption: 'The selected measure sorts this server-paged session list; measures are in-window and cost is a lower bound when calls are unpriced.',
   requires: ['entities_session'],
   caveats: 'Server-sorted, cursor-paged session list. Measures are in-window; cost is a lower bound when calls are unpriced and never $0.',
   measureBasis: 'session facts.ts window; totals come from the server population, never a returned page'

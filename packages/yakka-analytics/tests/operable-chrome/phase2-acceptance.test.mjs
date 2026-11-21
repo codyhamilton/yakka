@@ -207,6 +207,10 @@ test('plan30 phase 2 acceptance', { skip: SKIP }, async t => {
         screenRequests[screen.id] = since(before);
         assert.equal((await page.locator('h1').first().textContent()).trim(), screen.h1);
         assert.ok((await page.evaluate(() => new URL(location.href).searchParams.get('tenant'))) === A, 'tenant survives the route');
+        if (screen.id === 'S-sessions') {
+          const caption = (await page.locator('[data-panel="sessions-list"] .workspace-panel-caption').textContent()).trim();
+          assert.equal(caption, 'The selected measure sorts this server-paged session list; measures are in-window and cost is a lower bound when calls are unpriced.');
+        }
         if (screen.board) {
           const ids = await page.locator('[data-panel]').evaluateAll(nodes => nodes.map(node => node.dataset.panel));
           assert.deepEqual(ids, BOARDS[screen.board], `${screen.board} panel DOM order`);
