@@ -1034,6 +1034,25 @@ None that block this design. Unknown live authenticated counts and unstamped API
 - Surfaces: all chart/panel/frame/caption/applicability/explorer/theme and Chromium fixtures named above.
 - Approach: **Known** — wire shared contracts into existing panels/read adapters and literal caption registry; no chart-library rewrite.
 - Depends on: phase 1. Refine required: shared panel infrastructure, boards, and explorers have independently verifiable ownership.
+- Units:
+
+| Unit | Brief | Depends on | May run alongside |
+|---|---|---|---|
+| U1 — Shared caption, filter applicability and panel-view infrastructure | [phase2-01-shared-caption-applicability](briefs/phase2-01-shared-caption-applicability.md) | — | U2 |
+| U2 — Board assembly order, Start tables and shell wiring | [phase2-02-board-order-start](briefs/phase2-02-board-order-start.md) | — | U1 |
+| U3 — Pulse and activity panels | [phase2-03-pulse-activity](briefs/phase2-03-pulse-activity.md) | U1 | U4, U5, U6, U7, U8 |
+| U4 — Trends and Cost time-series, rank and treemap | [phase2-04-trends-cost-time](briefs/phase2-04-trends-cost-time.md) | U1, U2 | U3, U5, U6, U7, U8 |
+| U5 — Distribution and Compare panels | [phase2-05-distribution-compare](briefs/phase2-05-distribution-compare.md) | U1, U2 | U3, U4, U6, U7, U8 |
+| U6 — Quality score panels | [phase2-06-quality](briefs/phase2-06-quality.md) | U1, U2 | U3, U4, U5, U7, U8 |
+| U7 — Scatter panels | [phase2-07-scatter](briefs/phase2-07-scatter.md) | U1, U2 | U3, U4, U5, U6, U8 |
+| U8 — Plans, Sessions and Event ledger lists | [phase2-08-explorers-list](briefs/phase2-08-explorers-list.md) | U1, U2 | U3, U4, U5, U6, U7 |
+| U9 — Plan and session detail screens | [phase2-09-plans-session-detail](briefs/phase2-09-plans-session-detail.md) | U1, U2, U8 | U10, U11 |
+| U10 — Artifact and Operations screens | [phase2-10-artifact-ops](briefs/phase2-10-artifact-ops.md) | U1, U2 | U9, U11 |
+| U11 — Tools and Workflow boards | [phase2-11-tools-workflow](briefs/phase2-11-tools-workflow.md) | U1, U2, U3, U4, U7 | U9, U10 |
+| U12 — Phase 2 acceptance harness and proof | [phase2-12-proof-harness](briefs/phase2-12-proof-harness.md) | U1–U11 | — |
+
+- Execution waves: Wave 1 — U1 and U2 in parallel. Wave 2 — U3–U8 in parallel. Wave 3 — U9–U11 in parallel. Wave 4 — U12.
+- Carried placement: none new. Phase 1 Carried items land in U2 (full S-start table), U3/U4 (Pulse/Trends layouts) and U8 (nine-column S-ledger).
 
 ### Phase 3 — Account operations are discoverable and preserve existing authority
 

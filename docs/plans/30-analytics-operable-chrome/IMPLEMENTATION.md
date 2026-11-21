@@ -28,3 +28,26 @@ Refined into four units by `refine` (commit `e8f91833`):
 Phase 1 verified at `2026-11-22 00:20 AEST` with the real-Go two-tenant fixture and real Chromium. Every Phase 1 outcome ID passes; see `reports/phase1-05-verification.md` for the per-ID table, evidence, 1440×900 screenshot/mockup comparisons, and the two signed-in production gates. Plan 29 phase-3 acceptance remains 5/5 pass/fail on its pre-Plan-30 responsive measurements; no Plan 29 file changed.
 
 Carried: full S-start table, Pulse/Trends board layouts and the nine-column S-ledger contract remain Phase 2, as assigned by the unit briefs. Signed-in production checks are gated.
+
+## Phase 2 — Every board and explorer answers its displayed question in plain language
+
+Refined into twelve units by `refine` on 2026-11-22:
+
+| Unit | Brief | Depends on | Wave |
+|---|---|---|---|
+| U1 — Shared caption, filter applicability and panel-view infrastructure | `briefs/phase2-01-shared-caption-applicability.md` | — | 1 (parallel) |
+| U2 — Board assembly order, Start tables and shell wiring | `briefs/phase2-02-board-order-start.md` | — | 1 (parallel) |
+| U3 — Pulse and activity panels | `briefs/phase2-03-pulse-activity.md` | U1 | 2 (parallel) |
+| U4 — Trends and Cost time-series, rank and treemap | `briefs/phase2-04-trends-cost-time.md` | U1, U2 | 2 (parallel) |
+| U5 — Distribution and Compare panels | `briefs/phase2-05-distribution-compare.md` | U1, U2 | 2 (parallel) |
+| U6 — Quality score panels | `briefs/phase2-06-quality.md` | U1, U2 | 2 (parallel) |
+| U7 — Scatter panels | `briefs/phase2-07-scatter.md` | U1, U2 | 2 (parallel) |
+| U8 — Plans, Sessions and Event ledger lists | `briefs/phase2-08-explorers-list.md` | U1, U2 | 2 (parallel) |
+| U9 — Plan and session detail screens | `briefs/phase2-09-plans-session-detail.md` | U1, U2, U8 | 3 (parallel) |
+| U10 — Artifact and Operations screens | `briefs/phase2-10-artifact-ops.md` | U1, U2 | 3 (parallel) |
+| U11 — Tools and Workflow boards | `briefs/phase2-11-tools-workflow.md` | U1, U2, U3, U4, U7 | 3 (parallel) |
+| U12 — Phase 2 acceptance harness and proof | `briefs/phase2-12-proof-harness.md` | U1–U11 | 4 |
+
+Phase 1 Carried placement: U2 owns the full S-start table; U3/U4 own the Pulse/Trends board layouts; U8 owns the nine-column S-ledger. No new Carried item was introduced.
+
+`artifact_feedback` (jev-1.13.0) delivered and screened every Phase 2 brief and this phase record as `pass`; scoring is not configured on the service. No design contradiction was found during refinement.
