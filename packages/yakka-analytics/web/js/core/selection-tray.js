@@ -11,14 +11,21 @@ import { stateUrl } from './chips.js';
 
 const WINDOW_MS = { h: 3600e3, d: 86400e3, w: 7 * 86400e3, m: 30 * 86400e3, y: 365 * 86400e3 };
 
+// The server requires a non-empty IANA scope tz on every cohort, so an unset
+// state tz falls back to the browser zone and finally UTC rather than `null`.
+export function scopeTimezone(state = {}) {
+  return state.tz || Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+}
+
 export function absoluteScope(state = {}, now = Date.now()) {
-  if (state.from || state.to) return { from: state.from || null, to: state.to || null, tz: state.tz || null };
+  const tz = scopeTimezone(state);
+  if (state.from || state.to) return { from: state.from || null, to: state.to || null, tz };
   const to = new Date(now).toISOString();
-  if (!state.win || state.win === 'all') return { from: null, to, tz: state.tz || null };
+  if (!state.win || state.win === 'all') return { from: null, to, tz };
   const match = /^(\d+)([hdwmy])$/.exec(state.win);
-  if (!match) return { from: null, to, tz: state.tz || null };
+  if (!match) return { from: null, to, tz };
   const from = new Date(now - Number(match[1]) * WINDOW_MS[match[2]]).toISOString();
-  return { from, to, tz: state.tz || null };
+  return { from, to, tz };
 }
 
 const SHARED_FILTERS = ['repo_id', 'harness', 'kind', 'plan', 'norm_event', 'event', 'tool', 'model', 'source', 'conversation_id'];

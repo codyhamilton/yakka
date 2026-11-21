@@ -228,6 +228,22 @@ export function resetPanelScope(state = {}, keys = []) {
   return next;
 }
 
+// Facets describe tenant metadata under the frozen window only: the route
+// refuses cohort and never narrows options by filters, excludes, pick or sel.
+export function facetsParameters(context = {}) {
+  const params = new URLSearchParams();
+  const window = context.window || {};
+  if (window.all) {
+    params.set('all', '1');
+    if (window.to) params.set('to', window.to);
+  } else {
+    if (window.from) params.set('from', window.from);
+    if (window.to) params.set('to', window.to);
+  }
+  params.set('tz', context.tz || Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC');
+  return params;
+}
+
 export function createScopeControls({
   doc = globalThis.document,
   state = {},
@@ -238,7 +254,8 @@ export function createScopeControls({
   onRefresh = () => {},
   onRetryCounts = null,
   allowRefresh = true,
-  facetsFetch = true
+  facetsFetch = true,
+  resetCmp = 'off'
 } = {}) {
   let committed = state;
   let draft = draftFromState(state);
@@ -502,7 +519,7 @@ export function createScopeControls({
     countPath = key;
     facets = { state: 'loading', repos: [], kinds: [], error: '' };
     render();
-    return transport.get('facets', nextContext.paramsFor(), { tenant: nextContext.tenant })
+    return transport.get('facets', facetsParameters(nextContext), { tenant: nextContext.tenant })
       .then(({ response, body }) => {
         if (countPath !== key) return;
         if (!response.ok) {
@@ -534,6 +551,7 @@ export function createScopeControls({
 
   reset.addEventListener('click', () => {
     const next = resetScopeState(committed);
+    if (resetCmp) next.cmp = resetCmp;
     onCommit(next);
   });
 

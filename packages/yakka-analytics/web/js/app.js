@@ -859,6 +859,7 @@ async function render(record) {
     transport,
     readContext: context,
     facetsFetch: Boolean(features.event_counts || features.record_filters || features.facets),
+    resetCmp: record.path === '/b/compare' ? 'period' : 'off',
     onCommit: next => {
       if (!renderIsCurrent(generation)) return;
       router.pushScope(stateUrl(next, globalThis.location?.search || '', path));

@@ -305,10 +305,6 @@ export function render(root, doc = globalThis.document, { signal, tenant = '', r
     const footer = doc.createElement('div');
     footer.className = 'ledger-footer';
 
-    populationNode = doc.createElement('p');
-    populationNode.className = 'ledger-population';
-    footer.append(populationNode);
-
     const noteHost = doc.createElement('div');
     renderLedgerNotes(noteHost, { rows, summary: 'Each row is one retained record; rows shown are the loaded pages, never a total.', doc });
     footer.append(noteHost);
@@ -346,6 +342,7 @@ export function render(root, doc = globalThis.document, { signal, tenant = '', r
       onInspect: inspectRow,
       onSelect: selectRow
     });
+    attachPopulation();
     renderFooter();
   }
 
@@ -377,9 +374,10 @@ export function render(root, doc = globalThis.document, { signal, tenant = '', r
   }
 
   function attachPopulation() {
+    body.querySelector('.ledger-population')?.remove();
     populationNode = doc.createElement('p');
     populationNode.className = 'ledger-population';
-    body.append(populationNode);
+    body.prepend(populationNode);
     updatePopulation();
   }
 

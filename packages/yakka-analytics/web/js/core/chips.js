@@ -81,8 +81,8 @@ function splitExclude(value) {
 
 export function chipModel({ state = {}, schema = null, grain = '', ignoredFilters = [], unmapped = '' } = {}) {
   const chips = [];
-  chips.push({ kind: 'scope', key: 'window', label: windowLabel(state), removable: true });
-  if (state.tz) chips.push({ kind: 'scope', key: 'tz', value: state.tz, label: `tz ${state.tz}`, removable: true });
+  chips.push({ kind: 'scope', key: 'window', label: windowLabel(state), removable: false });
+  if (state.tz) chips.push({ kind: 'scope', key: 'tz', value: state.tz, label: `tz ${state.tz}`, removable: false });
   for (const [key, values] of Object.entries(state.filters || {})) {
     const applied = filterApplies(key, { schema, grain, ignoredFilters });
     for (const value of values || []) {
@@ -230,14 +230,20 @@ export function advancedScopeRows(state = {}) {
 }
 
 // Remove exactly one repeated include/exclude/ca..cd key. The window, timezone
-// and all other advanced URL state survive.
-export function removeAdvancedRow(state, row = {}) {
-  if (row.kind === 'filter') return removeFilterChip(state, row.key, row.value);
-  if (row.kind === 'exclude') return removeExcludeChip(state, row.value);
-  if (row.kind === 'cohort') return removeCohortChip(state, row.key);
-  const next = copyState(state);
-  if (row.kind === 'cmp') next.cmp = 'off';
-  if (row.kind === 'pick') next.pick = '';
+// and all other advanced URL state survive. Every removal invalidates the
+// derived pick/selection because the rows it was derived from may no longer
+// exist in the new population.
+export function removeAdvancedRow(state = {}, row = {}) {
+  let next;
+  if (row.kind === 'filter') next = removeFilterChip(state, row.key, row.value);
+  else if (row.kind === 'exclude') next = removeExcludeChip(state, row.value);
+  else if (row.kind === 'cohort') next = removeCohortChip(state, row.key);
+  else {
+    next = copyState(state);
+    if (row.kind === 'cmp') next.cmp = 'off';
+  }
+  next.pick = '';
+  next.sel = '';
   return next;
 }
 
