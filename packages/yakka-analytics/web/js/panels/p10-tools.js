@@ -32,10 +32,10 @@ const REPO_LENSES = new Set(['repo_id', 'session_repo']);
 export const TOOLS_MEASURES = ['hook_events'];
 
 export const TOOLS_SPECS = {
-  mix: { grain: 'time', measures: ['hook_events'], split: 'tool_kind', chart: 'bars', scope: { second: 'harness', mode: 'stacked' } },
-  treemap: { grain: 'time', measures: ['hook_events'], split: 'tool', chart: 'treemap', scope: { parent: 'harness' } },
-  rank: { grain: 'time', measures: ['hook_events'], split: 'tool', chart: 'rank' },
-  rhythm: { grain: 'time', measures: ['hook_events'], chart: 'heatmap' }
+  mix: { grain: 'time', measures: ['hook_events'], split: 'tool_kind', chart: 'bars', scope: { second: 'harness', mode: 'stacked', captionKey: 'G-mix' } },
+  treemap: { grain: 'time', measures: ['hook_events'], split: 'tool', chart: 'treemap', scope: { parent: 'harness', captionKey: 'G-toolsmap' } },
+  rank: { grain: 'time', measures: ['hook_events'], split: 'tool', chart: 'rank', scope: { captionKey: 'G-toolsrank' } },
+  rhythm: { grain: 'time', measures: ['hook_events'], chart: 'heatmap', scope: { captionKey: 'G-rhythm' } }
 };
 
 // The capability notes the Tools preset adds beside the shared panels' own
@@ -161,7 +161,8 @@ export function registerToolsPanels() {
       title: 'Tools',
       panels: TOOLS_PANELS.map(panel => panel.id),
       specs: TOOLS_SPECS,
-      notes: TOOLS_NOTES
+      notes: TOOLS_NOTES,
+      fullWidth: []
     });
   }
   return true;

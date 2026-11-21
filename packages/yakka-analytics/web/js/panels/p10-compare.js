@@ -15,11 +15,11 @@ export const COMPARE_PANELS = [DIST_RANGES_PANEL, DIST_HIST_PANEL, DIST_ECDF_PAN
 export const COMPARE_PRESET_ID = 'compare';
 
 export const COMPARE_SPECS = {
-  'dist-ranges': { grain: 'call', measures: ['cost_usd'], split: 'model', chart: 'ranges', scope: { cmp: 'period' } },
-  'dist-hist': { grain: 'call', measures: ['cost_usd'], split: 'model', chart: 'histogram', scope: { cmp: 'period' } },
-  'dist-ecdf': { grain: 'call', measures: ['cost_usd'], split: 'model', chart: 'ecdf', scope: { cmp: 'period' } },
-  'trend-lines': { grain: 'time', measures: ['cost_usd'], split: 'model', chart: 'lines', scope: { cmp: 'period' } },
-  rank: { grain: 'time', measures: ['cost_usd'], split: 'model', chart: 'slope', scope: { cmp: 'period' } }
+  'dist-ranges': { grain: 'call', measures: ['cost_usd'], split: 'model', chart: 'ranges', scope: { cmp: 'period', captionKey: 'G-compranges' } },
+  'dist-hist': { grain: 'call', measures: ['cost_usd'], split: 'model', chart: 'histogram', scope: { cmp: 'period', captionKey: 'G-comphist' } },
+  'dist-ecdf': { grain: 'call', measures: ['cost_usd'], split: 'model', chart: 'ecdf', scope: { cmp: 'period', captionKey: 'G-compecdf' } },
+  'trend-lines': { grain: 'time', measures: ['cost_usd'], split: 'model', chart: 'lines', scope: { cmp: 'period', captionKey: 'G-complines' } },
+  rank: { grain: 'time', measures: ['cost_usd'], split: 'model', chart: 'slope', scope: { cmp: 'period', captionKey: 'G-slope' } }
 };
 
 export function registerComparePanels() {
@@ -29,7 +29,8 @@ export function registerComparePanels() {
       id: COMPARE_PRESET_ID,
       title: 'Compare',
       panels: COMPARE_PANELS.map(panel => panel.id),
-      specs: COMPARE_SPECS
+      specs: COMPARE_SPECS,
+      fullWidth: ['rank']
     });
   }
   return true;

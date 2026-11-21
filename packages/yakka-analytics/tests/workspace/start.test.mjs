@@ -165,3 +165,106 @@ test('an older or partial server disables paths with the reason and names missin
   assert.match(legacyScatter, /does not advertise/);
   await diagnostics.assertClean();
 });
+
+test('Start regions, table columns and the two-column board geometry match phase 2', { skip: environment.ok ? false : SKIP_REASON }, async t => {
+  const harness = await startWorkspaceHarness();
+  const browser = await launchBrowser(environment);
+  t.after(async () => { await browser.close(); await harness.close(); });
+  const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+  const diagnostics = await watchPage(page);
+
+  await control(harness.origin, { scenario: 'default' });
+  await page.goto(`${harness.origin}/`);
+  await settle(page);
+
+  const regionOrder = await page.evaluate(() => [...document.querySelector('#app').children].map(node => {
+    if (node.classList.contains('scope-controls')) return 'scope-controls';
+    if (node.classList.contains('question-paths')) return 'question-paths';
+    if (node.classList.contains('saved-boards')) return 'saved-boards';
+    return node.tagName.toLowerCase();
+  }));
+  assert.deepEqual(regionOrder.slice(0, 4), ['h1', 'scope-controls', 'question-paths', 'saved-boards']);
+
+  assert.equal(await page.locator('table.question-paths').count(), 1);
+  assert.deepEqual(await page.locator('.question-paths thead th').allInnerTexts(), ['Area', 'Question', 'Explanation']);
+  assert.deepEqual(await page.locator('.question-paths tbody tr td:first-child').allInnerTexts(), [
+    'Cost', 'Cost', 'Cost',
+    'Quality', 'Quality', 'Quality', 'Quality', 'Quality',
+    'Plans', 'Plans', 'Plans',
+    'Activity', 'Activity', 'Activity',
+    'Health'
+  ]);
+  const explanations = await page.locator('.question-paths tbody tr td:nth-child(3)').allInnerTexts();
+  assert.equal(explanations.length, 15);
+  assert.ok(explanations.every(text => text.trim().length > 0), 'every question path explains itself');
+  assert.equal(await page.locator('.question-paths a').count(), 15);
+  assert.equal(await page.locator('.question-paths [aria-disabled="true"]').count(), 0);
+  assert.equal(await page.locator('.coverage-strip').count(), 0, 'Start has no standalone coverage strip');
+  assert.equal(await page.locator('.workspace-panel').count(), 0, 'Start has no chart');
+
+  assert.equal(await page.locator('table.saved-board-list').count(), 1);
+  assert.deepEqual(await page.locator('.saved-board-list thead th').allInnerTexts(), ['Name', 'Open', 'Delete', 'URL summary']);
+  assert.match(await page.locator('.saved-board-list tbody').innerText(), /No saved boards yet\./);
+  assert.equal(await page.locator('.save-board input').inputValue(), '');
+
+  await page.goto(`${harness.origin}/b/pulse?win=30d`);
+  await page.waitForFunction(() => document.querySelectorAll('.workspace-panel').length === 5);
+  const pulse = await page.evaluate(() => {
+    const rect = id => document.querySelector(`[data-panel="${id}"]`).getBoundingClientRect();
+    const metrics = rect('pulse-strips');
+    const river = rect('river');
+    const movers = rect('movers');
+    const coverage = rect('coverage');
+    return {
+      grid: document.querySelector('.panel-grid').getBoundingClientRect().width,
+      metrics: metrics.width,
+      river: river.width,
+      movers: movers.width,
+      gap: movers.left - river.right,
+      coverage: coverage.width,
+      spans: Object.fromEntries(['pulse-strips', 'river', 'movers', 'calendar', 'coverage'].map(id => [id, document.querySelector(`[data-panel="${id}"]`).dataset.span]))
+    };
+  });
+  assert.ok(Math.abs(pulse.grid - 1416) <= 1, `grid ${pulse.grid}`);
+  assert.ok(Math.abs(pulse.metrics - 1416) <= 1, `metrics ${pulse.metrics}`);
+  assert.ok(Math.abs(pulse.river - 704) <= 1, `river ${pulse.river}`);
+  assert.ok(Math.abs(pulse.movers - 704) <= 1, `movers ${pulse.movers}`);
+  assert.ok(Math.abs(pulse.gap - 8) <= 1, `gap ${pulse.gap}`);
+  assert.deepEqual(pulse.spans, { 'pulse-strips': '12', river: '6', movers: '6', calendar: '6', coverage: '6' });
+
+  await page.goto(`${harness.origin}/b/trends?win=30d`);
+  await page.waitForFunction(() => document.querySelectorAll('.workspace-panel').length === 5);
+  const rhythm = await page.evaluate(() => {
+    const node = document.querySelector('[data-panel="rhythm"]');
+    return { span: node.dataset.span, width: node.getBoundingClientRect().width };
+  });
+  assert.equal(rhythm.span, '12', 'the odd final panel spans the full width');
+  assert.ok(Math.abs(rhythm.width - 1416) <= 1, `rhythm ${rhythm.width}`);
+
+  await page.goto(`${harness.origin}/b/compare?win=7d`);
+  await page.waitForFunction(() => document.querySelector('#comparison-select'));
+  assert.deepEqual(await page.locator('#comparison-select option').evaluateAll(nodes => nodes.map(node => [node.value, node.textContent, node.disabled])), [
+    ['period', 'Previous equal period', false],
+    ['off', 'No comparison', false],
+    ['cohorts', 'Saved cohorts', true]
+  ]);
+  assert.equal(await page.locator('#comparison-select').inputValue(), 'period');
+  await page.locator('#comparison-select').selectOption('off');
+  await page.waitForFunction(() => {
+    const raw = new URLSearchParams(location.search).get('p1');
+    if (!raw) return false;
+    try { return JSON.parse(raw).scope?.cmp === 'off'; } catch { return false; }
+  });
+  const compareState = await page.evaluate(() => {
+    const params = new URLSearchParams(location.search);
+    return {
+      cmp: params.get('cmp'),
+      specs: ['p1', 'p2', 'p3', 'p4', 'p5'].map(key => JSON.parse(params.get(key) || '{}').scope?.cmp)
+    };
+  });
+  assert.equal(compareState.cmp, null, 'off is not a URL cmp key');
+  assert.deepEqual(compareState.specs, ['off', 'off', 'off', 'off', 'off']);
+  await page.waitForFunction(() => document.querySelector('#comparison-select')?.value === 'off');
+
+  await diagnostics.assertClean();
+});

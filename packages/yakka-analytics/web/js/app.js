@@ -24,7 +24,7 @@ import { buildCohort, createSelectionTray, nextCohortSlot, openListDestination, 
 import { createInspector } from './core/inspector.js';
 import { createCapabilityInspector } from './core/capability-inspector.js';
 import { unsupportedState } from './core/panel-state.js';
-import { decodePick, encodePick } from './core/selection-model.js';
+import { decodePick, encodePick, decodeCohort } from './core/selection-model.js';
 import { coverageSnapshot } from './panels/coverage.js';
 
 const root = document.querySelector('#app');
@@ -236,21 +236,21 @@ function panelHref(grain, measures, split, chart) {
 // reason when /schema lacks what it needs. Later-phase destinations are named
 // and are never dead.
 export const QUESTION_PATHS = [
-  { group: 'Cost', label: 'Where did the money go this week against last?', href: '/b/cost?win=7d&cmp=period' },
-  { group: 'Cost', label: 'Which model gives the most output per dollar?', href: `/b/scatter?win=30d&${panelHref('session', ['cost_usd', 'commits'], 'session_model', 'scatter')}`, requires: ['entities_session'] },
-  { group: 'Cost', label: 'How much of my spend cannot be priced?', href: '/b/pulse?win=30d' },
-  { group: 'Quality', label: 'How do design, brief and report scores differ by harness?', href: `/b/quality?win=30d&${panelHref('content', ['score'], 'harness', 'ranges')}`, requires: ['scores_by_lens'] },
-  { group: 'Quality', label: 'Quality by model and by repo over time', href: `/b/quality?win=90d&${panelHref('content', ['score'], 'session_model', 'lines')}`, requires: ['scores_by_lens'] },
-  { group: 'Quality', label: 'Do expensive sessions write better artifacts?', href: `/b/scatter?win=30d&${panelHref('artifact', ['cost_usd', 'score'], 'session_model', 'scatter')}`, requires: ['entities_session', 'entities_artifact'] },
-  { group: 'Quality', label: 'Which artifacts scored lowest?', href: `/b/quality?win=30d&${panelHref('artifact', ['score'], 'kind', 'strip')}`, requires: ['entities_artifact', 'scores_by_lens'] },
-  { group: 'Quality', label: 'Am I better than my usual?', href: `/b/quality?win=30d&${panelHref('content', ['score'], 'kind', 'ranges')}`, requires: ['scores_by_lens'] },
-  { group: 'Plans', label: 'Which brief runs have no report or commit yet?', href: `/b/workflow?win=30d&${panelHref('execution', ['ts'], 'shape', 'bars')}`, requires: ['entities_execution'] },
-  { group: 'Plans', label: 'What did this plan contain, and how did the design change?', href: '/plans', requires: ['entities_plan'] },
-  { group: 'Plans', label: 'Which plans cost the most for what they produced?', href: `/b/scatter?win=30d&${panelHref('plan', ['associated_cost_usd', 'artifacts'], 'repo_id', 'scatter')}`, requires: ['entities_plan'] },
-  { group: 'Activity', label: 'What just happened?', href: '/b/pulse?win=1d', requires: ['activity'] },
-  { group: 'Activity', label: 'When do I work?', href: '/b/pulse?win=90d' },
-  { group: 'Activity', label: 'How do harnesses use tools?', href: '/b/tools?win=30d' },
-  { group: 'Health', label: 'What is unscored, unpriced, unattributed or rejected?', href: '/ops' }
+  { group: 'Cost', label: 'Where did the money go this week against last?', href: '/b/cost?win=7d&cmp=period', explanation: 'Cost board for seven days against the previous equal period.' },
+  { group: 'Cost', label: 'Which model gives the most output per dollar?', href: `/b/scatter?win=30d&${panelHref('session', ['cost_usd', 'commits'], 'session_model', 'scatter')}`, requires: ['entities_session'], explanation: 'Sessions plotted by priced spend and commits, coloured by session model.' },
+  { group: 'Cost', label: 'How much of my spend cannot be priced?', href: '/b/pulse?win=30d', explanation: 'Pulse window totals, including the unpriced-call count and its lower bound.' },
+  { group: 'Quality', label: 'How do design, brief and report scores differ by harness?', href: `/b/quality?win=30d&${panelHref('content', ['score'], 'harness', 'ranges')}`, requires: ['scores_by_lens'], explanation: 'Quality score ranges by harness for the selected document kind.' },
+  { group: 'Quality', label: 'Quality by model and by repo over time', href: `/b/quality?win=90d&${panelHref('content', ['score'], 'session_model', 'lines')}`, requires: ['scores_by_lens'], explanation: 'Quality score trend by session model over ninety days.' },
+  { group: 'Quality', label: 'Do expensive sessions write better artifacts?', href: `/b/scatter?win=30d&${panelHref('artifact', ['cost_usd', 'score'], 'session_model', 'scatter')}`, requires: ['entities_session', 'entities_artifact'], explanation: 'Artifact clarity plotted against its writing session’s priced spend.' },
+  { group: 'Quality', label: 'Which artifacts scored lowest?', href: `/b/quality?win=30d&${panelHref('artifact', ['score'], 'kind', 'strip')}`, requires: ['entities_artifact', 'scores_by_lens'], explanation: 'File-weighted score strips grouped by document kind.' },
+  { group: 'Quality', label: 'Am I better than my usual?', href: `/b/quality?win=30d&${panelHref('content', ['score'], 'kind', 'ranges')}`, requires: ['scores_by_lens'], explanation: 'Score ranges for the selected kind against the all-history baseline.' },
+  { group: 'Plans', label: 'Which brief runs have no report or commit yet?', href: `/b/workflow?win=30d&${panelHref('execution', ['ts'], 'shape', 'bars')}`, requires: ['entities_execution'], explanation: 'Workflow execution completion by plan, naming each shape.' },
+  { group: 'Plans', label: 'What did this plan contain, and how did the design change?', href: '/plans', requires: ['entities_plan'], explanation: 'Plans explorer with the plan’s artifacts, executions and events.' },
+  { group: 'Plans', label: 'Which plans cost the most for what they produced?', href: `/b/scatter?win=30d&${panelHref('plan', ['associated_cost_usd', 'artifacts'], 'repo_id', 'scatter')}`, requires: ['entities_plan'], explanation: 'Plans plotted by associated spend and artifact count.' },
+  { group: 'Activity', label: 'What just happened?', href: '/b/pulse?win=1d', requires: ['activity'], explanation: 'Pulse recent activity observations for the last twenty-four hours.' },
+  { group: 'Activity', label: 'When do I work?', href: '/b/pulse?win=90d', explanation: 'Pulse activity and daily calendar over ninety days.' },
+  { group: 'Activity', label: 'How do harnesses use tools?', href: '/b/tools?win=30d', explanation: 'Tools composition of hook events by tool category and harness.' },
+  { group: 'Health', label: 'What is unscored, unpriced, unattributed or rejected?', href: '/ops', explanation: 'Operations storage, coverage, unscored, unpriced, unattributed and rejection facts.' }
 ];
 
 export function featureAvailable(schema, name) {
@@ -341,35 +341,49 @@ function scopedHref(href, tenant) {
   } catch { return href; }
 }
 
+export const QUESTION_GROUPS = ['Cost', 'Quality', 'Plans', 'Activity', 'Health'];
+
+function questionCell(tag, className, value) {
+  const cell = element(tag, className, value);
+  if (tag === 'th') cell.scope = 'col';
+  return cell;
+}
+
+// S-start: a full-width semantic table, Area then Question then Explanation,
+// with the fixed group order and the existing QUESTION_PATHS order inside each
+// group. A path the server cannot answer is disabled text plus the reason; it
+// is never a dead link, and every enabled link keeps the selected tenant.
 function renderQuestionPaths(container, schema, tenant = '') {
-  const intro = element('p', 'muted', 'Explore the analytics this server supports. Every path opens a configured board or explorer, or says why the server cannot answer it.');
-  container.append(intro);
-  const groups = new Map();
-  for (const path of QUESTION_PATHS) {
-    if (!groups.has(path.group)) groups.set(path.group, []);
-    groups.get(path.group).push(path);
-  }
-  for (const [group, paths] of groups) {
-    const section = element('section', 'question-group');
-    section.append(element('h2', '', group));
-    const list = element('ul', 'question-paths');
-    for (const path of paths) {
-      const item = element('li');
+  const table = element('table', 'question-paths');
+  table.append(element('caption', '', 'Question paths'));
+  const head = element('thead');
+  const headRow = element('tr');
+  headRow.append(questionCell('th', '', 'Area'), questionCell('th', '', 'Question'), questionCell('th', '', 'Explanation'));
+  head.append(headRow);
+  const body = element('tbody');
+  for (const group of QUESTION_GROUPS) {
+    for (const path of QUESTION_PATHS.filter(item => item.group === group)) {
+      const row = element('tr');
       const availability = pathAvailability(path, schema);
+      const question = element('td');
       if (availability.ok) {
         const link = element('a', '', path.label);
         link.href = scopedHref(path.href, tenant);
-        item.append(link);
+        question.append(link);
       } else {
         const label = element('span', 'disabled-path', path.label);
         label.setAttribute('aria-disabled', 'true');
-        item.append(label, element('span', 'disabled-reason', availability.reason));
+        question.append(label);
       }
-      list.append(item);
+      const explanation = availability.ok
+        ? (path.explanation || '')
+        : `${path.explanation || ''} ${availability.reason}`.trim();
+      row.append(element('td', '', group), question, element('td', '', explanation));
+      body.append(row);
     }
-    section.append(list);
-    container.append(section);
   }
+  table.append(head, body);
+  container.append(table);
 }
 
 function renderNamedDestination(container, record) {
@@ -394,31 +408,60 @@ function renderNotFound(container, record) {
 function mountSavedBoards(container, state) {
   const section = element('section', 'saved-boards');
   section.append(element('h2', '', 'Saved boards'));
-  const list = element('ul', 'saved-board-list');
-  const render = () => {
-    list.replaceChildren();
-    const boards = readBoards();
-    if (!boards.length) list.append(element('li', 'muted', 'No saved boards yet.'));
-    for (const board of boards) {
-      const item = element('li');
-      item.append(element('span', '', board.name), document.createTextNode(' '));
-      const open = element('button', '', 'Open');
-      open.type = 'button';
-      open.addEventListener('click', () => openBoard(board.name));
-      const remove = element('button', '', 'Delete');
-      remove.type = 'button';
-      remove.addEventListener('click', () => { deleteBoard(board.name); render(); });
-      item.append(open, remove);
-      list.append(item);
-    }
-  };
   const form = element('form', 'save-board');
   const input = element('input');
   input.name = 'board-name';
   input.placeholder = 'Board name';
   input.setAttribute('aria-label', 'Board name');
+  input.required = true;
   const save = element('button', '', 'Save current view');
   save.type = 'submit';
+  const table = element('table', 'saved-board-list');
+  table.append(element('caption', '', 'Saved boards'));
+  const head = element('thead');
+  const headRow = element('tr');
+  headRow.append(
+    questionCell('th', '', 'Name'),
+    questionCell('th', '', 'Open'),
+    questionCell('th', '', 'Delete'),
+    questionCell('th', '', 'URL summary')
+  );
+  head.append(headRow);
+  const body = element('tbody');
+  table.append(head, body);
+
+  const render = () => {
+    body.replaceChildren();
+    const boards = readBoards().slice().sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+    if (!boards.length) {
+      const row = element('tr');
+      const cell = element('td', 'muted', 'No saved boards yet.');
+      cell.colSpan = 4;
+      row.append(cell);
+      body.append(row);
+      return;
+    }
+    for (const board of boards) {
+      const row = element('tr');
+      const name = element('td', '', board.name);
+      name.title = board.name;
+      const openCell = element('td');
+      const open = element('button', '', 'Open');
+      open.type = 'button';
+      open.addEventListener('click', () => openBoard(board.name));
+      openCell.append(open);
+      const deleteCell = element('td');
+      const remove = element('button', '', 'Delete');
+      remove.type = 'button';
+      remove.addEventListener('click', () => { deleteBoard(board.name); render(); });
+      deleteCell.append(remove);
+      const summary = element('td', '', board.url);
+      summary.title = board.url;
+      row.append(name, openCell, deleteCell, summary);
+      body.append(row);
+    }
+  };
+
   form.addEventListener('submit', event => {
     event.preventDefault();
     const name = input.value.trim();
@@ -428,7 +471,7 @@ function mountSavedBoards(container, state) {
     render();
   });
   form.append(input, save);
-  section.append(form, list);
+  section.append(form, table);
   render();
   container.append(section);
 }
@@ -462,6 +505,53 @@ function currentState() {
   return decodeUrlState(globalThis.location?.search || '');
 }
 
+const COHORT_SLOTS = ['ca', 'cb', 'cc', 'cd'];
+
+function validCohortCount(state) {
+  return COHORT_SLOTS.filter(key => decodeCohort(state.cohorts?.[key])).length;
+}
+
+// The committed comparison is the URL `cmp` when it names a mode; an explicit
+// `off` is encoded as an absent URL key, so the per-panel override is the
+// durable signal that the board is not comparing.
+function currentComparison(state, board) {
+  if (state.cmp === 'cohorts') return 'cohorts';
+  if (state.cmp === 'period') return 'period';
+  const panelCmp = board.panels.find(entry => entry.spec?.scope?.cmp)?.spec.scope.cmp;
+  return panelCmp === 'off' || panelCmp === 'cohorts' ? panelCmp : 'period';
+}
+
+// S-compare: one labeled Comparison select before the grid. A change writes the
+// URL `cmp` and every panel's `pN.scope.cmp` in one push, because an explicit
+// `off` is not a URL key and each preset panel carries a default cmp=period.
+function mountComparison(container, state, board, router, path) {
+  const enough = validCohortCount(state) >= 2;
+  const group = element('div', 'compare-control');
+  const label = element('label', '', 'Comparison');
+  const select = element('select');
+  select.id = 'comparison-select';
+  label.htmlFor = 'comparison-select';
+  for (const [value, text] of [['period', 'Previous equal period'], ['off', 'No comparison'], ['cohorts', 'Saved cohorts']]) {
+    const option = element('option', '', text);
+    option.value = value;
+    if (value === 'cohorts' && !enough) option.disabled = true;
+    select.append(option);
+  }
+  select.value = currentComparison(state, board);
+  select.addEventListener('change', () => {
+    const next = currentState();
+    next.cmp = select.value;
+    for (const entry of board.panels) {
+      if (!entry.panel) continue;
+      const spec = entry.spec || {};
+      writePanelSpec(next, entry.key, { ...spec, scope: { ...(spec.scope || {}), cmp: select.value } });
+    }
+    router.pushScope(stateUrl(next, globalThis.location?.search || '', path));
+  });
+  group.append(label, select);
+  container.append(group);
+}
+
 async function renderBoard(container, record, state, schema, context, scopeControls = null, conflicts = []) {
   const tenant = context?.tenant || '';
   const board = assembleBoard({ presetId: record.presetId, state });
@@ -470,7 +560,7 @@ async function renderBoard(container, record, state, schema, context, scopeContr
   container.append(element('h1', '', board.title));
   if (scopeControls) container.append(scopeControls.element);
   renderScopeBar(container, state);
-  renderCoverageStrip(container, schema);
+  if (record.path === '/b/compare') mountComparison(container, state, board, router, record.path);
   if (context?.window) {
     for (const entry of board.panels) {
       entry.scope = { ...entry.scope, from: context.window.from || '', to: context.window.to || '' };
@@ -531,9 +621,11 @@ async function renderBoard(container, record, state, schema, context, scopeContr
   }
 
   for (const entry of board.panels) {
+    const span = board.spans?.[entry.panelId] || '6';
     if (conflicts.includes(entry.key)) {
       const blocked = element('section', 'workspace-panel blocked-panel');
       blocked.dataset.state = 'unsupported';
+      blocked.dataset.span = span;
       blocked.append(
         element('h2', '', entry.panelId),
         element('p', 'disabled-reason', 'Saved panel scope conflicts with the global filters. Reset panel scope.')
@@ -552,6 +644,7 @@ async function renderBoard(container, record, state, schema, context, scopeContr
       const missing = element('section', 'workspace-panel');
       missing.dataset.state = 'unsupported';
       missing.dataset.idle = 'true';
+      missing.dataset.span = span;
       missing.append(element('h2', '', entry.panelId), element('p', 'disabled-reason', entry.reason));
       grid.append(missing);
       continue;
@@ -674,6 +767,7 @@ async function renderBoard(container, record, state, schema, context, scopeContr
     frame.element.addEventListener('open', () => router.push(openListDestination(entry.panel.grain)));
 
     const missingFeature = (entry.panel.requires || []).find(feature => !featureAvailable(schema, feature));
+    frame.element.dataset.span = span;
     grid.append(frame.element);
     if (missingFeature) {
       const source = entry.panel.capabilitySources?.[missingFeature]
@@ -872,7 +966,6 @@ async function render(record) {
   if (record.kind === 'start') {
     root.append(element('h1', '', 'Start'), scopeControls.element);
     renderQuestionPaths(root, schema, tenant);
-    renderCoverageStrip(root, schema);
     mountSavedBoards(root, state);
   } else if (record.kind === 'board') {
     await renderBoard(root, record, state, schema, context, scopeControls, conflicts);

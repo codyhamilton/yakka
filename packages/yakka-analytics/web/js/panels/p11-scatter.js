@@ -16,19 +16,19 @@ export const SCATTER_PRESET_ID = 'scatter';
 export const SCATTER_SPECS = {
   'scatter-session': {
     grain: 'session', measures: ['cost_usd', 'commits', 'unpriced_calls'], split: 'session_model', chart: 'scatter',
-    scope: { x: 'cost_usd', y: 'commits', size: 'unpriced_calls', colour: 'session_model' }
+    scope: { x: 'cost_usd', y: 'commits', size: 'unpriced_calls', colour: 'session_model', captionKey: 'G-sessionxy' }
   },
   'scatter-artifact': {
     grain: 'artifact', measures: ['writing_session_cost_usd', 'score:clarity'], split: 'session_model', chart: 'scatter',
-    scope: { x: 'writing_session_cost_usd', y: 'score:clarity', colour: 'session_model' }
+    scope: { x: 'writing_session_cost_usd', y: 'score:clarity', colour: 'session_model', captionKey: 'G-artifactxy' }
   },
   'scatter-plan': {
     grain: 'plan', measures: ['associated_cost_usd', 'artifacts'], split: 'repo_id', chart: 'scatter',
-    scope: { x: 'associated_cost_usd', y: 'artifacts', colour: 'repo_id' }
+    scope: { x: 'associated_cost_usd', y: 'artifacts', colour: 'repo_id', captionKey: 'G-planxy' }
   },
   'scatter-day': {
     grain: 'time', measures: ['cost_usd', 'commits'], chart: 'scatter',
-    scope: { x: 'cost_usd', y: 'commits' }
+    scope: { x: 'cost_usd', y: 'commits', captionKey: 'G-dayxy' }
   }
 };
 
@@ -39,7 +39,8 @@ export function registerScatterPanels() {
       id: SCATTER_PRESET_ID,
       title: 'Scatter',
       panels: P11_SCATTER_PANELS.map(panel => panel.id),
-      specs: SCATTER_SPECS
+      specs: SCATTER_SPECS,
+      fullWidth: []
     });
   }
   return true;

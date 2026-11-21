@@ -13,11 +13,11 @@ export const TRENDS_PANELS = [TREND_COLUMNS_PANEL, TREND_LINES_PANEL, TREND_MULT
 export const TRENDS_PRESET_ID = 'trends';
 
 export const TRENDS_SPECS = {
-  'trend-columns': { grain: 'time', measures: ['cost_usd'], split: 'model', chart: 'columns' },
-  'trend-lines': { grain: 'time', measures: ['cost_usd'], split: 'model', chart: 'lines' },
-  'trend-multiples': { grain: 'time', measures: ['cost_usd'], split: 'model', chart: 'lines' },
-  calendar: { grain: 'time', measures: ['cost_usd'], chart: 'calendar' },
-  rhythm: { grain: 'time', measures: ['hook_events'], chart: 'heatmap' }
+  'trend-columns': { grain: 'time', measures: ['cost_usd'], split: 'model', chart: 'columns', scope: { captionKey: 'G-columns' } },
+  'trend-lines': { grain: 'time', measures: ['cost_usd'], split: 'model', chart: 'lines', scope: { captionKey: 'G-lines' } },
+  'trend-multiples': { grain: 'time', measures: ['cost_usd'], split: 'model', chart: 'lines', scope: { captionKey: 'G-multiples' } },
+  calendar: { grain: 'time', measures: ['cost_usd'], chart: 'calendar', scope: { captionKey: 'G-calendar' } },
+  rhythm: { grain: 'time', measures: ['hook_events'], chart: 'heatmap', scope: { captionKey: 'G-rhythm' } }
 };
 
 export function registerTrendsPanels() {
@@ -27,7 +27,8 @@ export function registerTrendsPanels() {
       id: TRENDS_PRESET_ID,
       title: 'Trends',
       panels: TRENDS_PANELS.map(panel => panel.id),
-      specs: TRENDS_SPECS
+      specs: TRENDS_SPECS,
+      fullWidth: []
     });
   }
   return true;

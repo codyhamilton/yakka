@@ -20,16 +20,16 @@ export const COST_PANELS = [
 export const COST_PRESET_ID = 'cost';
 
 export const COST_SPECS = {
-  'trend-columns': { grain: 'time', measures: ['cost_usd'], split: 'model', chart: 'columns' },
-  rank: { grain: 'time', measures: ['cost_usd'], split: 'model', chart: 'rank' },
-  treemap: { grain: 'time', measures: ['cost_usd'], split: 'model', chart: 'treemap', scope: { parent: 'harness' } },
+  'trend-columns': { grain: 'time', measures: ['cost_usd'], split: 'model', chart: 'columns', scope: { captionKey: 'G-columns' } },
+  rank: { grain: 'time', measures: ['cost_usd'], split: 'model', chart: 'rank', scope: { captionKey: 'G-rank' } },
+  treemap: { grain: 'time', measures: ['cost_usd'], split: 'model', chart: 'treemap', scope: { parent: 'harness', captionKey: 'G-costmap' } },
   // Model, harness and repo are three real cost investigations: the model view
   // stays on trend-columns/rank, while the three distribution panels mount the
   // conversation repo lens, the call harness lens and the conversation model
   // lens. No repo total is formed from /query.
-  'dist-ranges': { grain: 'session', measures: ['cost_usd'], split: 'session_repo', chart: 'ranges', scope: { grain: 'conversation', dim: 'session_repo' } },
-  'dist-hist': { grain: 'session', measures: ['cost_usd'], split: 'harness', chart: 'histogram', scope: { grain: 'call', dim: 'harness' } },
-  'dist-ecdf': { grain: 'session', measures: ['cost_usd'], split: 'model', chart: 'ecdf', scope: { grain: 'conversation', dim: 'model' } }
+  'dist-ranges': { grain: 'session', measures: ['cost_usd'], split: 'session_repo', chart: 'ranges', scope: { grain: 'conversation', dim: 'session_repo', captionKey: 'G-ranges' } },
+  'dist-hist': { grain: 'session', measures: ['cost_usd'], split: 'harness', chart: 'histogram', scope: { grain: 'call', dim: 'harness', captionKey: 'G-hist' } },
+  'dist-ecdf': { grain: 'session', measures: ['cost_usd'], split: 'model', chart: 'ecdf', scope: { grain: 'conversation', dim: 'model', captionKey: 'G-ecdf' } }
 };
 
 export function registerCostPanels() {
@@ -39,7 +39,8 @@ export function registerCostPanels() {
       id: COST_PRESET_ID,
       title: 'Cost',
       panels: COST_PANELS.map(panel => panel.id),
-      specs: COST_SPECS
+      specs: COST_SPECS,
+      fullWidth: []
     });
   }
   return true;
