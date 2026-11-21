@@ -241,7 +241,7 @@ export async function load(context = {}) {
       wrapper.className = 'p10-trend';
       const node = doc.createElement('yk-chart');
       node.className = 'p10-trend-chart';
-      node.spec = model.spec;
+      node.spec = { ...model.spec, x: { ...model.spec.x, timeZone: scope.tz || 'UTC' } };
       node.data = model.rows;
       wireChartScope(node, panel.id, doc);
       const tableNode = table(doc, {

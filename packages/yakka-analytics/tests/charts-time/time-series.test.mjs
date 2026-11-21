@@ -5,7 +5,7 @@ import {
   normaliseSpec, stackBands, transformSeriesData
 } from '../../web/js/charts/series.js';
 import {
-  buildScales, columnBarLayout, dataToPx, normaliseDash, pxToData, scaleGroupKey, xToPx, yToPx
+  buildScales, columnBarLayout, dataToPx, formatTimeAxisTick, normaliseDash, pxToData, scaleGroupKey, timeAxisValues, xToPx, yToPx
 } from '../../web/js/charts/scales.js';
 import { thresholdModel, thresholdValueText } from '../../web/js/charts/thresholds.js';
 import { formatCount, formatValue } from '../../web/js/charts/formatters.js';
@@ -73,12 +73,22 @@ test('normaliseSpec defaults mode and type and keeps stable series order and key
   assert.equal(spec.series[0].label, 'z');
 });
 
-test('scales give one time or numeric x scale, one y scale and a zero-based y for columns', () => {
+test('scales keep millisecond X data numeric and format temporal ticks as event time', () => {
   const time = buildScales({ x: { kind: 'time' } });
-  assert.equal(time.x.time, true);
+  assert.equal(time.x.time, false);
   assert.deepEqual(Object.keys(time), ['x', 'y']);
   const numeric = buildScales({ x: { kind: 'number' } });
   assert.equal(numeric.x.time, false);
+
+  const values = timeAxisValues({ x: { kind: 'time', timeZone: 'UTC' } });
+  assert.deepEqual(values(null, [Date.parse('2026-09-01T00:00:00Z'), Date.parse('2026-09-02T00:00:00Z')]), ['1 Sept', '2 Sept']);
+  assert.equal(formatTimeAxisTick(Date.parse('2026-09-01T23:00:00Z'), { timeZone: 'Australia/Brisbane' }), '2 Sept');
+  assert.deepEqual(
+    timeAxisValues({ x: { kind: 'time', axisMode: 'elapsed', axisOrigin: Date.parse('2026-09-01T00:00:00Z') } })(null,
+      [Date.parse('2026-09-01T00:00:00Z'), Date.parse('2026-09-02T00:00:00Z')]),
+    ['0d', '1d']
+  );
+  assert.equal(formatTimeAxisTick(58810, { kind: 'time', timeZone: 'UTC' }), '1 Jan');
 
   const column = buildScales({ x: { kind: 'time' } }, { zeroBased: true });
   assert.deepEqual(column.y.range(null, 5, 10), [0, 10]);

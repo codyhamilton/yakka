@@ -14,7 +14,7 @@ import { createTooltip, tooltipModel } from './tooltip.js';
 import { adoptChartStyles, readToken, watchTheme } from './styles.js';
 import { transformSeriesData } from './series.js';
 import {
-  buildScales, columnBarLayout, normaliseDash, scaleGroupKey, scaleRange, xIsNumeric, xPxToData, xToPx, yPxToData, yToPx
+  buildScales, columnBarLayout, normaliseDash, scaleGroupKey, scaleRange, timeAxisValues, xIsNumeric, xPxToData, xToPx, yPxToData, yToPx
 } from './scales.js';
 import { createThresholdPlugin, renderThresholdTable, thresholdModel } from './thresholds.js';
 import { createGestureEngine, createHighlightPlugin } from './gestures.js';
@@ -383,7 +383,7 @@ export class YkChart extends HTMLElement {
       series: seriesOpts,
       bands: transform.bands,
       axes: [
-        { stroke: axisStroke, grid: { stroke: gridStroke }, ticks: { stroke: gridStroke }, labelFont: '12px system-ui, sans-serif' },
+        { stroke: axisStroke, grid: { stroke: gridStroke }, ticks: { stroke: gridStroke }, labelFont: '12px system-ui, sans-serif', ...(timeAxisValues(styledSpec) ? { values: timeAxisValues(styledSpec) } : {}) },
         { stroke: axisStroke, grid: { stroke: gridStroke }, ticks: { stroke: gridStroke }, label: units, labelFont: '12px system-ui, sans-serif' }
       ],
       plugins,
@@ -795,11 +795,15 @@ export class YkChart extends HTMLElement {
   }
 
   #tooltipModel(row) {
+    const timestamp = Number(row.x);
+    const xLabel = this._tooltipSpec?.x?.kind === 'time' && Number.isFinite(timestamp)
+      ? new Date(timestamp).toISOString()
+      : row.key;
     return tooltipModel({
       spec: this._tooltipSpec,
       datum: {
         key: row.key,
-        label: `${this._tooltipSpec.x?.label || 'Time'} ${row.key}`,
+        label: `${this._tooltipSpec.x?.label || 'Time'} ${xLabel}`,
         values: row.values,
         n: row.n,
         coverage: this.#spec?.coverage,

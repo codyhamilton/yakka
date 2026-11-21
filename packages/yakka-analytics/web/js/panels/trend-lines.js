@@ -263,7 +263,7 @@ export async function load(context = {}) {
             units: meta.unit,
             timeBasis: 'artifact/event facts.ts bucket start',
             series: item.series,
-            x: { label: 'Time', kind: 'time' },
+            x: { label: 'Time', kind: 'time', timeZone: scope.tz || 'UTC' },
             empty: 'no buckets in the current window'
           };
           node.data = item.rows;
@@ -281,7 +281,12 @@ export async function load(context = {}) {
           units: meta.unit,
           timeBasis: 'artifact/event facts.ts bucket start; previous period aligned by offset',
           series,
-          x: { label: compare ? 'Elapsed offset (tooltip shows the actual date)' : 'Time', kind: 'time' },
+          x: {
+            label: compare ? 'Elapsed offset (tooltip shows the actual date)' : 'Time',
+            kind: 'time',
+            timeZone: scope.tz || 'UTC',
+            ...(compare ? { axisMode: 'elapsed', axisOrigin: currentWindow(scope)?.from } : {})
+          },
           empty: 'no buckets in the current window'
         };
         node.data = rows;

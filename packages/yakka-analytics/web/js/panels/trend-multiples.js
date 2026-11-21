@@ -174,7 +174,10 @@ export async function load(context = {}) {
           scaleGroup: `trend-multiples:${measure}:${split}`,
           ...(yRange ? { yRange } : {}),
           series: item.series,
-          x: { label: 'Time', kind: 'time' },
+          x: {
+            label: 'Time', kind: 'time', timeZone: scope.tz || 'UTC',
+            ...(compare ? { axisMode: 'elapsed', axisOrigin: currentWindow(scope)?.from } : {})
+          },
           empty: 'no buckets in the current window'
         };
         node.data = item.rows;

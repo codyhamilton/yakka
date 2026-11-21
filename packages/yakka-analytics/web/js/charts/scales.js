@@ -21,9 +21,10 @@ export function normaliseYRange(range) {
 
 export function buildScales(spec = {}, { zeroBased = false } = {}) {
   const scales = {
-    x: xIsNumeric(spec)
-      ? { time: false, auto: true, distr: 1 }
-      : { time: true, auto: true, distr: 1 }
+    // Chart rows use millisecond timestamps. uPlot's time scale expects
+    // seconds, so use its continuous numeric scale and format temporal ticks
+    // from the original millisecond values instead.
+    x: { time: false, auto: true, distr: 1 }
   };
   const y = { auto: true, distr: 1 };
   const explicit = normaliseYRange(spec.yRange);
@@ -34,6 +35,39 @@ export function buildScales(spec = {}, { zeroBased = false } = {}) {
   }
   scales.y = y;
   return scales;
+}
+
+export function formatTimeAxisTick(value, x = {}) {
+  const timestamp = Number(value);
+  if (!Number.isFinite(timestamp)) return '';
+  if (x.axisMode === 'elapsed') {
+    const origin = Number(x.axisOrigin);
+    if (!Number.isFinite(origin)) return '';
+    const elapsed = Math.max(0, timestamp - origin);
+    if (elapsed === 0) return '0d';
+    const days = elapsed / 86400000;
+    if (days >= 1) return `${Math.round(days)}d`;
+    const hours = elapsed / 3600000;
+    if (hours >= 1) return `${Math.round(hours)}h`;
+    return `${Math.round(elapsed / 60000)}m`;
+  }
+  let timeZone = x.timeZone || 'UTC';
+  try {
+    return new Intl.DateTimeFormat('en-AU', {
+      timeZone, month: 'short', day: 'numeric'
+    }).format(new Date(timestamp));
+  } catch {
+    timeZone = 'UTC';
+    return new Intl.DateTimeFormat('en-AU', {
+      timeZone, month: 'short', day: 'numeric'
+    }).format(new Date(timestamp));
+  }
+}
+
+export function timeAxisValues(spec = {}) {
+  if (xIsNumeric(spec)) return null;
+  const x = spec.x || {};
+  return (_plot, ticks) => ticks.map(value => formatTimeAxisTick(value, x));
 }
 
 // A series dash accepts the contract words or an explicit array. Only a real
