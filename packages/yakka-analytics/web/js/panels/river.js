@@ -11,6 +11,26 @@ import { cancelledState, emptyState, errorState } from '../core/panel-state.js';
 import { emptyCausesFor, ensurePulseStyles, scopeParams, whenPanelBody } from './pulse-strips.js';
 
 export const OBSERVATION_TYPES = ['session_start', 'artifact_version', 'execution', 'rejection'];
+export const ACTIVITY_CAPTION = 'Each row is a session start, artifact version, brief execution or rejection; these observations are not a count of all events.';
+
+function countOrNull(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const number = Number(value);
+  return Number.isFinite(number) && number >= 0 ? Math.floor(number) : null;
+}
+
+// N1 activity denominator: loaded observation rows against the typed
+// observation population. `cohort_n` wins; `eligible_n` is only a fallback,
+// and neither supplied is unavailable — never `of 0`.
+export function activityPopulationText({ loaded = 0, population = null } = {}) {
+  const shown = countOrNull(loaded) ?? 0;
+  const shownText = formatNumber(shown);
+  const cohort = countOrNull(population?.cohort_n);
+  const eligible = countOrNull(population?.eligible_n);
+  const matching = cohort ?? eligible;
+  if (matching === null) return `${shownText} observations displayed; matching observation total unavailable.`;
+  return `${shownText} observations displayed of ${formatNumber(matching)} matching observations`;
+}
 const TYPE_LABELS = {
   session_start: 'Session start',
   artifact_version: 'Artifact version',
@@ -49,7 +69,9 @@ export function mapActivityList({ status, body } = {}) {
     rows,
     next: asString(payload.next) || null,
     ignoredFilters: Array.isArray(payload.ignored_filters) ? payload.ignored_filters.map(String) : [],
-    population: payload.population || { unit: 'typed_observation', returned_n: rows.length, eligible_n: rows.length },
+    population: payload.population && typeof payload.population === 'object'
+      ? payload.population
+      : { unit: 'typed_observation', returned_n: rows.length },
     basis: 'row clock is event time; late arrivals are reported by Follow at receive time'
   };
 }
@@ -170,6 +192,8 @@ function renderRiver(host, result, context, doc) {
 
   const basis = el(doc, 'p', 'pulse-basis', 'Basis: row clock is event time (UTC); late arrivals are reported by Follow by receive time.');
   wrapper.append(basis);
+  wrapper.append(el(doc, 'p', 'activity-population', activityPopulationText({ loaded: result.rows.length, population: result.population })));
+  wrapper.append(el(doc, 'p', 'pulse-basis activity-caption', ACTIVITY_CAPTION));
   if (result.ignoredFilters.length) {
     wrapper.append(el(doc, 'p', 'pulse-note', `Ignored filters (not applied by the server): ${result.ignoredFilters.join(', ')}.`));
   }
@@ -192,6 +216,13 @@ function renderRiver(host, result, context, doc) {
   return chart;
 }
 
+function renderStatusLine(result, doc) {
+  const wrapper = el(doc, 'div', 'river');
+  wrapper.append(el(doc, 'p', 'activity-population', activityPopulationText({ loaded: result.rows?.length || 0, population: result.population })));
+  wrapper.append(el(doc, 'p', 'pulse-basis activity-caption', ACTIVITY_CAPTION));
+  return wrapper;
+}
+
 export async function load({ scope = {}, transport, tenant, signal, doc = globalThis.document, clear = null } = {}) {
   ensurePulseStyles(doc);
   const context = {
@@ -203,9 +234,12 @@ export async function load({ scope = {}, transport, tenant, signal, doc = global
     params.set('mode', 'list');
     const { response, body } = await transport.get('activity', params, { tenant, signal, stateKey: 'river' });
     const result = mapActivityList({ status: response.status, body });
-    if (result.state === 'error') return result;
+    if (result.state === 'error') {
+      whenPanelBody('river', doc, host => host.replaceChildren(renderStatusLine(result, doc)));
+      return result;
+    }
     if (result.state === 'empty') {
-      whenPanelBody('river', doc, host => host.querySelector('.river')?.replaceChildren());
+      whenPanelBody('river', doc, host => host.replaceChildren(renderStatusLine(result, doc)));
       const causes = emptyCausesFor(scope, clear);
       if (!causes.length) causes.push({ kind: 'scope', label: `no observations in window ${scope.win || 'all'}`, clear: null });
       return emptyState(causes);
@@ -214,7 +248,9 @@ export async function load({ scope = {}, transport, tenant, signal, doc = global
     return result;
   } catch (error) {
     if (error?.name === 'AbortError') return cancelledState();
-    return errorState({ message: error?.message || 'The activity request failed.' });
+    const result = errorState({ message: error?.message || 'The activity request failed.' });
+    whenPanelBody('river', doc, host => host.replaceChildren(renderStatusLine(result, doc)));
+    return result;
   }
 }
 

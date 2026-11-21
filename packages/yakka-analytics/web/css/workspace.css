@@ -22,6 +22,8 @@
 .workspace-panel-header{display:flex;flex-wrap:wrap;align-items:center;gap:4px;justify-content:space-between}
 .workspace-panel-title{font-size:13px;margin:0}
 .workspace-panel-status,.workspace-panel-population,.workspace-panel-basis{margin:0;font-size:12px;color:var(--muted)}
+.activity-population{margin:.25rem 0;font-size:12px;font-weight:600}
+.activity-caption{margin:.15rem 0}
 .workspace-panel-meta{display:flex;flex-wrap:wrap;align-items:baseline;gap:.15rem .6rem;min-width:0}
 .workspace-panel-body{flex:1;min-width:0;min-height:2rem;overflow-wrap:anywhere}
 .workspace-panel-body > *,.workspace-panel-body > * > *{min-width:0}

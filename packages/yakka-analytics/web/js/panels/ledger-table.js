@@ -23,6 +23,14 @@ export const ROW_FIELDS = [
 
 export const BASIS = 'event ts for facts and rejections; commit-sourced artifact versions carry Bash-hook time; late arrivals can appear after their event time';
 
+export const LEDGER_CAPTION = 'Each row is a retained event or rejection matching these filters; load more rows to continue through the same result set.';
+export const LEDGER_LOADING_TEXT = 'Loading Event ledger…';
+export const LEDGER_EMPTY_TEXT = 'No records match these filters.';
+export const LEDGER_ERROR_TEXT = 'Could not load Event ledger.';
+export const LEDGER_MORE_TEXT = 'Load more events';
+export const LEDGER_LOADING_MORE_TEXT = 'Loading…';
+export const LEDGER_RETRY_NEXT_TEXT = 'Retry next page';
+
 const WINDOW_MS = { h: 3600e3, d: 86400e3, w: 7 * 86400e3, m: 30 * 86400e3, y: 365 * 86400e3 };
 
 // The event grain's declared filter set, for the shared chips/tray modules.
@@ -35,8 +43,9 @@ function iso(value) {
   return new Date(value).toISOString();
 }
 
-// Absolute window. `from`/`to` in the URL take precedence over `win`; a relative
-// window is frozen to absolute bounds so every cursor page sends the same filter.
+// Absolute window. `win=all` is all-history and never carries a lower bound;
+// otherwise `from`/`to` take precedence over `win`, and a relative window is
+// frozen to absolute bounds so every cursor page sends the same filter.
 export function resolveWindow(state = {}, now = Date.now(), resolved = null) {
   if (resolved && typeof resolved === 'object') {
     return {
@@ -45,6 +54,8 @@ export function resolveWindow(state = {}, now = Date.now(), resolved = null) {
       all: resolved.all === true
     };
   }
+  const win = String(state.win || '30d');
+  if (win === 'all') return { from: '', to: iso(now), all: true };
   const from = state.from ? iso(state.from) : '';
   const to = state.to ? iso(state.to) : '';
   if (from || to) {
@@ -52,8 +63,6 @@ export function resolveWindow(state = {}, now = Date.now(), resolved = null) {
     const absoluteFrom = from || iso(Date.parse(absoluteTo) - 30 * 86400e3);
     return { from: absoluteFrom, to: absoluteTo, all: false };
   }
-  const win = String(state.win || '30d');
-  if (win === 'all') return { from: '', to: iso(now), all: true };
   const match = /^(\d+)([hdwmy])$/.exec(win);
   if (!match) return { from: iso(now - 30 * 86400e3), to: iso(now), all: false };
   return { from: iso(now - Number(match[1]) * WINDOW_MS[match[2]]), to: iso(now), all: false };
@@ -78,6 +87,14 @@ export function filterToParameters(state = {}, { now = Date.now(), window = null
     if (DECLARED_FILTER_SET.has(lens)) params.append('exclude', raw);
   }
   return params;
+}
+
+// T4 initial page size: 100, or the schema's lower explore budget when it
+// publishes one. A larger server budget never raises the client page.
+export function ledgerPageLimit(serverLimit) {
+  const server = Number(serverLimit);
+  if (Number.isFinite(server) && server > 0 && server < 100) return Math.floor(server);
+  return 100;
 }
 
 // The next page reuses the frozen filter and only adds the cursor and limit;
@@ -134,6 +151,76 @@ export function pagingSummary({ shown = 0, truncated = false, hasNext = false } 
   return `${count} rows shown; end of the ledger.`;
 }
 
+function countOrNull(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const number = Number(value);
+  return Number.isFinite(number) && number >= 0 ? Math.floor(number) : null;
+}
+
+// The Ledger denominator. Rows are the loaded `/explore` pages; the matched
+// total is the shell count snapshot for the committed generation. A missing
+// snapshot is unavailable, never `of 0`, and a loaded page is never a total.
+export function ledgerPopulationText({ loaded = 0, counts = null, state = '' } = {}) {
+  const shown = countOrNull(loaded) ?? 0;
+  const shownText = formatNumber(shown);
+  if (state === 'loading') return `${shownText} rows displayed; counting matching records…`;
+  const matched = countOrNull(counts?.matched?.rows);
+  if (matched === null) return `${shownText} rows displayed; matching record total unavailable.`;
+  if (shown > matched) return `${shownText} rows displayed; counts may have changed — Refresh.`;
+  return `${shownText} rows displayed of ${formatNumber(matched)} matching records`;
+}
+
+// Sanitized API code: text only, no markup, bounded. It is the only server
+// detail a T3 row shows besides the named status family.
+export function sanitizeApiCode(value) {
+  return String(value ?? '')
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 80);
+}
+
+function action(id, label, extra = {}) {
+  return { id, label, ...extra };
+}
+
+// The T1–T4 status row model. Text and recovery actions are pure so the probe
+// checks can assert them without a browser; the renderer attaches handlers.
+export function ledgerStateModel(state = 'loading', {
+  caption = 'Event ledger', status = 0, code = '', retry = null, actions = null
+} = {}) {
+  if (state === 'loading') return { state: 'loading', text: `Loading ${caption}…`, busy: true, detail: '', code: '', actions: [] };
+  if (state === 'empty') {
+    const defaults = actions || [action('all-history', 'All history'), action('reset-filters', 'Reset filters')];
+    return { state: 'empty', text: LEDGER_EMPTY_TEXT, busy: false, detail: '', code: '', actions: defaults };
+  }
+  const clean = sanitizeApiCode(code);
+  const numeric = Number(status) || 0;
+  if (numeric === 401) {
+    return { state: 'error', text: LEDGER_ERROR_TEXT, busy: false, detail: '', code: clean, actions: [action('sign-in', 'Sign in', { href: '/login' })], retry: null };
+  }
+  if (numeric === 403) {
+    return { state: 'error', text: LEDGER_ERROR_TEXT, busy: false, detail: 'You do not have access to this tenant', code: clean, actions: [], retry: null };
+  }
+  if (numeric === 503 || state === 'busy') {
+    const recovery = actions || (retry ? [action('retry', 'Retry')] : []);
+    return { state: 'error', text: LEDGER_ERROR_TEXT, busy: false, detail: 'The server is busy; retry shortly.', code: clean, actions: recovery, retry };
+  }
+  if (state === 'timeout' || /timeout/i.test(clean)) {
+    const recovery = actions || (retry ? [action('retry', 'Retry')] : []);
+    return { state: 'error', text: LEDGER_ERROR_TEXT, busy: false, detail: 'The read timed out; retry.', code: clean, actions: recovery, retry };
+  }
+  const recovery = actions || (retry ? [action('retry', 'Retry')] : []);
+  return { state: 'error', text: LEDGER_ERROR_TEXT, busy: false, detail: '', code: clean, actions: recovery, retry };
+}
+
+// T4: a failed continuation is retried in place; the loaded same-scope rows
+// stay and the page-1 error vocabulary is not reused.
+export function retryNextPage({ page = 'first', result = null } = {}) {
+  const failed = page === 'next' && result && result.state !== 'ready' && result.state !== 'cancelled';
+  return { retryNextPage: Boolean(failed), label: failed ? LEDGER_RETRY_NEXT_TEXT : '' };
+}
+
 // `unpriced` is never `$0`; an absent cost is unpriced, not a free row.
 export function formatRowCost(row = {}) {
   if (row.priced === false) return 'unpriced';
@@ -176,9 +263,10 @@ export function mapExploreResponse({ status = 0, body = null } = {}) {
     });
   }
   if (status === 409) {
-    return errorState({ message: payload.error || 'analytics data changed during pagination; restart from the first page', code: payload.code || 'cursor_stale' });
+    const stale = errorState({ message: payload.error || 'analytics data changed during pagination; restart from the first page', code: payload.code || 'cursor_stale' });
+    return { ...stale, status };
   }
-  if (status >= 400) return errorState({ message: payload.error || `The server returned ${status}.`, code: payload.code || String(status) });
+  if (status >= 400) return { ...errorState({ message: payload.error || `The server returned ${status}.`, code: payload.code || String(status) }), status };
   const rows = Array.isArray(payload.rows) ? payload.rows : [];
   const next = typeof payload.next === 'string' && payload.next ? payload.next : null;
   const truncated = payload.truncated === true;
@@ -192,7 +280,10 @@ export function mapExploreResponse({ status = 0, body = null } = {}) {
 
 export function mapLoadError(error) {
   if (error?.name === 'AbortError') return cancelledState();
-  return errorState({ message: error?.message || 'The ledger request failed.' });
+  return {
+    ...errorState({ message: error?.message || 'The ledger request failed.', code: error?.code || '' }),
+    status: Number(error?.status) || 0
+  };
 }
 
 // Fetch one page. Throws only on an abort; every other answer is classified.
@@ -233,14 +324,14 @@ const COLUMNS = [
   { field: 'cost_usd', label: 'Cost', cost: true }
 ];
 
-// A real table with a caption, scoped headers, checkbox selection, keyboard row
-// navigation and visible focus. Selection and inspection are emitted through
-// callbacks; the table never fetches.
-export function renderLedgerTable(container, { rows = [], selected = new Map(), doc = globalThis.document, onInspect, onSelect } = {}) {
+// The table skeleton shared by ready rows and T1–T3 status rows: caption and
+// scoped headers always exist, and one tbody receives either rows or the
+// single full-span status row.
+export function createLedgerTableShell(container, { doc = globalThis.document, caption = LEDGER_CAPTION } = {}) {
   container.replaceChildren();
   const wrapper = el(doc, 'div', 'ledger-table-wrap');
   const table = el(doc, 'table', 'ledger-table');
-  table.append(el(doc, 'caption', 'ledger-caption', `Windowed events, ${formatNumber(rows.length)} rows shown. Every row is one event; cost is per row.`));
+  table.append(el(doc, 'caption', 'ledger-caption', caption));
 
   const head = doc.createElement('thead');
   const headRow = doc.createElement('tr');
@@ -256,63 +347,117 @@ export function renderLedgerTable(container, { rows = [], selected = new Map(), 
 
   const body = doc.createElement('tbody');
   body.className = 'ledger-body';
-
-  rows.forEach((row, index) => {
-    const key = rowKey(row);
-    const entityKey = entityKeyForRow(row);
-    const state = selected.get(entityKey) === 'exclude' ? 'exclude' : selected.has(entityKey) ? 'include' : '';
-    const tr = el(doc, 'tr', 'ledger-row');
-    tr.dataset.rowKey = key;
-    tr.dataset.entityKey = entityKey;
-    tr.dataset.type = row.type || '';
-    tr.dataset.ts = row.ts || '';
-    if (state) tr.dataset.selected = state;
-    tr.tabIndex = 0;
-    tr.setAttribute('role', 'row');
-
-    const selectCell = el(doc, 'td', 'ledger-select');
-    const box = doc.createElement('input');
-    box.type = 'checkbox';
-    box.className = 'ledger-row-check';
-    box.checked = selected.has(entityKey);
-    box.setAttribute('aria-label', `Select ${row.type || 'event'} at ${row.ts || 'unknown time'}`);
-    box.addEventListener('click', event => {
-      event.stopPropagation();
-      onSelect?.(row, { mode: event.altKey ? 'exclude' : 'include' });
-    });
-    selectCell.append(box);
-    tr.append(selectCell);
-
-    for (const column of COLUMNS) {
-      tr.append(el(doc, 'td', column.cost ? 'numeric ledger-cost' : '', column.cost ? formatRowCost(row) : cellText(row, column.field)));
-    }
-    tr.addEventListener('click', event => {
-      if (event.target.closest('input,button,a')) return;
-      if (event.shiftKey || event.ctrlKey || event.metaKey || event.altKey) {
-        onSelect?.(row, { mode: event.altKey ? 'exclude' : 'include' });
-        return;
-      }
-      onInspect?.(row, tr);
-    });
-    tr.addEventListener('keydown', event => {
-      if (event.key === 'Enter') { event.preventDefault(); onInspect?.(row, tr); return; }
-      if (event.key === ' ') { event.preventDefault(); onSelect?.(row, { mode: event.altKey ? 'exclude' : 'include' }); return; }
-      if (event.key === 'x' || event.key === 'X') { event.preventDefault(); onSelect?.(row, { mode: 'exclude' }); return; }
-      if (event.key === 'ArrowDown' || event.key === 'ArrowUp' || event.key === 'Home' || event.key === 'End') {
-        event.preventDefault();
-        const all = [...body.querySelectorAll('.ledger-row')];
-        const at = all.indexOf(tr);
-        const nextAt = event.key === 'Home' ? 0 : event.key === 'End' ? all.length - 1 : at + (event.key === 'ArrowDown' ? 1 : -1);
-        all[Math.max(0, Math.min(all.length - 1, nextAt))]?.focus();
-      }
-    });
-    body.append(tr);
-  });
-
   table.append(head, body);
   wrapper.append(table);
   container.append(wrapper);
-  return container;
+  return { wrapper, table, head, body, caption };
+}
+
+function attachAction(doc, node, item, handlers) {
+  if (!item) return;
+  if (item.href) {
+    node.href = item.href;
+    return;
+  }
+  const handler = handlers?.[item.id];
+  if (typeof handler === 'function') node.addEventListener('click', handler);
+}
+
+// One full-span 30px status row. Loading carries aria-busy on the tbody; empty
+// and error offer only the recovery actions their contract names.
+export function ledgerStateRow(doc, model, handlers = {}) {
+  const row = el(doc, 'tr', 'ledger-state-row');
+  row.dataset.state = model.state;
+  const cell = el(doc, 'td', 'ledger-state-cell');
+  cell.colSpan = COLUMNS.length + 1;
+  cell.append(el(doc, 'span', 'ledger-state-text', model.text));
+  if (model.detail) cell.append(el(doc, 'span', 'ledger-state-detail', ` ${model.detail}`));
+  if (model.code) cell.append(el(doc, 'code', 'ledger-state-code', ` ${model.code}`));
+  for (const item of model.actions || []) {
+    const button = item.href ? el(doc, 'a', 'ledger-state-action', item.label) : el(doc, 'button', 'ledger-state-action', item.label);
+    if (!item.href) button.type = 'button';
+    button.dataset.action = item.id;
+    attachAction(doc, button, item, handlers);
+    cell.append(doc.createTextNode(' '), button);
+  }
+  row.append(cell);
+  return row;
+}
+
+export function renderLedgerState(container, state, {
+  doc = globalThis.document, caption = LEDGER_CAPTION, name = 'Event ledger', status = 0, code = '', retry = null, actions = null, handlers = {}
+} = {}) {
+  const model = ledgerStateModel(state, { caption: name, status, code, retry, actions });
+  const shell = createLedgerTableShell(container, { doc, caption });
+  shell.body.append(ledgerStateRow(doc, model, handlers));
+  if (model.busy) shell.body.setAttribute('aria-busy', 'true');
+  if (model.state === 'empty') {
+    container.append(el(doc, 'p', 'ledger-state-hint', 'No rows match the committed scope. Loaded rows are never presented as a total.'));
+  }
+  return { ...shell, model };
+}
+
+// A real table with a caption, scoped headers, checkbox selection, keyboard row
+// navigation and visible focus. Selection and inspection are emitted through
+// callbacks; the table never fetches.
+export function ledgerRowElement(doc, row, { selected = new Map(), body = null, onInspect, onSelect } = {}) {
+  const key = rowKey(row);
+  const entityKey = entityKeyForRow(row);
+  const state = selected.get(entityKey) === 'exclude' ? 'exclude' : selected.has(entityKey) ? 'include' : '';
+  const tr = el(doc, 'tr', 'ledger-row');
+  tr.dataset.rowKey = key;
+  tr.dataset.entityKey = entityKey;
+  tr.dataset.type = row.type || '';
+  tr.dataset.ts = row.ts || '';
+  if (state) tr.dataset.selected = state;
+  tr.tabIndex = 0;
+  tr.setAttribute('role', 'row');
+
+  const selectCell = el(doc, 'td', 'ledger-select');
+  const box = doc.createElement('input');
+  box.type = 'checkbox';
+  box.className = 'ledger-row-check';
+  box.checked = selected.has(entityKey);
+  box.setAttribute('aria-label', `Select ${row.type || 'event'} at ${row.ts || 'unknown time'}`);
+  box.addEventListener('click', event => {
+    event.stopPropagation();
+    onSelect?.(row, { mode: event.altKey ? 'exclude' : 'include' });
+  });
+  selectCell.append(box);
+  tr.append(selectCell);
+
+  for (const column of COLUMNS) {
+    tr.append(el(doc, 'td', column.cost ? 'numeric ledger-cost' : '', column.cost ? formatRowCost(row) : cellText(row, column.field)));
+  }
+  tr.addEventListener('click', event => {
+    if (event.target.closest('input,button,a')) return;
+    if (event.shiftKey || event.ctrlKey || event.metaKey || event.altKey) {
+      onSelect?.(row, { mode: event.altKey ? 'exclude' : 'include' });
+      return;
+    }
+    onInspect?.(row, tr);
+  });
+  tr.addEventListener('keydown', event => {
+    if (event.key === 'Enter') { event.preventDefault(); onInspect?.(row, tr); return; }
+    if (event.key === ' ') { event.preventDefault(); onSelect?.(row, { mode: event.altKey ? 'exclude' : 'include' }); return; }
+    if (event.key === 'x' || event.key === 'X') { event.preventDefault(); onSelect?.(row, { mode: 'exclude' }); return; }
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp' || event.key === 'Home' || event.key === 'End') {
+      event.preventDefault();
+      const all = body ? [...body.querySelectorAll('.ledger-row')] : [];
+      const at = all.indexOf(tr);
+      const nextAt = event.key === 'Home' ? 0 : event.key === 'End' ? all.length - 1 : at + (event.key === 'ArrowDown' ? 1 : -1);
+      all[Math.max(0, Math.min(all.length - 1, nextAt))]?.focus();
+    }
+  });
+  return tr;
+}
+
+export function renderLedgerTable(container, { rows = [], selected = new Map(), doc = globalThis.document, onInspect, onSelect } = {}) {
+  const shell = createLedgerTableShell(container, { doc });
+  for (const row of rows) {
+    shell.body.append(ledgerRowElement(doc, row, { selected, body: shell.body, onInspect, onSelect }));
+  }
+  return shell;
 }
 
 // A small, honest footer: declared filters, rows shown and the unpriced lower bound.
