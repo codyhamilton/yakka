@@ -65,8 +65,10 @@ function applyExtra(params, extra) {
   return params;
 }
 
-export function resolveReadContext({ me = null, state = {}, now = Date.now() } = {}) {
-  const tenant = rememberedTenant(me);
+export function resolveReadContext({ me = null, state = {}, now = Date.now(), tenant: authorized, generation = 0 } = {}) {
+  // `tenant` from the shell's authorization decision wins; callers that only
+  // hold /me keep the Plan 29 remembered-tenant behaviour.
+  const tenant = typeof authorized === 'string' ? authorized : rememberedTenant(me);
   const tz = state.tz || Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
   const window = resolveWindow(state, now);
   const scope = { ...state, from: window.from, to: window.to };
@@ -103,6 +105,7 @@ export function resolveReadContext({ me = null, state = {}, now = Date.now() } =
     tz,
     scope,
     window,
+    generation,
     paramsFor
   };
 }

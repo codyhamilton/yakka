@@ -1,9 +1,9 @@
 import { decodeUrlState } from '../contract/url-state.js';
 import { resolveReadContext } from './core/read-context.js';
 import { createScheduler } from './core/request-scheduler.js';
-import { createTransport } from '../contract/transport.js';
+import { createTransport, isCollectorMode, resolvedBase } from '../contract/transport.js';
 import { legacyErrorMessage } from './core/legacy-error.js';
-import { sessionGateDecision, shouldRecoverTenant } from '../contract/session-gate.js';
+import { authorizedTenant, activeTenants, sessionGateDecision, shouldRecoverTenant, tenantOptionLabel } from '../contract/session-gate.js';
 import { renderIdentity } from './identity/flows.js';
 import { createRouter, isAccountRoute, loadExplorer } from './core/router.js';
 import { createFollow } from './core/follow.js';
@@ -12,6 +12,7 @@ import './charts/yk-bars.js';
 import './charts/yk-ranges.js';
 import './charts/yk-matrix.js';
 import { encodePanelSpec, writePanelSpec } from './core/view-spec.js';
+import { createScopeControls, panelOverridePlan, applyPromotions, resetPanelScope, TIME_OVERRIDE_FIELDS } from './core/scope-controls.js';
 import { assembleBoard } from './boards/board.js';
 import { createPanelFrame } from './panels/panel-frame.js';
 import './panels/index.js';
@@ -35,8 +36,15 @@ const scheduler = createScheduler({ onChange: ({ inFlight }) => {
 const transport = createTransport(scheduler);
 let activeBoardTeardown = null;
 let activeRouteTeardown = null;
+let activeScopeDestroy = null;
+let activeFollow = null;
 let boardFrameTeardown = [];
 let renderGeneration = 0;
+let lastMe = null;
+let lastMeStatus = 0;
+let lastRecord = null;
+let sessionFetchedAt = 0;
+const generationMismatch = new Set();
 
 function beginRender() {
   renderGeneration += 1;
@@ -49,18 +57,174 @@ function renderIsCurrent(generation) {
 }
 
 function teardownActiveRoute() {
+  if (activeFollow) { activeFollow.destroy(); activeFollow = null; }
+  if (activeScopeDestroy) { activeScopeDestroy(); activeScopeDestroy = null; }
   if (activeRouteTeardown) { activeRouteTeardown(); activeRouteTeardown = null; }
   if (activeBoardTeardown) { activeBoardTeardown(); activeBoardTeardown = null; }
   for (const destroy of boardFrameTeardown) destroy();
   boardFrameTeardown = [];
 }
+
+const tenantSelect = document.querySelector('#tenant-select');
+const tenantNote = document.querySelector('#tenant-note');
+
+function mountTenantHeader({ me = null, meStatus = 0, auth = null, state = {}, localMode = false } = {}) {
+  tenantSelect.replaceChildren();
+  const tenants = Array.isArray(me?.tenants) ? me.tenants : [];
+  let selected = auth?.tenant || state.tenant || '';
+  if (meStatus !== 200 && tenants.length === 0) {
+    const option = element('option', '', localMode ? 'Local collector' : 'Token-bound tenant');
+    option.value = '';
+    option.selected = true;
+    tenantSelect.append(option);
+    tenantSelect.disabled = true;
+    tenantNote.hidden = false;
+    tenantNote.textContent = localMode ? 'Local collector' : 'Token-bound tenant · Sign in to manage account';
+    return;
+  }
+  if (!tenants.length) {
+    const option = element('option', '', 'Create a tenant to view analytics');
+    option.value = '';
+    option.selected = true;
+    tenantSelect.append(option);
+    tenantSelect.disabled = true;
+    tenantNote.hidden = true;
+    return;
+  }
+  if (auth?.unavailable && selected) {
+    const option = element('option', '', `${selected} · unavailable`);
+    option.value = selected;
+    option.selected = true;
+    tenantSelect.append(option);
+  }
+  for (const tenant of tenants) {
+    const lifecycle = String(tenant.lifecycle_state || tenant.state || 'active');
+    const option = element('option', '', lifecycle === 'active' ? tenantOptionLabel(tenant) : `${tenantOptionLabel(tenant)} · ${lifecycle}`);
+    option.value = tenant.id;
+    option.selected = tenant.id === selected;
+    option.disabled = lifecycle !== 'active';
+    tenantSelect.append(option);
+  }
+  if (!selected) {
+    const first = activeTenants(me)[0];
+    if (first) { selected = first.id; tenantSelect.value = first.id; }
+  }
+  tenantSelect.disabled = false;
+  tenantNote.hidden = true;
+}
+
+function navPath(value) {
+  try { return new URL(value, globalThis.location.href).pathname.replace(/\/+$/, '') || '/'; } catch { return ''; }
+}
+
+function markActiveNav(path, hash = '') {
+  const wanted = path.replace(/\/+$/, '') || '/';
+  for (const link of document.querySelectorAll('.analytics-nav a')) {
+    const target = navPath(link.getAttribute('href') || '');
+    if (target === wanted || (target !== '/' && wanted.startsWith(`${target}/`))) link.setAttribute('aria-current', 'page');
+    else link.removeAttribute('aria-current');
+  }
+  for (const link of document.querySelectorAll('.account-nav a')) {
+    const raw = link.getAttribute('href') || '';
+    const target = navPath(raw);
+    const at = raw.indexOf('#');
+    const wantedHash = at === -1 ? '' : raw.slice(at + 1);
+    if (target === wanted && wantedHash && `#${wantedHash}` === hash) link.setAttribute('aria-current', 'location');
+    else if (target === wanted && !wantedHash) link.setAttribute('aria-current', 'location');
+    else link.removeAttribute('aria-current');
+  }
+}
+
+function committedScopeUrl(state, path = globalThis.location?.pathname || '/') {
+  return stateUrl(state, globalThis.location?.search || '', path);
+}
+
+function clearForTenantChange(state, tenant) {
+  const next = {
+    ...state,
+    tenant,
+    filters: {},
+    exclude: [],
+    cohorts: { ca: '', cb: '', cc: '', cd: '' },
+    pick: '', sel: '', hide: [],
+    panels: {},
+    panelSpecs: {}
+  };
+  for (const [key, spec] of Object.entries(state.panelSpecs || {})) {
+    const scope = { ...(spec.scope || {}) };
+    for (const field of TIME_OVERRIDE_FIELDS) delete scope[field];
+    const cleaned = { ...spec, scope };
+    next.panelSpecs[key] = cleaned;
+    next.panels[key] = encodePanelSpec(cleaned);
+  }
+  return next;
+}
+
+function parentListPath(record, state) {
+  if (record.kind !== 'explorer') return record.path;
+  if (record.explorer === 'sessions' && record.sessionId) return '/sessions';
+  if (record.explorer === 'plans' && record.plan) return '/plans';
+  if (record.explorer === 'artifact') {
+    const params = new URLSearchParams(state.search || record.search || '');
+    if (params.has('repo_id') || params.has('path')) return '/ledger';
+  }
+  return record.path;
+}
+
+async function changeTenant(nextTenant) {
+  if (!nextTenant) return;
+  const record = lastRecord || router.current();
+  const state = decodeUrlState(record.search);
+  if (state.tenant === nextTenant) return;
+  try { localStorage.setItem('yakka-analytics-tenant', nextTenant); } catch {}
+  generationMismatch.delete(nextTenant);
+  scheduler.supersedeAll();
+  teardownActiveRoute();
+  transport.invalidateTenant();
+  const target = parentListPath(record, { search: record.search });
+  const next = clearForTenantChange(state, nextTenant);
+  if (target !== record.path) { next.unknown = {}; next.pick = ''; next.sel = ''; }
+  router.push(stateUrl(next, record.search, target));
+}
+
+tenantSelect.addEventListener('change', () => { changeTenant(tenantSelect.value); });
 let sessionPromise;
 function loadSessionOnce() {
   if (!sessionPromise) sessionPromise = transport.request('me').then(result => {
     const valid = result.response.status !== 200 || (result.body && Array.isArray(result.body.tenants) && result.body.github_id !== undefined);
+    sessionFetchedAt = Date.now();
     return { me: result.body, status: valid ? result.response.status : 0 };
   }).catch(() => ({ me: null, status: 0 }));
   return sessionPromise;
+}
+
+function tenantOf(me, id) {
+  return (Array.isArray(me?.tenants) ? me.tenants : []).find(tenant => tenant.id === id) || null;
+}
+
+// S1 lifecycle revalidation: after sleep/reset or on focus, re-read /me before
+// trusting the selected tenant. A changed generation or a disappeared tenant
+// clears that selection; the shell then requires an explicit choice instead of
+// silently choosing another tenant.
+async function revalidateSession() {
+  const record = lastRecord;
+  if (!record || Date.now() - sessionFetchedAt < 30000) return;
+  const priorMe = lastMe;
+  const priorTenant = decodeUrlState(record.search).tenant || '';
+  sessionPromise = undefined;
+  const result = await loadSessionOnce();
+  const before = tenantOf(priorMe, priorTenant);
+  const after = tenantOf(result.me, priorTenant);
+  const beforeGeneration = String(before?.lifecycle_generation || '');
+  const afterGeneration = String(after?.lifecycle_generation || '');
+  const changed = Boolean(priorTenant && before && (!after || (beforeGeneration && afterGeneration && beforeGeneration !== afterGeneration)));
+  if (changed) {
+    generationMismatch.add(priorTenant);
+    scheduler.supersedeAll();
+    transport.invalidateTenant(priorTenant);
+    try { localStorage.removeItem('yakka-analytics-tenant'); } catch {}
+  }
+  render(router.current());
 }
 
 function panelHref(grain, measures, split, chart) {
@@ -168,7 +332,16 @@ function renderCoverageStrip(container, schema) {
   container.append(strip);
 }
 
-function renderQuestionPaths(container, schema) {
+function scopedHref(href, tenant) {
+  if (!tenant) return href;
+  try {
+    const url = new URL(href, globalThis.location?.href || 'http://localhost');
+    if (!url.searchParams.has('tenant')) url.searchParams.set('tenant', tenant);
+    return `${url.pathname}${url.search}${url.hash}`;
+  } catch { return href; }
+}
+
+function renderQuestionPaths(container, schema, tenant = '') {
   const intro = element('p', 'muted', 'Explore the analytics this server supports. Every path opens a configured board or explorer, or says why the server cannot answer it.');
   container.append(intro);
   const groups = new Map();
@@ -185,7 +358,7 @@ function renderQuestionPaths(container, schema) {
       const availability = pathAvailability(path, schema);
       if (availability.ok) {
         const link = element('a', '', path.label);
-        link.href = path.href;
+        link.href = scopedHref(path.href, tenant);
         item.append(link);
       } else {
         const label = element('span', 'disabled-path', path.label);
@@ -289,19 +462,20 @@ function currentState() {
   return decodeUrlState(globalThis.location?.search || '');
 }
 
-async function renderBoard(container, record, state, schema, context) {
+async function renderBoard(container, record, state, schema, context, scopeControls = null, conflicts = []) {
   const tenant = context?.tenant || '';
-  renderScopeBar(container, state);
-  renderCoverageStrip(container, schema);
   const board = assembleBoard({ presetId: record.presetId, state });
   if (board.kind === 'named') { renderNamedDestination(container, { ...record, label: board.label, title: board.title, phase: board.phase }); return; }
   if (board.kind !== 'board') { renderNotFound(container, record); container.append(element('p', 'notice', board.reason)); return; }
+  container.append(element('h1', '', board.title));
+  if (scopeControls) container.append(scopeControls.element);
+  renderScopeBar(container, state);
+  renderCoverageStrip(container, schema);
   if (context?.window) {
     for (const entry of board.panels) {
       entry.scope = { ...entry.scope, from: context.window.from || '', to: context.window.to || '' };
     }
   }
-  container.append(element('h1', '', board.title));
   const grid = element('div', 'panel-grid');
 
   const runtime = { grain: '', unit: '', population: null, selection: null, unmapped: '', chips: [] };
@@ -357,6 +531,23 @@ async function renderBoard(container, record, state, schema, context) {
   }
 
   for (const entry of board.panels) {
+    if (conflicts.includes(entry.key)) {
+      const blocked = element('section', 'workspace-panel blocked-panel');
+      blocked.dataset.state = 'unsupported';
+      blocked.append(
+        element('h2', '', entry.panelId),
+        element('p', 'disabled-reason', 'Saved panel scope conflicts with the global filters. Reset panel scope.')
+      );
+      const reset = element('button', '', 'Reset panel scope');
+      reset.type = 'button';
+      reset.addEventListener('click', () => {
+        const next = resetPanelScope(currentState(), conflicts);
+        router.pushScope(stateUrl(next, globalThis.location?.search || '', record.path));
+      });
+      blocked.append(reset);
+      grid.append(blocked);
+      continue;
+    }
     if (!entry.panel) {
       const missing = element('section', 'workspace-panel');
       missing.dataset.state = 'unsupported';
@@ -498,7 +689,7 @@ async function renderBoard(container, record, state, schema, context) {
   layout.append(grid, inspector.element);
   container.append(layout, tray.element);
   updateTray();
-  mountFollow(container, schema, tenant);
+  activeFollow = mountFollow(container, schema, tenant);
   mountSavedBoards(container, state);
 }
 
@@ -540,11 +731,13 @@ async function renderExplorer(container, record, context) {
 async function render(record) {
   const generation = beginRender();
   const path = record.path;
-  const state = decodeUrlState(record.search);
+  let state = decodeUrlState(record.search);
+  lastRecord = record;
   teardownActiveRoute();
   root.replaceChildren();
   root.dataset.route = path;
   setShellState('loading', 'false');
+  markActiveNav(path, globalThis.location?.hash || '');
   const exempt = isAccountRoute(path);
   const sessionExempt = ['/login', '/oauth/callback', '/settings'].includes(path);
   let me = null, meStatus = 0, hint = '';
@@ -556,9 +749,15 @@ async function render(record) {
   if (!renderIsCurrent(generation)) return;
   const decision = sessionGateDecision({ path, search: record.search, meStatus });
   if (!decision.stay) { location.replace(decision.redirect); return; }
-  if (!exempt && meStatus !== 200) hint = decision.hint || '';
+  const noServer = meStatus !== 200;
+  const localMode = noServer && isCollectorMode() && !resolvedBase();
+  let bearer = '';
+  try { bearer = (localStorage.getItem('yakka-analytics-key') || '').trim(); } catch {}
+  const tokenBound = noServer && !isCollectorMode() && Boolean(bearer);
+  if (!exempt && noServer && !localMode && !tokenBound) hint = decision.hint || '';
   if (hint) {
     root.dataset.route = path;
+    mountTenantHeader({ me, meStatus, state, localMode });
     root.append(element('h1', '', 'Connection'), element('p', '', hint));
     const link = element('a', '', 'Open Settings'); link.href = '/settings'; root.append(link);
     setShellState('ready', 'true');
@@ -566,6 +765,7 @@ async function render(record) {
   }
 
   if (exempt) {
+    mountTenantHeader({ me, meStatus, state, localMode });
     root.append(element('h1', '', record.title));
     await renderIdentity(root, path, transport, me, () => renderIsCurrent(generation));
     if (!renderIsCurrent(generation)) return;
@@ -573,7 +773,52 @@ async function render(record) {
     return;
   }
 
-  const context = resolveReadContext({ me, state, now: Date.now() });
+  lastMe = me;
+  lastMeStatus = meStatus;
+  let auth = authorizedTenant({ me, urlTenant: state.tenant });
+  if (state.tenant && generationMismatch.has(state.tenant)) auth = { tenant: '', unavailable: true, source: 'lifecycle' };
+  mountTenantHeader({ me, meStatus, auth, state, localMode: localMode || tokenBound });
+  if (auth.unavailable) {
+    root.append(
+      element('h1', '', record.title || 'Tenant unavailable'),
+      element('p', 'tenant-unavailable', 'This tenant is unavailable to your account.')
+    );
+    const choose = element('button', '', 'Choose a tenant');
+    choose.type = 'button';
+    choose.addEventListener('click', () => { if (tenantSelect.disabled) globalThis.location.assign('/profile'); else tenantSelect.focus(); });
+    root.append(choose);
+    setShellState('ready', 'true');
+    return;
+  }
+  const tenants = Array.isArray(me?.tenants) ? me.tenants : [];
+  if (meStatus === 200 && !tenants.length) {
+    root.append(element('h1', '', record.title || 'Analytics'), element('p', '', 'Create a tenant to view analytics'));
+    const profile = element('a', '', 'Open Profile'); profile.href = '/profile';
+    root.append(profile);
+    setShellState('ready', 'true');
+    return;
+  }
+
+  // A missing initial tenant is canonicalized with replaceState; a later
+  // committed edit pushes exactly once through the router.
+  if (!state.tenant && auth.tenant) {
+    const next = { ...state, tenant: auth.tenant };
+    globalThis.history.replaceState(null, '', stateUrl(next, record.search, path));
+    state = decodeUrlState(globalThis.location?.search || '');
+  }
+  if (auth.tenant) { try { localStorage.setItem('yakka-analytics-tenant', auth.tenant); } catch {} }
+
+  // Unambiguous saved panel scope becomes visible global scope once. A global
+  // field always wins; disagreeing overrides block their panels.
+  const promotions = panelOverridePlan(state);
+  if (Object.keys(promotions.promotions).length) {
+    const promoted = applyPromotions(state, promotions.promotions);
+    globalThis.history.replaceState(null, '', stateUrl(promoted, globalThis.location?.search || '', path));
+    state = decodeUrlState(globalThis.location?.search || '');
+  }
+  const conflicts = panelOverridePlan(state).conflicts;
+
+  const context = resolveReadContext({ me, state, now: Date.now(), tenant: auth.tenant, generation });
   const tenant = context.tenant;
   let schema = null;
   try {
@@ -582,8 +827,6 @@ async function render(record) {
     if (result.response.ok && !result.error) schema = result.body;
     else if (shouldRecoverTenant({ status: result.response.status, error: result.body?.error, me, path }) && path !== '/profile') { location.assign('/profile'); return; }
     else {
-      // The failure is named and a fresh read is offered; navigation and the
-      // current route stay rendered, and each panel settles on its own.
       const node = document.querySelector('#schema-status');
       const reason = result.error?.message || (result.response.status === 401
         ? 'Connection was rejected. Check the API base and bearer in Settings.'
@@ -608,18 +851,42 @@ async function render(record) {
   }
   if (!renderIsCurrent(generation)) return;
 
+  const features = schema?.features || {};
+  const scopeControls = createScopeControls({
+    doc: document,
+    state,
+    schema,
+    transport,
+    readContext: context,
+    facetsFetch: Boolean(features.event_counts || features.record_filters || features.facets),
+    onCommit: next => {
+      if (!renderIsCurrent(generation)) return;
+      router.pushScope(stateUrl(next, globalThis.location?.search || '', path));
+    },
+    onRefresh: () => router.resolve()
+  });
+  activeScopeDestroy = () => scopeControls.destroy();
+  scopeControls.update(state, { schema, context });
+
   if (record.kind === 'start') {
-    root.append(element('h1', '', 'Start'));
-    renderQuestionPaths(root, schema);
+    root.append(element('h1', '', 'Start'), scopeControls.element);
+    renderQuestionPaths(root, schema, tenant);
     renderCoverageStrip(root, schema);
+    mountSavedBoards(root, state);
   } else if (record.kind === 'board') {
-    await renderBoard(root, record, state, schema, context);
+    await renderBoard(root, record, state, schema, context, scopeControls, conflicts);
   } else if (record.kind === 'named') {
+    root.append(element('h1', '', record.title), scopeControls.element);
     renderScopeBar(root, state);
     renderCoverageStrip(root, schema);
     renderNamedDestination(root, record);
   } else if (record.kind === 'explorer') {
     await renderExplorer(root, record, context);
+    if (!renderIsCurrent(generation)) return;
+    const heading = root.querySelector('h1');
+    if (heading?.after) heading.after(scopeControls.element);
+    else root.prepend(scopeControls.element);
+    scopeControls.update(state, { schema, context });
   } else {
     renderNotFound(root, record);
   }
@@ -635,5 +902,8 @@ document.querySelector('#theme-toggle').addEventListener('click', () => {
   document.documentElement.dataset.themePreference = next;
   try { localStorage.setItem('yakka-analytics-theme', next); } catch {}
 });
+
+globalThis.addEventListener('focus', () => { revalidateSession().catch(() => {}); });
+globalThis.addEventListener('pageshow', event => { if (event.persisted) revalidateSession().catch(() => {}); });
 
 router.resolve();

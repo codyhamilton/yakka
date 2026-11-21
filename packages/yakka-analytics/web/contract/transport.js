@@ -77,6 +77,13 @@ export function createTransport(scheduler, { fetchImpl = fetch } = {}) {
     invalidateSchema(tenant = '') {
       schemas.delete(tenant);
     },
+    // A tenant change or lifecycle revalidation invalidates every cached read
+    // that was served for that tenant. Schema is the only cross-request cache
+    // here; panels keep their own route-scoped state.
+    invalidateTenant(tenant = '') {
+      schemas.delete(tenant);
+      if (!tenant) schemas.clear();
+    },
     // Adapt at the one boundary and cache only a successful adapted schema. A
     // non-OK response, network failure or adapter exception reaches the caller
     // but is dropped from the cache, so a later call performs a fresh read.

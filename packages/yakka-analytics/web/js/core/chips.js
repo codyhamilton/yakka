@@ -207,3 +207,45 @@ export function createChips({ doc = globalThis.document, router, path = '/' } = 
 
   return { element, update };
 }
+
+// C11 Advanced scope rows. The window and tenant are never rows here: they are
+// committed controls, not removable advanced predicates.
+export function advancedScopeRows(state = {}) {
+  const rows = [];
+  for (const [key, values] of Object.entries(state.filters || {})) {
+    for (const value of values || []) rows.push({ kind: 'filter', key, value, name: key, label: `${key}: ${value}` });
+  }
+  for (const value of state.exclude || []) {
+    const { lens } = splitExclude(value);
+    rows.push({ kind: 'exclude', key: lens, value, name: 'exclude', label: `exclude ${value}` });
+  }
+  for (const [key, text] of Object.entries(state.cohorts || {})) {
+    if (!text) continue;
+    const slot = key.slice(1).toUpperCase();
+    rows.push({ kind: 'cohort', key, value: text, name: `cohort ${slot}`, label: cohortLabel(slot, text) });
+  }
+  if (state.cmp && state.cmp !== 'off') rows.push({ kind: 'cmp', key: 'cmp', value: state.cmp, name: 'compare', label: `compare ${state.cmp}` });
+  if (state.pick) rows.push({ kind: 'pick', key: 'pick', value: state.pick, name: 'selection', label: 'selection' });
+  return rows;
+}
+
+// Remove exactly one repeated include/exclude/ca..cd key. The window, timezone
+// and all other advanced URL state survive.
+export function removeAdvancedRow(state, row = {}) {
+  if (row.kind === 'filter') return removeFilterChip(state, row.key, row.value);
+  if (row.kind === 'exclude') return removeExcludeChip(state, row.value);
+  if (row.kind === 'cohort') return removeCohortChip(state, row.key);
+  const next = copyState(state);
+  if (row.kind === 'cmp') next.cmp = 'off';
+  if (row.kind === 'pick') next.pick = '';
+  return next;
+}
+
+// C7 Reset filters: canonical defaults plus tenant, timezone and panel specs.
+export function resetScopeState(state = {}) {
+  return {
+    ...copyState(state),
+    win: '30d', from: '', to: '', filters: {}, exclude: [],
+    cohorts: { ca: '', cb: '', cc: '', cd: '' }, pick: '', sel: '', hide: [], cmp: 'off'
+  };
+}

@@ -30,3 +30,37 @@ export function formTenant(me) {
   if (tenants.some(t => t.id === remembered)) return remembered;
   return tenants.length === 1 ? tenants[0].id : '';
 }
+
+function lifecycle(tenant) {
+  return String(tenant?.lifecycle_state || tenant?.state || 'active');
+}
+
+export function activeTenants(me) {
+  const tenants = Array.isArray(me?.tenants) ? me.tenants : [];
+  return tenants.filter(tenant => tenant && tenant.id && lifecycle(tenant) === 'active');
+}
+
+// S1 collector precedence: a URL tenant found in /me.tenants wins, then a valid
+// remembered tenant, then the first active owned tenant. A supplied tenant that
+// is foreign, deleted or pending stops reads instead of falling back.
+export function authorizedTenant({ me, urlTenant = '' } = {}) {
+  const tenants = Array.isArray(me?.tenants) ? me.tenants : [];
+  if (!tenants.length) return { tenant: '', unavailable: false, source: 'none' };
+  let remembered = ''; try { remembered = (localStorage.getItem('yakka-analytics-tenant') || '').trim(); } catch {}
+  if (urlTenant) {
+    const found = tenants.find(tenant => tenant.id === urlTenant);
+    if (found && lifecycle(found) === 'active') return { tenant: found.id, unavailable: false, source: 'url' };
+    return { tenant: '', unavailable: true, source: 'url' };
+  }
+  const validRemembered = tenants.find(tenant => tenant.id === remembered && lifecycle(tenant) === 'active');
+  if (validRemembered) return { tenant: validRemembered.id, unavailable: false, source: 'remembered' };
+  const first = tenants.find(tenant => lifecycle(tenant) === 'active');
+  if (first) return { tenant: first.id, unavailable: false, source: 'first' };
+  return { tenant: '', unavailable: false, source: 'none' };
+}
+
+export function tenantOptionLabel(tenant) {
+  const name = String(tenant?.name || tenant?.id || '');
+  const id = String(tenant?.id || '');
+  return id ? `${name} · ${id}` : name;
+}
