@@ -8,7 +8,7 @@ import '../charts/yk-bars.js';
 import { formatCount, formatMoney, formatNumber } from '../charts/formatters.js';
 import { cancelledState, emptyState, errorState } from '../core/panel-state.js';
 import {
-  emptyCausesFor, ensurePulseStyles, previousWindow, scopeParams, table, whenPanelBody, windowParams
+  emptyCausesFor, ensurePulseStyles, previousParams, previousWindow, scopeParams, table, whenPanelBody
 } from './pulse-strips.js';
 
 export const MOVER_DEFAULT_MEASURE = 'cost_usd';
@@ -209,16 +209,17 @@ async function query(transport, measure, lens, bucket, params, { tenant, signal,
 }
 
 async function loadLens(transport, lens, measure, scope, prev, { tenant, signal, stateKey, allowUnpriced = false }) {
-  const currentBody = await query(transport, measure, lens, 'none', scopeParams(scope), { tenant, signal, stateKey: `${stateKey}-cur` });
-  const seriesBody = await query(transport, measure, lens, 'day', scopeParams(scope), { tenant, signal, stateKey: `${stateKey}-series` });
+  const scopeQuery = scopeParams(scope);
+  const currentBody = await query(transport, measure, lens, 'none', scopeQuery, { tenant, signal, stateKey: `${stateKey}-cur` });
+  const seriesBody = await query(transport, measure, lens, 'day', scopeQuery, { tenant, signal, stateKey: `${stateKey}-series` });
   let previousBody = null;
   if (prev) {
-    try { previousBody = await query(transport, measure, lens, 'none', windowParams(prev), { tenant, signal, stateKey: `${stateKey}-prev` }); } catch { previousBody = null; }
+    try { previousBody = await query(transport, measure, lens, 'none', previousParams(scopeQuery, prev), { tenant, signal, stateKey: `${stateKey}-prev` }); } catch { previousBody = null; }
   }
   let unpriced = null;
   if (allowUnpriced) {
     try {
-      const body = await query(transport, 'unpriced_calls', lens, 'none', scopeParams(scope), { tenant, signal, stateKey: `${stateKey}-unpriced` });
+      const body = await query(transport, 'unpriced_calls', lens, 'none', scopeQuery, { tenant, signal, stateKey: `${stateKey}-unpriced` });
       unpriced = groupTotals(body);
     } catch { unpriced = null; }
   }

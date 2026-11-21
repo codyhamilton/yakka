@@ -11,17 +11,42 @@ import { stateUrl } from './chips.js';
 
 const WINDOW_MS = { h: 3600e3, d: 86400e3, w: 7 * 86400e3, m: 30 * 86400e3, y: 365 * 86400e3 };
 
+// The server requires a non-empty IANA scope tz on every cohort, so an unset
+// state tz falls back to the browser zone and finally UTC rather than `null`.
+export function scopeTimezone(state = {}) {
+  return state.tz || Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+}
+
 export function absoluteScope(state = {}, now = Date.now()) {
-  if (state.from || state.to) return { from: state.from || null, to: state.to || null, tz: state.tz || null };
+  const tz = scopeTimezone(state);
+  if (state.from || state.to) return { from: state.from || null, to: state.to || null, tz };
   const to = new Date(now).toISOString();
-  if (!state.win || state.win === 'all') return { from: null, to, tz: state.tz || null };
+  if (!state.win || state.win === 'all') return { from: null, to, tz };
   const match = /^(\d+)([hdwmy])$/.exec(state.win);
-  if (!match) return { from: null, to, tz: state.tz || null };
+  if (!match) return { from: null, to, tz };
   const from = new Date(now - Number(match[1]) * WINDOW_MS[match[2]]).toISOString();
-  return { from, to, tz: state.tz || null };
+  return { from, to, tz };
 }
 
 const SHARED_FILTERS = ['repo_id', 'harness', 'kind', 'plan', 'norm_event', 'event', 'tool', 'model', 'source', 'conversation_id'];
+
+// The cohort scope lenses each source grain accepts, mirroring the server's
+// published table. Ledger panels build cohorts from a static schema, so the
+// fallback still refuses an event-only filter on a session cohort instead of
+// letting the server reject the whole request as unsupported_join.
+const GRAIN_SCOPE_FILTERS = {
+  session: ['harness', 'session_model', 'session_repo', 'id'],
+  artifact: ['kind', 'plan', 'repo_id', 'harness', 'session_model', 'source', 'screen_verdict', 'scorer', 'band:<check>', 'id'],
+  content: ['harness', 'session_model', 'repo_id', 'plan', 'scorer', 'screen_verdict', 'band', 'id'],
+  execution: ['shape', 'plan', 'repo_id', 'harness', 'session_model', 'id'],
+  plan: ['repo_id', 'harness', 'session_model', 'id'],
+  time: ['repo_id', 'harness', 'kind', 'plan', 'norm_event', 'event', 'tool', 'model', 'source', 'conversation_id', 'id']
+};
+
+function grainScopeFilters(schema, grain) {
+  const published = schema?.grains?.[grain]?.filters;
+  return Array.isArray(published) ? published : (GRAIN_SCOPE_FILTERS[grain] || null);
+}
 
 // Known lens names for this grain, longest first, so a multi-colon lens such as
 // `band:quality` is resolved before the legacy first-colon cut. Never parse a
@@ -32,6 +57,7 @@ export function knownLenses({ schema = null, grain = '' } = {}) {
   for (const key of ['filters', 'lenses']) {
     for (const name of fromGrain?.[key] || []) if (typeof name === 'string' && name) names.add(name);
   }
+  for (const name of grainScopeFilters(schema, grain) || []) names.add(name);
   return [...names].sort((a, b) => b.length - a.length);
 }
 
@@ -45,10 +71,28 @@ export function splitExclude(value, { schema = null, grain = '' } = {}) {
   return at === -1 ? { lens: 'exclude', value: text } : { lens: text.slice(0, at), value: text.slice(at + 1) };
 }
 
+// A cohort scope may carry only lenses the source grain defines. The server
+// refuses a scope element that belongs to another grain (unsupported_join,
+// not_defined_for_grain), so an event-only tool/stage filter must not be
+// copied into a session cohort. Only an unknown grain keeps the permissive
+// behaviour.
+function filterDefinedForGrain(filters, key) {
+  return filters.some(name => {
+    if (name === key) return true;
+    for (const suffix of [':<check>', ':<kind>']) {
+      if (name.endsWith(suffix)) {
+        const prefix = name.slice(0, -suffix.length);
+        return key === prefix || key.startsWith(`${prefix}:`);
+      }
+    }
+    return false;
+  });
+}
+
 function applies(key, { schema, grain }) {
-  const filters = schema?.grains?.[grain]?.filters;
+  const filters = grainScopeFilters(schema, grain);
   if (!Array.isArray(filters)) return true;
-  return filters.includes(key) || ['repo_id', 'harness', 'kind', 'plan', 'norm_event', 'event', 'tool', 'model', 'source', 'conversation_id'].includes(key);
+  return filterDefinedForGrain(filters, key);
 }
 
 export function scopeElements(state = {}, { schema = null, grain = '' } = {}) {

@@ -80,6 +80,9 @@ export function createPanelFrame({ panel, spec = {}, scope = {}, transport, sche
     if (options.inFlight !== undefined) element.dataset.inFlight = String(options.inFlight);
     badges.update(badgeModel(badgeInput(options)));
     status.replaceChildren();
+    // Opt-in: a panel that owns its exact T1–T4 rows in the table body passes
+    // renderStatus:false so the generic frame vocabulary does not double it.
+    if (options.renderStatus === false) return;
     if (next === 'loading') {
       const count = Number(options.inFlight) || 0;
       status.textContent = `Loading${count ? ` (${count} in flight)` : ''}…`;

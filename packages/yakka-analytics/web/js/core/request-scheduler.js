@@ -45,5 +45,12 @@ export function createScheduler({ fetchImpl = fetch, maxInFlight = 4, onChange =
   function supersede(stateKey) {
     for (const item of active.values()) if (item.stateKey === stateKey) item.controller.abort();
   }
-  return { request, supersede, get inFlight() { return inFlight.size; }, get queued() { return queue.length; } };
+  // Cancel every in-flight and queued request. A tenant change calls this
+  // before it starts a new authorized generation, so no prior-tenant response
+  // can reach the new render.
+  function supersedeAll() {
+    for (const item of active.values()) item.controller.abort();
+    for (const item of queue) if (!item.controller.signal.aborted) item.controller.abort();
+  }
+  return { request, supersede, supersedeAll, get inFlight() { return inFlight.size; }, get queued() { return queue.length; } };
 }

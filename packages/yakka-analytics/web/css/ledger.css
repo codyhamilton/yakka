@@ -118,7 +118,7 @@
 
 .ledger-load-more {
   margin: 0.9rem 0.25rem;
-  min-height: 26px;
+  min-height: 28px;
   min-width: 8rem;
   padding: 4px 10px;
   cursor: pointer;
@@ -136,6 +136,68 @@
 
 .ledger-footer {
   margin-top: 0.5rem;
+}
+
+.ledger-population,
+.ledger-state-hint {
+  margin: 0.5rem 0.25rem;
+  font-size: 0.92rem;
+}
+
+.ledger-population {
+  font-weight: 600;
+}
+
+/* T1–T3: one full-span 30px state row under the preserved caption/header. */
+.ledger-state-row td {
+  height: 30px;
+  max-height: 30px;
+  text-align: left;
+}
+
+.ledger-state-cell {
+  white-space: normal;
+}
+
+.ledger-state-text {
+  font-weight: 600;
+}
+
+.ledger-state-detail,
+.ledger-state-code {
+  margin-left: 0.25rem;
+}
+
+.ledger-state-code {
+  font-family: ui-monospace, monospace;
+  font-size: 11px;
+}
+
+.ledger-state-action {
+  font: inherit;
+  min-height: 28px;
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  background: var(--bg);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.ledger-state-action:focus-visible,
+.ledger-retry-next:focus-visible {
+  outline: 2px solid var(--yk-focus, var(--accent));
+  outline-offset: 2px;
+}
+
+.ledger-table tbody[aria-busy="true"] .ledger-state-row {
+  border-left: 3px solid var(--accent);
+}
+
+.ledger-next-error {
+  margin: 0.5rem 0.25rem;
+  color: var(--danger);
+  font-weight: 600;
 }
 
 @media (pointer: coarse) {

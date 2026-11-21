@@ -1016,6 +1016,17 @@ None that block this design. Unknown live authenticated counts and unstamped API
 - Surfaces: shared shell/context/control/count API/transport/route/theme and fixture surfaces named above. Preserve API-origin lifecycle boundary.
 - Approach: **Known** — existing context, typed store queries, URL codec, scheduler and transport extended; no new attribution/IAM architecture.
 - Depends on: nothing. Refine required: API/store and shell are distinct ownership units.
+- Units:
+
+| Unit | Brief | Depends on | May run alongside |
+|---|---|---|---|
+| U1 — Go event-counts API and shared retained-record predicate | [phase1-01-go-event-counts](briefs/phase1-01-go-event-counts.md) | — | U2 |
+| U2 — Shared shell, reserved tenant scope and count strip | [phase1-02-shell-scope](briefs/phase1-02-shell-scope.md) | — | U1 |
+| U3 — Pulse/Ledger honest denominators, observations and T1–T4 states | [phase1-03-pulse-ledger](briefs/phase1-03-pulse-ledger.md) | U2 | — |
+| U4 — Real-Go two-tenant fixture and Chromium Phase 1 proof | [phase1-04-proof-harness](briefs/phase1-04-proof-harness.md) | U1, U2, U3 | — |
+
+- Execution waves: Wave 1 — U1 and U2 in parallel. Wave 2 — U3. Wave 3 — U4.
+- Carried placement: none.
 
 ### Phase 2 — Every board and explorer answers its displayed question in plain language
 

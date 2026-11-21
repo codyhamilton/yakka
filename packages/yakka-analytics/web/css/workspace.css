@@ -22,6 +22,8 @@
 .workspace-panel-header{display:flex;flex-wrap:wrap;align-items:center;gap:4px;justify-content:space-between}
 .workspace-panel-title{font-size:13px;margin:0}
 .workspace-panel-status,.workspace-panel-population,.workspace-panel-basis{margin:0;font-size:12px;color:var(--muted)}
+.activity-population{margin:.25rem 0;font-size:12px;font-weight:600}
+.activity-caption{margin:.15rem 0}
 .workspace-panel-meta{display:flex;flex-wrap:wrap;align-items:baseline;gap:.15rem .6rem;min-width:0}
 .workspace-panel-body{flex:1;min-width:0;min-height:2rem;overflow-wrap:anywhere}
 .workspace-panel-body > *,.workspace-panel-body > * > *{min-width:0}
@@ -101,3 +103,23 @@
 @media(pointer:coarse){
   button,.workspace-chip-remove,.selection-tray-action,.workspace-inspector-action,.workspace-inspector-close,.capability-summary{min-height:44px}
 }
+
+/* V2/T base: every data/header row is a single 30px line with left alignment,
+   ellipsis and tabular numerals. Tables scroll inside their panel, never widen
+   the document. */
+.workspace-panel { padding: 8px; gap: 8px; }
+th, td {
+  height: 30px;
+  max-height: 30px;
+  padding: 0 7px;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-variant-numeric: tabular-nums;
+}
+th { color: var(--muted); font-weight: 500; background: var(--surface-alt, var(--yk-surface-alt, var(--surface))); }
+.workspace-panel-body,
+.workspace-panel table { min-width: 0; }
+.workspace-panel table { border-collapse: collapse; }
+.workspace-panel td, .workspace-panel th { min-width: 0; }
