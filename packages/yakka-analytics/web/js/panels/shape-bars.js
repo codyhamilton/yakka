@@ -261,6 +261,7 @@ export async function load(context = {}) {
       node.spec = {
         chart: 'bars',
         type: 'stacked',
+        orientation: 'horizontal',
         title: 'Process shape per plan (completion, not success)',
         timeBasis: 'the scope window; last observation age is lifetime',
         units: 'executions',

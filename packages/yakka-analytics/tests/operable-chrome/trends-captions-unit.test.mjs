@@ -19,9 +19,11 @@ import {
   trendTableColumns, load as loadColumns
 } from '../../web/js/panels/trend-columns.js';
 import {
-  TREND_LINES_CAPTION, TREND_COMPLINES_CAPTION, load as loadLines
+  TREND_LINES_CAPTION, TREND_COMPLINES_CAPTION, compareRows, load as loadLines
 } from '../../web/js/panels/trend-lines.js';
-import { TREND_MULTIPLES_CAPTION, multiplesTableColumns, load as loadMultiples } from '../../web/js/panels/trend-multiples.js';
+import {
+  TREND_MULTIPLES_CAPTION, multiplesTableColumns, multiplesYRange, load as loadMultiples
+} from '../../web/js/panels/trend-multiples.js';
 import { RHYTHM_CAPTION, RHYTHM_TABLE_COLUMNS, load as loadRhythm } from '../../web/js/panels/rhythm.js';
 import {
   RANK_CAPTION, TOOLS_RANK_CAPTION, PLAN_RANK_CAPTION, SLOPE_CAPTION,
@@ -251,6 +253,40 @@ test('slope refuses without cmp=period and a finite window', async () => {
   });
   assert.equal(allResult.reason, 'Choose a finite period to compare periods.');
   assert.equal(all.calls.length, 0);
+});
+
+test('small multiples share one Y domain across every group and both periods', () => {
+  const charts = [
+    {
+      groupKey: 'alpha',
+      series: [{ key: 'current' }, { key: 'previous' }],
+      rows: [
+        { values: { current: 3, previous: 5 } },
+        { values: { current: 1, previous: null } }
+      ]
+    },
+    {
+      groupKey: 'beta',
+      series: [{ key: 'current' }, { key: 'previous' }],
+      rows: [{ values: { current: 9, previous: 2 } }]
+    }
+  ];
+  assert.deepEqual(multiplesYRange(charts), { min: 0, max: 9 });
+  assert.equal(multiplesYRange([{ series: [{ key: 'x' }], rows: [{ values: { x: null } }] }]), null);
+});
+
+test('the previous compare line is dashed for G-complines', () => {
+  const measured = compareRows({
+    currentBody: { rows: [{ t: '2026-09-10T00:00:00Z', k: [], v: 2 }] },
+    previousBody: { rows: [{ t: '2026-08-10T00:00:00Z', k: [], v: 1 }] },
+    measure: 'cost_usd',
+    split: '',
+    schema,
+    scope: { win: '30d' }
+  });
+  assert.deepEqual(measured.series.map(series => [series.key, series.dash ?? 'solid']), [
+    ['current', 'solid'], ['previous', 'dashed']
+  ]);
 });
 
 test('plan rank keeps its non-additive and lower-bound language', () => {

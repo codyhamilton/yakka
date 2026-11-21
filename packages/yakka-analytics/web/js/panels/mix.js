@@ -166,6 +166,7 @@ export async function load(context = {}) {
       node.spec = {
         chart: 'bars',
         type: mode,
+        orientation: 'horizontal',
         title: `${meta.label} by ${first} × ${second}`,
         units: meta.unit,
         series: model.series.map(series => ({ ...series, unit: meta.unit, kind: meta.kind }))

@@ -70,7 +70,7 @@ export function compareRows({ currentBody, previousBody, measure, split, schema,
   const previous = queryRows(previousBody, measure, split, meta);
   const series = [
     { key: 'current', label: currentLabel(scope), unit: meta.unit, kind: meta.kind },
-    { key: 'previous', label: previousLabel(scope), unit: meta.unit, kind: meta.kind }
+    { key: 'previous', label: previousLabel(scope), unit: meta.unit, kind: meta.kind, dash: 'dashed' }
   ];
   const byX = new Map();
   for (const row of current.rows) {

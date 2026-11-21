@@ -27,6 +27,14 @@ export function normaliseRangesType(type) {
   return RANGE_TYPES.includes(type) ? type : 'box';
 }
 
+// G-compranges keeps the current row solid and draws the previous row dashed
+// and outlined, without moving any of its geometry.
+export function rangePeriodStyle(period) {
+  const text = String(period || 'current').toLowerCase();
+  const previous = text !== '' && text !== 'current' && !text.startsWith('cohort a');
+  return { previous, dash: previous ? '6 4' : null, fillOpacity: previous ? 0 : 0.35 };
+}
+
 export function percentile(values, fraction) {
   const sorted = (values || []).map(numeric).filter(value => value !== null).sort((a, b) => a - b);
   if (!sorted.length) return null;
@@ -300,18 +308,23 @@ export class YkRanges extends SvgChartElement {
       if (entityLegend && hidden.has(row.key)) return;
       const style = styleFor(row.key);
       const centre = xToPx(index);
+      const periodStyle = rangePeriodStyle(row.period);
+      const dash = periodStyle.dash ? { 'stroke-dasharray': periodStyle.dash } : {};
       const { min, q1, median, q3, max, p95 } = row.summary;
-      const element = svgNode(doc, 'g', { class: 'yk-mark', 'data-shape': style.shape, 'data-pattern': style.pattern || '' });
+      const element = svgNode(doc, 'g', {
+        class: 'yk-mark', 'data-shape': style.shape, 'data-pattern': style.pattern || '',
+        'data-period': row.period || 'current', ...(periodStyle.previous ? { 'data-previous': 'true' } : {})
+      });
 
       if (!hidden.has('min') && !hidden.has('max') && min !== null && max !== null) {
         element.append(svgNode(doc, 'line', {
-          class: 'yk-range-whisker', x1: centre, y1: yToPx(min), x2: centre, y2: yToPx(max), stroke: style.colour, 'stroke-width': 1.5
+          class: 'yk-range-whisker', x1: centre, y1: yToPx(min), x2: centre, y2: yToPx(max), stroke: style.colour, 'stroke-width': 1.5, ...dash
         }));
         element.append(svgNode(doc, 'line', {
-          class: 'yk-range-cap', x1: centre - capWidth, y1: yToPx(min), x2: centre + capWidth, y2: yToPx(min), stroke: style.colour, 'stroke-width': 1.5
+          class: 'yk-range-cap', x1: centre - capWidth, y1: yToPx(min), x2: centre + capWidth, y2: yToPx(min), stroke: style.colour, 'stroke-width': 1.5, ...dash
         }));
         element.append(svgNode(doc, 'line', {
-          class: 'yk-range-cap', x1: centre - capWidth, y1: yToPx(max), x2: centre + capWidth, y2: yToPx(max), stroke: style.colour, 'stroke-width': 1.5
+          class: 'yk-range-cap', x1: centre - capWidth, y1: yToPx(max), x2: centre + capWidth, y2: yToPx(max), stroke: style.colour, 'stroke-width': 1.5, ...dash
         }));
       }
 
@@ -320,10 +333,11 @@ export class YkRanges extends SvgChartElement {
         const height = Math.max(1, yToPx(q1) - top);
         element.append(svgNode(doc, 'rect', {
           class: 'yk-mark-shape yk-range-box', x: centre - boxWidth / 2, y: top, width: boxWidth, height,
-          fill: style.colour, 'fill-opacity': '0.35', stroke: style.colour, 'stroke-width': 1.5
+          fill: periodStyle.previous ? 'none' : style.colour, 'fill-opacity': String(periodStyle.fillOpacity),
+          stroke: style.colour, 'stroke-width': 1.5, ...dash
         }));
         const pattern = patternId(style.pattern);
-        if (pattern) {
+        if (pattern && !periodStyle.previous) {
           element.append(svgNode(doc, 'rect', {
             x: centre - boxWidth / 2, y: top, width: boxWidth, height, fill: `url(#${pattern})`, 'pointer-events': 'none'
           }));
@@ -333,7 +347,7 @@ export class YkRanges extends SvgChartElement {
       if (!hidden.has('median') && median !== null) {
         element.append(svgNode(doc, 'line', {
           class: 'yk-range-median', x1: centre - boxWidth / 2, y1: yToPx(median), x2: centre + boxWidth / 2, y2: yToPx(median),
-          stroke: style.colour, 'stroke-width': 3
+          stroke: style.colour, 'stroke-width': 3, ...dash
         }));
       }
 

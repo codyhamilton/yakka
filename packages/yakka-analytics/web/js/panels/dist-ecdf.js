@@ -261,7 +261,7 @@ export async function load(context = {}) {
         group: '', highest: Math.max(...current.edges.filter(Number.isFinite), ...before.edges.filter(Number.isFinite)),
         series: [
           { key: 'current', label: 'Current period', unit: meta.unit, kind: 'percent' },
-          { key: 'previous', label: 'Previous period', unit: meta.unit, kind: 'percent' }
+          { key: 'previous', label: 'Previous period', unit: meta.unit, kind: 'percent', dash: 'dashed' }
         ],
         data: [
           ...current.samples.map(sample => ({ x: sample.x, group: 'current' })),

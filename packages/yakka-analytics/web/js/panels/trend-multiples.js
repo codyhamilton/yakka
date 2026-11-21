@@ -55,6 +55,21 @@ function ignoredFrom(body) {
   return Array.isArray(body?.ignored_filters) ? body.ignored_filters.map(String) : [];
 }
 
+// One Y domain for every small multiple. It spans every group and, in a period
+// compare, both the current and previous series so heights compare across charts.
+export function multiplesYRange(charts = []) {
+  let max = 0;
+  for (const item of charts) {
+    for (const row of item.rows || []) {
+      for (const series of item.series || []) {
+        const value = Number(row.values?.[series.key]);
+        if (Number.isFinite(value)) max = Math.max(max, value);
+      }
+    }
+  }
+  return max > 0 ? { min: 0, max } : null;
+}
+
 export async function load(context = {}) {
   const { scope = {}, spec = {}, transport, tenant = '', signal } = context;
   const doc = context.doc || globalThis.document;
@@ -124,11 +139,12 @@ export async function load(context = {}) {
         rows = [...byX.values()].sort((a, b) => a.x - b.x);
         series = [
           { key: 'current', label: 'Current period', unit: meta.unit, kind: meta.kind },
-          { key: 'previous', label: 'Previous period', unit: meta.unit, kind: meta.kind }
+          { key: 'previous', label: 'Previous period', unit: meta.unit, kind: meta.kind, dash: 'dashed' }
         ];
       }
       return { groupKey, series, rows };
     });
+    const yRange = multiplesYRange(charts);
     const tableRows = [];
     for (const item of charts) {
       for (const row of item.rows) {
@@ -156,6 +172,7 @@ export async function load(context = {}) {
           units: meta.unit,
           timeBasis: 'artifact/event facts.ts bucket start',
           scaleGroup: `trend-multiples:${measure}:${split}`,
+          ...(yRange ? { yRange } : {}),
           series: item.series,
           x: { label: 'Time', kind: 'time' },
           empty: 'no buckets in the current window'

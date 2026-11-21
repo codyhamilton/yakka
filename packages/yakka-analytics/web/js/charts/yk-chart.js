@@ -14,7 +14,7 @@ import { createTooltip, tooltipModel } from './tooltip.js';
 import { adoptChartStyles, readToken, watchTheme } from './styles.js';
 import { transformSeriesData } from './series.js';
 import {
-  buildScales, scaleGroupKey, scaleRange, xIsNumeric, xPxToData, xToPx, yPxToData, yToPx
+  buildScales, columnBarLayout, normaliseDash, scaleGroupKey, scaleRange, xIsNumeric, xPxToData, xToPx, yPxToData, yToPx
 } from './scales.js';
 import { createThresholdPlugin, renderThresholdTable, thresholdModel } from './thresholds.js';
 import { createGestureEngine, createHighlightPlugin } from './gestures.js';
@@ -318,9 +318,10 @@ export class YkChart extends HTMLElement {
     const data = [xs, ...seriesStyles.map(item => plotRows.map(values => values[item.key] ?? null))];
 
     const hidden = new Set(this.#hidden);
+    const columnLayout = transform.type === 'columns' ? columnBarLayout(seriesStyles) : null;
     const seriesOpts = [
       { label: styledSpec.x?.label || 'Time' },
-      ...seriesStyles.map(item => {
+      ...seriesStyles.map((item, index) => {
         const base = {
           key: item.key,
           label: item.label,
@@ -330,13 +331,21 @@ export class YkChart extends HTMLElement {
           show: !hidden.has(item.key),
           points: { show: false }
         };
+        const dash = normaliseDash(item.dash);
+        if (dash) base.dash = dash;
         if (transform.type === 'area') {
           base.fill = withAlpha(item.colour, 0.18);
         }
         if (transform.type === 'columns') {
-          base.fill = item.colour;
-          base.width = 0;
-          base.paths = uPlot.paths.bars({ size: [0.72, Infinity, 1] });
+          if (item.outline) {
+            base.fill = withAlpha(item.colour, 0.12);
+            base.stroke = item.colour;
+            base.width = 1.5;
+          } else {
+            base.fill = item.colour;
+            base.width = 0;
+          }
+          base.paths = uPlot.paths.bars({ size: columnLayout.size, align: columnLayout.aligns[index] });
           base.points = { show: false };
         }
         if (transform.type === 'ecdf') {

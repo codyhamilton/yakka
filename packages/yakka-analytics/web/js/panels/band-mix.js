@@ -169,7 +169,7 @@ export async function load(context = {}) {
       const node = doc.createElement('yk-bars');
       node.className = 'p10-quality-chart';
       node.spec = {
-        chart: 'bars', type: 'stacked',
+        chart: 'bars', type: 'stacked', orientation: 'horizontal',
         title: `${check} band composition by kind (files)`,
         units: 'files',
         timeBasis: 'the selected artifact version; files, not content versions',

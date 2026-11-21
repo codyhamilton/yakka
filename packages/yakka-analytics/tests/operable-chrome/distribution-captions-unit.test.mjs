@@ -20,9 +20,10 @@ import {
   load as loadRanges
 } from '../../web/js/panels/dist-ranges.js';
 import {
-  COMPHIST_CAPTION, DIST_HIST_CAPTION, DIST_HIST_DEFAULTS, histogramTableColumns,
+  COMPHIST_CAPTION, DIST_HIST_CAPTION, DIST_HIST_DEFAULTS, groupedHistogramCharts, histogramTableColumns,
   histogramTableRows, orderHistogramCharts, load as loadHist
 } from '../../web/js/panels/dist-hist.js';
+import { rangePeriodStyle } from '../../web/js/charts/yk-ranges.js';
 import {
   COMPECDF_CAPTION, DIST_ECDF_CAPTION, DIST_ECDF_DEFAULTS, ecdfTableColumns, ecdfTableRows,
   load as loadEcdf
@@ -156,6 +157,32 @@ test('the exact table columns keep group ascending and current before previous',
   assert.deepEqual(ecdf.map(item => `${item[0]}/${item[1]}/${item[2]}/${item[3]}/${item[4]}`), [
     'claude/current/0.5/4/100', 'claude/previous/0.5/2/100', 'gpt/current/0.5/1/50', 'gpt/current/1/2/100'
   ]);
+});
+
+test('G-comphist groups current and previous into one chart with aligned series', () => {
+  const bins = [{ from: 0, to: 1 }, { from: 1, to: 2 }];
+  const grouped = groupedHistogramCharts([
+    { group: 'gpt', period: 'current', n: 4, rows: [{ values: { count: 3 } }, { values: { count: 1 } }] },
+    { group: 'gpt', period: 'previous', n: 2, rows: [{ values: { count: 2 } }, { values: { count: 0 } }] },
+    { group: 'claude', period: 'current', n: 1, rows: [{ values: { count: 1 } }, { values: { count: 0 } }] }
+  ], bins);
+  assert.deepEqual(grouped.map(chart => chart.group), ['gpt', 'claude']);
+  assert.deepEqual(grouped[0].series.map(series => [series.key, series.align, series.outline === true]), [
+    ['current', -1, false], ['previous', 1, true]
+  ]);
+  assert.deepEqual(grouped[0].rows.map(row => [row.x, row.values.current, row.values.previous]), [
+    [0, 3, 2], [1, 1, 0]
+  ]);
+  assert.deepEqual(grouped[0].bins, bins);
+  assert.deepEqual(grouped[1].rows.map(row => row.values.previous), [null, null], 'a missing previous period is not a fake zero');
+});
+
+test('G-compranges keeps the current row solid and the previous row dashed', () => {
+  assert.equal(rangePeriodStyle('current').dash, null);
+  assert.equal(rangePeriodStyle('current').fillOpacity, 0.35);
+  assert.equal(rangePeriodStyle('previous').dash, '6 4');
+  assert.equal(rangePeriodStyle('previous').fillOpacity, 0);
+  assert.equal(rangePeriodStyle('previous').previous, true);
 });
 
 test('the G defaults reach the wire for Cost and Compare', async () => {

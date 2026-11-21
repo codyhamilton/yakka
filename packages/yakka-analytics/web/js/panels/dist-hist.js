@@ -1,7 +1,7 @@
 // `dist-hist`: fixed-bin histograms per group. The first group's server bins
 // become the fixed `spec.bins`; a zero-filled bin is the server's count, never
-// an invented value for a null score. Compare shows current and previous side
-// by side, or one split-value group with a column per cohort.
+// an invented value for a null score. Compare draws one chart per group with
+// the current and previous bars grouped inside each bin.
 
 import '../charts/yk-ranges.js';
 import { cancelledState, emptyState, errorState, unsupportedState } from '../core/panel-state.js';
@@ -77,6 +77,42 @@ export function histogramTableRows(charts = []) {
     String(row.values.count),
     index === 0 ? edgeText(item.unpriced) : '—'
   ]));
+}
+
+// G-comphist draws one grouped column chart per group, not a current and a
+// previous chart side by side. Both series share the fixed bins; the current
+// bar sits on the left of its bin and the previous bar on the right.
+export function groupedHistogramCharts(charts = [], bins = []) {
+  const order = [];
+  const byGroup = new Map();
+  for (const item of charts) {
+    const group = String(item.group);
+    if (!byGroup.has(group)) {
+      byGroup.set(group, {});
+      order.push(group);
+    }
+    byGroup.get(group)[periodRank(item.period) === 1 ? 'previous' : 'current'] = item;
+  }
+  return order.map(group => {
+    const sides = byGroup.get(group);
+    return {
+      group,
+      bins: bins.map(bin => ({ ...bin })),
+      rows: bins.map((bin, index) => ({
+        key: `bin:${index}`,
+        x: Number(bin.from),
+        values: {
+          current: sides.current?.rows?.[index]?.values?.count ?? null,
+          previous: sides.previous?.rows?.[index]?.values?.count ?? null
+        }
+      })),
+      n: { current: sides.current?.n ?? null, previous: sides.previous?.n ?? null },
+      series: [
+        { key: 'current', label: 'Current period', unit: 'calls', kind: 'count', align: -1 },
+        { key: 'previous', label: 'Previous period', unit: 'calls', kind: 'count', align: 1, outline: true }
+      ]
+    };
+  });
 }
 
 function withUnpriced(body) {
@@ -243,6 +279,25 @@ export async function load(context = {}) {
           }
           chartHost.append(section);
         }
+      } else if (compare) {
+        for (const item of groupedHistogramCharts(ordered, bins)) {
+          const node = doc.createElement('yk-chart');
+          node.className = 'p10-dist-chart';
+          node.dataset.group = item.group;
+          node.spec = {
+            chart: 'columns',
+            type: 'columns',
+            mode: 'absolute',
+            stacked: false,
+            title: `${meta.label} · ${item.group} · current and previous period (n ${item.n.current ?? 0} then ${item.n.previous ?? 0})`,
+            timeBasis: 'priced calls only; the scope window',
+            units: meta.unit,
+            x: { label: `${meta.label} bin lower edge`, kind: 'number', unit: meta.unit },
+            series: item.series
+          };
+          node.data = item.rows;
+          chartHost.append(node);
+        }
       } else {
         for (const item of ordered) {
           const node = doc.createElement('yk-ranges');
@@ -252,7 +307,7 @@ export async function load(context = {}) {
           node.spec = {
             chart: 'ranges',
             type: 'histogram',
-            title: `${meta.label} · ${item.label}${compare ? ` · ${item.period} period` : ''} (n ${item.n ?? 0})`,
+            title: `${meta.label} · ${item.label} (n ${item.n ?? 0})`,
             timeBasis: 'priced calls only; the scope window',
             units: meta.unit,
             bins,
