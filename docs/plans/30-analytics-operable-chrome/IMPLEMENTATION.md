@@ -31,6 +31,31 @@ Carried: full S-start table, Pulse/Trends board layouts and the nine-column S-le
 
 ## Phase 2 — Every board and explorer answers its displayed question in plain language
 
+Refined into twelve units by `refine` (commits `f732556e`, wave-dependency fix `dce3ad93`):
+
+| Unit | Brief | Depends on | Wave |
+|---|---|---|---|
+| U1 — Shared caption, filter applicability and panel-view infrastructure | `briefs/phase2-01-shared-caption-applicability.md` | — | 1 |
+| U2 — Board assembly order, Start tables and shell wiring | `briefs/phase2-02-board-order-start.md` | — | 1 |
+| U3 — Pulse and activity panels | `briefs/phase2-03-pulse-activity.md` | U1 | 2 |
+| U4 — Trends and Cost time-series, rank and treemap | `briefs/phase2-04-trends-cost-time.md` | U1, U2 | 2 |
+| U5 — Distribution and Compare panels | `briefs/phase2-05-distribution-compare.md` | U1, U2 | 2 |
+| U6 — Quality score panels | `briefs/phase2-06-quality.md` | U1, U2 | 2 |
+| U7 — Scatter panels | `briefs/phase2-07-scatter.md` | U1, U2 | 2 |
+| U8 — Plans, Sessions and Event ledger lists | `briefs/phase2-08-explorers-list.md` | U1, U2 | 2 |
+| U9 — Plan and session detail screens | `briefs/phase2-09-plans-session-detail.md` | U1, U2, U8, U11 | 4 |
+| U10 — Artifact and Operations screens | `briefs/phase2-10-artifact-ops.md` | U1, U2 | 3 |
+| U11 — Tools and Workflow boards | `briefs/phase2-11-tools-workflow.md` | U1, U2, U3, U4, U7 | 3 |
+| U12 — Phase 2 acceptance harness and proof | `briefs/phase2-12-proof-harness.md` | U1–U11 | 5 |
+
+Units ran sequentially in this single shared worktree to avoid concurrent Git-index and moving-tree test races; dependencies and ownership stayed exactly as refined.
+
+### Unit outcomes
+
+- **U1 — phase2-01-shared-caption-applicability** (commit `d8d001dd`): new `panels/captions.js` (sixteen family templates, controlled label dictionary, explicit unregistered-caption refusal), new `core/filter-applicability.js` (measure-dimension intersection, response `ignored_filters`, exact F sentence, alphabetical labels), one applicability classification in `panel-state`, optional `caption`/`applies`/`filterExceptions` in the registry, caption slot plus no-marks refusal and `Edit filters` in `panel-frame`, `mountPanelViews` chart/table local toggle in `p10-shared`, explicit-column and `select:false` support in `charts/table`. New unit tests 13 pass; engine + activity regression 14 pass; all operable-chrome 37 pass. Deviation recorded: applicability auto-applies only to panels that declare `applies`/`scopeFilters`; panel modules adopt it in their own units. No gate.
+
+## Phase 2 — Every board and explorer answers its displayed question in plain language
+
 Refined into twelve units by `refine` on 2026-11-22:
 
 | Unit | Brief | Depends on | Wave |
