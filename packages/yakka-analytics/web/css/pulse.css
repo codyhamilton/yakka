@@ -31,7 +31,8 @@
   border-collapse: collapse;
   margin: 0.5rem 0;
   font-size: 12px;
-  line-height: 1.5;
+  line-height: 1.35;
+  table-layout: fixed;
 }
 
 .pulse-table caption {
@@ -43,9 +44,13 @@
 .pulse-table th,
 .pulse-table td {
   border-bottom: 1px solid var(--yk-border);
-  padding: 5px 8px;
+  padding: 0 8px;
+  height: 30px;
   text-align: left;
-  vertical-align: top;
+  vertical-align: middle;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .pulse-table thead th {
@@ -57,9 +62,92 @@
 
 .pulse-table th.numeric,
 .pulse-table td.numeric {
-  text-align: right;
+  text-align: left;
   font-variant-numeric: tabular-nums;
 }
+
+.workspace-panel-caption {
+  margin: 0 0 6px;
+  color: var(--yk-muted);
+  font-size: 0.92rem;
+  text-align: left;
+}
+
+.p10-views {
+  display: grid;
+  gap: 8px;
+}
+
+.p10-view-controls {
+  display: flex;
+  gap: 8px;
+}
+
+.p10-view-toggle,
+.activity-open,
+.activity-more {
+  min-height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--yk-border);
+  border-radius: 2px;
+  background: var(--yk-surface-alt);
+  color: var(--yk-text);
+  font: inherit;
+}
+
+.pulse-metrics {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.pulse-metric {
+  display: grid;
+  gap: 2px;
+  padding: 8px;
+  border: 1px solid var(--yk-border);
+  border-radius: 2px;
+  background: var(--yk-chart-surface, var(--yk-surface));
+  color: var(--yk-chart-text, var(--yk-text));
+}
+
+.pulse-metric-label {
+  color: var(--yk-chart-muted, var(--yk-muted));
+  font-size: 0.85rem;
+}
+
+.pulse-metric-value {
+  font-variant-numeric: tabular-nums;
+  font-size: 1.1rem;
+  text-align: left;
+}
+
+.pulse-metric-unit {
+  color: var(--yk-chart-muted, var(--yk-muted));
+  font-size: 0.8rem;
+}
+
+.pulse-metric[data-unavailable="true"] {
+  border-style: dashed;
+}
+
+.pulse-mover-sparks {
+  display: grid;
+  gap: 2px;
+}
+
+.pulse-mover-spark {
+  margin: 0;
+  color: var(--yk-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 900px) {
+  .pulse-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
 
 .river-follow {
   display: flex;
@@ -95,6 +183,7 @@
 .pulse-calendar-matrix {
   display: block;
   width: 100%;
+  min-height: 160px;
 }
 
 .pulse-movers-list {

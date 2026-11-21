@@ -5,20 +5,56 @@
 
 import { formatCount, formatMoney, formatNumber } from '../charts/formatters.js';
 import { cancelledState, emptyState, errorState } from '../core/panel-state.js';
+import { applicability, applicabilityState } from '../core/filter-applicability.js';
 import { resolveReadContext } from '../core/read-context.js';
+import { registerCaption } from './captions.js';
+import { mountPanelViews } from './p10-shared.js';
 
 export const WINDOW_MS = { h: 3600e3, d: 86400e3, w: 7 * 86400e3, m: 30 * 86400e3, y: 365 * 86400e3 };
 
+// G-metrics fixes the seven cells and their order: priced spend, model calls,
+// hook events, artifact versions, commits, sessions, unpriced calls. No score
+// row and no rejections row.
 export const STRIP_MEASURES = [
-  { key: 'cost_usd', label: 'Cost', kind: 'money', unit: 'USD' },
+  { key: 'cost_usd', label: 'Priced spend', kind: 'money', unit: 'USD' },
   { key: 'model_calls', label: 'Model calls', kind: 'count', unit: 'calls' },
-  { key: 'conversations', label: 'Sessions', kind: 'count', unit: 'sessions' },
-  { key: 'hook_events', label: 'Events', kind: 'count', unit: 'events' },
-  { key: 'artifact_versions', label: 'Artifacts', kind: 'count', unit: 'versions' },
+  { key: 'hook_events', label: 'Hook events', kind: 'count', unit: 'events' },
+  { key: 'artifact_versions', label: 'Artifact versions', kind: 'count', unit: 'versions' },
   { key: 'commits', label: 'Commits', kind: 'count', unit: 'commits' },
-  { key: 'rejections', label: 'Rejections', kind: 'count', unit: 'rejections' },
-  { key: 'quality_median', label: 'Quality median', kind: 'ratio', unit: 'score' }
+  { key: 'conversations', label: 'Sessions', kind: 'count', unit: 'sessions' },
+  { key: 'unpriced_calls', label: 'Unpriced calls', kind: 'count', unit: 'calls' }
 ];
+
+export const PULSE_CAPTIONS = {
+  'G-metrics': 'These totals describe the selected period; each label names its own unit and the values must not be added together.'
+};
+
+export const STRIP_COLUMNS = ['Metric', 'Selected period', 'Previous period', 'Change', 'Unit'];
+
+registerCaption('pulse-strips', ({ spec }) => PULSE_CAPTIONS[spec?.scope?.captionKey] || PULSE_CAPTIONS['G-metrics']);
+
+// The active values of one shared filter, whether the board passes a flat
+// scope or the URL state's nested `filters`.
+export function activeFilterValues(scope = {}, name = '') {
+  const out = [];
+  for (const raw of [scope?.filters?.[name], scope?.[name]]) {
+    for (const value of Array.isArray(raw) ? raw : raw === undefined || raw === null ? [] : [raw]) {
+      if (typeof value === 'string' && value) out.push(value);
+    }
+  }
+  return out;
+}
+
+export function hasKindFilter(scope = {}) {
+  return activeFilterValues(scope, 'kind').length > 0;
+}
+
+// Refuse an active filter this panel cannot apply, before or after the read.
+// Returns the applicability state (no marks) or null when every filter applies.
+export function filterRefusal({ panel, spec = {}, scope = {}, schema = null, ignoredFilters = [] } = {}) {
+  const result = applicability({ panel, spec, scope, schema, ignoredFilters });
+  return result.applicable ? null : applicabilityState(result);
+}
 
 // Request parameters for a panel scope. Relative windows resolve to absolute
 // bounds here, so no panel ever sends `win`; the shared filter names pass
@@ -189,12 +225,11 @@ export function formatRatio(value) {
 }
 
 function changeText(current, previous, kind) {
-  if (current === null || current === undefined || previous === null || previous === undefined) return 'not supplied';
+  if (current === null || current === undefined || previous === null || previous === undefined) return '—';
   const delta = Number(current) - Number(previous);
-  if (!Number.isFinite(delta)) return 'not supplied';
-  if (kind === 'ratio') return `${delta >= 0 ? '+' : ''}${formatNumber(delta, { digits: 2 })}`;
+  if (!Number.isFinite(delta)) return '—';
   const sign = delta > 0 ? '+' : delta < 0 ? '−' : '';
-  return `${sign}${formatCount(Math.abs(delta), { unit: kind === 'money' ? 'USD' : '' })}`;
+  return kind === 'money' ? `${sign}${formatMoney(Math.abs(delta))}` : `${sign}${formatCount(Math.abs(delta), { unit: '' })}`;
 }
 
 // Pick the first check with a scored population. The panel names the kind,
@@ -214,45 +249,42 @@ export function qualityMedian(scores, kind = 'design') {
   };
 }
 
-// The strip model used by the table and any bars. `previous` is null when the
-// scope is all-history; that is rendered as "no previous period", never zero.
-export function stripModel({ summary = {}, previous = null, scores = null, kind = 'design', scope = {} } = {}) {
+// The seven-cell model used by the metrics row and the table. `previous` is
+// null when the scope is all-history; that is rendered as "no previous
+// period", never zero. A document-kind filter gates the two counters the
+// summary cannot apply it to (priced spend and hook events) instead of
+// relabelling them as filtered.
+export function stripModel({ summary = {}, previous = null, scope = {} } = {}) {
   const hasPrevious = previous !== null && previous !== undefined;
-  const median = qualityMedian(scores, kind);
+  const gated = hasKindFilter(scope) ? new Set(['cost_usd', 'hook_events']) : new Set();
   const rows = STRIP_MEASURES.map(measure => {
+    const unavailable = gated.has(measure.key);
     let current = null;
     let before = null;
-    let display = 'not supplied';
-    let previousDisplay = hasPrevious ? 'not supplied' : 'no previous period';
-    let split = '';
+    let display = '—';
+    let previousDisplay = hasPrevious ? '—' : 'no previous period';
+    if (unavailable) {
+      return {
+        key: measure.key, label: measure.label, unit: measure.unit, kind: measure.kind,
+        current: null, previous: null, display: '—', previousDisplay: hasPrevious ? '—' : 'no previous period',
+        change: '—', available: false
+      };
+    }
     if (measure.key === 'cost_usd') {
       current = summary.cost_usd === undefined ? null : summary.cost_usd;
       before = hasPrevious ? previous.cost_usd ?? null : null;
       display = formatStripCost({ cost_usd: current, unpriced_calls: summary.unpriced_calls, priced_calls: summary.priced_calls });
       if (hasPrevious) previousDisplay = formatStripCost({ cost_usd: before, unpriced_calls: previous.unpriced_calls, priced_calls: previous.priced_calls });
-    } else if (measure.key === 'rejections') {
-      current = rejectionTotal(summary.rejections);
-      before = hasPrevious ? rejectionTotal(previous.rejections) : null;
-      display = current === null ? 'not supplied' : formatCount(current, { unit: 'rejections' });
-      if (hasPrevious) previousDisplay = before === null ? 'not supplied' : formatCount(before, { unit: 'rejections' });
-      const pre = Number(summary.rejections?.precheck);
-      const screen = Number(summary.rejections?.screen);
-      if (Number.isFinite(pre) || Number.isFinite(screen)) split = `${Number.isFinite(pre) ? pre : 0} precheck + ${Number.isFinite(screen) ? screen : 0} screen`;
-    } else if (measure.key === 'quality_median') {
-      current = median.median;
-      display = median.median === null ? 'not supplied' : formatRatio(median.median);
-      previousDisplay = hasPrevious ? 'not supplied' : 'no previous period';
-      split = `${median.label}${median.n === null ? '' : ` · n ${formatNumber(median.n)}`}`;
     } else {
       current = summary[measure.key] === undefined ? null : summary[measure.key];
       before = hasPrevious ? previous[measure.key] ?? null : null;
-      display = current === null ? 'not supplied' : formatCount(current, { unit: measure.unit });
-      if (hasPrevious) previousDisplay = before === null ? 'not supplied' : formatCount(before, { unit: measure.unit });
+      display = current === null ? '—' : formatCount(current, { unit: '' });
+      if (hasPrevious) previousDisplay = before === null ? '—' : formatCount(before, { unit: '' });
     }
     const change = hasPrevious ? changeText(current, before, measure.kind) : 'no previous period';
-    return { key: measure.key, label: measure.label, unit: measure.unit, kind: measure.kind, current, previous: hasPrevious ? before : null, display, previousDisplay, change, split };
+    return { key: measure.key, label: measure.label, unit: measure.unit, kind: measure.kind, current, previous: hasPrevious ? before : null, display, previousDisplay, change, available: true };
   });
-  return { rows, hasPrevious, median, kind };
+  return { rows, hasPrevious, gated: [...gated] };
 }
 
 export function table(doc, { caption, columns, rows, empty = 'none reported' }) {
@@ -286,6 +318,7 @@ export function table(doc, { caption, columns, rows, empty = 'none reported' }) 
       const cell = doc.createElement('td');
       if (columns[index]?.numeric) cell.className = 'numeric';
       cell.textContent = value;
+      if (value !== null && value !== undefined && value !== '') cell.title = String(value);
       tr.append(cell);
     });
     body.append(tr);
@@ -294,37 +327,61 @@ export function table(doc, { caption, columns, rows, empty = 'none reported' }) 
   return node;
 }
 
+// The G-metrics chart view: seven labelled cells, each naming its own unit.
+export function renderMetrics(model, doc = globalThis.document) {
+  const wrapper = doc.createElement('div');
+  wrapper.className = 'pulse-metrics';
+  wrapper.setAttribute('role', 'list');
+  for (const row of model.rows) {
+    const cell = doc.createElement('div');
+    cell.className = 'pulse-metric';
+    cell.setAttribute('role', 'listitem');
+    if (!row.available) cell.dataset.unavailable = 'true';
+    const label = doc.createElement('span');
+    label.className = 'pulse-metric-label';
+    label.textContent = row.label;
+    const value = doc.createElement('strong');
+    value.className = 'pulse-metric-value';
+    value.textContent = row.available ? row.display : '—';
+    const unit = doc.createElement('span');
+    unit.className = 'pulse-metric-unit';
+    unit.textContent = row.available ? row.unit : `not available for this filter · ${row.unit}`;
+    cell.append(label, value, unit);
+    wrapper.append(cell);
+  }
+  return wrapper;
+}
+
+// The table view of the same seven cells plus the previous period and change.
+export function renderMetricsTable(model, doc = globalThis.document) {
+  return table(doc, {
+    caption: 'Window totals, selected period against the previous equal period',
+    columns: STRIP_COLUMNS.map((label, index) => ({ label, numeric: index > 0 && index < 4 })),
+    rows: model.rows.map(row => [row.label, row.display, row.previousDisplay, row.change, row.unit])
+  });
+}
+
 export function renderStrips(container, model, doc = globalThis.document) {
   container.replaceChildren();
   const wrapper = doc.createElement('div');
   wrapper.className = 'pulse-strips';
-  const basis = doc.createElement('p');
-  basis.className = 'pulse-basis';
-  basis.textContent = model.hasPrevious
-    ? 'Basis: server summary for the current window against the previous equal-length window.'
-    : 'Basis: server summary for the current window. All-history scope has no previous period.';
-  wrapper.append(basis);
-  const rows = model.rows.map(row => [
-    row.label,
-    row.display,
-    row.previousDisplay,
-    row.change,
-    row.split || '—'
-  ]);
-  wrapper.append(table(doc, {
-    caption: 'Headline measures, current period against the previous equal period',
-    columns: [
-      { label: 'Measure' }, { label: 'Current', numeric: true }, { label: 'Previous', numeric: true },
-      { label: 'Change', numeric: true }, { label: 'Detail' }
-    ],
-    rows
-  }));
-  const flags = [];
-  if (model.rows.some(row => String(row.display).includes('unpriced'))) flags.push('Unpriced cost is a lower bound and is never shown as $0.');
-  if (flags.length) {
+  wrapper.append(renderMetrics(model, doc), renderMetricsTable(model, doc));
+  if (!model.hasPrevious) {
     const note = doc.createElement('p');
     note.className = 'pulse-note';
-    note.textContent = flags.join(' ');
+    note.textContent = 'All-history scope has no previous period.';
+    wrapper.append(note);
+  }
+  if (model.gated.length) {
+    const note = doc.createElement('p');
+    note.className = 'pulse-note';
+    note.textContent = 'Priced spend and hook events do not apply the document kind filter; they are shown as unavailable rather than as filtered totals.';
+    wrapper.append(note);
+  }
+  if (model.rows.some(row => String(row.display).includes('unpriced'))) {
+    const note = doc.createElement('p');
+    note.className = 'pulse-note';
+    note.textContent = 'Unpriced cost is a lower bound and is never shown as $0.';
     wrapper.append(note);
   }
   container.append(wrapper);
@@ -350,11 +407,16 @@ function previousFromContext(readContext) {
   return { from: from - span, to: from };
 }
 
-export async function load({ scope = {}, transport, tenant, signal, doc = globalThis.document, clear = null, readContext = null } = {}) {
+export async function load({ scope = {}, spec = {}, transport, tenant, signal, doc = globalThis.document, clear = null, readContext = null, schema = null } = {}) {
   ensurePulseStyles(doc);
   try {
+    const refusal = filterRefusal({ panel: PULSE_STRIPS_PANEL, spec, scope, schema });
+    if (refusal) return refusal;
     const currentParams = readContext ? readContext.paramsFor() : scopeParams(scope);
     const current = await fetchSummary(transport, currentParams, { tenant, signal, stateKey: 'pulse-summary' });
+    const ignored = current.ignored_filters;
+    const lateRefusal = filterRefusal({ panel: PULSE_STRIPS_PANEL, spec, scope, schema, ignoredFilters: Array.isArray(ignored) ? ignored : [] });
+    if (lateRefusal) return lateRefusal;
     if (summaryIsEmpty(current)) {
       whenPanelBody('pulse-strips', doc, host => host.replaceChildren());
       const causes = emptyCausesFor(scope, clear);
@@ -366,17 +428,7 @@ export async function load({ scope = {}, transport, tenant, signal, doc = global
     if (prev) {
       try { previous = await fetchSummary(transport, previousParams(currentParams, prev), { tenant, signal, stateKey: 'pulse-summary-prev' }); } catch { previous = null; }
     }
-    let scores = null;
-    try {
-      const scoreParams = readContext ? readContext.paramsFor({ kind: 'design' }) : (() => {
-        const params = scopeParams(scope);
-        params.set('kind', 'design');
-        return params;
-      })();
-      const { response, body } = await transport.get('scores', scoreParams, { tenant, signal, stateKey: 'pulse-scores' });
-      if (response.ok) scores = body;
-    } catch { scores = null; }
-    const model = stripModel({ summary: current, previous, scores, kind: 'design', scope });
+    const model = stripModel({ summary: current, previous, scope });
     const result = {
       state: 'ready',
       strips: model.rows,
@@ -384,7 +436,27 @@ export async function load({ scope = {}, transport, tenant, signal, doc = global
       basis: model.hasPrevious ? 'summary; previous equal-length window' : 'summary; no previous period for all-history',
       population: { unit: 'measure', returned_n: model.rows.length, eligible_n: model.rows.length }
     };
-    whenPanelBody('pulse-strips', doc, host => renderStrips(host, model, doc));
+    whenPanelBody('pulse-strips', doc, host => {
+      const views = mountPanelViews({
+        panelId: 'pulse-strips',
+        chart: renderMetrics(model, doc),
+        table: renderMetricsTable(model, doc),
+        doc,
+        defaultView: 'chart',
+        label: 'Window totals view'
+      });
+      views.element.removeAttribute('data-panel');
+      host.replaceChildren(views.element);
+      if (!model.hasPrevious || model.gated.length) {
+        const note = doc.createElement('p');
+        note.className = 'pulse-note';
+        const parts = [];
+        if (!model.hasPrevious) parts.push('All-history scope has no previous period.');
+        if (model.gated.length) parts.push('Priced spend and hook events do not apply the document kind filter; they are unavailable, not filtered totals.');
+        note.textContent = parts.join(' ');
+        host.append(note);
+      }
+    });
     return result;
   } catch (error) {
     if (error?.name === 'AbortError') return cancelledState();
@@ -394,19 +466,19 @@ export async function load({ scope = {}, transport, tenant, signal, doc = global
 
 export const PULSE_STRIPS_PANEL = {
   id: 'pulse-strips',
-  title: 'Pulse',
+  title: 'Window totals',
   grain: 'time',
-  measures: ['cost_usd', 'model_calls', 'conversations', 'hook_events', 'artifact_versions', 'commits', 'rejections'],
+  measures: ['cost_usd', 'model_calls', 'hook_events', 'artifact_versions', 'commits', 'conversations', 'unpriced_calls'],
   lenses: [],
   charts: [],
   table: true,
+  applies: ['repo_id', 'kind'],
   requires: [],
-  caveats: 'Current period against the previous equal-length window. All-history has no previous period. Unpriced cost is a lower bound, never $0. Quality median names its kind, check, scorer and n.',
+  caveats: 'Current period against the previous equal-length window. All-history has no previous period. Unpriced cost is a lower bound, never $0. Priced spend and hook events do not apply a document-kind filter.',
   measureBasis: 'summary event-time window; previous window is the equal length immediately before',
   requests: () => [
     { route: '/v1/analytics/summary', method: 'GET', params: { window: 'current' } },
-    { route: '/v1/analytics/summary', method: 'GET', params: { window: 'previous' } },
-    { route: '/v1/analytics/scores', method: 'GET', params: { kind: 'design' } }
+    { route: '/v1/analytics/summary', method: 'GET', params: { window: 'previous' } }
   ],
   load
 };

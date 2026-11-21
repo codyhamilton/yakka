@@ -8,10 +8,17 @@ import '../charts/yk-bars.js';
 import { formatCount, formatMoney, formatNumber } from '../charts/formatters.js';
 import { cancelledState, emptyState, errorState } from '../core/panel-state.js';
 import {
-  emptyCausesFor, ensurePulseStyles, previousParams, previousWindow, scopeParams, table, whenPanelBody
+  emptyCausesFor, ensurePulseStyles, filterRefusal, previousParams, previousWindow, scopeParams, table, whenPanelBody
 } from './pulse-strips.js';
+import { registerCaption } from './captions.js';
+import { mountPanelViews } from './p10-shared.js';
 
 export const MOVER_DEFAULT_MEASURE = 'cost_usd';
+export const MOVERS_CAPTION = 'Each bar shows priced spend for a harness or model; longer bars mean more dollars spent in the selected period.';
+export const MOVER_COLUMNS = ['Harness/model', 'Current priced spend (USD)', 'Previous priced spend (USD)', 'Change (USD)', 'Unpriced calls'];
+const GROUP_LABELS = { harness: 'Harness', model: 'Model' };
+
+registerCaption('movers', () => MOVERS_CAPTION);
 const PANEL_MEASURES = ['cost_usd', 'model_calls', 'commits', 'unpriced_calls'];
 const MEASURE_LABELS = { cost_usd: 'Cost', model_calls: 'Model calls', commits: 'Commits', unpriced_calls: 'Unpriced calls' };
 const MEASURE_UNITS = { cost_usd: 'USD', model_calls: 'calls', commits: 'commits', unpriced_calls: 'calls' };
@@ -115,10 +122,10 @@ export function buildMoverModel({ lens, measure = MOVER_DEFAULT_MEASURE, current
     };
   });
   rows.sort((a, b) => {
-    if (a.change === null && b.change === null) return String(a.key).localeCompare(String(b.key));
-    if (a.change === null) return 1;
-    if (b.change === null) return -1;
-    if (b.change !== a.change) return b.change - a.change;
+    if (a.current === null && b.current === null) return String(a.key).localeCompare(String(b.key));
+    if (a.current === null) return 1;
+    if (b.current === null) return -1;
+    if (b.current !== a.current) return b.current - a.current;
     return String(a.key).localeCompare(String(b.key));
   });
   return { lens, measure, rows, hasPrevious, population, nPerGroup: 'not supplied per group' };
@@ -130,67 +137,86 @@ function formatMoverValue(value, measure) {
   return formatCount(value, { unit: MEASURE_UNITS[measure] || '' });
 }
 
-function renderMovers(host, model, doc, context) {
+// Harness rows first, then model rows, each spend DESC and identity ASC.
+export function combinedMoverRows(models = []) {
+  const rows = [];
+  for (const model of models) {
+    for (const row of model.rows) rows.push({ ...row, lens: model.lens, group: GROUP_LABELS[model.lens] || model.lens });
+  }
+  return rows;
+}
+
+function renderMovers(host, models, doc) {
   ensurePulseStyles(doc);
-  host.replaceChildren();
   const wrapper = doc.createElement('div');
   wrapper.className = 'pulse-movers';
+  const hasPrevious = models[0]?.hasPrevious === true;
   const heading = doc.createElement('p');
   heading.className = 'pulse-basis';
-  heading.textContent = model.hasPrevious
-    ? 'Basis: server totals for the current window against the previous equal-length window; association, not cause.'
-    : 'Basis: server totals for the current window; all-history has no previous period. Association, not cause.';
+  heading.textContent = hasPrevious
+    ? 'Basis: server priced-spend totals for the current window against the previous equal-length window; association, not cause.'
+    : 'Basis: server priced-spend totals for the current window; all-history has no previous period. Association, not cause.';
   wrapper.append(heading);
 
-  const chooserLabel = doc.createElement('label');
-  chooserLabel.className = 'pulse-chooser';
-  chooserLabel.append(doc.createTextNode('Measure '));
-  const chooser = doc.createElement('select');
-  chooser.setAttribute('aria-label', 'Movers measure');
-  for (const measure of context.measures) {
-    const option = doc.createElement('option');
-    option.value = measure;
-    option.textContent = MEASURE_LABELS[measure] || measure;
-    option.selected = measure === model.measure;
-    chooser.append(option);
-  }
-  chooser.addEventListener('change', () => context.refresh?.(chooser.value));
-  chooserLabel.append(chooser);
-  wrapper.append(chooserLabel);
-
-  if (!model.rows.length) {
+  const rows = combinedMoverRows(models);
+  if (!rows.length) {
     const empty = doc.createElement('p');
     empty.className = 'pulse-note';
-    empty.textContent = `No groups for ${model.lens} in this window.`;
+    empty.textContent = 'No harness or model groups in this window.';
     wrapper.append(empty);
-  } else {
-    const chart = doc.createElement('yk-bars');
-    chart.className = 'pulse-movers-bars';
-    chart.setAttribute('aria-label', `${MEASURE_LABELS[model.measure] || model.measure} change by ${model.lens}`);
-    wrapper.append(chart);
-    chart.spec = {
-      chart: 'bars', type: 'lollipop', title: `${MEASURE_LABELS[model.measure] || model.measure} by ${model.lens}`,
-      units: MEASURE_UNITS[model.measure] || '',
-      series: [{ key: model.measure, label: MEASURE_LABELS[model.measure] || model.measure, unit: MEASURE_UNITS[model.measure] || '', kind: model.measure === 'cost_usd' ? 'money' : 'count' }]
-    };
-    chart.data = model.rows.map(row => ({ key: row.key, label: row.label, values: { [model.measure]: row.current } }));
-    wrapper.append(table(doc, {
-      caption: `${MEASURE_LABELS[model.measure] || model.measure} change by ${model.lens}, ranked by change`,
-      columns: [
-        { label: model.lens }, { label: 'Current', numeric: true }, { label: 'Previous', numeric: true },
-        { label: 'Change', numeric: true }, { label: 'Unpriced', numeric: true }, { label: 'Daily' }, { label: 'n' }
-      ],
-      rows: model.rows.map(row => [
-        row.label,
-        formatMoverValue(row.current, model.measure),
-        model.hasPrevious ? formatMoverValue(row.previous, model.measure) : 'no previous period',
-        row.change === null ? (model.hasPrevious ? 'not supplied' : 'no previous period') : formatMoverValue(row.change, model.measure),
-        row.unpriced === null ? 'not supplied' : formatCount(row.unpriced, { unit: 'calls' }),
-        row.sparkline,
-        model.nPerGroup
-      ])
-    }));
+    host.append(wrapper);
+    return;
   }
+
+  const chart = doc.createElement('yk-bars');
+  chart.className = 'pulse-movers-bars';
+  chart.setAttribute('aria-label', 'Priced spend by harness and model');
+  chart.spec = {
+    chart: 'bars', type: 'lollipop', title: 'Priced spend by harness and model',
+    units: 'USD',
+    series: [{ key: 'cost_usd', label: 'Priced spend', unit: 'USD', kind: 'money' }]
+  };
+  chart.data = rows.map(row => ({
+    key: row.key,
+    label: `${row.group}: ${row.label}`,
+    values: { cost_usd: row.current }
+  }));
+
+  const sparks = doc.createElement('div');
+  sparks.className = 'pulse-mover-sparks';
+  for (const row of rows) {
+    if (!row.sparkline || row.sparkline === '—') continue;
+    const line = doc.createElement('p');
+    line.className = 'pulse-mover-spark';
+    line.textContent = `${row.group}: ${row.label} ${row.sparkline}`;
+    line.title = `Daily priced spend for ${row.group.toLowerCase()} ${row.label}`;
+    sparks.append(line);
+  }
+
+  const tableNode = table(doc, {
+    caption: 'Priced spend by harness and model, harness rows then model rows',
+    columns: [
+      { label: MOVER_COLUMNS[0] },
+      { label: MOVER_COLUMNS[1], numeric: true },
+      { label: MOVER_COLUMNS[2], numeric: true },
+      { label: MOVER_COLUMNS[3], numeric: true },
+      { label: MOVER_COLUMNS[4], numeric: true }
+    ],
+    rows: rows.map(row => [
+      `${row.group}: ${row.label}`,
+      formatMoverValue(row.current, 'cost_usd'),
+      hasPrevious ? formatMoverValue(row.previous, 'cost_usd') : '—',
+      row.change === null ? '—' : formatMoverValue(row.change, 'cost_usd'),
+      row.unpriced === null ? '—' : formatCount(row.unpriced, { unit: 'calls' })
+    ])
+  });
+
+  const views = mountPanelViews({
+    panelId: 'movers', chart, table: tableNode, doc, defaultView: 'chart', label: 'Spend by harness and model view'
+  });
+  views.element.removeAttribute('data-panel');
+  wrapper.append(views.element);
+  if (sparks.children.length) wrapper.append(sparks);
   host.append(wrapper);
 }
 
@@ -223,7 +249,7 @@ async function loadLens(transport, lens, measure, scope, prev, { tenant, signal,
       unpriced = groupTotals(body);
     } catch { unpriced = null; }
   }
-  return buildMoverModel({
+  const model = buildMoverModel({
     lens,
     measure,
     current: groupTotals(currentBody),
@@ -233,27 +259,27 @@ async function loadLens(transport, lens, measure, scope, prev, { tenant, signal,
     population: currentBody.population || null,
     hasPrevious: Boolean(prev && previousBody)
   });
+  model.ignoredFilters = Array.isArray(currentBody.ignored_filters) ? currentBody.ignored_filters.map(String) : [];
+  return model;
 }
 
-export async function load({ scope = {}, spec = {}, transport, tenant, signal, doc = globalThis.document, clear = null } = {}) {
+export async function load({ scope = {}, spec = {}, transport, tenant, signal, doc = globalThis.document, clear = null, schema = null } = {}) {
   spec = spec || {};
   ensurePulseStyles(doc);
   try {
-    const { body: schema } = await transport.schema(tenant);
-    const measures = offeredMeasures(schema);
-    const measuresList = measures.length ? measures : FALLBACK_MEASURES;
-    let measure = (spec.measures || [])[0];
-    if (!measuresList.includes(measure)) measure = measuresList.includes(MOVER_DEFAULT_MEASURE) ? MOVER_DEFAULT_MEASURE : measuresList[0];
-    const lenses = moverLenses(schema, measure);
+    const resolvedSchema = schema || (await transport.schema(tenant)).body;
+    const refusal = filterRefusal({ panel: MOVERS_PANEL, spec, scope, schema: resolvedSchema });
+    if (refusal) return refusal;
+    const measure = MOVER_DEFAULT_MEASURE;
+    const lenses = ['harness', 'model'];
     const prev = previousWindow(scope);
     const models = [];
     for (const lens of lenses) {
-      models.push(await loadLens(transport, lens, measure, scope, prev, { tenant, signal, stateKey: `movers-${lens}`, allowUnpriced: measuresList.includes('unpriced_calls') }));
+      models.push(await loadLens(transport, lens, measure, scope, prev, { tenant, signal, stateKey: `movers-${lens}`, allowUnpriced: true }));
     }
-    const context = {
-      measures: measuresList,
-      refresh: nextMeasure => load({ scope, spec: { ...spec, measures: [nextMeasure] }, transport, tenant, doc, signal: undefined, clear })
-    };
+    const ignored = models.flatMap(model => model.ignoredFilters || []);
+    const lateRefusal = filterRefusal({ panel: MOVERS_PANEL, spec, scope, schema: resolvedSchema, ignoredFilters: ignored });
+    if (lateRefusal) return lateRefusal;
     if (!models.some(model => model.rows.length)) {
       whenPanelBody('movers', doc, host => host.replaceChildren());
       const causes = emptyCausesFor(scope, clear);
@@ -261,34 +287,23 @@ export async function load({ scope = {}, spec = {}, transport, tenant, signal, d
       return emptyState(causes);
     }
     whenPanelBody('movers', doc, host => {
-      host.replaceChildren();
       const container = doc.createElement('div');
       container.className = 'pulse-movers-list';
-      for (const model of models) {
-        const section = doc.createElement('section');
-        section.className = 'pulse-mover-lens';
-        const title = doc.createElement('h3');
-        title.textContent = `By ${model.lens}`;
-        section.append(title);
-        const holder = doc.createElement('div');
-        section.append(holder);
-        renderMovers(holder, model, doc, context);
-        container.append(section);
-      }
-      if (!repoLensOffered(schema, measure)) {
+      renderMovers(container, models, doc);
+      if (!repoLensOffered(resolvedSchema, measure)) {
         const note = doc.createElement('p');
         note.className = 'pulse-note';
         note.textContent = 'Repository lens not offered: the server does not list session_repo for the time grain.';
         container.append(note);
       }
-      host.append(container);
+      host.replaceChildren(container);
     });
     return {
       state: 'ready',
       measure,
       lenses,
-      models: models.map(model => ({ lens: model.lens, rows: model.rows })),
-      basis: 'query totals; current versus previous equal-length window; association, not cause',
+      models: models.map(model => ({ lens: model.lens, rows: model.rows, ignoredFilters: model.ignoredFilters })),
+      basis: 'query priced-spend totals; current versus previous equal-length window; association, not cause',
       population: models[0]?.population || null
     };
   } catch (error) {
@@ -299,13 +314,14 @@ export async function load({ scope = {}, spec = {}, transport, tenant, signal, d
 
 export const MOVERS_PANEL = {
   id: 'movers',
-  title: 'Movers',
+  title: 'Spend by harness and model',
   grain: 'time',
-  measures: PANEL_MEASURES,
-  lenses: ['harness', 'model', 'session_repo'],
-  charts: ['bars', 'lines'],
+  measures: ['cost_usd'],
+  lenses: ['harness', 'model'],
+  charts: ['bars'],
+  applies: ['repo_id', 'harness', 'model'],
   requires: [],
-  caveats: 'Ranked change is an association, not cause. The repo lens is offered only when /schema lists session_repo for the time grain. Per-group n and unpriced counts are named when the server does not supply them.',
+  caveats: 'Priced spend only, split by harness then model. Ranked bars are an association, not cause. The repo lens is offered only when /schema lists session_repo for the time grain.',
   measureBasis: 'query bucket totals on the summary event-time window',
   requests: () => [
     { route: '/v1/analytics/query', method: 'GET', params: { measure: 'cost_usd', dim: 'harness', bucket: 'none' } },

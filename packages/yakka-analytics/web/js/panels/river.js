@@ -8,10 +8,16 @@ import '../charts/yk-lanes.js';
 import { formatNumber } from '../charts/formatters.js';
 import { createFollow } from '../core/follow.js';
 import { cancelledState, emptyState, errorState } from '../core/panel-state.js';
-import { emptyCausesFor, ensurePulseStyles, scopeParams, whenPanelBody } from './pulse-strips.js';
+import { emptyCausesFor, ensurePulseStyles, filterRefusal, scopeParams, whenPanelBody } from './pulse-strips.js';
+import { registerCaption } from './captions.js';
+import { mountPanelViews } from './p10-shared.js';
 
 export const OBSERVATION_TYPES = ['session_start', 'artifact_version', 'execution', 'rejection'];
 export const ACTIVITY_CAPTION = 'Each row is a session start, artifact version, brief execution or rejection; these observations are not a count of all events.';
+export const ACTIVITY_COLUMNS = ['Time', 'Type', 'Repository', 'Plan', 'Kind', 'Path', 'Conversation', 'Stage', 'Open'];
+export const RIVER_DEFAULT_VIEW = 'table';
+
+registerCaption('river', () => ACTIVITY_CAPTION);
 
 function countOrNull(value) {
   if (value === null || value === undefined || value === '') return null;
@@ -31,12 +37,13 @@ export function activityPopulationText({ loaded = 0, population = null } = {}) {
   if (matching === null) return `${shownText} observations displayed; matching observation total unavailable.`;
   return `${shownText} observations displayed of ${formatNumber(matching)} matching observations`;
 }
-const TYPE_LABELS = {
+export const ACTIVITY_TYPE_LABELS = {
   session_start: 'Session start',
   artifact_version: 'Artifact version',
-  execution: 'Execution',
+  execution: 'Brief execution',
   rejection: 'Rejection'
 };
+const TYPE_LABELS = ACTIVITY_TYPE_LABELS;
 const TYPE_UNITS = {
   session_start: 'session', artifact_version: 'version', execution: 'execution', rejection: 'rejection'
 };
@@ -180,27 +187,138 @@ function renderFollow(host, doc, context) {
   return mount;
 }
 
-function renderRiver(host, result, context, doc) {
-  const prior = host.querySelector('.river-follow');
-  ensurePulseStyles(doc);
-  const mount = renderFollow(host, doc, context);
-  const wrapper = host.querySelector('.river') || el(doc, 'div', 'river');
-  wrapper.replaceChildren();
-  if (prior && prior.parentNode === host) prior.after(wrapper);
-  if (!mount.bar.isConnected) host.prepend(mount.bar);
-  host.append(wrapper);
+function timeZoneLabel(tz) {
+  return tz || Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+}
 
-  const basis = el(doc, 'p', 'pulse-basis', 'Basis: row clock is event time (UTC); late arrivals are reported by Follow by receive time.');
-  wrapper.append(basis);
-  wrapper.append(el(doc, 'p', 'activity-population', activityPopulationText({ loaded: result.rows.length, population: result.population })));
-  wrapper.append(el(doc, 'p', 'pulse-basis activity-caption', ACTIVITY_CAPTION));
-  if (result.ignoredFilters.length) {
-    wrapper.append(el(doc, 'p', 'pulse-note', `Ignored filters (not applied by the server): ${result.ignoredFilters.join(', ')}.`));
+export function formatActivityTime(value, tz) {
+  if (!value) return '—';
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return String(value);
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: timeZoneLabel(tz), year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false
+  }).formatToParts(date);
+  const get = type => parts.find(part => part.type === type)?.value || '';
+  return `${get('year')}-${get('month')}-${get('day')} ${get('hour')}:${get('minute')}:${get('second')}`;
+}
+
+export function activityTableRows(rows = [], tz) {
+  return rows.map(row => [
+    formatActivityTime(row.event_time, tz),
+    TYPE_LABELS[row.type] || row.type,
+    row.repo_id || '—',
+    row.plan || '—',
+    row.kind || '—',
+    row.path || '—',
+    row.conversation_id || '—',
+    row.stage || '—'
+  ]);
+}
+
+function tableCell(doc, value, className = '') {
+  const cell = doc.createElement('td');
+  if (className) cell.className = className;
+  cell.textContent = value;
+  if (value !== null && value !== undefined && value !== '' && value !== '—') cell.title = String(value);
+  return cell;
+}
+
+function buildActivityTable(state, context, doc, onUpdate) {
+  const wrap = doc.createElement('div');
+  wrap.className = 'activity-table-view';
+  const node = doc.createElement('table');
+  node.className = 'pulse-table activity-table';
+  const cap = doc.createElement('caption');
+  cap.textContent = 'Recent observations, newest first';
+  node.append(cap);
+  const head = doc.createElement('thead');
+  const headRow = doc.createElement('tr');
+  const tz = timeZoneLabel(context.scope?.tz);
+  ACTIVITY_COLUMNS.forEach((label, index) => {
+    const th = doc.createElement('th');
+    th.scope = 'col';
+    th.textContent = index === 0 ? `Time (${tz})` : label;
+    headRow.append(th);
+  });
+  head.append(headRow);
+  const tbody = doc.createElement('tbody');
+  node.append(head, tbody);
+
+  function rowNode(row) {
+    const tr = doc.createElement('tr');
+    const values = activityTableRows([row], context.scope?.tz)[0];
+    for (const value of values) tr.append(tableCell(doc, value));
+    const openCell = doc.createElement('td');
+    const open = doc.createElement('button');
+    open.type = 'button';
+    open.className = 'activity-open';
+    open.textContent = 'Open';
+    open.setAttribute('aria-label', `Open ${TYPE_LABELS[row.type] || row.type} ${row.identity}`);
+    open.addEventListener('click', () => {
+      const view = doc.defaultView;
+      const Ctor = view?.CustomEvent || globalThis.CustomEvent;
+      if (!Ctor) return;
+      open.dispatchEvent(new Ctor('activity-open', { bubbles: true, detail: { ...row } }));
+    });
+    openCell.append(open);
+    tr.append(openCell);
+    return tr;
   }
+
+  function renderRows() {
+    tbody.replaceChildren();
+    for (const row of state.rows) tbody.append(rowNode(row));
+  }
+
+  const pager = doc.createElement('div');
+  pager.className = 'activity-pager';
+  function renderPager() {
+    pager.replaceChildren();
+    if (!state.next) return;
+    const button = doc.createElement('button');
+    button.type = 'button';
+    button.className = 'activity-more';
+    button.textContent = 'Load more observations';
+    button.addEventListener('click', async () => {
+      button.disabled = true;
+      button.textContent = 'Loading…';
+      try {
+        const params = new URLSearchParams(state.params);
+        params.set('cursor', state.next);
+        const { response, body } = await context.transport.get('activity', params, { tenant: context.tenant, stateKey: 'river-more' });
+        const page = mapActivityList({ status: response.status, body });
+        if (page.state === 'error') {
+          button.disabled = false;
+          button.textContent = 'Load more observations';
+          pager.append(el(doc, 'span', 'pulse-note', ` Retry next page: ${page.message}`));
+          return;
+        }
+        state.rows.push(...page.rows);
+        state.next = page.next;
+        if (page.population?.cohort_n !== undefined) state.population = page.population;
+        renderRows();
+        renderPager();
+        onUpdate?.();
+      } catch {
+        button.disabled = false;
+        button.textContent = 'Load more observations';
+        pager.append(el(doc, 'span', 'pulse-note', ' Retry next page.'));
+      }
+    });
+    pager.append(button);
+  }
+
+  renderRows();
+  renderPager();
+  wrap.append(node, pager);
+  return wrap;
+}
+
+function buildLanes(result, doc) {
   const chart = doc.createElement('yk-lanes');
   chart.className = 'river-lanes';
   chart.setAttribute('aria-label', 'Recent session starts, artifact versions, executions and rejections');
-  wrapper.append(chart);
   const model = laneRows(result.rows);
   chart.spec = {
     chart: 'lanes',
@@ -210,62 +328,94 @@ function renderRiver(host, result, context, doc) {
     series: model.series
   };
   chart.data = model.data;
-  if (result.next) wrapper.append(el(doc, 'p', 'pulse-note', 'More observations are available; the server returned a cursor.'));
-  const legend = el(doc, 'p', 'pulse-note', `Observation types: ${OBSERVATION_TYPES.map(type => TYPE_LABELS[type]).join(', ')}. Each mark is one typed observation; its lane is its type.`);
-  wrapper.append(legend);
   return chart;
 }
 
-function renderStatusLine(result, doc) {
+function renderRiver(host, result, context, doc) {
+  ensurePulseStyles(doc);
+  const mount = renderFollow(host, doc, context);
+  const body = el(doc, 'div', 'river');
+  const state = { ...result, rows: result.rows.slice() };
+  const population = el(doc, 'p', 'activity-population');
+  const chart = buildLanes(state, doc);
+  const updatePopulation = () => {
+    population.textContent = activityPopulationText({ loaded: state.rows.length, population: state.population });
+    const lanes = laneRows(state.rows);
+    chart.spec = { ...chart.spec, series: lanes.series };
+    chart.data = lanes.data;
+  };
+  updatePopulation();
+  const views = mountPanelViews({
+    panelId: 'river',
+    chart,
+    table: buildActivityTable(state, context, doc, updatePopulation),
+    doc,
+    defaultView: RIVER_DEFAULT_VIEW,
+    label: 'Recent activity view'
+  });
+  views.element.removeAttribute('data-panel');
+  body.append(views.element, population);
+  if (state.next) body.append(el(doc, 'p', 'pulse-note', 'More observations are available; use Load more observations.'));
+  host.replaceChildren(mount.bar, body);
+}
+
+function renderStatusLine(result, context, doc) {
   const wrapper = el(doc, 'div', 'river');
   wrapper.append(el(doc, 'p', 'activity-population', activityPopulationText({ loaded: result.rows?.length || 0, population: result.population })));
-  wrapper.append(el(doc, 'p', 'pulse-basis activity-caption', ACTIVITY_CAPTION));
+  if (context?.scope?.tz) wrapper.append(el(doc, 'p', 'pulse-note', `Times shown in ${timeZoneLabel(context.scope.tz)}.`));
   return wrapper;
 }
 
-export async function load({ scope = {}, transport, tenant, signal, doc = globalThis.document, clear = null } = {}) {
+export async function load({ scope = {}, spec = {}, transport, tenant, signal, doc = globalThis.document, clear = null, schema = null } = {}) {
   ensurePulseStyles(doc);
   const context = {
     transport, tenant, doc, scope,
     refresh: () => load({ scope, transport, tenant, doc, signal: undefined, clear })
   };
   try {
+    const refusal = filterRefusal({ panel: RIVER_PANEL, spec, scope, schema });
+    if (refusal) return refusal;
     const params = scopeParams(scope);
     params.set('mode', 'list');
+    params.set('limit', '100');
     const { response, body } = await transport.get('activity', params, { tenant, signal, stateKey: 'river' });
     const result = mapActivityList({ status: response.status, body });
+    const lateRefusal = filterRefusal({ panel: RIVER_PANEL, spec, scope, schema, ignoredFilters: result.ignoredFilters });
+    if (lateRefusal) return lateRefusal;
     if (result.state === 'error') {
-      whenPanelBody('river', doc, host => host.replaceChildren(renderStatusLine(result, doc)));
+      whenPanelBody('river', doc, host => host.replaceChildren(renderStatusLine(result, context, doc)));
       return result;
     }
     if (result.state === 'empty') {
-      whenPanelBody('river', doc, host => host.replaceChildren(renderStatusLine(result, doc)));
+      whenPanelBody('river', doc, host => host.replaceChildren(renderStatusLine(result, context, doc)));
       const causes = emptyCausesFor(scope, clear);
       if (!causes.length) causes.push({ kind: 'scope', label: `no observations in window ${scope.win || 'all'}`, clear: null });
       return emptyState(causes);
     }
+    result.params = params;
     whenPanelBody('river', doc, host => renderRiver(host, result, context, doc));
     return result;
   } catch (error) {
     if (error?.name === 'AbortError') return cancelledState();
     const result = errorState({ message: error?.message || 'The activity request failed.' });
-    whenPanelBody('river', doc, host => host.replaceChildren(renderStatusLine(result, doc)));
+    whenPanelBody('river', doc, host => host.replaceChildren(renderStatusLine(result, context, doc)));
     return result;
   }
 }
 
 export const RIVER_PANEL = {
   id: 'river',
-  title: 'River',
+  title: 'Recent activity',
   grain: 'activity observation',
   measures: ['observation'],
   lenses: ['conversation_id', 'repo_id', 'harness', 'kind', 'plan', 'stage'],
   charts: ['lanes'],
+  applies: ['repo_id', 'kind', 'harness', 'plan'],
   requires: ['activity'],
-  caveats: 'Row clock is event time; late arrivals are reported by Follow by receive time. Follow advances its acknowledged watermark only when you acknowledge.',
+  caveats: 'Row clock is event time; late arrivals are reported by Follow by receive time. Follow advances its acknowledged watermark only when you acknowledge. Observations are not a count of all events.',
   measureBasis: 'activity event time; Follow counts by receive time',
   requests: () => [
-    { route: '/v1/analytics/activity', method: 'GET', params: { mode: 'list' } },
+    { route: '/v1/analytics/activity', method: 'GET', params: { mode: 'list', limit: 100 } },
     { route: '/v1/analytics/activity', method: 'GET', params: { mode: 'probe', after: '<watermark>' } }
   ],
   load
