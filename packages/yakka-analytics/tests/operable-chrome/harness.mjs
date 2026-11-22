@@ -14,7 +14,7 @@ import { startPlan30Harness } from '../plan30/harness.mjs';
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, '..', '..', '..', '..');
 export const screensRoot = resolve(repoRoot, '.scratch', 'plan30-chrome', 'screens');
-export const mockupsRoot = resolve(repoRoot, 'docs', 'plans', '30-analytics-operable-chrome', 'mockups');
+export const mockupsRoot = resolve(repoRoot, 'docs', 'plans', '30-analytics-operable-chrome-assets', 'mockups');
 
 export const SCREEN_FILES = {
   start: 'start', pulse: 'pulse', trends: 'trends', cost: 'cost', quality: 'quality',
