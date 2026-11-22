@@ -14,8 +14,7 @@ function sessionRoute(path) {
   return route === 'me' || route.startsWith('device/') || route.startsWith('tenants') || route.startsWith('tokens') || route.startsWith('admin/');
 }
 export function authInit(path) {
-  const collector = isCollectorMode();
-  const session = collector && sessionRoute(path);
+  const session = sessionRoute(path);
   const key = storage('yakka-analytics-key');
   const headers = new Headers();
   if (!session && key && resolvedBase()) headers.set('Authorization', `Bearer ${key}`);
