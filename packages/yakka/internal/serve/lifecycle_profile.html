@@ -161,7 +161,8 @@ function tenantLabel(tenant) {
   return id ? name + " \u00b7 " + id : name;
 }
 function tenantLifecycle(tenant) { return String(tenant.lifecycle_state || "active"); }
-function activeTenants(list) { return (list || []).filter(function (tenant) { return tenantLifecycle(tenant) === "active"; }); }
+function tenantSelectable(tenant) { const s = tenantLifecycle(tenant); return s !== "resetting" && s !== "deleting"; }
+function selectableTenants(list) { return (list || []).filter(tenantSelectable); }
 function clearRemembered() {
   try {
     localStorage.removeItem(SELECTION_KEY); localStorage.removeItem(GENERATION_KEY);
@@ -220,8 +221,8 @@ function renderSelect() {
     const lifecycle = tenantLifecycle(tenant);
     const option = document.createElement("option");
     option.value = tenant.id;
-    option.textContent = lifecycle === "active" ? tenantLabel(tenant) : tenantLabel(tenant) + " \u00b7 " + lifecycle;
-    option.disabled = lifecycle !== "active";
+    option.textContent = tenantSelectable(tenant) ? tenantLabel(tenant) : tenantLabel(tenant) + " \u00b7 " + lifecycle;
+    option.disabled = !tenantSelectable(tenant);
     option.selected = tenant.id === state.selected;
     select.appendChild(option);
   });
@@ -233,9 +234,9 @@ function initSelection() {
   const wanted = new URLSearchParams(location.search).get("tenant") || "";
   const owned = state.me.tenants || [];
   if (wanted) {
-    // A named tenant that is foreign, deleted or not active must not be replaced
+    // A named tenant that is foreign, deleted or mid-cleanup must not be replaced
     // with another owned tenant. Reset and delete stay on an explicit choice.
-    const match = owned.find(function (tenant) { return tenant.id === wanted && tenantLifecycle(tenant) === "active"; });
+    const match = owned.find(function (tenant) { return tenant.id === wanted && tenantSelectable(tenant); });
     if (match) { selectTenant(match.id, false); return; }
     state.selected = "";
     state.refusedSelection = true;
@@ -245,7 +246,7 @@ function initSelection() {
     byId("selection-note").hidden = false;
     return;
   }
-  const first = activeTenants(owned)[0];
+  const first = selectableTenants(owned)[0];
   if (first) selectTenant(first.id, true); else { paintSelection(); updateReturnLink(); }
 }
 function selectTenant(id, writeUrl) {
@@ -285,15 +286,15 @@ function renderTenant(tenant) {
   const idCell = document.createElement("td"); idCell.textContent = tenant.id; idCell.title = String(tenant.id || ""); row.appendChild(idCell);
   const lifecycle = tenantLifecycle(tenant);
   const stateCell = document.createElement("td"); stateCell.textContent = lifecycle; stateCell.title = lifecycle; row.appendChild(stateCell);
-  const generationText = tenant.lifecycle_generation === null ? "none (legacy)" : String(tenant.lifecycle_generation);
+  const generationText = tenant.lifecycle_generation === null ? "not assigned yet" : String(tenant.lifecycle_generation);
   const generationCell = document.createElement("td"); generationCell.textContent = generationText; generationCell.title = generationText; row.appendChild(generationCell);
   const actions = document.createElement("td"); actions.className = "actions";
   if (lifecycle === "active") {
     actions.appendChild(actionButton("Reset tenant", tenant, "reset"));
     actions.appendChild(actionButton("Delete tenant", tenant, "delete"));
-  } else if (lifecycle === "unsupported") {
+  } else if (lifecycle === "unmarked" || lifecycle === "unsupported") {
     const note = document.createElement("span"); note.className = "pending";
-    note.textContent = "legacy_tenant_cleanup_unsupported: this legacy tenant has no trustworthy lifecycle marker and no lifecycle actions are offered.";
+    note.textContent = "No lifecycle marker yet, so reset and delete are not offered. This tenant can still be selected and used. It gets a marker when the server next starts with adoption enabled.";
     note.title = note.textContent; actions.appendChild(note);
   } else {
     const note = document.createElement("span"); note.className = "pending";
@@ -356,7 +357,7 @@ async function submitConfirmed() {
     if (deleted) selectTenant("", true);
     await loadMe();
     if (deleted) {
-      const survivor = activeTenants(state.me ? state.me.tenants : [])[0];
+      const survivor = selectableTenants(state.me ? state.me.tenants : [])[0];
       state.returnTenant = survivor ? survivor.id : "";
       updateReturnLink();
     }
@@ -383,7 +384,7 @@ function failureMessage(code, op, id) {
     case "session_required": return "session_required: your session has ended. Sign in again; nothing was changed.";
     case "tenant_owner_required": return "tenant_owner_required: this signed-in owner does not own tenant " + id + ".";
     case "tenant_busy": return "tenant_busy: cleanup is already running for tenant " + id + ". Review the owner lifecycle state below.";
-    case "legacy_tenant_cleanup_unsupported": return "legacy_tenant_cleanup_unsupported: this legacy tenant has no trustworthy lifecycle marker and cannot be cleaned up here.";
+    case "legacy_tenant_cleanup_unsupported": return "legacy_tenant_cleanup_unsupported: this tenant has no lifecycle marker yet, so reset and delete are not available. It can still be selected and used.";
     case "tenant_cleanup_incomplete": return "tenant_cleanup_incomplete: cleanup did not finish for tenant " + id + ". The tenant stays unavailable until recovery completes.";
     case "tenant_not_found": return "tenant_not_found: tenant " + id + " no longer exists.";
     case "tenant_confirmation_mismatch": return "tenant_confirmation_mismatch: the typed id did not match. Nothing was changed.";

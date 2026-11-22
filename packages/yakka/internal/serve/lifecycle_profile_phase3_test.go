@@ -72,7 +72,7 @@ func TestLifecycleProfilePhase3Page(t *testing.T) {
 		"C1 replaceState":             "history.replaceState(null, \"\", url)",
 		"C1 URL field":                `params.set("tenant", state.selected)`,
 		"C1 option label separator":   " \\u00b7 ",
-		"C1 disabled pending options": `option.disabled = lifecycle !== "active"`,
+		"C1 disabled mid-cleanup options": `option.disabled = !tenantSelectable(tenant)`,
 		"C1 explicit choice":          "Choose a tenant",
 		"Reset action label":          `"Reset tenant"`,
 		"Delete action label":         `"Delete tenant"`,
