@@ -145,7 +145,7 @@ function installHold() {
 const initialAccountTenants = () => [
   { id: 'tenant-a', name: 'Alpha', lifecycle_state: 'active', lifecycle_generation: 3 },
   { id: 'tenant-b', name: 'Beta', lifecycle_state: 'active', lifecycle_generation: 5 },
-  { id: 'tenant-p', name: 'Pending', lifecycle_state: 'pending', lifecycle_generation: 1 }
+  { id: 'tenant-p', name: 'Resetting', lifecycle_state: 'resetting', lifecycle_generation: 1 }
 ];
 
 const initialAccountTokens = () => [
@@ -281,7 +281,7 @@ export async function installAccountStub(page) {
 const initialLifecycleTenants = () => [
   { id: 't-a', name: 'Alpha', lifecycle_state: 'active', lifecycle_generation: 3 },
   { id: 't-b', name: 'Beta', lifecycle_state: 'active', lifecycle_generation: 5 },
-  { id: 't-p', name: 'Pending', lifecycle_state: 'pending', lifecycle_generation: 1 }
+  { id: 't-p', name: 'Resetting', lifecycle_state: 'resetting', lifecycle_generation: 1 }
 ];
 
 export async function installLifecycleStub(page) {
