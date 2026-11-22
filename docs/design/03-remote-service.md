@@ -70,6 +70,7 @@ Server configuration is environment only:
 | `GITHUB_OAUTH_CLIENT_ID`, `GITHUB_OAUTH_CLIENT_SECRET`, `YAKKA_PUBLIC_URL` | set together for remote collector mode (non-loopback bind); ignored on loopback ([design 5](05-distribution.md#local-bootstrap)) |
 | `TYPESAFE_API_KEY` | scorer credential; server side only, never in any client config |
 | `CLAUDE_API_TOKEN` | review provider credential; set in remote mode and review is available to every authenticated tenant for any repo; server side only, sent only in the provider authentication header |
+| `YAKKA_ADOPT_UNMARKED_TENANTS` | `1`, `true`, `yes` or `on` adopts every owned tenant that has no lifecycle marker once at startup (fresh marker and generation, state `active`); unset or any other value leaves them unmarked. Set in `fly.toml`. |
 
 `CLAUDE_API_TOKEN` is the setting that enables review. The model defaults to `claude-haiku-5-5`;
 `YAKKA_REVIEW_MODEL` is an optional override and is not required for registration. Effort is chosen
@@ -217,6 +218,8 @@ self-serve reset and delete with complete tenant/global cleanup. Its per-call ef
 controls, removal of the trial env gate, and complete paged review reads are also implemented and
 described above.
 
+Since 22 Nov 2026 (Plan 31) tenants created before the follow-up are adopted at startup rather than left unsupported.
+
 ### Owner tenant lifecycle API
 
 Only the human owner may reset or delete a tenant. Agents must not perform or attempt this on a user's behalf.
@@ -243,7 +246,7 @@ an absent/invalid cookie is `401 session_required` with sign-in guidance. After 
 non-JSON is `415 json_required`; absent ids are `404 tenant_not_found`; existing tenants owned by
 someone else are `403 tenant_owner_required`, including for an admin non-owner. Malformed JSON,
 missing/wrong-type/mismatched confirmation is `400 tenant_confirmation_mismatch`. After those
-checks, legacy tenants without a trustworthy ownership/creation marker return
+checks, tenants that have no lifecycle marker yet (flag off or adoption failed) return
 `409 legacy_tenant_cleanup_unsupported`. All rejections are no-ops before destructive work or
 selection changes. Busy work that cannot safely quiesce returns `409 tenant_busy`; partial cleanup
 is `503 tenant_cleanup_incomplete`, unavailable until operation-bound durable recovery finishes.
@@ -256,13 +259,12 @@ re-selection or creation; it preserves global login and other tenants. Reset ret
 listed identity metadata; delete leaves zero target references. Old credentials, cursors, queued
 work and restarts cannot resurrect erased assets. Anonymous provider safety exposure remains,
 without target identity or tenant analytics residue. Each owned `/v1/me` tenant carries `lifecycle_state`
-(`active`, `resetting`, `deleting`, `unsupported`) and `lifecycle_generation` (opaque string, null
-for unsupported legacy). Read from registry/journal metadata without lazy-open; disable lifecycle actions while recovery is
-unresolved. Pending entries remain owner-visible until completion; reset changes
+(`active`, `resetting`, `deleting`, `unmarked`) and `lifecycle_generation` (opaque string, null
+only while unmarked). Read from registry/journal metadata without lazy-open; disable lifecycle actions while recovery is
+unresolved. In-progress entries remain owner-visible until completion; reset changes
 generation, delete disappears. Both API-origin and Pages UI revalidate selection/generation on
 return/focus/pageshow and before tenant reads, clearing absent/changed selections and cached reads
-without auto-selecting another tenant. In-progress state suspends target reads. An eligible
-remembered selection lacking a generation requires explicit re-selection. Failed recovery reads
+without auto-selecting another tenant. In-progress state suspends target reads. A remembered selection whose tenant has no marker yet stays valid; an empty generation is not a change. Failed recovery reads
 show completion unknown and never trigger automatic mutation replay. The gate is a **spoofable guardrail, not proof
 of a human**; future human verification/captcha is explicitly out of scope. Detailed concurrency,
 recovery and no-cross-tenant proofs are in the plan's Phase 2.

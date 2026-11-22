@@ -149,3 +149,7 @@ No live historical population or paid trial is evidenced; the target of 50 disti
 *Superseded in part by [Plan 28](28-review-token-only-gating.md): the settings, cap and spend-approval follow-ups are replaced by token-only availability; the remaining items stand.*
 
 Resolve original findings #211–#217 before relying on their affected edge cases. Complete the historical clone/population proof, deployed-server readiness, server credential check, explicit spend approval and human lifecycle UI walkthrough before operator use. Consider a standalone high-water value only if audit consumers require it; current exports preserve the opaque cursor chain. Address #225 with a deterministic save-failure test for reservation purge.
+
+## Policy amendment — 22 Nov 2026 (Plan 31)
+
+Cody, 22 Nov 2026, decided that an owned tenant with no lifecycle record is a normal tenant. The Follow-up Phase 2 rule that such legacy tenants are not migrated, guessed at or given an inferred marker is reversed: at startup, behind `YAKKA_ADOPT_UNMARKED_TENANTS`, every unmarked tenant gets a fresh random marker and generation and state `active`, once. `/v1/me` no longer reports `unsupported`; the marker-less value is `unmarked`. Reset and delete keep every confirmation. See Plan 31.
