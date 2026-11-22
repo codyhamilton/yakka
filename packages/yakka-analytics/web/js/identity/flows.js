@@ -16,6 +16,10 @@ export function deviceApprovalPayload({ user_code, tenant, scope, lifetime, name
 export const deviceDenialPayload = userCode => ({ user_code: normalizeUserCode(userCode), action: 'deny' });
 
 function storageGet(key) { try { return localStorage.getItem(key) || ''; } catch { return ''; } }
+// response.url is always absolute; the request URL is relative when no API base
+// is configured (same-origin collector). Compare them in one absolute space so a
+// successful callback is not mistaken for an unexpected redirect.
+const absoluteUrl = value => { try { return new URL(value, globalThis.location.href).href; } catch { return String(value || ''); } };
 function isHttpUrl(value) { try { const url = new URL(value); return url.protocol === 'http:' || url.protocol === 'https:'; } catch { return false; } }
 
 export async function renderIdentity(root, path, api, me, isCurrent = () => true, account = null) {
@@ -42,7 +46,7 @@ async function callback(root, api, isCurrent = () => true) {
   try {
     const { response, body, requestUrl } = await api.callback(new URLSearchParams(location.search));
     if (!isCurrent()) return;
-    if (response.redirected || (response.url && response.url !== requestUrl) || response.type === 'opaqueredirect') throw new Error('The sign-in callback redirected unexpectedly.');
+    if (response.redirected || (response.url && absoluteUrl(response.url) !== absoluteUrl(requestUrl)) || response.type === 'opaqueredirect') throw new Error('The sign-in callback redirected unexpectedly.');
     const target = oauthCallbackTarget(body);
     if (!response.ok || !target) throw new Error('Sign in failed. Please try again.');
     location.assign(target);
