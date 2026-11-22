@@ -64,7 +64,7 @@ export function isoToWallTime(iso, timeZone) {
 // guessed, so a DST fold never silently maps to another hour.
 export function wallTimeToIso(value, timeZone = 'UTC') {
   const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?$/.exec(String(value || ''));
-  if (!match) return { error: CUSTOM_RANGE_ERROR };
+  if (!match) return { error: CUSTOM_TIME_ERROR };
   const [, y, mo, d, h, mi, s] = match;
   const naive = Date.UTC(Number(y), Number(mo) - 1, Number(d), Number(h), Number(mi), Number(s || 0));
   let offset = 0;
@@ -119,15 +119,19 @@ export function customTimeError(draft = {}) {
   return '';
 }
 
-// Apply only the C2–C5 draft fields. Advanced predicates, panel specs, tenant,
-// timezone-independent state and the compare mode survive.
-export function commitDraft(state = {}, draft = {}) {
-  const next = {
+function copyState(state = {}) {
+  return {
     ...state,
     filters: Object.fromEntries(Object.entries(state.filters || {}).map(([key, values]) => [key, [...(values || [])]])),
     cohorts: { ...(state.cohorts || {}) },
     exclude: [...(state.exclude || [])]
   };
+}
+
+// Apply only the C2–C5 draft fields. Advanced predicates, panel specs, tenant,
+// timezone-independent state and the compare mode survive.
+export function commitDraft(state = {}, draft = {}) {
+  const next = copyState(state);
   next.tz = draft.tz || state.tz || '';
   for (const field of FILTER_FIELDS) delete next.filters[field];
   if (draft.repo?.length) next.filters.repo_id = [...draft.repo];
@@ -189,12 +193,7 @@ export function panelOverridePlan(state = {}) {
 }
 
 export function applyPromotions(state = {}, promotions = {}) {
-  const next = {
-    ...state,
-    filters: Object.fromEntries(Object.entries(state.filters || {}).map(([key, values]) => [key, [...(values || [])]])),
-    cohorts: { ...(state.cohorts || {}) },
-    exclude: [...(state.exclude || [])]
-  };
+  const next = copyState(state);
   const remove = new Set(Object.keys(promotions).filter(field => field !== 'tenant'));
   const strip = scope => {
     const out = { ...(scope || {}) };
@@ -528,7 +527,7 @@ export function createScopeControls({
       .then(({ response, body }) => {
         if (countPath !== key) return;
         if (!response.ok) {
-          facets = { state: 'error', repos: [], kinds: [], error: response.status === 403 ? 'Filter options unavailable' : 'Filter options unavailable' };
+          facets = { state: 'error', repos: [], kinds: [], error: 'Filter options unavailable' };
         } else {
           facets = {
             state: 'ready',

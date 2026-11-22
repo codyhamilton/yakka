@@ -7,7 +7,6 @@ const node = (tag, text, attrs = {}) => {
   for (const [key, value] of Object.entries(attrs)) {
     if (key === 'className') el.className = value;
     else if (key === 'dataset') Object.assign(el.dataset, value);
-    else if (key.startsWith('on')) el.addEventListener(key.slice(2), value);
     else if (value !== undefined) el.setAttribute(key, value);
   }
   return el;
@@ -117,13 +116,9 @@ function paint(view, context) {
   }
   view.append(identity);
 
-  if (!me || meStatus !== 200) {
-    view.append(renderTenants(view, context, null));
-    view.append(renderTokens(view, context, null));
-    return;
-  }
-  view.append(renderTenants(view, context, me));
-  view.append(renderTokens(view, context, me));
+  const signedIn = meStatus === 200 && me ? me : null;
+  view.append(renderTenants(view, context, signedIn));
+  view.append(renderTokens(view, context, signedIn));
 }
 
 function renderTenants(view, context, me) {
@@ -151,7 +146,6 @@ function renderTenants(view, context, me) {
   section.append(wrap);
 
   const tenants = Array.isArray(me?.tenants) ? me.tenants : [];
-  let selected = context.tenant || '';
   const paintRows = list => {
     const body = tbody(grid);
     body.replaceChildren();
@@ -169,7 +163,7 @@ function renderTenants(view, context, me) {
       row.append(node('td', tenant.lifecycle_generation === undefined || tenant.lifecycle_generation === null ? '—' : String(tenant.lifecycle_generation)));
       const actions = node('td', undefined, { className: 'account-actions' });
       const use = actionButton('Use tenant', { 'data-testid': `use-tenant-${tenant.id}` });
-      use.addEventListener('click', () => { selected = tenant.id; context.onSelectTenant?.(tenant.id); });
+      use.addEventListener('click', () => { context.onSelectTenant?.(tenant.id); });
       actions.append(use, ' ');
       const href = `${resolvedBase()}/profile/lifecycle?tenant=${encodeURIComponent(tenant.id)}`;
       actions.append(node('a', 'Reset or delete… (API owner page)', { href, className: 'account-lifecycle-link', 'data-testid': `lifecycle-link-${tenant.id}` }));
@@ -266,7 +260,7 @@ function renderTokens(view, context, me) {
 
   const scopeLabelEl = node('label', 'Scope ');
   const scope = node('select', undefined, { name: 'scope', 'data-testid': 'token-scope' });
-  for (const [value, label] of [['read', 'Read'], ['read_write', 'Read and write']]) scope.append(node('option', label, { value }));
+  for (const [value, label] of Object.entries(SCOPE_LABELS)) scope.append(node('option', label, { value }));
   scope.value = 'read';
   scopeLabelEl.append(scope);
   form.append(scopeLabelEl);

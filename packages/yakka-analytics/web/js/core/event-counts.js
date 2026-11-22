@@ -10,7 +10,6 @@ export const COUNTS_LEGACY_TEXT = 'This server cannot report retained-event tota
 export const COUNTS_RETRY_TEXT = 'Retry counts';
 
 let snapshot = null;
-let sequence = 0;
 
 export function currentEventCounts() {
   return snapshot ? { ...snapshot, matched: { ...snapshot.matched }, tenantTotal: { ...snapshot.tenantTotal } } : null;
@@ -172,8 +171,7 @@ export function createEventCountStrip({
     destroy() { destroyed = true; localSequence += 1; }
   };
 
-  if (capability) load(context);
-  else render({ state: 'legacy', text: COUNTS_LEGACY_TEXT });
+  render({ state: 'legacy', text: COUNTS_LEGACY_TEXT });
   return api;
 }
 

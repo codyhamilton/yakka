@@ -75,14 +75,16 @@ function cellText(value) {
 export function parseReaderIdentity(search = '') {
   const params = new URLSearchParams(search);
   const rawHash = (params.get('hash') || '').trim();
-  const hash = /^[0-9a-f]{64}$/.test(rawHash) ? rawHash : '';
+  const rawCompare = (params.get('compare') || '').trim();
+  const hashOk = /^[0-9a-f]{64}$/.test(rawHash);
+  const compareOk = /^[0-9a-f]{64}$/.test(rawCompare);
   return {
     repo_id: (params.get('repo_id') || '').trim(),
     path: (params.get('path') || '').trim(),
-    hash,
-    compare: /^[0-9a-f]{64}$/.test((params.get('compare') || '').trim()) ? (params.get('compare') || '').trim() : '',
-    invalidCompare: params.has('compare') && !/^[0-9a-f]{64}$/.test((params.get('compare') || '').trim()),
-    invalidHash: rawHash !== '' && hash === ''
+    hash: hashOk ? rawHash : '',
+    compare: compareOk ? rawCompare : '',
+    invalidCompare: params.has('compare') && !compareOk,
+    invalidHash: rawHash !== '' && !hashOk
   };
 }
 
@@ -138,9 +140,7 @@ export function checkChoices(rows = [], catalogue = []) {
 }
 
 export function scoreCheckNames(rows = []) {
-  const names = new Set();
-  for (const row of rows) for (const check of Object.keys(row?.scores || {})) names.add(check);
-  return [...names].sort();
+  return checkChoices(rows);
 }
 
 export function defaultScoreCheck(rows = []) {
@@ -441,7 +441,7 @@ function scoreChart(doc, history, { check, scorer } = {}) {
     mark.setAttribute('r', '3');
     mark.setAttribute('class', 'artifact-chart-mark');
     const title = doc.createElementNS('http://www.w3.org/2000/svg', 'title');
-    title.textContent = `${observation(point)} · ${shortHash(point.hash)} · ${point.score.toFixed(2)} (${scorer})`;
+    title.textContent = `${point.observed} · ${shortHash(point.hash)} · ${point.score.toFixed(2)} (${scorer})`;
     mark.append(title);
     svg.append(mark);
   }
@@ -451,7 +451,7 @@ function scoreChart(doc, history, { check, scorer } = {}) {
   return host;
 }
 
-function scoreTable(doc, history, { check, scorer } = {}) {
+function scoreTable(doc, history, { check } = {}) {
   const table = el(doc, 'table', 'artifact-table artifact-score-table');
   table.append(el(doc, 'caption', '', 'Clarity across file versions'), tableCols(doc, SCORE_COLUMNS), tableHead(doc, SCORE_COLUMNS));
   const body = doc.createElement('tbody');
@@ -545,7 +545,6 @@ export function render(root, doc = globalThis.document, { signal, tenant = '', r
   let contentRun = 0;
   let diffRun = 0;
   let explicitPair = Boolean(identity.hash && identity.compare && identity.hash !== identity.compare);
-  let loadVersionSlot = null;
   let scoreSlot = null;
   let viewerSlot = null;
   let contentPane = null;
@@ -604,8 +603,8 @@ export function render(root, doc = globalThis.document, { signal, tenant = '', r
     compareHash = rows.some(row => row.content_hash === compareHash) ? compareHash : defaults.to;
     const pair = explicitPair && rows.some(row => row.content_hash === selectedHash)
       && rows.some(row => row.content_hash === compareHash) && selectedHash !== compareHash;
-    const from = compareSelect('Compare from', pair ? selectedHash : defaults.from);
-    const to = compareSelect('Compare to', pair ? compareHash : (compareHash || defaults.to));
+    const from = compareSelect('Compare from', 'from', pair ? selectedHash : defaults.from);
+    const to = compareSelect('Compare to', 'to', pair ? compareHash : (compareHash || defaults.to));
     const show = el(doc, 'button', 'artifact-show-diff', 'Show diff');
     show.type = 'button';
     show.disabled = rows.length < 2;
@@ -613,11 +612,11 @@ export function render(root, doc = globalThis.document, { signal, tenant = '', r
     versionControls.append(from.label, to.label, show);
   }
 
-  function compareSelect(label, value) {
+  function compareSelect(label, side, value) {
     const node = el(doc, 'label', 'artifact-compare-select');
     node.append(doc.createTextNode(`${label} `));
     const select = doc.createElement('select');
-    select.className = `artifact-compare-${label === 'Compare from' ? 'from' : 'to'}`;
+    select.className = `artifact-compare-${side}`;
     select.setAttribute('aria-label', label);
     for (const row of sortVersions(rows)) {
       const option = doc.createElement('option');
@@ -649,7 +648,7 @@ export function render(root, doc = globalThis.document, { signal, tenant = '', r
       more.addEventListener('click', loadMore);
       footer.append(more);
     }
-    loadVersionSlot.replaceChildren(table, footer);
+    versionSlot.replaceChildren(table, footer);
   }
 
   function paintScorePanel() {
@@ -755,7 +754,7 @@ export function render(root, doc = globalThis.document, { signal, tenant = '', r
       contentPane.append(block);
       return;
     }
-    if (contentHash !== selectedHash || contentText === '') {
+    if (contentHash !== selectedHash) {
       contentPane.append(el(doc, 'p', 'artifact-content-status', 'Loading content…'));
       return;
     }
@@ -1011,8 +1010,7 @@ export function render(root, doc = globalThis.document, { signal, tenant = '', r
     form.addEventListener('submit', event => {
       event.preventDefault();
       if (!repoSelect.value || !pathInput.value.trim()) return;
-      globalThis.history.pushState(null, '', readerUrl({ repo_id: repoSelect.value, path: pathInput.value.trim() }));
-      globalThis.dispatchEvent(new PopStateEvent('popstate'));
+      reroute(readerUrl({ repo_id: repoSelect.value, path: pathInput.value.trim() }));
     });
     if (!tenantValue) {
       transport.request('me', { signal: controller.signal, stateKey: 'artifact-me' }).then(result => {
@@ -1050,7 +1048,6 @@ export function render(root, doc = globalThis.document, { signal, tenant = '', r
   const versions = buildVersionsSlot();
   versionControls = versions.controls;
   versionSlot = versions.slot;
-  loadVersionSlot = versionSlot;
   section.append(versions.wrapper);
   const scoreSection = el(doc, 'div', 'artifact-score-slot');
   scoreSlot = scoreSection;

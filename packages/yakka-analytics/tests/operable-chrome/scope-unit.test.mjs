@@ -50,6 +50,7 @@ test('collector precedence: URL, then remembered, then first active; foreign URL
 });
 
 test('custom wall times refuse nonexistent and ambiguous DST hours', () => {
+  assert.equal(wallTimeToIso('not-a-time', 'UTC').error, CUSTOM_TIME_ERROR);
   assert.equal(wallTimeToIso('2026-03-08T02:30', 'America/New_York').error, CUSTOM_TIME_ERROR);
   assert.equal(wallTimeToIso('2026-11-01T01:30', 'America/New_York').error, CUSTOM_TIME_ERROR);
   const ok = wallTimeToIso('2026-06-01T09:15', 'Australia/Brisbane');
