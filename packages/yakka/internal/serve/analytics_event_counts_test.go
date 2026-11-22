@@ -86,6 +86,10 @@ func TestEventCountsHandler(t *testing.T) {
 	if code != 400 || body["code"] != "unsupported_filter" || body["reason"] != "bogus" {
 		t.Fatalf("unknown key: %d %v", code, body)
 	}
+	code, body = aget(t, s, eventCountsURL(from, to, url.Values{"exclude": {"bogus:x"}}))
+	if code != 400 || body["code"] != "unsupported_filter" || body["reason"] != "bogus" {
+		t.Fatalf("unknown exclude: %d %v", code, body)
+	}
 }
 
 func TestEventCountsBusy(t *testing.T) {

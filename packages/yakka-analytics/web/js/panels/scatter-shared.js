@@ -573,6 +573,9 @@ export function renderScatterChooser({ panelId, spec = {}, schema = null, panel 
   const grain = spec.grain || panel?.grain || '';
   const wrapper = doc.createElement('div');
   wrapper.className = 'p11-chooser';
+  // Unsupported candidates are intentionally omitted from the controls. Do
+  // not turn every panel/schema mismatch into a user-facing list of fake
+  // choices; P6 offers only the supported intersection.
   const unsupported = [...axes.unsupported, ...colours.unsupported];
   const axisOptions = fields.axes.map(name => ({ value: name, label: scatterLabel(name) }));
   const sizeOptions = [{ value: '', label: 'None' }, ...axisOptions];
@@ -609,17 +612,5 @@ export function renderScatterChooser({ panelId, spec = {}, schema = null, panel 
     select(doc, 'Colour', colourOptions, fields.colour, value => dispatch({ scope: { colour: value } }))
   );
 
-  if (unsupported.length) {
-    const list = doc.createElement('ul');
-    list.className = 'p11-unsupported';
-    list.setAttribute('aria-label', 'Unsupported scatter choices');
-    for (const item of unsupported) {
-      const node = doc.createElement('li');
-      node.dataset.kind = item.kind;
-      node.textContent = `${item.kind} ${item.name} is unsupported: ${item.reason}. Try ${item.try}.`;
-      list.append(node);
-    }
-    wrapper.append(list);
-  }
   return { element: wrapper, fields, unsupported, dispatch };
 }

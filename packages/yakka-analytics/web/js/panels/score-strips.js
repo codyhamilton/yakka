@@ -11,7 +11,7 @@ import {
   ensureP10Styles, mountPanelViews, requestParams, schemaGrain, whenPanelBody, whenPanelSlot
 } from './p10-shared.js';
 import {
-  SCORE_UNIT, defaultCheck, fetchContentBaselines, fetchScoreCatalogue, multiKindRefusal,
+  SCORE_UNIT, defaultCheck, fetchContentBaselines, fetchScoreCatalogue, installScoreControls, multiKindRefusal,
   renderScoreControls, requestedScore, resolveScorer, scoreApplicabilityRefusal, scoreCaption,
   scoreKind, scorerNames
 } from './score-ranges.js';
@@ -154,7 +154,11 @@ export async function load(context = {}) {
       if (!catalogue.response.ok) return errorState({ message: catalogue.body?.error || `The server returned ${catalogue.response.status}.`, code: catalogue.body?.code || String(catalogue.response.status || '') });
       checks = catalogue.checks;
     }
-    if (!checks.length) return emptyState([{ kind: 'scope', label: `no checks are catalogued for ${kind}`, clear: null }]);
+    if (!checks.length) {
+      installScoreControls({ panelId: panel.id, panel, spec, doc, check: '', scorer: '' });
+      whenPanelBody(panel.id, doc, host => host.replaceChildren());
+      return emptyState([{ kind: 'scope', label: `no checks are catalogued for ${kind}`, clear: null }]);
+    }
     if (requested.check && !checks.includes(requested.check)) {
       return unsupportedState({ measure: `check ${requested.check}`, reason: 'not in the score catalogue for this kind', source: 'server /schema', nearest: checks[0] });
     }
@@ -166,8 +170,10 @@ export async function load(context = {}) {
       return unsupportedState({ measure: `scorer ${requested.scorer}`, reason: 'not in the content baseline for this check', source: 'server /baselines', nearest: scorerNames(baselines.body)[0] || null });
     }
     if (!resolved.scorer) {
+      installScoreControls({ panelId: panel.id, panel, spec, doc, kind, check, checks, scorer: '', scorers: scorerNames(baselines.body) });
       return unsupportedState({ measure: `a scorer for ${check}`, reason: 'no scorer is published for this check', source: 'server /baselines', nearest: null });
     }
+    installScoreControls({ panelId: panel.id, panel, spec, doc, kind, check, checks, scorer: resolved.scorer, scorers: scorerNames(baselines.body) });
     const pageMax = Number(schema?.budgets?.page_max) || 0;
     const params = requestParams({
       scope: { ...scope, kind }, spec: { ...spec, split: '' }, measure: '',

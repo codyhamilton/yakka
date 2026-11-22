@@ -1140,21 +1140,24 @@ function renderDetail(root, doc, { signal, id, tenant = '', readContext = null }
   back.href = sessionBackDestination(search);
   const ledger = el(doc, 'a', 'session-ledger-link', 'Open full ledger');
   ledger.href = sessionLedgerDestination(id, search);
-  root.append(heading, back, ledger);
-
-  const frame = createPanelFrame({ panel: SESSION_LANES_PANEL, scope: { id }, transport, scheduler, doc });
-  frame.element.dataset.chart = 'lanes';
-  root.append(frame.element);
-  const body = frame.element.querySelector('.workspace-panel-body');
+  const links = el(doc, 'nav', 'session-detail-links');
+  links.setAttribute('aria-label', 'Session navigation');
+  links.append(back, ledger);
+  root.append(heading, links);
 
   const identity = detailSection(doc, 'session-detail-identity', 'Identity');
   const strips = el(doc, 'div', 'session-measure-strips');
   const selected = measureStrip(doc, 'selected', 'Selected window');
   const whole = measureStrip(doc, 'whole', 'Whole session');
   strips.append(selected.strip, whole.strip);
+
+  const frame = createPanelFrame({ panel: SESSION_LANES_PANEL, scope: { id }, transport, scheduler, doc });
+  frame.element.dataset.chart = 'lanes';
+  const body = frame.element.querySelector('.workspace-panel-body');
   const lanesSection = detailSection(doc, 'session-detail-lanes', 'Session events over time');
   const recordsSection = detailSection(doc, 'session-detail-records', 'Session records');
-  body.replaceChildren(identity.section, strips, lanesSection.section, recordsSection.section);
+  body.replaceChildren(lanesSection.section);
+  root.append(identity.section, strips, frame.element, recordsSection.section);
 
   let disposed = false;
   let controller = new AbortController();

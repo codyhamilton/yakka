@@ -262,6 +262,20 @@ func TestEventCountsRetainedRecordPredicate(t *testing.T) {
 	}
 }
 
+func TestRetainedRecordPredicateRejectsUnknownExclude(t *testing.T) {
+	tn, from, to := predicateFixture(t)
+	f := AnalyticsFilter{
+		From: from, To: to,
+		Excludes: map[string][]string{"bogus": {"value"}},
+	}
+	if _, _, err := tn.Explore(context.Background(), f, 100); err == nil || err.Error() != "unsupported_filter: bogus" {
+		t.Fatalf("Explore unknown exclude error = %v, want unsupported_filter: bogus", err)
+	}
+	if _, err := tn.EventCounts(context.Background(), f); err == nil || err.Error() != "unsupported_filter: bogus" {
+		t.Fatalf("EventCounts unknown exclude error = %v, want unsupported_filter: bogus", err)
+	}
+}
+
 func TestEventCountsEmptyWindowKeepsTenantTotal(t *testing.T) {
 	tn, from, _ := predicateFixture(t)
 	got, err := tn.EventCounts(context.Background(), AnalyticsFilter{From: from.Add(-48 * time.Hour), To: from.Add(-24 * time.Hour)})

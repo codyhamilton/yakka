@@ -63,7 +63,9 @@ function declaredRouteFilters(panel = {}) {
 
 function activeFilters(scope = {}, ignoredFilters = []) {
   const active = new Map();
-  for (const [key, raw] of Object.entries(scope || {})) {
+  const entries = Object.entries(scope || {}).filter(([key]) => key !== 'filters');
+  if (scope?.filters && typeof scope.filters === 'object') entries.push(...Object.entries(scope.filters));
+  for (const [key, raw] of entries) {
     if (SCOPE_ONLY.has(key)) continue;
     const values = Array.isArray(raw) ? raw : [raw];
     if (values.some(value => value !== undefined && value !== null && value !== '')) active.set(key, true);
@@ -90,7 +92,14 @@ function supportedSet(panel, schema, measure) {
 
 export function applicability({ panel = {}, spec = {}, scope = {}, schema = null, ignoredFilters = [] } = {}) {
   const measure = spec?.measures?.[0] || panel?.measures?.[0] || '';
-  const supported = supportedSet(panel, schema, measure);
+  // Mixed summary panels can answer a shared filter for some cells while
+  // explicitly marking other measures unavailable. Their union is the panel
+  // read capability; individual cells own their narrower applicability. The
+  // panel's declared filters are the published union, so a single measure's
+  // narrower schema dims must not refuse the shared read.
+  const supported = panel?.appliesByAnyMeasure
+    ? new Set(declaredRouteFilters(panel) || [])
+    : supportedSet(panel, schema, measure);
   const { active, ignored } = activeFilters(scope, ignoredFilters);
   const unsupportedFilters = [];
   const labels = new Set();

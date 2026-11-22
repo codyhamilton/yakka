@@ -88,7 +88,7 @@ test('pulse summary keeps repository and kind on the previous-period read', () =
   assert.deepEqual(sideOf(previous), sideOf(current), 'the previous read adds no unrelated filter');
 }));
 
-test('movers current, series, previous and unpriced reads keep the same filters', () => withLocation(async () => {
+test('movers refuse an unsupported document-kind filter before reading', () => withLocation(async () => {
   const calls = [];
   const schema = makeSchema();
   schema.grains.time.measures = [...schema.grains.time.measures, 'unpriced_calls'];
@@ -107,33 +107,10 @@ test('movers current, series, previous and unpriced reads keep the same filters'
     }
   };
   const scope = { ...CURRENT, tz: 'UTC', filters: FILTERS };
-  await loadMovers({ scope, transport, tenant: 'tenant-b', doc: fakeDoc() });
-
-  const currentCalls = calls.filter(call => call.params.get('from') === CURRENT.from);
-  const previousCalls = calls.filter(call => call.params.get('from') === PREVIOUS.from);
-  assert.equal(currentCalls.length, 6, 'two lenses: current totals, daily series and unpriced counts');
-  assert.equal(previousCalls.length, 2, 'one previous-period read per lens');
-  assert.ok(currentCalls.some(call => call.params.get('measure') === 'unpriced_calls'));
-
-  for (const call of calls) {
-    assert.equal(call.tenant, 'tenant-b');
-    assert.equal(call.params.get('tz'), 'UTC');
-    assert.equal(call.params.get('repo_id'), 'repo-a');
-    assert.equal(call.params.get('kind'), 'brief');
-    assert.equal(call.params.has('all'), false);
-    assert.equal(call.params.has('win'), false);
-  }
-  for (const call of currentCalls) {
-    assert.equal(call.params.get('to'), CURRENT.to);
-  }
-  for (const call of previousCalls) {
-    assert.equal(call.params.get('to'), PREVIOUS.to);
-    assert.equal(call.params.get('bucket'), 'none', 'G-movers previous read is a bucket total');
-    const match = currentCalls.find(current => current.params.get('measure') === call.params.get('measure') &&
-      current.params.get('dim') === call.params.get('dim') && current.params.get('bucket') === call.params.get('bucket'));
-    assert.ok(match, `no current peer for ${call.params.get('measure')}/${call.params.get('dim')}`);
-    assert.deepEqual(sideOf(call), sideOf(match), 'the previous read adds no unrelated filter');
-  }
+  const result = await loadMovers({ scope, transport, tenant: 'tenant-b', doc: fakeDoc() });
+  assert.equal(result.state, 'unsupported');
+  assert.match(result.message, /cannot apply document kind/i);
+  assert.deepEqual(calls, [], 'an inapplicable filter refuses the panel before query reads');
 }));
 
 const environment = loadBrowserEnvironment();
@@ -161,14 +138,15 @@ test('a filtered Pulse view keeps repository and kind on comparison reads in Chr
     const summaries = requests.filter(url => url.pathname.endsWith('/v1/analytics/summary'));
     const queries = requests.filter(url => url.pathname.endsWith('/v1/analytics/query'));
     assert.ok(summaries.length >= 2, 'summary current and previous reads were observed');
-    assert.ok(queries.length >= 2, 'movers comparison reads were observed');
+    assert.equal(queries.length, 0, 'movers refuses kind because its declared measures cannot apply it');
+    assert.match(await page.locator('[data-panel="movers"]').innerText(), /cannot apply document kind/i);
 
     const currentTo = Math.max(...summaries.map(url => Date.parse(url.searchParams.get('to'))).filter(Number.isFinite));
     const currentFrom = currentTo - 7 * DAY;
     const previousFrom = currentTo - 14 * DAY;
     const at = value => new Date(value).toISOString();
 
-    for (const url of [...summaries, ...queries]) {
+    for (const url of summaries) {
       assert.equal(url.searchParams.get('tenant'), tenant);
       assert.equal(url.searchParams.get('repo_id'), 'fixture-repo', `${url.pathname} dropped the repository`);
       assert.equal(url.searchParams.get('kind'), 'brief', `${url.pathname} dropped the document kind`);
@@ -180,21 +158,30 @@ test('a filtered Pulse view keeps repository and kind on comparison reads in Chr
     assert.equal(previousSummaries.length, 1, 'exactly one previous summary read');
     assert.equal(previousSummaries[0].searchParams.get('to'), at(currentFrom));
 
-    const previousQueries = queries.filter(url => url.searchParams.get('from') === at(previousFrom));
-    assert.ok(previousQueries.length >= 1, 'movers issued a previous-period query');
-    for (const previous of previousQueries) {
-      assert.equal(previous.searchParams.get('to'), at(currentFrom));
-      assert.equal(previous.searchParams.get('bucket'), 'none');
-      const peer = queries.find(url => url.searchParams.get('from') === at(currentFrom) &&
-        url.searchParams.get('measure') === previous.searchParams.get('measure') &&
-        url.searchParams.get('dim') === previous.searchParams.get('dim') &&
-        url.searchParams.get('bucket') === previous.searchParams.get('bucket'));
-      assert.ok(peer, 'a current peer read exists');
-      const nonTime = url => [...url.searchParams.entries()]
-        .filter(([key]) => key !== 'from' && key !== 'to')
-        .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
-      assert.deepEqual(nonTime(previous), nonTime(peer), 'the previous read adds no unrelated filter');
-    }
+    assert.equal(queries.length, 0, 'unsupported movers filter produces no query reads');
+  } finally {
+    if (browser) await browser.close();
+    await harness.close();
+  }
+});
+
+test('Kind draft can return to All kinds and correcting an unknown URL value enables Apply', { skip: SKIP }, async () => {
+  const harness = await startWorkspaceHarness();
+  let browser;
+  try {
+    browser = await launchBrowser(environment);
+    const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+    await page.goto(`${harness.origin}/ledger?kind=brief`);
+    await page.waitForFunction(() => document.querySelector('#scope-kind') && document.querySelector('.scope-apply'));
+    assert.ok(await page.locator('#scope-kind option[value=""]').count(), 'All kinds remains available with a committed selection');
+    await page.selectOption('#scope-kind', '');
+    assert.equal(await page.locator('#scope-kind').inputValue(), '', 'All kinds clears the draft selection');
+
+    await page.goto(`${harness.origin}/ledger?kind=weird`);
+    await page.waitForFunction(() => document.querySelector('#scope-kind') && document.querySelector('.scope-apply'));
+    assert.equal(await page.locator('.scope-apply').isDisabled(), true, 'unrecognized URL value blocks Apply');
+    await page.selectOption('#scope-kind', 'brief');
+    assert.equal(await page.locator('.scope-apply').isEnabled(), true, 'a valid draft corrects the unrecognized committed value');
   } finally {
     if (browser) await browser.close();
     await harness.close();

@@ -44,7 +44,8 @@
 .session-events th, .session-events td { padding: 5px 8px; border-bottom: 1px solid var(--yk-border); text-align: left; }
 .session-event-row[data-priced="false"] td { color: var(--yk-muted); font-style: italic; }
 .session-artifacts, .session-plans { margin: 0.25rem 0 0.5rem 1rem; }
-.sessions-back { display: inline-block; margin-bottom: 0.5rem; }
+.sessions-back { display: inline-block; }
+.session-detail-links { display:flex; align-items:center; gap:12px; margin:0 0 8px; }
 
 @media (pointer: coarse) {
   .session-open, .session-lens { min-height: 44px; }

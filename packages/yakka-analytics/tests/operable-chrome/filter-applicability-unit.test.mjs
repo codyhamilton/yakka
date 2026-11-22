@@ -10,6 +10,7 @@ import {
   UNSUPPORTED_FILTER_MESSAGE, applicability, applicabilityState, filterLabel
 } from '../../web/js/core/filter-applicability.js';
 import { mountPanelViews, panelViewsEnabled } from '../../web/js/panels/p10-shared.js';
+import { createPanelFrame } from '../../web/js/panels/panel-frame.js';
 import { tableModel } from '../../web/js/charts/table.js';
 
 const schema = {
@@ -40,6 +41,7 @@ function node(tag) {
     append(...nodes) { for (const child of nodes) { this.children.push(child); this.childNodes.push(child); } },
     replaceChildren(...nodes) { this.children = []; this.childNodes = []; this.append(...nodes); },
     setAttribute(key, value) { this.attributes[key] = String(value); },
+    removeAttribute(key) { delete this.attributes[key]; },
     getAttribute(key) { return this.attributes[key] ?? null; },
     addEventListener(key, handler) { this.listeners[key] = handler; },
     click() { this.listeners.click?.({ target: this }); },
@@ -58,6 +60,10 @@ function all(root, predicate, out = []) {
   if (predicate(root)) out.push(root);
   for (const child of root.children || []) all(child, predicate, out);
   return out;
+}
+
+function deepText(root) {
+  return (root.children || []).length ? root.children.map(deepText).join('') : (root.textContent || '');
 }
 
 function button(root, label) {
@@ -182,6 +188,45 @@ test('the frame keeps the caption visible and clears the body on an applicabilit
   assert.equal(body.children.length, 0, 'no body marks survive a refusal');
   const status = all(frame.element, item => item.className === 'workspace-panel-status')[0];
   assert.equal(status.textContent, 'This chart cannot apply document kind. Change the filters to view it.');
+});
+
+test('panel frame renders the shared T1-T3 copy, busy state, recovery actions and safe codes', () => {
+  const doc = fakeDoc();
+  let allHistory = 0;
+  let reset = 0;
+  let retry = 0;
+  const frame = createPanelFrame({
+    panel: { id: 'rows', title: 'Rows', tableCaption: 'Rows, per repository', charts: [] },
+    doc, onAllHistory: () => allHistory++, onResetFilters: () => reset++
+  });
+  const status = frame.element.children.find(item => item.className === 'workspace-panel-meta').children[0];
+
+  frame.setState('loading');
+  assert.equal(deepText(status), 'Loading Rows, per repository…');
+  assert.equal(status.getAttribute('aria-busy'), 'true');
+
+  frame.setState('empty');
+  assert.match(deepText(status), /^No records match these filters\./);
+  button(status, 'All history').click();
+  button(status, 'Reset filters').click();
+  assert.equal(allHistory, 1);
+  assert.equal(reset, 1);
+
+  frame.setState('error', { code: 'read_failed', retry: () => retry++ });
+  assert.match(deepText(status), /^Could not load Rows, per repository\. \(read_failed\)Retry$/);
+  button(status, 'Retry').click();
+  assert.equal(retry, 1);
+  frame.setState('error', { code: '<img onerror=bad()>' });
+  assert.doesNotMatch(deepText(status), /onerror|<img/);
+
+  frame.setState('unauthorized', { status: 401 });
+  assert.match(deepText(status), /Sign in to load this table\.Sign in/);
+  frame.setState('unauthorized', { status: 403 });
+  assert.equal(deepText(status), 'You do not have access to this tenant');
+  frame.setState('busy');
+  assert.match(deepText(status), /server is busy; could not load Rows, per repository/);
+  frame.setState('timeout');
+  assert.match(deepText(status), /request timed out; could not load Rows, per repository/);
 });
 
 test('an unregistered caption is an explicit refusal in the frame', async () => {

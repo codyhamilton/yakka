@@ -69,8 +69,8 @@ export function cancelledState({ retry = null } = {}) {
   return { state: 'cancelled', retry };
 }
 
-export function unauthorizedState({ message = '', code = '', retry = null } = {}) {
-  return { state: 'unauthorized', message, code, retry };
+export function unauthorizedState({ message = '', code = '', status = 0, retry = null } = {}) {
+  return { state: 'unauthorized', message, code, status, retry };
 }
 
 export function busyState({ message = '', code = 'busy', retry = null, retryAfter = 0 } = {}) {
@@ -107,6 +107,7 @@ export function stateFromResponse({ status = 0, body = {} } = {}) {
     return unauthorizedState({
       message: message || (status === 401 ? 'Sign in again to read this tenant.' : 'This tenant is not authorized for this read.'),
       code: code || String(status),
+      status,
       retry
     });
   }

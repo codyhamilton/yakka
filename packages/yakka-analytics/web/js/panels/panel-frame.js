@@ -35,7 +35,7 @@ function badgeInput(result = {}) {
   return meta;
 }
 
-export function createPanelFrame({ panel, spec = {}, scope = {}, transport, scheduler, tenant = '', schema = null, doc = globalThis.document, onEditFilters = null, editFilters = null } = {}) {
+export function createPanelFrame({ panel, spec = {}, scope = {}, transport, scheduler, tenant = '', schema = null, doc = globalThis.document, onEditFilters = null, editFilters = null, onAllHistory = null, onResetFilters = null } = {}) {
   if (!panel || !panel.id) throw new Error('panel frame needs a registered panel');
   const element = doc.createElement('section');
   element.className = 'workspace-panel';
@@ -63,6 +63,7 @@ export function createPanelFrame({ panel, spec = {}, scope = {}, transport, sche
   const status = doc.createElement('p');
   status.className = 'workspace-panel-status';
   status.setAttribute('aria-live', 'polite');
+  status.setAttribute('role', 'status');
   const population = doc.createElement('p');
   population.className = 'workspace-panel-population';
   const basis = doc.createElement('p');
@@ -104,6 +105,23 @@ export function createPanelFrame({ panel, spec = {}, scope = {}, transport, sche
     status.append(button);
   }
 
+  function recovery(label, handler) {
+    if (typeof handler !== 'function') return;
+    const button = text(doc, 'button', 'workspace-panel-recovery', label);
+    button.type = 'button';
+    button.addEventListener('click', handler);
+    status.append(button);
+  }
+
+  function tableCaption() {
+    return String(panel.tableCaption || panel.title || panel.id);
+  }
+
+  function sanitizedCode(value) {
+    const code = String(value || '').trim();
+    return /^[A-Za-z0-9_.:-]{1,64}$/.test(code) ? code : '';
+  }
+
   function showApplicability(result) {
     const next = applicabilityResultState(result);
     if (!next) return false;
@@ -125,50 +143,46 @@ export function createPanelFrame({ panel, spec = {}, scope = {}, transport, sche
     // renderStatus:false so the generic frame vocabulary does not double it.
     if (options.renderStatus === false) return;
     if (next === 'loading') {
-      const count = Number(options.inFlight) || 0;
-      status.textContent = `Loading${count ? ` (${count} in flight)` : ''}…`;
+      status.setAttribute('aria-busy', 'true');
+      status.textContent = `Loading ${tableCaption()}…`;
       return;
     }
+    status.removeAttribute('aria-busy');
     if (next === 'ready') {
       status.textContent = '';
       return;
     }
     if (next === 'empty') {
-      status.append(text(doc, 'strong', '', 'No rows match. '));
-      const causes = options.causes || [];
-      if (!causes.length) status.append(doc.createTextNode('The scope produced zero.'));
-      for (const cause of causes) {
-        status.append(doc.createTextNode(`${cause.label} `));
-        if (cause.clear) {
-          const button = text(doc, 'button', '', `Clear ${cause.kind}`);
-          button.type = 'button';
-          button.addEventListener('click', cause.clear);
-          status.append(button);
-        }
-      }
+      status.append(text(doc, 'strong', '', 'No records match these filters.'));
+      recovery('All history', onAllHistory);
+      recovery('Reset filters', onResetFilters);
       return;
     }
     if (next === 'error') {
-      status.append(text(doc, 'strong', '', options.message || 'The server did not answer.'));
-      if (options.code) status.append(doc.createTextNode(` (${options.code})`));
+      status.append(text(doc, 'strong', '', `Could not load ${tableCaption()}.`));
+      const code = sanitizedCode(options.code);
+      if (code) status.append(doc.createTextNode(` (${code})`));
       addRetry(options.retry);
       return;
     }
     if (next === 'unauthorized') {
-      status.append(text(doc, 'strong', '', options.message || 'This read is not authorized.'));
-      if (options.code) status.append(doc.createTextNode(` (${options.code})`));
-      addRetry(options.retry);
+      if (Number(options.status) === 403 || String(options.code) === '403') {
+        status.append(text(doc, 'strong', '', 'You do not have access to this tenant'));
+      } else {
+        status.append(text(doc, 'strong', '', 'Sign in to load this table.'));
+        const link = text(doc, 'a', '', 'Sign in');
+        link.href = `/login${globalThis.location?.search || ''}`;
+        status.append(link);
+      }
       return;
     }
     if (next === 'busy') {
-      status.append(text(doc, 'strong', '', options.message || 'The server is busy; retry shortly.'));
-      if (options.code) status.append(doc.createTextNode(` (${options.code})`));
+      status.append(text(doc, 'strong', '', `The server is busy; could not load ${tableCaption()}.`));
       addRetry(options.retry);
       return;
     }
     if (next === 'timeout') {
-      status.append(text(doc, 'strong', '', options.message || 'The read timed out; narrow the window or retry.'));
-      if (options.code) status.append(doc.createTextNode(` (${options.code})`));
+      status.append(text(doc, 'strong', '', `The request timed out; could not load ${tableCaption()}.`));
       addRetry(options.retry);
       return;
     }

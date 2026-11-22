@@ -236,7 +236,23 @@ test('plan30 phase 2 acceptance', { skip: SKIP }, async t => {
           }
         }
         if (screen.id === 'S-plan-detail') pass('G-planline', 'S-plan-detail plan-timeline caption, events/executions sources and table order');
-        if (screen.id === 'S-session-detail') pass('G-sessionlanes', 'S-session-detail session-lanes caption, marks sentence and 7-column table');
+        if (screen.id === 'S-session-detail') {
+          const ordered = await page.evaluate(() => {
+            const selectors = ['.session-detail-identity', '.session-measure-strips', '[data-panel="session-lanes"]', '.session-detail-records'];
+            const nodes = selectors.map(selector => document.querySelector(selector));
+            return {
+              present: nodes.every(Boolean),
+              ordered: nodes.every((node, index) => index === nodes.length - 1 ||
+                Boolean(node.compareDocumentPosition(nodes[index + 1]) & Node.DOCUMENT_POSITION_FOLLOWING)),
+              linksGap: getComputedStyle(document.querySelector('.session-detail-links')).gap
+            };
+          });
+          assert.equal(ordered.present, true, 'identity, summary strips, lanes and records are separate regions');
+          assert.equal(ordered.ordered, true, 'identity, selected/whole strips, lanes and records follow the contract order');
+          assert.notEqual(ordered.linksGap, 'normal', 'session navigation links have spacing');
+          pass('S-session-detail', 'separate ordered identity, selected/whole strips, lanes and records regions');
+          pass('G-sessionlanes', 'S-session-detail session-lanes caption, marks sentence and 7-column table');
+        }
         if (screen.id === 'S-artifact') pass('G-artifactscore', 'S-artifact score-history caption and 5-column table (single version, no scorer values in fixture)');
         if (screen.regions) {
           const regions = await page.locator('main > *').evaluateAll(nodes => nodes.map(node => node.className).filter(Boolean));
@@ -350,12 +366,15 @@ test('plan30 phase 2 acceptance', { skip: SKIP }, async t => {
 
     await group('P5', async () => {
       await go('/b/quality');
-      const qualityControls = await page.locator('[data-panel] select').count();
-      assert.equal(qualityControls, 0, 'empty score catalogue offers no invented controls');
+      const qualityControls = await page.locator('[data-panel] select').evaluateAll(nodes => nodes.map(node => node.getAttribute('aria-label')));
+      assert.equal(qualityControls.filter(label => label === 'Check').length, 4, 'each Quality panel keeps its Check control');
+      assert.equal(qualityControls.filter(label => label === 'Scorer').length, 4, 'each Quality panel keeps its Scorer control');
+      assert.equal(await page.locator('[data-panel] select[aria-label="Check"] option:disabled').count(), 4, 'empty check catalogue is explicit');
+      assert.equal(await page.locator('[data-panel] select[aria-label="Scorer"] option:disabled').count(), 4, 'empty scorer catalogue is explicit');
       await go('/artifact?repo_id=repo-a&path=docs%2Fplans%2Fplan-a%2Fbriefs%2F01.md');
       const labels = await page.locator('[data-panel="artifact-reader"] select').evaluateAll(nodes => nodes.map(node => node.getAttribute('aria-label')));
       assert.deepEqual(labels, ['Version', 'Compare from', 'Compare to', 'Check', 'Scorer'], 'artifact version and P5 controls');
-    }, 'Check/Scorer controls present in catalogue order (empty scorer fixture offers no options)');
+    }, 'Check/Scorer controls remain available when the catalogue is empty');
 
     await group('P6', async () => {
       await go('/b/scatter');
@@ -440,9 +459,16 @@ test('plan30 phase 2 acceptance', { skip: SKIP }, async t => {
     }, 'advanced removal deletes exactly one filter and keeps the window');
 
     await group('F1', async () => {
+      const before = mark();
       await go('/b/pulse?kind=brief');
       const panels = await page.locator('[data-panel]').evaluateAll(nodes => nodes.map(node => node.dataset.panel));
-      for (const id of ['pulse-strips', 'movers', 'calendar']) {
+      assert.ok(panels.includes('coverage'), 'metadata coverage panel retained');
+      assert.equal(await page.locator('[data-panel="pulse-strips"]').getAttribute('data-state'), 'ready', 'shared summary retains valid counters');
+      assert.equal(await page.locator('[data-panel="pulse-strips"] .pulse-metric[data-unavailable="true"]').count(), 2, 'cost and hook cells are individually unavailable');
+      const summaries = since(before).filter(entry => entry.path.endsWith('/v1/analytics/summary'));
+      assert.ok(summaries.length > 0, 'kind-filtered summary requests were retained');
+      assert.ok(summaries.every(entry => entry.query.get('kind') === 'brief'), 'summary requests retain kind=brief');
+      for (const id of ['movers', 'calendar']) {
         const state = await page.locator(`[data-panel="${id}"]`).getAttribute('data-state');
         const status = (await page.locator(`[data-panel="${id}"] .workspace-panel-status`).textContent() || '').trim();
         const caption = (await page.locator(`[data-panel="${id}"] .workspace-panel-caption`).textContent() || '').trim();
@@ -451,8 +477,7 @@ test('plan30 phase 2 acceptance', { skip: SKIP }, async t => {
         assert.equal(caption, G[id] || caption, `${id} caption remains visible`);
         assert.equal(await page.locator(`[data-panel="${id}"] tbody tr`).count(), 0, `${id} no stale rows`);
       }
-      assert.ok(panels.includes('coverage'), 'metadata coverage panel retained');
-    }, 'Brief unsupported summary/hook/cost panels show no marks and the exact sentence');
+    }, 'kind-filtered Pulse retains valid counters, gates cost/hook cells and refuses Movers/Calendar');
 
     await group('F2', async () => {
       const before = mark();

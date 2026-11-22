@@ -356,7 +356,7 @@ func (f AnalyticsFilter) rejWhere() (string, []any) {
 // strings. Every include field is OR within its repeated values and AND across fields; a nonempty
 // include cannot match an absent field. Exclusions use the same values, so excluding a nonempty
 // absent value does not exclude a rejection. Other rejection routes keep rejWhere.
-func (f AnalyticsFilter) retainedRecordRejWhere() (string, []any) {
+func (f AnalyticsFilter) retainedRecordRejWhere() (string, []any, error) {
 	args := []any{f.From.UnixNano(), f.To.UnixNano()}
 	w := "at >= ? AND at <= ?"
 	w += inList("''", f.Repos, &args)
@@ -381,8 +381,14 @@ func (f AnalyticsFilter) retainedRecordRejWhere() (string, []any) {
 		"conversation_id": "conversation_id",
 	}
 	for dim, values := range f.Excludes {
+		if dim == "stage" { // already applied above using the rejection stage column
+			continue
+		}
 		col, ok := cols[dim]
-		if !ok || len(values) == 0 {
+		if !ok {
+			return "", nil, fmt.Errorf("unsupported_filter: %s", dim)
+		}
+		if len(values) == 0 {
 			continue
 		}
 		for _, v := range values {
@@ -398,7 +404,7 @@ func (f AnalyticsFilter) retainedRecordRejWhere() (string, []any) {
 		w += " AND conversation_id" + operator + "(" + f.CohortSQL + ")"
 		args = append(args, f.CohortArgs...)
 	}
-	return w, args
+	return w, args, nil
 }
 
 func (t *Tenant) strings(ctx context.Context, q string, args ...any) ([]string, error) {
@@ -1273,7 +1279,10 @@ func (t *Tenant) ExplorePage(ctx context.Context, f AnalyticsFilter, cur *Explor
 		cur = &copy
 	}
 	fw, fargs := f.factWhere()
-	rw, rargs := f.retainedRecordRejWhere()
+	rw, rargs, err := f.retainedRecordRejWhere()
+	if err != nil {
+		return nil, false, nil, err
+	}
 
 	fq := `SELECT type, ts, harness, repo_id, plan, kind, event,
 		CASE WHEN type='hook_event' THEN tool ELSE '' END AS tool,

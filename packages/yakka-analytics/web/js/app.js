@@ -18,7 +18,7 @@ import { createPanelFrame } from './panels/panel-frame.js';
 import './panels/index.js';
 import { currentBoardUrl, readBoards, saveBoard, deleteBoard, openBoard } from './core/saved-boards.js';
 import {
-  addFilterChip, createChips, legendFocusFilter, removeCohortChip, removeExcludeChip, removeFilterChip, stateUrl, withPick
+  addFilterChip, createChips, legendFocusFilter, removeCohortChip, removeExcludeChip, removeFilterChip, resetScopeState, stateUrl, withPick
 } from './core/chips.js';
 import { buildCohort, createSelectionTray, nextCohortSlot, openListDestination, writeCohort } from './core/selection-tray.js';
 import { createInspector } from './core/inspector.js';
@@ -707,7 +707,15 @@ async function renderBoard(container, record, state, schema, context, scopeContr
         }
       }
       : entry.panel;
-    const frame = createPanelFrame({ panel: wrappedPanel, spec: entry.spec, scope: entry.scope, transport, scheduler, tenant, schema });
+    const frame = createPanelFrame({
+      panel: wrappedPanel, spec: entry.spec, scope: entry.scope, transport, scheduler, tenant, schema,
+      onAllHistory: () => clearPanelCause({ kind: 'window' }),
+      onResetFilters: () => {
+        const next = resetScopeState(currentState());
+        if (record.path === '/b/compare') next.cmp = 'period';
+        router.pushScope(stateUrl(next, globalThis.location?.search || '', record.path));
+      }
+    });
     boardFrameTeardown.push(() => frame.destroy());
     const capability = createCapabilityInspector({ doc: document, panel: entry.panel, spec: entry.spec || {}, schema });
     frame.element.append(capability.element);

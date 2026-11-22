@@ -473,6 +473,7 @@ export const PULSE_STRIPS_PANEL = {
   charts: [],
   table: true,
   applies: ['repo_id', 'kind'],
+  appliesByAnyMeasure: true,
   requires: [],
   caveats: 'Current period against the previous equal-length window. All-history has no previous period. Unpriced cost is a lower bound, never $0. Priced spend and hook events do not apply a document-kind filter.',
   measureBasis: 'summary event-time window; previous window is the equal length immediately before',

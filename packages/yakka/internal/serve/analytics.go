@@ -305,9 +305,13 @@ func (s *Server) parseFilter(w http.ResponseWriter, r *http.Request, ts *tenantS
 				dim, value, ok = item[:i], item[i+1:], true
 			}
 		}
-		allowed := allowedExclude[dim] || strings.HasPrefix(dim, "band:") && len(strings.TrimPrefix(dim, "band:")) > 0
-		if !ok || !allowed || value == "" {
+		if !ok || value == "" {
 			errJSON(w, 400, "exclude must be <dimension>:<value>")
+			return f, false
+		}
+		allowed := allowedExclude[dim] || strings.HasPrefix(dim, "band:") && len(strings.TrimPrefix(dim, "band:")) > 0
+		if !allowed {
+			errCodeJSON(w, http.StatusBadRequest, "unsupported_filter", "unsupported filter", map[string]any{"reason": dim})
 			return f, false
 		}
 		excludes[dim] = append(excludes[dim], value)

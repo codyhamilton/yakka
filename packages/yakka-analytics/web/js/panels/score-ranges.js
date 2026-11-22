@@ -283,13 +283,16 @@ function addField(doc, wrapper, labelText, options, value, onChange) {
   label.append(doc.createTextNode(labelText));
   const control = doc.createElement('select');
   control.setAttribute('aria-label', labelText);
-  for (const option of options) {
+  const choices = options.length ? options : [{ value: '', label: labelText === 'Check' ? 'No checks published' : 'No scorers published', disabled: true }];
+  for (const option of choices) {
     const node = doc.createElement('option');
     node.value = option.value;
     node.textContent = option.label;
     node.selected = option.value === value;
+    node.disabled = Boolean(option.disabled);
     control.append(node);
   }
+  if (!options.length) control.disabled = true;
   control.addEventListener('change', () => onChange(control.value));
   label.append(control);
   wrapper.append(label);
@@ -330,6 +333,13 @@ export function renderScoreControls({
   return wrapper;
 }
 
+export function installScoreControls(options = {}) {
+  const { panelId, panel, spec, doc = globalThis.document } = options;
+  whenPanelSlot(panelId, 'chooser', doc, slot => {
+    slot.replaceChildren(renderScoreControls({ ...options, panelId, panel, spec, doc }));
+  });
+}
+
 registerCaption('score-ranges', ({ spec = {}, scope = {} } = {}) => {
   const key = spec?.scope?.captionKey || 'G-scores';
   const resolved = scoreKind(scope, spec);
@@ -359,7 +369,11 @@ export async function load(context = {}) {
     const kind = resolvedKind.kind;
     const catalogue = await fetchScoreCatalogue(transport, kind, { tenant, signal, stateKey: 'score-ranges-catalogue' });
     if (!catalogue.response.ok) return errorState({ message: catalogue.body?.error || `The server returned ${catalogue.response.status}.`, code: catalogue.body?.code || String(catalogue.response.status || '') });
-    if (!catalogue.checks.length) return emptyState([{ kind: 'scope', label: `no checks are catalogued for ${kind}`, clear: null }]);
+    if (!catalogue.checks.length) {
+      installScoreControls({ panelId: panel.id, panel, spec, doc, check: '', scorer: '', includeSplit: true, splits: contentSplits(schema) });
+      whenPanelBody(panel.id, doc, host => host.replaceChildren());
+      return emptyState([{ kind: 'scope', label: `no checks are catalogued for ${kind}`, clear: null }]);
+    }
     if (requested.check && !catalogue.checks.includes(requested.check)) {
       return unsupportedState({
         measure: `check ${requested.check}`, reason: 'not in the score catalogue for this kind',
@@ -377,11 +391,13 @@ export async function load(context = {}) {
       });
     }
     if (!resolved.scorer) {
+      installScoreControls({ panelId: panel.id, panel, spec, doc, kind, check, checks: catalogue.checks, scorer: '', scorers: scorerNames(baselines.body), includeSplit: true, splits: contentSplits(schema) });
       return unsupportedState({
         measure: `a scorer for ${check}`, reason: 'no scorer is published for this check',
         source: 'server /baselines', nearest: null
       });
     }
+    installScoreControls({ panelId: panel.id, panel, spec, doc, kind, check, checks: catalogue.checks, scorer: resolved.scorer, scorers: scorerNames(baselines.body), includeSplit: true, splits: contentSplits(schema) });
     const split = defaultSplit(contentSplits(schema), spec.split || '');
     if (spec.split && !contentSplits(schema).includes(spec.split) && spec.split !== split) {
       return unsupportedState({ lens: `split ${spec.split}`, reason: 'not published for the content grain', source: 'server /schema', nearest: split || null });

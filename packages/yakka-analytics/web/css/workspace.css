@@ -25,6 +25,8 @@
 .activity-caption{margin:.15rem 0}
 .workspace-panel-meta{display:flex;flex-wrap:wrap;align-items:baseline;gap:.15rem .6rem;min-width:0}
 .workspace-panel-body{flex:1;min-width:0;min-height:2rem;overflow-wrap:anywhere}
+.workspace-panel-status{min-height:30px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.workspace-panel-recovery{min-height:30px}
 .workspace-panel-body > *,.workspace-panel-body > * > *{min-width:0}
 .workspace-panel-chips,.workspace-panel-chooser,.workspace-panel-inspector{display:flex;flex-wrap:wrap;gap:4px;min-width:0}
 

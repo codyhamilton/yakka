@@ -33,7 +33,10 @@ func (t *Tenant) EventCounts(ctx context.Context, f AnalyticsFilter) (EventCount
 
 	var out EventCounts
 	fw, fargs := f.factWhere()
-	rw, rargs := f.retainedRecordRejWhere()
+	rw, rargs, err := f.retainedRecordRejWhere()
+	if err != nil {
+		return out, err
+	}
 	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM facts WHERE `+fw, fargs...).Scan(&out.Matched.Events); err != nil {
 		return EventCounts{}, err
 	}

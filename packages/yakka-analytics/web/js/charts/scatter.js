@@ -91,7 +91,7 @@ export function scatterModel({ spec = {}, data = [] } = {}) {
   return { spec: normal, points };
 }
 
-export function scatterExtent(points, axis) {
+export function scatterExtent(points, axis, { integer = false } = {}) {
   let min = Infinity;
   let max = -Infinity;
   for (const point of points) {
@@ -101,6 +101,12 @@ export function scatterExtent(points, axis) {
     if (value > max) max = value;
   }
   if (!Number.isFinite(min) || !Number.isFinite(max)) return { min: 0, max: 1 };
+  if (integer) {
+    min = Math.min(0, Math.floor(min));
+    max = Math.ceil(max);
+    if (min === max) max = min + 1;
+    return { min, max };
+  }
   if (min === max) {
     const pad = Math.abs(min) * 0.1 || 1;
     return { min: min - pad, max: max + pad };
@@ -109,15 +115,15 @@ export function scatterExtent(points, axis) {
   return { min: min - pad, max: max + pad };
 }
 
-export function scatterLayout(points, { width = 640, height = 240, padding = SCATTER_PADDING } = {}) {
+export function scatterLayout(points, { width = 640, height = 240, padding = SCATTER_PADDING, xInteger = false, yInteger = false } = {}) {
   const plot = {
     left: padding.left,
     top: padding.top,
     width: Math.max(1, width - padding.left - padding.right),
     height: Math.max(1, height - padding.top - padding.bottom)
   };
-  const x = scatterExtent(points, 'x');
-  const y = scatterExtent(points, 'y');
+  const x = scatterExtent(points, 'x', { integer: xInteger });
+  const y = scatterExtent(points, 'y', { integer: yInteger });
   return {
     width,
     height,

@@ -199,16 +199,32 @@ function chooseOption(doc, labelText, options, value, onChange) {
   label.append(doc.createTextNode(labelText));
   const control = doc.createElement('select');
   control.setAttribute('aria-label', labelText);
-  for (const option of options) {
+  const choices = options.length ? options : [{ value: '', label: 'No published options', disabled: true }];
+  for (const option of choices) {
     const node = doc.createElement('option');
     node.value = option.value;
     node.textContent = option.label;
     node.selected = option.value === value;
+    node.disabled = Boolean(option.disabled);
     control.append(node);
   }
+  if (!options.length) control.disabled = true;
   control.addEventListener('change', () => onChange(control.value));
   label.append(control);
   return label;
+}
+
+function installArtifactScatterControls({ panel, spec, schema, doc, checks = [], check = '', scorers = [], scorer = '' } = {}) {
+  whenPanelSlot(panel.id, 'chooser', doc, slot => {
+    const rendered = renderScatterChooser({ panelId: panel.id, panel, spec, schema, doc, defaults: scatterDefaults(panel) });
+    const checkField = chooseOption(doc, 'Check', checks.map(value => ({ value, label: scatterLabel(`score:${value}`).replace(/ score$/, '') })), check,
+      value => rendered.dispatch({ scope: { check: value, y: `score:${value}` } }));
+    const scorerField = chooseOption(doc, 'Scorer', scorers.map(value => ({ value, label: value })), scorer,
+      value => rendered.dispatch({ scope: { scorer: value } }));
+    rendered.element.insertBefore(scorerField, rendered.element.firstChild);
+    rendered.element.insertBefore(checkField, rendered.element.firstChild);
+    slot.replaceChildren(rendered.element);
+  });
 }
 
 export async function load(context = {}) {
@@ -234,7 +250,11 @@ export async function load(context = {}) {
       return errorState({ message: catalogue.body?.error || `The server returned ${catalogue.response.status}.`, code: catalogue.body?.code || String(catalogue.response.status || '') });
     }
     const checks = catalogue.checks;
-    if (!checks.length) return emptyState([{ kind: 'scope', label: `no checks are catalogued for ${kind}`, clear: null }]);
+    if (!checks.length) {
+      installArtifactScatterControls({ panel, spec, schema, doc });
+      whenPanelBody(panel.id, doc, host => host.replaceChildren());
+      return emptyState([{ kind: 'scope', label: `no checks are catalogued for ${kind}`, clear: null }]);
+    }
     if (requested.check && !checks.includes(requested.check)) {
       return unsupportedState({ measure: `check ${requested.check}`, reason: 'not in the score catalogue for this kind', source: 'server /scores', nearest: checks[0] });
     }
@@ -248,6 +268,7 @@ export async function load(context = {}) {
       return unsupportedState({ measure: `scorer ${requested.scorer}`, reason: 'not in the content baseline for this check', source: 'server /baselines', nearest: scorerNames(baselines.body)[0] || null });
     }
     if (!resolved.scorer) {
+      installArtifactScatterControls({ panel, spec, schema, doc, checks, check, scorers: scorerNames(baselines.body) });
       return unsupportedState({ measure: `a scorer for ${check}`, reason: 'no scorer is published for this check', source: 'server /baselines', nearest: null });
     }
     const axisModel = artifactAxes(schema, catalogue.body);
@@ -360,18 +381,6 @@ export async function load(context = {}) {
       note.className = 'p11-scatter-note';
       note.textContent = `${missing.text}. ${ARTIFACT_READER_NOTICE}`;
       details.append(summary, basis, caveats, note);
-      if (unsupported.length) {
-        const list = doc.createElement('ul');
-        list.className = 'p11-unsupported';
-        list.setAttribute('aria-label', 'Unsupported scatter choices');
-        for (const item of unsupported) {
-          const entry = doc.createElement('li');
-          entry.dataset.kind = item.kind;
-          entry.textContent = `${item.kind} ${item.name} is unsupported: ${item.reason}. Try ${item.try}.`;
-          list.append(entry);
-        }
-        details.append(list);
-      }
       wrapper.append(views.element);
       const strip = renderMarginals(body, [x, y, size].filter(Boolean), { doc, schema });
       if (strip.childNodes.length) wrapper.append(strip);
@@ -412,17 +421,7 @@ export async function load(context = {}) {
       });
     });
     await painted?.whenSettled?.();
-    whenPanelSlot(panel.id, 'chooser', doc, slot => {
-      const rendered = renderScatterChooser({ panelId: panel.id, panel: rolePanel, spec: sandbox, schema, doc, defaults });
-      const checkField = chooseOption(doc, 'Check', checks.map(value => ({ value, label: scatterLabel(`score:${value}`).replace(/ score$/, '') })), check,
-        value => rendered.dispatch({ scope: { check: value, y: `score:${value}` } }));
-      const scorerOptions = scorerNames(baselines.body);
-      const scorerField = chooseOption(doc, 'Scorer', scorerOptions.map(value => ({ value, label: value })), resolved.scorer,
-        value => rendered.dispatch({ scope: { scorer: value } }));
-      rendered.element.insertBefore(scorerField, rendered.element.firstChild);
-      rendered.element.insertBefore(checkField, rendered.element.firstChild);
-      slot.replaceChildren(rendered.element);
-    });
+    installArtifactScatterControls({ panel, spec: sandbox, schema, doc, checks, check, scorers: scorerNames(baselines.body), scorer: resolved.scorer });
     return {
       state: 'ready', grain: 'artifact', kind, check, scorer: resolved.scorer, axes: [x, y, size].filter(Boolean), colour,
       sampled: body.sampled === true, population, missing,

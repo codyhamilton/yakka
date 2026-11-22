@@ -138,6 +138,7 @@ test('the Scatter board proves schema choices, exact grain selections, peer coho
   assert.deepEqual(ids, ['scatter-session', 'scatter-artifact', 'scatter-plan', 'scatter-day']);
   const states = await page.evaluate(() => Object.fromEntries([...document.querySelectorAll('.workspace-panel')].map(panel => [panel.dataset.panel, panel.dataset.state])));
   for (const id of ids) assert.equal(states[id], 'ready', `${id} settles ready`);
+  assert.equal(await page.locator('.p11-unsupported').count(), 0, 'unsupported options are not presented as choices');
 
   const options = await page.evaluate(() => Object.fromEntries(
     ['scatter-session', 'scatter-artifact', 'scatter-plan', 'scatter-day'].map(id => [
@@ -198,6 +199,8 @@ test('the Scatter board proves schema choices, exact grain selections, peer coho
   assert.match(artifactText, /Clarity score|normalized score/i);
   assert.match(artifactText, /whole population/);
   assert.doesNotMatch(artifactText, /\$0(?:\.00)?(?![\d.])/);
+  const artifactMarks = await page.evaluate(() => document.querySelector('[data-panel="scatter-artifact"] yk-chart').inspect().marks.length);
+  assert.ok(artifactMarks > 0, 'artifact scatter uses the published writing-session source population');
   const planCells = await page.evaluate(() => [...document.querySelectorAll('[data-panel="scatter-plan"] table tbody tr')]
     .map(row => [...row.querySelectorAll('td')].map(cell => cell.textContent)));
   assert.ok(planCells.some(row => row.includes('—')), 'the unpriced plan point is a dash, never $0');
@@ -411,7 +414,7 @@ test('a session detail reconciles returned markers and the capped whole run', { 
   const hollow = await page.evaluate(() => document.querySelector('[data-panel="session-lanes"] yk-lanes').shadowRoot.querySelectorAll('.yk-lane-marker[data-priced="false"]').length);
   assert.ok(hollow >= 1 && hollow <= loaded, `hollow unpriced markers ${hollow} within loaded ${loaded}`);
 
-  const text = await panel.textContent();
+  const text = await page.locator('main').textContent();
   assert.match(text, new RegExp(`${loaded} loaded matching events plotted`));
   assert.match(text, /Whole session exception/);
   assert.match(text, /13 unpriced/);

@@ -4,6 +4,8 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { formatScatterTick } from '../../web/js/charts/canvas-scatter.js';
+import { scatterLayout } from '../../web/js/charts/scatter.js';
 
 import {
   associationLines, associationTotals, canonicalJson, canonicalPredicate, decodeCohort, timeCohortSource
@@ -17,6 +19,14 @@ import { watchPage } from '../gallery/harness.mjs';
 import {
   SCATTER_DAY_PANEL, bucketInterval, bucketIntersectsWindow, timeBucketInfo, timePoint, timeScatterParams
 } from '../../web/js/panels/scatter-day.js';
+
+test('integer scatter measures never receive fractional ticks', () => {
+  assert.equal(formatScatterTick(1.6, 'commits'), '2');
+  assert.equal(formatScatterTick(2.4, 'artifact_versions'), '2');
+  assert.equal(formatScatterTick(1.6, 'cost_usd'), '1.6');
+  const layout = scatterLayout([{ x: 0, y: 0 }, { x: 1, y: 1 }, { x: 2, y: 2 }], { xInteger: true, yInteger: true });
+  assert.deepEqual([layout.xScale.min, layout.xScale.max, layout.yScale.min, layout.yScale.max], [0, 2, 0, 2]);
+});
 import {
   canonicalRowKey, countSelection, marginalModel, regionPredicate, scatterAxes, scatterCaveat,
   scatterColours, scatterParams, scatterPopulationText, scatterRows, scatterSpecFields,

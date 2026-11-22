@@ -158,18 +158,6 @@ export async function load(context = {}) {
       basis.className = 'p11-scatter-basis';
       basis.textContent = `Basis: ${xMeta.label} (${xMeta.unit || 'count'}) against ${yMeta.label} (${yMeta.unit || 'count'})${colour ? ` coloured by ${colour}` : ''}${size ? `, sized by ${sizeMeta.label}` : ''}. ${populationText}.`;
       details.append(summary, basis, caveats);
-      if (unsupported.length) {
-        const list = doc.createElement('ul');
-        list.className = 'p11-unsupported';
-        list.setAttribute('aria-label', 'Unsupported scatter choices');
-        for (const item of unsupported) {
-          const entry = doc.createElement('li');
-          entry.dataset.kind = item.kind;
-          entry.textContent = `${item.kind} ${item.name} is unsupported: ${item.reason}. Try ${item.try}.`;
-          list.append(entry);
-        }
-        details.append(list);
-      }
       wrapper.append(views.element);
       const strip = renderMarginals(body, [x, y, size].filter(Boolean), { doc, schema: resolvedSchema });
       if (strip.childNodes.length) wrapper.append(strip);

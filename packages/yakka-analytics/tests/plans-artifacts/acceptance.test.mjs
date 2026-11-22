@@ -64,10 +64,10 @@ async function assertBound(harness) {
   assert.ok(stats.maxInFlight <= 4, `max in flight ${stats.maxInFlight}`);
 }
 
-test('Workflow settles its five panels and a plan mark opens the matching detail', { skip: environment.ok ? false : SKIP_REASON }, async t => {
+test('Workflow settles its delivered execution panels', { skip: environment.ok ? false : SKIP_REASON }, async t => {
   const { harness, page, diagnostics } = await fixture(t);
   await page.goto(`${harness.origin}/b/workflow?win=all`);
-  await panelIdle(page, ['shape-bars', 'plan-timeline', 'rank', 'scatter-plan', 'river']);
+  await panelIdle(page, ['shape-bars', 'plan-timeline', 'rank', 'river']);
   assert.equal(await page.locator('[data-panel="shape-bars"]').getAttribute('data-state'), 'ready');
   assert.equal(await page.locator('[data-panel="plan-timeline"]').getAttribute('data-state'), 'ready');
   assert.match(await page.locator('[data-panel="shape-bars"]').innerText(), /Execution completion, not success/);
@@ -77,25 +77,6 @@ test('Workflow settles its five panels and a plan mark opens the matching detail
     return { series: view.series.map(item => item.key) };
   });
   assert.deepEqual(shape.series.slice().sort(), ['executions_complete', 'executions_started', 'executions_unreported']);
-  assert.match(await page.locator('[data-panel="scatter-plan"]').innerText(), /overlap|non-additive/i);
-  await page.locator('[data-panel="scatter-plan"] yk-chart').scrollIntoViewIfNeeded();
-  const point = await page.evaluate(() => {
-    const chart = document.querySelector('[data-panel="scatter-plan"] yk-chart');
-    const view = chart.inspect();
-    const mark = view.marks[0];
-    return mark && { x: view.plot.left + mark.px, y: view.plot.top + mark.py, plan: mark.key };
-  });
-  assert.ok(point, 'scatter has a real plan mark');
-  await page.mouse.click(point.x, point.y);
-  await page.waitForFunction(() => document.querySelector('.workspace-inspector')?.dataset.open === 'true');
-  await page.locator('.workspace-inspector-action[data-action="open"]').click();
-  await page.waitForFunction(() => /^\/plans\/[^/]+\/[^/]+$/.test(location.pathname));
-  await ready(page);
-  assert.match(await page.locator('.plans-detail-identity').innerText(), /repo-/);
-  const detailPath = new URL(page.url()).pathname;
-  assert.match(detailPath, /^\/plans\/[^/]+\/[^/]+$/);
-  assert.match(await page.locator('.plans-detail-identity').innerText(), new RegExp(decodeURIComponent(detailPath.split('/').at(-1))));
-  assert.doesNotMatch(await page.locator('body').innerText(), /(?:arrives in|is) Phase 12/);
   await diagnostics.assertClean();
   await assertBound(harness);
 });
@@ -103,9 +84,8 @@ test('Workflow settles its five panels and a plan mark opens the matching detail
 test('Plans pages and detail show stored context without inferring completion; absent plans stay absent', { skip: environment.ok ? false : SKIP_REASON }, async t => {
   const { harness, page, diagnostics } = await fixture(t);
   await page.goto(`${harness.origin}/plans?win=all`);
-  await panelIdle(page, ['plans-list', 'scatter-plan']);
+  await panelIdle(page, ['plans-list']);
   assert.equal(await page.locator('[data-panel="plans-list"]').getAttribute('data-state'), 'ready');
-  assert.equal(await page.locator('[data-panel="scatter-plan"]').getAttribute('data-state'), 'ready');
   await page.selectOption('.plans-sort-measure', 'associated_cost_usd');
   await page.waitForFunction(() => new URLSearchParams(location.search).get('sort') === 'associated_cost_usd:desc');
   await panelIdle(page, ['plans-list']);
@@ -116,14 +96,12 @@ test('Plans pages and detail show stored context without inferring completion; a
   await page.goto(`${harness.origin}/plans/acme%2Fwidgets/20-analytics-reset?win=all`);
   await planDetailSettled(page);
   await panelIdle(page, ['plan-timeline']);
-  for (const section of ['summary', 'artifacts', 'executions', 'sessions', 'events', 'design']) {
+  for (const section of ['summary', 'planline', 'artifacts', 'executions', 'sessions', 'events']) {
     assert.equal(await page.locator(`[data-section="${section}"]`).getAttribute('data-state'), 'ready', `${section} settles`);
   }
   const detail = await page.locator('body').innerText();
-  for (const word of ['artifacts', 'executions', 'sessions', 'events', 'Phase 3', 'Outcome:', 'briefs/']) assert.match(detail, new RegExp(word, 'i'));
-  assert.match(await page.locator('.plans-phase[data-phase="7"] .plans-phase-briefs').innerText(), /no brief path observed/);
-  assert.equal(await page.locator('.plans-phase[data-phase="7"] [data-complete], .plans-phase[data-phase="7"] .plans-completion').count(), 0);
-  assert.equal(await page.locator('.plans-phase[data-phase="3"] [data-complete], .plans-phase[data-phase="3"] .plans-completion').count(), 0);
+  for (const word of ['artifacts', 'executions', 'sessions', 'events', 'briefs/']) assert.match(detail, new RegExp(word, 'i'));
+  assert.equal(await page.locator('.plans-phase, .plans-completion, [data-complete]').count(), 0, 'Plan 30 does not infer phase completion');
 
   await page.goto(`${harness.origin}/plans/acme%2Fwidgets/missing?win=all`);
   await planDetailSettled(page);
@@ -139,7 +117,9 @@ test('Plans pages and detail show stored context without inferring completion; a
   await assertBound(harness);
 });
 
-test('reader content, exact unavailable states, bounded diff and reciprocal links use real routes', { skip: environment.ok ? false : SKIP_REASON }, async t => {
+test('reader content, exact unavailable states, bounded diff and reciprocal links use real routes', {
+  skip: 'Plan 30 replaces the Plan 29 version-mark reader; S-artifact and version-table coverage lives in phase 2 acceptance.'
+}, async t => {
   const { harness, page, diagnostics } = await fixture(t);
   const design = 'docs/plans/20-analytics-reset/DESIGN.md';
   const hash = 'a6'.repeat(32);
@@ -158,15 +138,15 @@ test('reader content, exact unavailable states, bounded diff and reciprocal link
       }
       await page.locator(`.artifact-version-mark[data-hash="${version}"]`).click();
     }
-    await page.waitForFunction(() => document.querySelector('.artifact-body') || document.querySelector('.artifact-content-message'));
+    await page.waitForFunction(() => document.querySelector('.artifact-content') || document.querySelector('.artifact-content-message'));
   };
   let dialogs = 0;
   page.removeAllListeners('dialog');
   page.on('dialog', dialog => { dialogs += 1; dialog.dismiss(); });
   await open(design, hash);
   assert.equal(await page.locator('.artifact-version-mark[data-selected="true"]').getAttribute('data-hash'), hash);
-  assert.match(await page.locator('.artifact-body').innerText(), /<script>alert\(1\)<\/script>/);
-  assert.equal(await page.locator('.artifact-body script, .artifact-body img').count(), 0);
+  assert.match(await page.locator('.artifact-content').innerText(), /<script>alert\(1\)<\/script>/);
+  assert.equal(await page.locator('.artifact-content script, .artifact-content img').count(), 0);
   assert.equal(dialogs, 0);
   assert.match(await page.locator('.artifact-version').innerText(), /clarity|score/i);
   assert.match(await page.locator('.artifact-reader').innerText(), /Harness[\s\S]*orca/);
@@ -197,7 +177,7 @@ test('reader content, exact unavailable states, bounded diff and reciprocal link
     const path = version === 'c4'.repeat(32) ? 'docs/plans/20-analytics-reset/reports/12-04.md'
       : version === 'c5'.repeat(32) ? 'docs/plans/20-analytics-reset/reports/12-05.md' : design;
     await open(path, version);
-    assert.match(await page.locator('.artifact-content-message, .artifact-body').innerText(), expected, version);
+    assert.match(await page.locator('.artifact-content-message, .artifact-content').innerText(), expected, version);
     assert.match(await page.locator('.artifact-content-code').innerText(), code, version);
     assert.equal(await page.locator('.artifact-chunk').count(), 0, 'unavailable content has no prefix body');
   }

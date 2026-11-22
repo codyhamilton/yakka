@@ -357,6 +357,11 @@ test('plan30 phase 1 acceptance', { skip: SKIP }, async t => {
       await page.selectOption('#scope-kind', 'brief');
       assert.equal((await page.locator('.scope-dirty').textContent()).trim(), 'Unapplied changes');
       checkAll(failures, 'C3/C4-preapply', since(before), []);
+      await page.selectOption('#scope-kind', '');
+      assert.equal(await page.locator('#scope-kind').inputValue(), '', 'All kinds clears a draft kind');
+      assert.equal(await page.locator('.scope-apply').isDisabled(), true, 'clearing to the committed draft disables Apply');
+      await page.selectOption('#scope-kind', 'brief');
+      assert.equal(await page.locator('.scope-apply').isEnabled(), true);
       await applyAndWait(() => new URL(location.href).searchParams.get('repo_id') === 'repo-a' && new URL(location.href).searchParams.get('kind') === 'brief');
       await waitCounts(countsLine(expectedA.repoABrief, expectedA.total));
       const read = since(before).find(url => url.pathname.endsWith('/v1/analytics/explore'));
@@ -364,6 +369,8 @@ test('plan30 phase 1 acceptance', { skip: SKIP }, async t => {
       await go(`/ledger?win=30d&tenant=${A}&kind=weird`);
       assert.equal(await page.locator('#scope-kind option:checked').textContent(), 'Unsupported kind: weird');
       assert.equal(await page.locator('.scope-apply').isDisabled(), true);
+      await page.selectOption('#scope-kind', 'brief');
+      assert.equal(await page.locator('.scope-apply').isEnabled(), true, 'correcting an unknown committed kind enables Apply');
     });
 
     await run('C5', async () => {

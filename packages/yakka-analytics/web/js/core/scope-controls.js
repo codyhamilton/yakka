@@ -439,12 +439,12 @@ export function createScopeControls({
       node.selected = true;
       kindSelect.append(node);
     }
-    if (!values.length) {
-      const all = el(doc, 'option', '', 'All kinds');
-      all.value = '';
-      all.selected = true;
-      kindSelect.prepend(all);
-    }
+    // The absent value is always a real option so users can clear a committed
+    // kind without resetting the rest of the scope.
+    const all = el(doc, 'option', '', 'All kinds');
+    all.value = '';
+    all.selected = !values.length;
+    kindSelect.prepend(all);
   }
 
   function renderTz() {
@@ -482,7 +482,7 @@ export function createScopeControls({
   function syncValidity() {
     const problem = customTimeError(draft);
     inlineError.textContent = problem;
-    const unsupportedKind = (committed.filters?.kind || []).some(value => !KIND_OPTIONS.some(option => option.value === value));
+    const unsupportedKind = (draft.kind || []).some(value => !KIND_OPTIONS.some(option => option.value === value));
     const dirty = isDirty();
     apply.disabled = !dirty || Boolean(problem) || unsupportedKind;
     dirtyNote.hidden = !dirty;
@@ -503,7 +503,12 @@ export function createScopeControls({
     draft.to = toInput.value || '';
     draft.tz = tzSelect.value || '';
     draft.repo = [...repoSelect.selectedOptions].map(option => option.value).filter(Boolean);
-    draft.kind = [...kindSelect.selectedOptions].filter(option => !option.disabled).map(option => option.value).filter(Boolean);
+    const selectedKinds = [...kindSelect.selectedOptions].filter(option => !option.disabled).map(option => option.value);
+    draft.kind = selectedKinds.includes('') ? [] : selectedKinds.filter(Boolean);
+    if (draft.kind.length) {
+      const all = [...kindSelect.options].find(option => option.value === '');
+      if (all) all.selected = false;
+    }
     renderWindow();
     syncValidity();
   }
