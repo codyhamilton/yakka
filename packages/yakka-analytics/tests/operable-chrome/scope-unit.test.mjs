@@ -31,7 +31,7 @@ test('tenant is a reserved URL field and never a filter or unknown key', () => {
   assert.deepEqual(decodeUrlState(encoded), state);
 });
 
-test('collector precedence: URL, then remembered, then first active; foreign URL refuses', () => {
+test('collector precedence: URL, then remembered, then first selectable; foreign URL refuses', () => {
   const previous = globalThis.localStorage;
   const store = new Map();
   globalThis.localStorage = {
