@@ -181,6 +181,42 @@ func TestLocalModeConfig(t *testing.T) {
 	}
 }
 
+func TestConfigAdoptFlag(t *testing.T) {
+	env := func(m map[string]string) func(string) string { return func(k string) string { return m[k] } }
+	cases := []struct {
+		name  string
+		value string
+		set   bool
+		want  bool
+	}{
+		{"unset", "", false, false},
+		{"true", "true", true, true},
+		{"one", "1", true, true},
+		{"padded upper", " TRUE ", true, true},
+		{"false", "false", true, false},
+		{"zero", "0", true, false},
+		{"maybe", "maybe", true, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := map[string]string{
+				"YAKKA_SERVE_ADDR": "127.0.0.1:0",
+				"YAKKA_SERVE_DATA": t.TempDir(),
+			}
+			if tc.set {
+				m["YAKKA_ADOPT_UNMARKED_TENANTS"] = tc.value
+			}
+			c, err := ConfigFromEnv(env(m))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if c.AdoptUnmarkedTenants != tc.want {
+				t.Fatalf("AdoptUnmarkedTenants=%v want %v for %q", c.AdoptUnmarkedTenants, tc.want, tc.value)
+			}
+		})
+	}
+}
+
 func TestRemoteConfig(t *testing.T) {
 	env := func(m map[string]string) func(string) string { return func(k string) string { return m[k] } }
 	c, err := ConfigFromEnv(env(map[string]string{

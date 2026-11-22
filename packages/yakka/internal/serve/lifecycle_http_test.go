@@ -506,6 +506,88 @@ func TestLifecycleHTTPLegacyTenantRefused(t *testing.T) {
 	}
 }
 
+func TestLifecycleHTTPAdoptedTenantKeepsConfirmations(t *testing.T) {
+	dir := t.TempDir()
+	doc := `{"version":1,"policy":{"mode":"everyone"},"sessions":{},"owners":{"t-legacy":"204"},"names":{"t-legacy":"old"},"token_hashes":[]}`
+	if err := os.WriteFile(filepath.Join(dir, registryFileName), []byte(doc), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg := lifecycleConfig(dir, "http://127.0.0.1:1")
+	cfg.AdoptUnmarkedTenants = true
+	s := New(cfg, Options{DisableWorker: true, PollInterval: time.Hour})
+	t.Cleanup(func() { _ = s.Close() })
+	owner := putLifecycleSession(t, s, "sess-adopt-owner", 204)
+	stranger := putLifecycleSession(t, s, "sess-adopt-stranger", 999)
+	h := s.Handler()
+	origin := "https://collector.example"
+
+	resetReq := func(cookie *http.Cookie, body string, uiHeader bool, bearer string) *http.Request {
+		req := httptest.NewRequest(http.MethodPost, "/v1/tenants/t-legacy/reset", strings.NewReader(body))
+		req.Header.Set("Origin", origin)
+		req.Header.Set("Sec-Fetch-Site", "same-origin")
+		if uiHeader {
+			req.Header.Set(tenantLifecycleUIHeader, tenantLifecycleUIValue)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		if bearer != "" {
+			req.Header.Set("Authorization", "Bearer "+bearer)
+		}
+		req.AddCookie(cookie)
+		return req
+	}
+
+	cases := []struct {
+		name       string
+		build      func() *http.Request
+		wantStatus int
+		wantCode   string
+	}{
+		{
+			name:       "mismatched confirmation",
+			build:      func() *http.Request { return resetReq(owner[0], `{"confirm_tenant_id":"somebody-else"}`, true, "") },
+			wantStatus: 400, wantCode: "tenant_confirmation_mismatch",
+		},
+		{
+			name:       "missing UI header",
+			build:      func() *http.Request { return resetReq(owner[0], `{"confirm_tenant_id":"t-legacy"}`, false, "") },
+			wantStatus: 403, wantCode: "tenant_lifecycle_ui_only",
+		},
+		{
+			name: "bearer header with owner cookie",
+			build: func() *http.Request {
+				return resetReq(owner[0], `{"confirm_tenant_id":"t-legacy"}`, true, "wk_not-a-real-key")
+			},
+			wantStatus: 403, wantCode: "tenant_lifecycle_ui_only",
+		},
+		{
+			name:       "non-owner session",
+			build:      func() *http.Request { return resetReq(stranger[0], `{"confirm_tenant_id":"t-legacy"}`, true, "") },
+			wantStatus: 403, wantCode: "tenant_owner_required",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			before := lifecycleStateDigest(t, s, dir, "t-legacy")
+			rec := httptest.NewRecorder()
+			h.ServeHTTP(rec, tc.build())
+			if got := lifecycleStateDigest(t, s, dir, "t-legacy"); got != before {
+				t.Fatal("refusal changed tenant, registry, grant, claim or spend state")
+			}
+			assertLifecycleError(t, rec, tc.wantStatus, tc.wantCode, "")
+			if _, err := os.Stat(filepath.Join(dir, "t-legacy")); !os.IsNotExist(err) {
+				t.Fatalf("refusal opened storage: %v", err)
+			}
+		})
+	}
+
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, resetReq(owner[0], `{"confirm_tenant_id":"t-legacy"}`, true, ""))
+	if rec.Code != http.StatusNoContent || rec.Body.Len() != 0 {
+		t.Fatalf("adopted reset: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestLifecycleHTTPResetAndDeleteSucceed(t *testing.T) {
 	dir := t.TempDir()
 	s := New(lifecycleConfig(dir, "http://127.0.0.1:1"), Options{DisableWorker: true, PollInterval: time.Hour})
