@@ -709,6 +709,7 @@ async function renderBoard(container, record, state, schema, context, scopeContr
       : entry.panel;
     const frame = createPanelFrame({
       panel: wrappedPanel, spec: entry.spec, scope: entry.scope, transport, scheduler, tenant, schema,
+      editFilters: () => scopeControls?.focusFilters?.(),
       onAllHistory: () => clearPanelCause({ kind: 'window' }),
       onResetFilters: () => {
         const next = resetScopeState(currentState());

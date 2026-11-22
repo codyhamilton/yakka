@@ -110,6 +110,11 @@ test('G-metrics fixes the seven cells and shows no previous period for all histo
   assert.equal(byKey.cost_usd.available, false);
   assert.equal(byKey.hook_events.available, false);
   assert.equal(byKey.model_calls.available, true);
+  const excluded = stripModel({ summary: summary(), previous: summary(), scope: { exclude: ['kind:brief'] } });
+  const excludedByKey = Object.fromEntries(excluded.rows.map(row => [row.key, row]));
+  assert.equal(excludedByKey.cost_usd.available, false);
+  assert.equal(excludedByKey.hook_events.available, false);
+  assert.equal(excludedByKey.commits.available, true);
 });
 
 test('G-movers fixes priced spend, harness then model, and the exact table columns', () => {

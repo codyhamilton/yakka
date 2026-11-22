@@ -46,7 +46,10 @@ export function activeFilterValues(scope = {}, name = '') {
 }
 
 export function hasKindFilter(scope = {}) {
-  return activeFilterValues(scope, 'kind').length > 0;
+  if (activeFilterValues(scope, 'kind').length > 0) return true;
+  const raw = scope?.exclude ?? scope?.filters?.exclude;
+  const values = Array.isArray(raw) ? raw : raw ? [raw] : [];
+  return values.some(value => String(value).startsWith('kind:'));
 }
 
 // Refuse an active filter this panel cannot apply, before or after the read.

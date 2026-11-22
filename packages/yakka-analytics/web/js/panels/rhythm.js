@@ -151,7 +151,7 @@ export const RHYTHM_PANEL = {
   measures: ['hook_events'],
   lenses: ['tool', 'tool_kind', 'harness', 'model', 'kind', 'plan', 'source'],
   charts: ['heatmap'],
-  applies: ['harness', 'kind', 'plan', 'model', 'tool', 'tool_kind', 'session_model', 'source'],
+  applies: ['repo_id', 'harness', 'kind', 'plan', 'model', 'tool', 'tool_kind', 'session_model', 'source'],
   requires: [],
   caveats: 'Weekday by hour heat map of hook events only. Cells share their keys with the table; no cost measure is joined here.',
   measureBasis: 'hook event facts.ts in the scope timezone',

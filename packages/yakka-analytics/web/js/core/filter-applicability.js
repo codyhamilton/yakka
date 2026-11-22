@@ -1,8 +1,11 @@
 // Filter applicability: a chart is refused, never silently unfiltered, when an
 // active shared filter is not one the chosen measure's route can apply. The
 // supported set is the intersection of the measure's published dimensions and
-// the panel/route's declared scope filters, plus any response ignored_filters.
-// Pure helpers only; the panel frame renders the returned state.
+// the panel/route's declared scope filters. Exclude entries count as their
+// dimension, not as a filter named "exclude". A response ignored_filters entry
+// is unsupported even when the client expected the route to apply it, except
+// on a mixed summary that gates each measure itself. Pure helpers only; the
+// panel frame renders the returned state.
 
 import { applicabilityState as panelApplicabilityState } from './panel-state.js';
 
@@ -61,6 +64,19 @@ function declaredRouteFilters(panel = {}) {
   return null;
 }
 
+// `band:<check>:<value>` keeps the check in the dimension; every other exclude
+// splits on the first colon, matching the shared filter's dim:value form.
+function excludeDimension(value) {
+  const text = String(value ?? '');
+  if (!text) return '';
+  if (text.startsWith('band:')) {
+    const at = text.lastIndexOf(':');
+    if (at > 'band:'.length) return text.slice(0, at);
+  }
+  const at = text.indexOf(':');
+  return at < 0 ? '' : text.slice(0, at);
+}
+
 function activeFilters(scope = {}, ignoredFilters = []) {
   const active = new Map();
   const entries = Object.entries(scope || {}).filter(([key]) => key !== 'filters');
@@ -68,6 +84,13 @@ function activeFilters(scope = {}, ignoredFilters = []) {
   for (const [key, raw] of entries) {
     if (SCOPE_ONLY.has(key)) continue;
     const values = Array.isArray(raw) ? raw : [raw];
+    if (key === 'exclude') {
+      for (const value of values) {
+        const dim = excludeDimension(value);
+        if (dim) active.set(dim, true);
+      }
+      continue;
+    }
     if (values.some(value => value !== undefined && value !== null && value !== '')) active.set(key, true);
   }
   const ignored = [];
@@ -101,10 +124,13 @@ export function applicability({ panel = {}, spec = {}, scope = {}, schema = null
     ? new Set(declaredRouteFilters(panel) || [])
     : supportedSet(panel, schema, measure);
   const { active, ignored } = activeFilters(scope, ignoredFilters);
+  const ignoredSet = new Set(ignored);
   const unsupportedFilters = [];
   const labels = new Set();
   for (const name of active) {
-    if (supported.has(name)) continue;
+    // A mixed summary keeps a filter the union can apply and gates the cells
+    // that cannot. Every other panel treats a server-ignored filter as dropped.
+    if (supported.has(name) && (!ignoredSet.has(name) || panel?.appliesByAnyMeasure)) continue;
     unsupportedFilters.push(name);
     labels.add(filterLabel(name));
   }

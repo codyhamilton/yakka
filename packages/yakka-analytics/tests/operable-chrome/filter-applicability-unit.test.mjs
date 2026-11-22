@@ -9,6 +9,7 @@ import assert from 'node:assert/strict';
 import {
   UNSUPPORTED_FILTER_MESSAGE, applicability, applicabilityState, filterLabel
 } from '../../web/js/core/filter-applicability.js';
+import { RHYTHM_PANEL } from '../../web/js/panels/rhythm.js';
 import { mountPanelViews, panelViewsEnabled } from '../../web/js/panels/p10-shared.js';
 import { createPanelFrame } from '../../web/js/panels/panel-frame.js';
 import { tableModel } from '../../web/js/charts/table.js';
@@ -107,6 +108,55 @@ test('the exact F refusal sentence uses the exported template and response ignor
   assert.equal(state.applicability, true);
   assert.equal(state.message, refused.message);
   assert.equal(applicabilityState({ applicable: true }), null);
+});
+
+test('exclude entries count as their dimension, and a dropped filter still refuses', () => {
+  const kept = applicability({
+    panel, spec: { measures: ['cost_usd'] }, schema,
+    scope: { repo_id: ['repo-a'], exclude: ['repo_id:other', 'session_repo:none'] }
+  });
+  assert.equal(kept.applicable, true);
+  assert.deepEqual(kept.unsupportedFilters, []);
+
+  const refused = applicability({
+    panel, spec: { measures: ['cost_usd'] }, schema,
+    scope: { exclude: ['kind:brief'] }
+  });
+  assert.equal(refused.applicable, false);
+  assert.deepEqual(refused.labels, ['document kind']);
+  assert.deepEqual(refused.unsupportedFilters, ['kind']);
+
+  const dropped = applicability({
+    panel, spec: { measures: ['cost_usd'] }, schema,
+    scope: { repo_id: ['repo-a'] },
+    ignoredFilters: ['repo_id']
+  });
+  assert.equal(dropped.applicable, false);
+  assert.deepEqual(dropped.labels, ['repository']);
+
+  const mixed = applicability({
+    panel: { ...panel, applies: ['repo_id', 'kind'], appliesByAnyMeasure: true },
+    spec: { measures: ['cost_usd'] },
+    schema,
+    scope: { kind: 'brief' },
+    ignoredFilters: ['kind']
+  });
+  assert.equal(mixed.applicable, true);
+});
+
+test('hook-event rhythm applies a repository filter the query supports', () => {
+  const hookSchema = {
+    measures: [{ name: 'hook_events', dims: ['harness', 'repo_id', 'norm_event', 'event', 'tool', 'tool_kind', 'conversation_id'] }]
+  };
+  const repo = applicability({
+    panel: RHYTHM_PANEL, spec: { measures: ['hook_events'] }, scope: { repo_id: ['repo-a'] }, schema: hookSchema
+  });
+  assert.equal(repo.applicable, true);
+  const kind = applicability({
+    panel: RHYTHM_PANEL, spec: { measures: ['hook_events'] }, scope: { kind: 'brief' }, schema: hookSchema
+  });
+  assert.equal(kind.applicable, false);
+  assert.deepEqual(kind.labels, ['document kind']);
 });
 
 test('an unsupported measure falls back to its published dims, not a guessed one', () => {
@@ -216,6 +266,14 @@ test('panel frame renders the shared T1-T3 copy, busy state, recovery actions an
   assert.match(deepText(status), /^Could not load Rows, per repository\. \(read_failed\)Retry$/);
   button(status, 'Retry').click();
   assert.equal(retry, 1);
+  frame.setState('error', { code: '401' });
+  assert.match(deepText(status), /Sign in to load this table\.Sign in/);
+  frame.setState('error', { code: '403' });
+  assert.equal(deepText(status), 'You do not have access to this tenant');
+  frame.setState('error', { code: 'busy' });
+  assert.match(deepText(status), /server is busy; could not load Rows, per repository/);
+  frame.setState('error', { code: 'query_timeout' });
+  assert.match(deepText(status), /request timed out; could not load Rows, per repository/);
   frame.setState('error', { code: '<img onerror=bad()>' });
   assert.doesNotMatch(deepText(status), /onerror|<img/);
 

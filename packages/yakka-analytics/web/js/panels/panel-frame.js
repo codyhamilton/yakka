@@ -122,6 +122,19 @@ export function createPanelFrame({ panel, spec = {}, scope = {}, transport, sche
     return /^[A-Za-z0-9_.:-]{1,64}$/.test(code) ? code : '';
   }
 
+  // Panels often return state "error" with the HTTP status stuffed into code.
+  // T3 still names 401, 403, busy and timeout instead of a generic load failure.
+  function namedFailure(options = {}) {
+    const status = Number(options.status) || 0;
+    const code = String(options.code || '');
+    const numeric = status || (/^\d{3}$/.test(code) ? Number(code) : 0);
+    if (numeric === 401) return 'sign-in';
+    if (numeric === 403) return 'forbidden';
+    if (code === 'busy') return 'busy';
+    if (numeric === 504 || /timeout/i.test(code)) return 'timeout';
+    return '';
+  }
+
   function showApplicability(result) {
     const next = applicabilityResultState(result);
     if (!next) return false;
@@ -159,6 +172,28 @@ export function createPanelFrame({ panel, spec = {}, scope = {}, transport, sche
       return;
     }
     if (next === 'error') {
+      const named = namedFailure(options);
+      if (named === 'sign-in') {
+        status.append(text(doc, 'strong', '', 'Sign in to load this table.'));
+        const link = text(doc, 'a', '', 'Sign in');
+        link.href = `/login${globalThis.location?.search || ''}`;
+        status.append(link);
+        return;
+      }
+      if (named === 'forbidden') {
+        status.append(text(doc, 'strong', '', 'You do not have access to this tenant'));
+        return;
+      }
+      if (named === 'busy') {
+        status.append(text(doc, 'strong', '', `The server is busy; could not load ${tableCaption()}.`));
+        addRetry(options.retry);
+        return;
+      }
+      if (named === 'timeout') {
+        status.append(text(doc, 'strong', '', `The request timed out; could not load ${tableCaption()}.`));
+        addRetry(options.retry);
+        return;
+      }
       status.append(text(doc, 'strong', '', `Could not load ${tableCaption()}.`));
       const code = sanitizedCode(options.code);
       if (code) status.append(doc.createTextNode(` (${code})`));
