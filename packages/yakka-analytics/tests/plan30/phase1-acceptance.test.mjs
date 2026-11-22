@@ -359,7 +359,7 @@ test('plan30 phase 1 acceptance', { skip: SKIP }, async t => {
       checkAll(failures, 'C3/C4-preapply', since(before), []);
       await page.selectOption('#scope-kind', '');
       assert.equal(await page.locator('#scope-kind').inputValue(), '', 'All kinds clears a draft kind');
-      assert.equal(await page.locator('.scope-apply').isDisabled(), true, 'clearing to the committed draft disables Apply');
+      assert.equal(await page.locator('.scope-apply').isEnabled(), true, 'the pending repository keeps Apply enabled');
       await page.selectOption('#scope-kind', 'brief');
       assert.equal(await page.locator('.scope-apply').isEnabled(), true);
       await applyAndWait(() => new URL(location.href).searchParams.get('repo_id') === 'repo-a' && new URL(location.href).searchParams.get('kind') === 'brief');
