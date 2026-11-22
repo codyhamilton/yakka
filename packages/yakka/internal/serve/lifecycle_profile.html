@@ -165,7 +165,11 @@ function tenantLabel(tenant) {
   const id = String(tenant.id || "");
   return id ? name + " \u00b7 " + id : name;
 }
-function tenantLifecycle(tenant) { return String(tenant.lifecycle_state || "active"); }
+function tenantLifecycle(tenant) {
+  const state = tenant.lifecycle_state;
+  if (state) return String(state);
+  return tenant.lifecycle_generation == null ? "unmarked" : "active";
+}
 function tenantSelectable(tenant) { const s = tenantLifecycle(tenant); return s !== "resetting" && s !== "deleting"; }
 function selectableTenants(list) { return (list || []).filter(tenantSelectable); }
 function clearRemembered() {
