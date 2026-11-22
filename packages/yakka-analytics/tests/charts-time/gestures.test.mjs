@@ -165,6 +165,7 @@ test('gesture and settled-state gallery proves the interaction contract in Chrom
     assert.deepEqual(subtracted.selection, { kind: 'entity', include: [rows[8].key], exclude: [rows[7].key] });
     assert.deepEqual((await inspect('gestures-a')).series, seriesBefore);
 
+    await page.locator('yk-chart#gestures-a .yk-chart-table > summary').click();
     await page.locator(`yk-chart#gestures-a input.yk-table-select[data-key="${rows[9].key}"]`).click();
     const afterCheckbox = await inspect('gestures-a');
     assert.deepEqual(afterCheckbox.selection.include, [rows[8].key, rows[9].key]);

@@ -242,6 +242,7 @@ test('the matrix gallery proves heatmap, calendar, ramp legend, interaction and 
     selection = await inspect('matrix-heatmap');
     assert.ok(selection.selection.exclude.includes(altPoint.key));
 
+    await page.evaluate(() => { document.getElementById('matrix-heatmap').shadowRoot.querySelector('details.yk-chart-table').open = true; });
     await page.locator('yk-matrix#matrix-heatmap .yk-table-select').nth(0).check();
     selection = await inspect('matrix-heatmap');
     assert.ok(selection.selection.include.includes(firstPoint.key));

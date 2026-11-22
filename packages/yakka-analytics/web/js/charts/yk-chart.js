@@ -528,7 +528,7 @@ export class YkChart extends HTMLElement {
     const doc = this.shadowRoot.ownerDocument;
     const details = doc.createElement('details');
     details.className = 'yk-chart-table';
-    details.open = true;
+    details.open = false;
     const summary = doc.createElement('summary');
     summary.textContent = 'Table';
     const extra = (model.spec.values || []).map(item => ({ ...item, key: String(item.key) }));
@@ -779,7 +779,7 @@ export class YkChart extends HTMLElement {
     const doc = this.shadowRoot.ownerDocument;
     const details = doc.createElement('details');
     details.className = 'yk-chart-table';
-    details.open = true;
+    details.open = false;
     const summary = doc.createElement('summary');
     summary.textContent = 'Table';
     const table = createTable(doc, {

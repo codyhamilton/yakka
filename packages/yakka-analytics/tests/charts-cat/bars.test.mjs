@@ -335,6 +335,7 @@ test('the bars gallery proves every mode, table, interaction and both themes in 
     assert.ok(selection.selection.exclude.includes(thirdKey));
 
     // The row checkbox toggles the same include predicate.
+    await page.evaluate(() => { document.getElementById('bars-ranked').shadowRoot.querySelector('details.yk-chart-table').open = true; });
     await page.locator('yk-bars#bars-ranked .yk-table-select').nth(0).check();
     selection = await inspect('bars-ranked');
     assert.ok(selection.selection.include.includes(firstKey));
