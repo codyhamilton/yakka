@@ -454,6 +454,8 @@ test('plan30 phase 3 acceptance', { skip: SKIP }, async t => {
     }, 'A6 ambiguous failure shows completion unknown and issues exactly one destructive request');
 
     // ----- Plan 31 Phase 1 A2-A7: a marker-less tenant is selectable -----
+    // Group ids are prefixed P1- because this file already reports Plan 30's
+    // A2-A6 checks; the DESIGN acceptance ids remain A2-A7.
     // The `/b/pulse` navigations below intentionally read analytics so A2-A4 can
     // prove every request carries tenant=default. The final guard asserts account
     // routes performed no analytics read; drop only these intentional reads after
@@ -477,16 +479,16 @@ test('plan30 phase 3 acceptance', { skip: SKIP }, async t => {
       for (const read of readsSince(mark)) assert.equal(new URLSearchParams(read.search).get('tenant'), 'default', `${read.path} carried ${read.search}`);
     };
 
-    await group('A2', async () => {
+    await group('P1-A2', async () => {
       await assertMarkerlessDefault(defaultFixture('unsupported'));
     }, 'A2 marker-less default (unsupported) selected, enabled, URL tenant=default, every analytics read carries tenant=default');
 
-    await group('A3', async () => {
+    await group('P1-A3', async () => {
       await assertMarkerlessDefault(defaultFixture('unmarked'));
       await assertMarkerlessDefault({ id: 'default', name: 'default', lifecycle_generation: null });
     }, 'A3 unmarked and absent lifecycle_state behave exactly like the unsupported default');
 
-    await group('A4', async () => {
+    await group('P1-A4', async () => {
       await clean();
       account.state.tenants = [
         { id: 't-new', name: 'Aaa', lifecycle_state: 'active', lifecycle_generation: 1 },
@@ -505,7 +507,7 @@ test('plan30 phase 3 acceptance', { skip: SKIP }, async t => {
       await accountPage.waitForFunction(() => document.documentElement.dataset.state === 'ready');
     }, 'A4 remembered and deep-linked default, then select t-new and default updates the URL each time');
 
-    await group('A5', async () => {
+    await group('P1-A5', async () => {
       await clean();
       await harness.go(accountPage, '/b/pulse');
       assert.deepEqual(await accountPage.locator('#tenant-select option').evaluateAll(nodes => nodes.filter(node => node.value === 'tenant-p').map(node => [node.textContent, node.disabled])), [
@@ -517,7 +519,7 @@ test('plan30 phase 3 acceptance', { skip: SKIP }, async t => {
       assert.equal(await textOf('.tenant-unavailable'), 'This tenant is unavailable to your account.');
     }, 'A5 resetting option disabled, cleanup and foreign unavailable copy exact');
 
-    await group('A6', async () => {
+    await group('P1-A6', async () => {
       await clean();
       account.state.tenants = account.state.tenants.concat([defaultFixture('unsupported')]);
       const mark = analytics.length;
@@ -553,7 +555,7 @@ test('plan30 phase 3 acceptance', { skip: SKIP }, async t => {
       assert.equal((await cells.nth(4).textContent() || '').trim(), 'No lifecycle marker yet, so reset and delete are not offered. This tenant can still be selected and used. It gets a marker when the server next starts with adoption enabled.');
     };
 
-    await group('A7', async () => {
+    await group('P1-A7', async () => {
       await assertUnmarkedLifecycle(defaultFixture('unsupported'), 'unsupported');
       await assertUnmarkedLifecycle(defaultFixture('unmarked'), 'unmarked');
       await lifecycle.reset();
