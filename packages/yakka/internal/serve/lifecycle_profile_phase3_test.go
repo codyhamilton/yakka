@@ -124,6 +124,13 @@ func TestLifecycleProfilePhase3Page(t *testing.T) {
 		}
 	}
 
+	if strings.Contains(body, "owned.some(function (tenant) { return tenant.id === wanted; })") {
+		t.Fatal("lifecycle page substitutes another owned tenant when the requested id does not match")
+	}
+	if !strings.Contains(body, "refusedSelection") {
+		t.Fatal("lifecycle page lost the refused-selection state")
+	}
+
 	lower := strings.ToLower(body)
 	if strings.Contains(lower, "authorization") {
 		t.Fatal("page must not construct an Authorization header")

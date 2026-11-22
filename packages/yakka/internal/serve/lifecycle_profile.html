@@ -152,7 +152,7 @@ const INVALIDATED_KEY = "yakka-analytics-tenant-invalidated";
 const THEME_KEY = "yakka-analytics-theme";
 const PAGES_ORIGIN = "https://yakka.build";
 const CHANNEL = typeof BroadcastChannel === "function" ? new BroadcastChannel("yakka-analytics-tenant-selection") : null;
-const state = { me: null, signedOut: false, recoveryFailed: false, busy: false, pending: null, selected: "", returnTenant: "", selectionInitialized: false };
+const state = { me: null, signedOut: false, recoveryFailed: false, busy: false, pending: null, selected: "", returnTenant: "", selectionInitialized: false, refusedSelection: false };
 const byId = (id) => document.getElementById(id);
 function setStatus(text) { byId("status").textContent = text; }
 function tenantLabel(tenant) {
@@ -199,7 +199,7 @@ function unauth() { state.me = null; state.signedOut = true; state.recoveryFaile
 function render() {
   const list = byId("tenants"); list.textContent = "";
   byId("identity").hidden = !state.me; byId("signin").hidden = !state.signedOut;
-  byId("recovery").hidden = !state.recoveryFailed; byId("selection-note").hidden = true;
+  byId("recovery").hidden = !state.recoveryFailed; byId("selection-note").hidden = !state.refusedSelection;
   if (state.me) {
     byId("identity").textContent = "Signed in as " + state.me.github_login + " (" + state.me.github_id + ")";
     state.me.tenants.forEach(function (tenant) { list.appendChild(renderTenant(tenant)); });
@@ -232,13 +232,25 @@ function initSelection() {
   state.selectionInitialized = true;
   const wanted = new URLSearchParams(location.search).get("tenant") || "";
   const owned = state.me.tenants || [];
-  let chosen = "";
-  if (wanted && owned.some(function (tenant) { return tenant.id === wanted; })) chosen = wanted;
-  else { const first = activeTenants(owned)[0]; if (first) chosen = first.id; }
-  if (chosen) selectTenant(chosen, true); else { paintSelection(); updateReturnLink(); }
+  if (wanted) {
+    // A named tenant that is foreign, deleted or not active must not be replaced
+    // with another owned tenant. Reset and delete stay on an explicit choice.
+    const match = owned.find(function (tenant) { return tenant.id === wanted && tenantLifecycle(tenant) === "active"; });
+    if (match) { selectTenant(match.id, false); return; }
+    state.selected = "";
+    state.refusedSelection = true;
+    renderSelect();
+    paintSelection();
+    updateReturnLink();
+    byId("selection-note").hidden = false;
+    return;
+  }
+  const first = activeTenants(owned)[0];
+  if (first) selectTenant(first.id, true); else { paintSelection(); updateReturnLink(); }
 }
 function selectTenant(id, writeUrl) {
   state.selected = id || ""; state.returnTenant = "";
+  if (state.selected) state.refusedSelection = false;
   renderSelect();
   if (writeUrl) {
     const params = new URLSearchParams(location.search);
@@ -248,6 +260,7 @@ function selectTenant(id, writeUrl) {
     try { history.replaceState(null, "", url); } catch (e) { /* URL may be read-only */ }
   }
   paintSelection(); updateReturnLink();
+  if (state.selected) byId("selection-note").hidden = true;
 }
 function paintSelection() {
   document.querySelectorAll("#tenants tr[data-tenant-id]").forEach(function (row) {

@@ -1,6 +1,19 @@
 import { oauthLoginPath } from '../../contract/return-path.js';
 import { resolvedBase } from '../../contract/transport.js';
 
+// The lifecycle page lives on the API origin. Only an http(s) base may become
+// that link; a javascript: or other stored base must not be an href.
+function lifecycleHref(tenantId) {
+  const query = `tenant=${encodeURIComponent(tenantId)}`;
+  const base = resolvedBase();
+  if (!base) return `/profile/lifecycle?${query}`;
+  let url;
+  try { url = new URL(base); } catch { return '/settings'; }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') return '/settings';
+  const prefix = url.pathname.replace(/\/+$/, '');
+  return `${url.origin}${prefix}/profile/lifecycle?${query}`;
+}
+
 const node = (tag, text, attrs = {}) => {
   const el = document.createElement(tag);
   if (text !== undefined) el.textContent = text;
@@ -165,7 +178,7 @@ function renderTenants(view, context, me) {
       const use = actionButton('Use tenant', { 'data-testid': `use-tenant-${tenant.id}` });
       use.addEventListener('click', () => { context.onSelectTenant?.(tenant.id); });
       actions.append(use, ' ');
-      const href = `${resolvedBase()}/profile/lifecycle?tenant=${encodeURIComponent(tenant.id)}`;
+      const href = lifecycleHref(tenant.id);
       actions.append(node('a', 'Reset or delete… (API owner page)', { href, className: 'account-lifecycle-link', 'data-testid': `lifecycle-link-${tenant.id}` }));
       row.append(actions);
       body.append(row);
@@ -302,7 +315,7 @@ function renderTokens(view, context, me) {
       plaintext = String(minted.token);
       issued.replaceChildren();
       const label = node('label', 'New token ');
-      const output = node('input', undefined, { readonly: '', type: 'text', 'data-testid': 'issued-token-once', className: 'account-token-plaintext' });
+      const output = node('input', undefined, { readonly: '', type: 'text', autocomplete: 'off', spellcheck: 'false', autocapitalize: 'off', 'data-testid': 'issued-token-once', className: 'account-token-plaintext' });
       output.value = plaintext;
       output.addEventListener('focus', () => output.select());
       label.append(output);

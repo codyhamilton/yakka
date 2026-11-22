@@ -1039,6 +1039,10 @@ func (s *Server) analyticsExplore(w http.ResponseWriter, r *http.Request, _ stri
 	}
 	rows, more, next, err := ts.t.ExplorePage(r.Context(), f, ec, limit)
 	if err != nil {
+		if reason, ok := unsupportedFilterReason(err); ok {
+			errCodeJSON(w, http.StatusBadRequest, "unsupported_filter", "unsupported filter", map[string]any{"reason": reason})
+			return
+		}
 		readFailed(w)
 		return
 	}

@@ -2,6 +2,7 @@ package serve
 
 import (
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -14,6 +15,8 @@ var eventCountsQueryKeys = map[string]bool{
 }
 
 func (s *Server) analyticsEventCounts(w http.ResponseWriter, r *http.Request, _ string, ts *tenantState) {
+	// Counts are tenant-scoped. Do not let a shared or heuristic cache reuse them.
+	w.Header().Set("Cache-Control", "private, no-store")
 	for key := range r.URL.Query() {
 		if !eventCountsQueryKeys[key] {
 			errCodeJSON(w, http.StatusBadRequest, "unsupported_filter", "unsupported filter", map[string]any{"reason": key})
@@ -26,6 +29,10 @@ func (s *Server) analyticsEventCounts(w http.ResponseWriter, r *http.Request, _ 
 	}
 	counts, err := ts.t.EventCounts(r.Context(), f)
 	if err != nil {
+		if reason, ok := unsupportedFilterReason(err); ok {
+			errCodeJSON(w, http.StatusBadRequest, "unsupported_filter", "unsupported filter", map[string]any{"reason": reason})
+			return
+		}
 		readFailed(w)
 		return
 	}
@@ -39,4 +46,14 @@ func (s *Server) analyticsEventCounts(w http.ResponseWriter, r *http.Request, _ 
 		"checked_at": counts.CheckedAt.UTC().Format(time.RFC3339),
 		"unit":       "retained_record",
 	})
+}
+
+// unsupportedFilterReason recognizes the store predicate's refusal. The reason
+// is the dimension name only; any other error stays a generic read failure.
+func unsupportedFilterReason(err error) (string, bool) {
+	reason, ok := strings.CutPrefix(err.Error(), "unsupported_filter: ")
+	if !ok || reason == "" || strings.ContainsAny(reason, " \t\r\n") {
+		return "", false
+	}
+	return reason, true
 }

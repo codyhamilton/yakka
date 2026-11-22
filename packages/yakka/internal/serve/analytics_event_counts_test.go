@@ -2,6 +2,8 @@ package serve
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"testing"
 	"time"
@@ -90,6 +92,39 @@ func TestEventCountsHandler(t *testing.T) {
 	if code != 400 || body["code"] != "unsupported_filter" || body["reason"] != "bogus" {
 		t.Fatalf("unknown exclude: %d %v", code, body)
 	}
+	// A schema-published dimension the retained-record predicate cannot apply is
+	// still a client error, not an unfiltered count or a read failure.
+	code, body = aget(t, s, eventCountsURL(from, to, url.Values{"exclude": {"id:x"}}))
+	if code != 400 || body["code"] != "unsupported_filter" || body["reason"] != "id" {
+		t.Fatalf("unapplied exclude: %d %v", code, body)
+	}
+	code, body = aget(t, s, eventCountsURL(from, to, url.Values{"exclude": {"session_model:opus"}}))
+	if code != 400 || body["code"] != "unsupported_filter" || body["reason"] != "session_model" {
+		t.Fatalf("session_model exclude: %d %v", code, body)
+	}
+	explore := "/v1/analytics/explore?" + url.Values{
+		"tenant": {"a"}, "from": {from.Format(time.RFC3339)}, "to": {to.Format(time.RFC3339)},
+		"exclude": {"session_model:opus"},
+	}.Encode()
+	code, body = aget(t, s, explore)
+	if code != 400 || body["code"] != "unsupported_filter" || body["reason"] != "session_model" {
+		t.Fatalf("explore unapplied exclude: %d %v", code, body)
+	}
+	if cache := recHeader(t, s, eventCountsURL(from, to, nil)); cache != "private, no-store" {
+		t.Fatalf("cache-control = %q", cache)
+	}
+}
+
+func recHeader(t *testing.T, s *Server, path string) string {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodGet, path, nil)
+	req.Header.Set("Authorization", "Bearer ka")
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("header probe %s: %d %s", path, rec.Code, rec.Body.String())
+	}
+	return rec.Header().Get("Cache-Control")
 }
 
 func TestEventCountsBusy(t *testing.T) {
