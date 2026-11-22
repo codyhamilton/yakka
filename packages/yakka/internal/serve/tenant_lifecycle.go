@@ -20,7 +20,7 @@ var ErrTenantCleanupIncomplete = errors.New("tenant cleanup incomplete")
 // so tenant-directory enumerators skip it.
 const lifecycleTrashName = ".lifecycle-trash"
 
-// tenantRegistered reports whether tenant has an owner entry. Legacy tenants do;
+// tenantRegistered reports whether tenant has an owner entry. Unmarked tenants do;
 // ids removed by delete do not.
 func (r *Registry) tenantRegistered(tenant string) bool {
 	r.mu.RLock()
@@ -165,7 +165,7 @@ func (s *Server) runTenantLifecycle(ctx context.Context, ownerID int64, tenant, 
 }
 
 // precheckTenantLifecycle applies the ordering the HTTP unit maps: absent id,
-// non-owner, legacy marker, then busy, all before any journal or effect.
+// non-owner, missing marker, then busy, all before any journal or effect.
 func (s *Server) precheckTenantLifecycle(ownerID int64, tenant string) error {
 	if !s.registry.tenantRegistered(tenant) {
 		return ErrTenantNotFound

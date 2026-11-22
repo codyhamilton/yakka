@@ -5,16 +5,17 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"sort"
 )
 
 // Lifecycle states reported for an owned tenant. Only active, resetting and
-// deleting are persisted; unsupported is derived for legacy tenants with no
-// trustworthy lifecycle record.
+// deleting are persisted; unmarked is derived for a tenant that has an owner
+// entry but no lifecycle record yet (see AdoptUnmarkedTenants).
 const (
-	lifecycleStateActive      = "active"
-	lifecycleStateResetting   = "resetting"
-	lifecycleStateDeleting    = "deleting"
-	lifecycleStateUnsupported = "unsupported"
+	lifecycleStateActive    = "active"
+	lifecycleStateResetting = "resetting"
+	lifecycleStateDeleting  = "deleting"
+	lifecycleStateUnmarked  = "unmarked"
 )
 
 // Lifecycle operations bound to an in-progress journal entry.
@@ -33,9 +34,7 @@ var (
 	ErrTenantLifecycleConflict        = errors.New("tenant lifecycle operation conflict")
 )
 
-// TenantLifecycleRecord is the persistent lifecycle/ownership record for one tenant.
-// A tenant with an owner/name entry but no record is legacy and must not be
-// migrated, guessed at or have a marker inferred from its id.
+// TenantLifecycleRecord is the persistent lifecycle/ownership record for one tenant. Policy change, 22 Nov 2026 (Cody): a tenant with an owner/name entry but no record is not legacy-unsupported. It is adopted once at startup (AdoptUnmarkedTenants, behind YAKKA_ADOPT_UNMARKED_TENANTS) with a fresh random marker and generation and state active. This reverses the Plan 23 follow-up rule (#219, 10 Nov 2026) that such tenants "must not be migrated, guessed at or have a marker inferred from its id". The marker is never derived from the id.
 type TenantLifecycleRecord struct {
 	Marker     string `json:"marker"`
 	Generation string `json:"generation"`
@@ -53,7 +52,7 @@ func newLifecycleValue() (string, error) {
 }
 
 // TenantLifecycle returns the trustworthy lifecycle record for tenant. It is
-// false for absent tenants and for legacy tenants with no record.
+// false for absent tenants and for tenants not yet adopted.
 func (r *Registry) TenantLifecycle(tenant string) (TenantLifecycleRecord, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -72,6 +71,70 @@ func (r *Registry) TenantGeneration(tenant string) (string, bool) {
 		return "", false
 	}
 	return rec.Generation, true
+}
+
+// AdoptUnmarkedTenants gives every owned tenant with no lifecycle marker a fresh
+// marker and generation and state active, saves once, and returns the adopted ids
+// sorted. It is idempotent: with nothing to adopt it returns nil and does not write.
+// On a save error the in-memory registry is restored and the error returned.
+func (r *Registry) AdoptUnmarkedTenants() ([]string, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var ids []string
+	for id := range r.owners {
+		if rec, ok := r.lifecycle[id]; !ok || rec.Marker == "" {
+			ids = append(ids, id)
+		}
+	}
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	sort.Strings(ids)
+	type prior struct {
+		rec TenantLifecycleRecord
+		had bool
+	}
+	prev := make(map[string]prior, len(ids))
+	prevDirty := r.dirty
+	next := make(map[string]TenantLifecycleRecord, len(ids))
+	for _, id := range ids {
+		rec, err := newActiveLifecycleRecord()
+		if err != nil {
+			return nil, err
+		}
+		next[id] = rec
+	}
+	for _, id := range ids {
+		old, had := r.lifecycle[id]
+		prev[id] = prior{old, had}
+		r.lifecycle[id] = next[id]
+	}
+	r.dirty = true
+	if err := r.saveLocked(); err != nil {
+		for _, id := range ids {
+			if p := prev[id]; p.had {
+				r.lifecycle[id] = p.rec
+			} else {
+				delete(r.lifecycle, id)
+			}
+		}
+		r.dirty = prevDirty
+		return nil, err
+	}
+	return ids, nil
+}
+
+// newActiveLifecycleRecord is the one place a fresh marker and generation are made.
+func newActiveLifecycleRecord() (TenantLifecycleRecord, error) {
+	marker, err := newLifecycleValue()
+	if err != nil {
+		return TenantLifecycleRecord{}, err
+	}
+	generation, err := newLifecycleValue()
+	if err != nil {
+		return TenantLifecycleRecord{}, err
+	}
+	return TenantLifecycleRecord{Marker: marker, Generation: generation, State: lifecycleStateActive}, nil
 }
 
 // BeginTenantReset records an in-progress reset for an owned, marker-backed

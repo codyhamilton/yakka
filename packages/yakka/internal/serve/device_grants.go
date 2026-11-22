@@ -32,7 +32,7 @@ type deviceGrant struct {
 	name       string    // token name chosen on approval
 	expiresAt  time.Time // token expiry, set on approval from the chosen lifetime
 	githubID   int64
-	generation string    // lifecycle generation observed at approval; empty for legacy tenants
+	generation string    // lifecycle generation observed at approval; empty for tenants without a record
 	expiry     time.Time // grant expiry
 	clientIP   string
 	lastPoll   time.Time
@@ -101,8 +101,7 @@ func (g *deviceGrants) dropLocked(hash string, gr *deviceGrant) {
 // grantGenerationCurrent reports whether an approval is still for the tenant's
 // current lifecycle generation. Reset advances that generation and delete
 // removes the record, so either must refuse a grant approved beforehand.
-// Legacy tenants have no record: an empty approval stays valid only while
-// they still have none.
+// A tenant without a record (not yet adopted) accepts only an empty approval while it still has none.
 func grantGenerationCurrent(approved, current string, ok bool) bool {
 	if !ok {
 		return approved == ""
