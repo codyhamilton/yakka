@@ -112,7 +112,56 @@ Called on both Phase 2 reports and both briefs: all four `delivered`, screen `pa
 2. The C6 stale-result check adds a harness-only `state.counts.gate` hook (snapshot status/body/abort before the gate). It is test scaffolding, not a product contract.
 3. The real dialog is a left-anchored 600px modal; the mockup renders the dialog inline. Future refinements should keep the existing modal and treat the inline rendering as a mockup-only choice.
 
+## Phase 3 — The server adopts every unmarked tenant once, behind a flag
+
+Status: closed, 2026-11-22 (closing commit carries `Yakka-Phase: 31-legacy-tenant-adoption:3`).
+
+Run: `31-p3` (build orchestrator; refine log `/home/codyh/workspace/.briefs/yakka/logs/31-p3-refine.log`). Start 2026-11-22T17:09:52+10:00.
+
+Refine verdict: PROCEED, three units. Briefs in `briefs/`, Units list under Phase 3 in `DESIGN.md`, committed at `7e6ce1e9`. `phase3-01` (product) and `phase3-02` (tests) are sequential because 01 removes `lifecycleStateUnsupported`; `phase3-03` (docs) is disjoint and ran alongside 01.
+
+Units:
+
+1. `phase3-01-product-adoption` — landed `60b857c1`. Report `reports/phase3-01-product-adoption.md`. State block and dated `TenantLifecycleRecord` comment; `AdoptUnmarkedTenants`/`newActiveLifecycleRecord` verbatim with `sort`; `createTenantLocked` constructor reuse; `/v1/me` emits `unmarked`; `Config.AdoptUnmarkedTenants` + `envTruthy` + the `New` adoption hook; the five §3.5 comments. `go build ./...` success, `gofmt -l` empty, all brief greps clean, B2 product subset empty. No `fly.toml`, tests or docs. Deviation: none. Closes the product half of B2 and the dated-comment half of B5.
+2. `phase3-02-go-tests` — landed `73f1c467`. Report `reports/phase3-02-go-tests.md`. Renamed `TestUnmarkedTenantReportsUnmarked`; added `TestAdoptUnmarkedTenants`, `TestAdoptSkipsNamesWithoutOwner`, `TestAdoptSaveFailureRestoresMemory`, `adopt_startup_test.go` (`TestNewAdoptsWhenFlagOn`, `TestNewLeavesUnmarkedWhenFlagOff`, `TestNewAdoptSecondStartIsByteIdentical`), `TestConfigAdoptFlag`, and `TestLifecycleHTTPAdoptedTenantKeepsConfirmations`. Deviations: the `tenantsOwnedBy` all-active assertion runs before the `BeginTenantReset` flip (the literal order cannot hold both states); the flag-off byte compare runs immediately after `New`, before the later token/session writes; the B4 test reuses the token-bearing fixture. Closes B1, B3 and B4.
+3. `phase3-03-docs-amendment` — landed `bcacd364`. Report `reports/phase3-03-docs-amendment.md`. Plan 23 dated amendment appended; 03/07/09 enum/null/wording updates and the `YAKKA_ADOPT_UNMARKED_TENANTS` config row verbatim (no `fly.toml` edit). Docs subset of B2 empty. Deviation: none. Closes the Plan 23 half of B5 and the docs half of B2.
+
+### Verification (Phase 3)
+
+Phase outcome, verified against the real implementation (Go `serve` package, fixture registries only):
+
+- Entry point: `New` (`yakka serve` start-up) with `Config.AdoptUnmarkedTenants` true and a `registry.json` holding owned tenants with no lifecycle record. Result: `TestNewAdoptsWhenFlagOn` and `TestAdoptUnmarkedTenants` show every previously unmarked tenant `lifecycle_state: "active"` with a 32-hex `lifecycle_generation`; `t-marked` is unchanged; a second start changes `registry.json` by zero bytes (`TestNewAdoptSecondStartIsByteIdentical`, equal SHA-256). With the flag off, `TestNewLeavesUnmarkedWhenFlagOff` shows `unmarked` with a null generation while the tenant still serves an analytics read, an MCP `tools/list`, and an owner `POST /v1/tokens`; `registry.json` is unchanged. `TestLifecycleHTTPAdoptedTenantKeepsConfirmations` shows reset of an adopted tenant succeeds with the normal confirmations (right id, Origin, `X-Yakka-UI`) and is refused for a mismatched id, a missing UI header, a bearer credential, and a non-owner, each with no state change; `TestLifecycleHTTPLegacyTenantRefused` keeps the flag-off 409. The B2 grep is empty; the only remaining lifecycle "unsupported" tokens are the retained `legacy_tenant_cleanup_unsupported` code and the Phase 1 old-API compatibility comparison, not user-facing text.
+- Real Go: `TMPDIR=.scratch/t go test ./internal/serve -count=1` → `ok … 477.456s`; `go vet ./...` → clean. Targeted run: 15 tests/subtests pass, including the new adoption, flag, startup, idempotence and confirmation cases.
+
+Per-check status:
+
+| ID | Result | Evidence |
+| --- | --- | --- |
+| B1 | pass | `cd packages/yakka && TMPDIR=/home/codyh/workspace/yakka-build/31/.scratch/t go test ./internal/serve -count=1` → `ok … 477.456s`; `go vet ./...` clean. Every 3.8 test present and passing. |
+| B2 | pass | The exact `grep -niE 'lifecycleStateUnsupported\|unsupported legacy\|`unsupported`\|legacy tenants'` over the four Go files and three design docs returns no lines (exit 1). Retained error identifiers do not match. |
+| B3 | pass | Inspected `serve/mcp.go`, `internal/mcp/mcp.go`, `cmd/yakka/sync.go`, `internal/drain/cli.go`, `plugins/yakka/skills`, `plugins/yakka/client/yakka.py`: only unrelated `unsupported_*`/`unsupported` version or JSON wording and the `ErrTenantLifecycleBusy`→`tenant_busy` in-progress refusal; no tenant refusal or `lifecycle_state` wording. `TestNewLeavesUnmarkedWhenFlagOff` is the regression lock (analytics + MCP `tools/list` + token mint). |
+| B4 | pass | `TestNewAdoptSecondStartIsByteIdentical` over one `.scratch/t` fixture: both starts log SHA-256 `16ad8b691ac1f79f0b1846b3e04e51146f2ce69f6af86271c96f7098b325f3fc`; the second start leaves the marker/generation unchanged. Temp dir only, never production. |
+| B5 | pass | `registry_lifecycle.go:37` carries the dated 22 Nov 2026 policy comment; `docs/plans/23-llm-review-shadow.md:153` ends the Plan 23 record with `## Policy amendment — 22 Nov 2026 (Plan 31)` and the exact text. |
+
+### Screens and mockup comparison
+
+Phase 3 is server, contract and docs only: it changes no HTML, JS, CSS or web UI, so it touches no screen. No new screenshot was required, and none of the three mockups was edited:
+
+- `mockups/tenant-selector.png` — not touched by Phase 3; the Phase 1 comparison stands.
+- `mockups/profile-tenants.png` — not touched by Phase 3; the Phase 1 comparison stands.
+- `mockups/lifecycle-confirm.png` — not touched by Phase 3; the Phase 2 comparison stands. The adopted-tenant reset/delete confirmations are proven by `TestLifecycleHTTPAdoptedTenantKeepsConfirmations`, which exercises the unchanged page contract.
+
+### artifact_feedback
+
+Called on all three Phase 3 reports and all three briefs. All six: state `delivered`, screen `pass` by jev-1.13.0 (scoring off on the service).
+
+### Phase 3 — Carried
+
+1. DESIGN 3.6 (the `YAKKA_ADOPT_UNMARKED_TENANTS = "true"` line and its `fly.toml` comment) is deliberately skipped by the signed-off 22 Nov override. A later change must add it once the guard has shipped; the code flag stays default off meanwhile.
+2. The B4 idempotence evidence is a `New`-twice Go test, not a process-level double start of the built binary; the same `New` path is the production start-up hook, so no separate harness is needed.
+3. Phase 3 touches no screen; the three mockups remain owned by Phases 1 and 2.
+
 ## Gates
 
-- gate: signed-in production check of Cody's live `default` tenant in the deployed shell is not automatable (Yakka has no automated sign-in); Phases 1 and 2 are proven against fixtures only.
-- gate: YAKKA_ADOPT_UNMARKED_TENANTS stays off in fly.toml until Phase 2 has shipped (standing override, 22 Nov); Phases 1 and 2 touch no flag.
+- gate: signed-in production check of Cody's live `default` tenant in the deployed shell is not automatable (Yakka has no automated sign-in); Phases 1, 2 and 3 are proven against fixtures only.
+- gate: YAKKA_ADOPT_UNMARKED_TENANTS stays off in fly.toml until Phase 2 has shipped (standing override, 22 Nov). Phase 3 implements the flag with the code default off and skips DESIGN 3.6; `fly.toml` is unchanged and contains no `YAKKA_ADOPT_UNMARKED_TENANTS` line.
