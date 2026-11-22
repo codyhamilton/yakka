@@ -253,6 +253,14 @@ Units:
 - Approach: known
 - Depends on: Phase 2 (the guard must be live before the `fly.toml` flag line ships; the Go code itself does not need it to compile or test). Ship Phase 1 first for the visible fix.
 
+Units:
+
+| Unit | Brief | Depends on | Runs alongside |
+| --- | --- | --- | --- |
+| 01 Server adoption, the flag and the `unmarked` rename | `briefs/phase3-01-product-adoption.md` | nothing | 03 |
+| 02 Go tests: adoption, flag, regression lock, start idempotence | `briefs/phase3-02-go-tests.md` | 01 (new symbols at run time) | 03 (disjoint paths; both need 01 landed) |
+| 03 Dated policy amendment and lifecycle docs | `briefs/phase3-03-docs-amendment.md` | nothing to edit; B2’s combined grep needs 01 landed | 01, 02 |
+
 ---
 
 ## Phase 1 specification
