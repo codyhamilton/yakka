@@ -46,10 +46,10 @@ Cited from DESIGN.md §3.1–3.5 and §3.9; settled, not to be re-derived.
   // deleting are persisted; unmarked is derived for a tenant that has an owner
   // entry but no lifecycle record yet (see AdoptUnmarkedTenants).
   const (
-  	lifecycleStateActive    = "active"
-  	lifecycleStateResetting = "resetting"
-  	lifecycleStateDeleting  = "deleting"
-  	lifecycleStateUnmarked  = "unmarked"
+      lifecycleStateActive    = "active"
+      lifecycleStateResetting = "resetting"
+      lifecycleStateDeleting  = "deleting"
+      lifecycleStateUnmarked  = "unmarked"
   )
   ```
 
@@ -65,13 +65,13 @@ Cited from DESIGN.md §3.1–3.5 and §3.9; settled, not to be re-derived.
 
   ```go
   if cfg.AdoptUnmarkedTenants {
-  	adopted, aerr := reg.AdoptUnmarkedTenants()
-  	switch {
-  	case aerr != nil:
-  		fmt.Fprintf(os.Stderr, "yakka serve: adopt unmarked tenants: %v\n", aerr)
-  	case len(adopted) > 0:
-  		fmt.Fprintf(os.Stderr, "yakka serve: adopted %d unmarked tenants as active: %s\n", len(adopted), strings.Join(adopted, ","))
-  	}
+      adopted, aerr := reg.AdoptUnmarkedTenants()
+      switch {
+      case aerr != nil:
+          fmt.Fprintf(os.Stderr, "yakka serve: adopt unmarked tenants: %v\n", aerr)
+      case len(adopted) > 0:
+          fmt.Fprintf(os.Stderr, "yakka serve: adopted %d unmarked tenants as active: %s\n", len(adopted), strings.Join(adopted, ","))
+      }
   }
   ```
 
