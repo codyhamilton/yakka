@@ -224,6 +224,14 @@ Three phases, fixed at sign-off. All approaches are known. Phases 1 to 3 can eac
 - Approach: known
 - Depends on: nothing
 
+Units:
+
+| Unit | Brief | Depends on | Runs alongside |
+| --- | --- | --- | --- |
+| 01 Lifecycle page selects any non-cleanup tenant | `briefs/phase1-01-lifecycle-page-selection.md` | nothing | 02 |
+| 02 Web UI: an unmarked tenant is selectable | `briefs/phase1-02-web-ui-selection.md` | nothing | 01 |
+| 03 Phase 1 real-browser acceptance (A2–A7, A9) | `briefs/phase1-03-browser-acceptance.md` | 01, 02 | nothing |
+
 ### Phase 2 — Reset and delete name the scale of loss and need a second phrase
 
 - Outcome: entry point: `/profile/lifecycle` on the API origin, Reset or Delete on any tenant row. Action: open the dialog for a tenant that holds records. Observable result: the dialog shows "This tenant holds N stored records (E events, R rejected). Deleting erases all of them and cannot be undone." (or "Resetting erases…"), Confirm is disabled until both the immutable id and the phrase match exactly, an empty tenant shows "This tenant holds no stored records." and asks only for the id, an unreadable count shows "The size of this tenant could not be read. Assume it holds data." and asks for both; the request sent is unchanged (`{confirm_tenant_id}`, `X-Yakka-UI: tenant-lifecycle`).
