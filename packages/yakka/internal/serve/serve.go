@@ -46,6 +46,8 @@ type Config struct {
 	// ReviewModel is the optional YAKKA_REVIEW_MODEL override. Empty means
 	// review.LiveModel ("claude-haiku-5-5"). Registration does not depend on it.
 	ReviewModel string
+	// AdoptUnmarkedTenants is YAKKA_ADOPT_UNMARKED_TENANTS: when true, New gives every owned tenant with no lifecycle marker a fresh marker and generation (state active) once at startup. Plan 31.
+	AdoptUnmarkedTenants bool
 }
 
 // EffectiveReviewModel is the model reviews use: ReviewModel if set, otherwise review.LiveModel.
@@ -89,6 +91,7 @@ func ConfigFromEnv(getenv func(string) string) (Config, error) {
 	c := Config{Addr: getenv("YAKKA_SERVE_ADDR"), Data: getenv("YAKKA_SERVE_DATA")}
 	c.ReviewToken = strings.TrimSpace(getenv("CLAUDE_API_TOKEN"))
 	c.ReviewModel = strings.TrimSpace(getenv("YAKKA_REVIEW_MODEL"))
+	c.AdoptUnmarkedTenants = envTruthy(getenv("YAKKA_ADOPT_UNMARKED_TENANTS"))
 	if c.Addr == "" {
 		c.Addr = "127.0.0.1:8770"
 	}
@@ -120,6 +123,14 @@ func ConfigFromEnv(getenv func(string) string) (Config, error) {
 	c.GitHubOAuthClientSecret = secret
 	c.PublicURL = pub
 	return c, nil
+}
+
+func envTruthy(v string) bool {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "1", "true", "yes", "on":
+		return true
+	}
+	return false
 }
 
 func validatePublicURL(raw string) error {
@@ -298,6 +309,15 @@ func New(cfg Config, opts Options) *Server {
 	reg, err := OpenRegistry(cfg.Data)
 	if err != nil {
 		panic("serve: registry: " + err.Error())
+	}
+	if cfg.AdoptUnmarkedTenants {
+		adopted, aerr := reg.AdoptUnmarkedTenants()
+		switch {
+		case aerr != nil:
+			fmt.Fprintf(os.Stderr, "yakka serve: adopt unmarked tenants: %v\n", aerr)
+		case len(adopted) > 0:
+			fmt.Fprintf(os.Stderr, "yakka serve: adopted %d unmarked tenants as active: %s\n", len(adopted), strings.Join(adopted, ","))
+		}
 	}
 	s := &Server{cfg: cfg, opts: opts, registry: reg, mcpTools: mcpTools, mcpDiscovery: newMCPDiscoveryLimits(), grants: newDeviceGrants(), tenants: map[string]*tenantState{}, gates: map[string]*sync.RWMutex{}, stop: make(chan struct{}), screen: opts.ScreenStep}
 	// A review tool is advertised only when its declared attempt-sized contract

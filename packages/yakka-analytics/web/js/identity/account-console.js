@@ -1,5 +1,6 @@
 import { oauthLoginPath } from '../../contract/return-path.js';
 import { resolvedBase } from '../../contract/transport.js';
+import { tenantSelectable, tenantCleanupState } from '../../contract/session-gate.js';
 
 // The lifecycle page lives on the API origin. Only an http(s) base may become
 // that link; a javascript: or other stored base must not be an href.
@@ -61,9 +62,6 @@ export function sortTokens(tokens) {
     return String(a?.id || '').localeCompare(String(b?.id || ''));
   });
 }
-
-const tenantState = tenant => String(tenant?.lifecycle_state || tenant?.state || 'active');
-const activeTenant = tenant => Boolean(tenant && tenant.id && tenantState(tenant) === 'active');
 
 function table(caption, widths, className) {
   const el = node('table', undefined, { className: `account-table ${className}` });
@@ -168,7 +166,7 @@ function renderTenants(view, context, me) {
     }
     for (const tenant of list) {
       const row = node('tr', undefined, { tabindex: '-1', dataset: { accountTenantRow: String(tenant.id) } });
-      const state = tenantState(tenant);
+      const state = tenantCleanupState(tenant) || 'active';
       row.append(node('td', String(tenant.name || ''), { title: String(tenant.name || '') }));
       row.append(node('td', String(tenant.id || ''), { title: String(tenant.id || '') }));
       row.append(node('td', 'Owner'));
@@ -177,6 +175,7 @@ function renderTenants(view, context, me) {
       const actions = node('td', undefined, { className: 'account-actions' });
       const use = actionButton('Use tenant', { 'data-testid': `use-tenant-${tenant.id}` });
       use.addEventListener('click', () => { context.onSelectTenant?.(tenant.id); });
+      if (!tenantSelectable(tenant)) { use.disabled = true; use.title = 'Reset or delete in progress'; }
       actions.append(use, ' ');
       const href = lifecycleHref(tenant.id);
       actions.append(node('a', 'Reset or delete… (API owner page)', { href, className: 'account-lifecycle-link', 'data-testid': `lifecycle-link-${tenant.id}` }));
@@ -259,10 +258,10 @@ function renderTokens(view, context, me) {
   section.append(node('p', 'A newly issued token appears once; existing token secrets are never listed.', { className: 'account-note' }));
 
   const tenants = Array.isArray(me?.tenants) ? me.tenants : [];
-  const selectedTenant = tenants.find(tenant => tenant.id === context.tenant && activeTenant(tenant)) || null;
+  const selectedTenant = tenants.find(tenant => tenant.id === context.tenant && tenantSelectable(tenant)) || null;
   const tenantLine = node('p', undefined, { className: 'account-token-tenant', 'data-token-tenant': '' });
   if (selectedTenant) tenantLine.textContent = `Selected tenant: ${selectedTenant.name} · ${selectedTenant.id}`;
-  else tenantLine.textContent = 'Create a tenant to issue a token.';
+  else tenantLine.textContent = tenants.length ? 'Choose a tenant to issue a token.' : 'Create a tenant to issue a token.';
   section.append(tenantLine);
 
   const form = node('form', undefined, { className: 'account-form account-token-form' });

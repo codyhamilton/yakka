@@ -117,7 +117,7 @@ func (r *Registry) tenantsOwnedBy(githubID int64) []TenantInfo {
 				generation := rec.Generation
 				info.LifecycleGeneration = &generation
 			} else {
-				info.LifecycleState = lifecycleStateUnsupported
+				info.LifecycleState = lifecycleStateUnmarked
 			}
 			out = append(out, info)
 		}

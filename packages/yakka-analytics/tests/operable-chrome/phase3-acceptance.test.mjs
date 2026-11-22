@@ -73,7 +73,7 @@ test('plan30 phase 3 acceptance', { skip: SKIP }, async t => {
     harness.watch(accountPage);
     accountPage.on('request', request => {
       const url = new URL(request.url());
-      if (url.pathname.startsWith('/v1/analytics/')) analytics.push({ path: url.pathname });
+      if (url.pathname.startsWith('/v1/analytics/')) analytics.push({ path: url.pathname, search: url.search });
     });
     account = await installAccountStub(accountPage);
     await harness.go(accountPage, '/login');
@@ -94,7 +94,7 @@ test('plan30 phase 3 acceptance', { skip: SKIP }, async t => {
       assert.equal(await tableRows.count(), 3);
       assert.deepEqual(await tableRows.nth(0).locator('td').allTextContents().then(v => v.slice(0, 5)), ['Alpha', 'tenant-a', 'Owner', 'Active', '3']);
       assert.deepEqual(await tableRows.nth(1).locator('td').allTextContents().then(v => v.slice(0, 5)), ['Beta', 'tenant-b', 'Owner', 'Active', '5']);
-      assert.deepEqual(await tableRows.nth(2).locator('td').allTextContents().then(v => v.slice(0, 5)), ['Pending', 'tenant-p', 'Owner', 'Pending', '1']);
+      assert.deepEqual(await tableRows.nth(2).locator('td').allTextContents().then(v => v.slice(0, 5)), ['Resetting', 'tenant-p', 'Owner', 'Resetting', '1']);
       assert.deepEqual((await widths('[data-account="tenants"]')).slice(0, 5), [240, 260, 100, 160, 100]);
       assert.ok((await heights('[data-account-tenant-row]')).every(height => Math.abs(height - 30) <= 1));
       const link = accountPage.locator('[data-testid="lifecycle-link-tenant-a"]');
@@ -380,12 +380,20 @@ test('plan30 phase 3 acceptance', { skip: SKIP }, async t => {
       await lifecyclePage.waitForFunction(() => document.querySelectorAll('#tenants tr[data-tenant-id]').length === 3);
     };
 
+    const openDialogReady = async () => {
+      await lifecyclePage.waitForFunction(() => {
+        const text = document.querySelector('#op-scale')?.textContent || '';
+        return text !== '' && !text.startsWith('Checking');
+      });
+    };
+
     await group('A6', async () => {
       await openLifecycle('t-a');
       const requestsBefore = lifecycle.state.requests.length;
       await lifecyclePage.locator('tr[data-tenant-id="t-a"]').getByRole('button', { name: 'Reset tenant' }).click();
       const dialog = lifecyclePage.locator('#confirm-dialog');
       await dialog.waitFor();
+      await openDialogReady();
       assert.equal(await lifecyclePage.locator('#typed-id').inputValue(), '');
       assert.equal(await lifecyclePage.locator('#confirm-action').isDisabled(), true);
       const box = await dialog.boundingBox();
@@ -398,6 +406,7 @@ test('plan30 phase 3 acceptance', { skip: SKIP }, async t => {
       assert.equal(await lifecyclePage.locator('#confirm-dialog').evaluate(node => node.open), false);
       assert.equal(lifecycle.state.requests.length, requestsBefore, 'Cancel issued a lifecycle request');
       await lifecyclePage.locator('tr[data-tenant-id="t-a"]').getByRole('button', { name: 'Reset tenant' }).click();
+      await openDialogReady();
       await lifecyclePage.locator('#typed-id').fill('t-a');
       assert.equal(await lifecyclePage.locator('#confirm-action').isDisabled(), false);
       await lifecyclePage.locator('#confirm-action').click();
@@ -417,6 +426,7 @@ test('plan30 phase 3 acceptance', { skip: SKIP }, async t => {
     await group('A6', async () => {
       await openLifecycle('t-a');
       await lifecyclePage.locator('tr[data-tenant-id="t-a"]').getByRole('button', { name: 'Delete tenant' }).click();
+      await openDialogReady();
       await lifecyclePage.locator('#typed-id').fill('t-a');
       await lifecyclePage.locator('#confirm-action').click();
       await lifecyclePage.waitForFunction(() => document.querySelectorAll('#tenants tr[data-tenant-id]').length === 2);
@@ -434,6 +444,7 @@ test('plan30 phase 3 acceptance', { skip: SKIP }, async t => {
       await openLifecycle('t-a');
       lifecycle.state.abort.reset = true;
       await lifecyclePage.locator('tr[data-tenant-id="t-a"]').getByRole('button', { name: 'Reset tenant' }).click();
+      await openDialogReady();
       await lifecyclePage.locator('#typed-id').fill('t-a');
       await lifecyclePage.locator('#confirm-action').click();
       await lifecyclePage.waitForFunction(() => (document.querySelector('#status')?.textContent || '').includes('completion unknown'));
@@ -441,6 +452,272 @@ test('plan30 phase 3 acceptance', { skip: SKIP }, async t => {
       assert.match(await lifecyclePage.locator('#status').textContent(), /completion unknown/);
       assert.ok(await lifecyclePage.locator('tr[data-tenant-id="t-a"]').count(), 'ambiguous failure lost the owner state');
     }, 'A6 ambiguous failure shows completion unknown and issues exactly one destructive request');
+
+    // ----- Plan 31 Phase 1 A2-A7: a marker-less tenant is selectable -----
+    // Group ids are prefixed P1- because this file already reports Plan 30's
+    // A2-A6 checks; the DESIGN acceptance ids remain A2-A7.
+    // The `/b/pulse` navigations below intentionally read analytics so A2-A4 can
+    // prove every request carries tenant=default. The final guard asserts account
+    // routes performed no analytics read; drop only these intentional reads after
+    // the section so that guard keeps its original meaning. A6 asserts its own
+    // account navigation read nothing.
+    const plan31Start = analytics.length;
+    const defaultFixture = state => ({ id: 'default', name: 'default', lifecycle_state: state, lifecycle_generation: null });
+    const readsSince = mark => analytics.slice(mark);
+    const assertMarkerlessDefault = async tenantFixture => {
+      await clean();
+      account.state.tenants = [tenantFixture];
+      const mark = analytics.length;
+      await harness.go(accountPage, '/b/pulse');
+      const select = accountPage.locator('#tenant-select');
+      assert.equal(await select.isDisabled(), false, 'tenant select is disabled');
+      assert.deepEqual(await select.locator('option').evaluateAll(nodes => nodes.map(node => ({ value: node.value, text: node.textContent, disabled: node.disabled, selected: node.selected }))), [
+        { value: 'default', text: 'default · default', disabled: false, selected: true }
+      ]);
+      assert.equal(new URL(accountPage.url()).searchParams.get('tenant'), 'default', 'URL did not gain tenant=default');
+      assert.equal(await accountPage.locator('.tenant-unavailable').count(), 0, 'unavailable copy shown');
+      for (const read of readsSince(mark)) assert.equal(new URLSearchParams(read.search).get('tenant'), 'default', `${read.path} carried ${read.search}`);
+    };
+
+    await group('P1-A2', async () => {
+      await assertMarkerlessDefault(defaultFixture('unsupported'));
+    }, 'A2 marker-less default (unsupported) selected, enabled, URL tenant=default, every analytics read carries tenant=default');
+
+    await group('P1-A3', async () => {
+      await assertMarkerlessDefault(defaultFixture('unmarked'));
+      await assertMarkerlessDefault({ id: 'default', name: 'default', lifecycle_generation: null });
+    }, 'A3 unmarked and absent lifecycle_state behave exactly like the unsupported default');
+
+    await group('P1-A4', async () => {
+      await clean();
+      account.state.tenants = [
+        { id: 't-new', name: 'Aaa', lifecycle_state: 'active', lifecycle_generation: 1 },
+        defaultFixture('unsupported')
+      ];
+      await accountPage.evaluate(() => localStorage.setItem('yakka-analytics-tenant', 'default'));
+      await harness.go(accountPage, '/b/pulse');
+      assert.equal(await accountPage.locator('#tenant-select').inputValue(), 'default', 'remembered default not selected');
+      await harness.go(accountPage, '/b/pulse?tenant=default');
+      assert.equal(await accountPage.locator('#tenant-select').inputValue(), 'default', 'deep-linked default not selected');
+      await accountPage.selectOption('#tenant-select', 't-new');
+      await accountPage.waitForFunction(() => new URL(location.href).searchParams.get('tenant') === 't-new');
+      await accountPage.waitForFunction(() => document.documentElement.dataset.state === 'ready');
+      await accountPage.selectOption('#tenant-select', 'default');
+      await accountPage.waitForFunction(() => new URL(location.href).searchParams.get('tenant') === 'default');
+      await accountPage.waitForFunction(() => document.documentElement.dataset.state === 'ready');
+    }, 'A4 remembered and deep-linked default, then select t-new and default updates the URL each time');
+
+    await group('P1-A5', async () => {
+      await clean();
+      await harness.go(accountPage, '/b/pulse');
+      assert.deepEqual(await accountPage.locator('#tenant-select option').evaluateAll(nodes => nodes.filter(node => node.value === 'tenant-p').map(node => [node.textContent, node.disabled])), [
+        ['Resetting · tenant-p · resetting', true]
+      ]);
+      await harness.go(accountPage, '/b/pulse?tenant=tenant-p');
+      assert.equal(await textOf('.tenant-unavailable'), 'This tenant is being reset or deleted. Choose it again when that finishes.');
+      await harness.go(accountPage, '/b/pulse?tenant=foreign');
+      assert.equal(await textOf('.tenant-unavailable'), 'This tenant is unavailable to your account.');
+    }, 'A5 resetting option disabled, cleanup and foreign unavailable copy exact');
+
+    await group('P1-A6', async () => {
+      await clean();
+      account.state.tenants = account.state.tenants.concat([defaultFixture('unsupported')]);
+      const mark = analytics.length;
+      await harness.go(accountPage, '/profile');
+      await accountPage.locator('[data-account="tenants"]').waitFor();
+      await accountPage.waitForFunction(() => !document.querySelector('[data-account="tokens"]')?.innerText.includes('Loading tokens…'));
+      assert.deepEqual((await accountPage.locator('[data-account-tenant-row="default"] td').allTextContents()).slice(0, 5), ['default', 'default', 'Owner', 'Active', '—']);
+      assert.equal(await accountPage.locator('[data-testid="use-tenant-default"]').isDisabled(), false, 'default Use tenant disabled');
+      assert.equal(await accountPage.locator('[data-testid="use-tenant-tenant-p"]').isDisabled(), true, 'resetting Use tenant enabled');
+      await accountPage.locator('[data-testid="use-tenant-default"]').click();
+      await accountPage.waitForFunction(() => (document.querySelector('[data-token-tenant]')?.textContent || '') === 'Selected tenant: default · default');
+      assert.equal(await accountPage.evaluate(() => localStorage.getItem('yakka-analytics-tenant')), 'default', 'Use tenant did not remember default');
+      assert.equal(await accountPage.locator('[data-testid="create-token"]').isDisabled(), false, 'create-token disabled for default');
+      assert.equal(new URL(accountPage.url()).searchParams.get('tenant'), 'default', 'Use tenant did not commit the URL');
+      account.state.tenants = [{ id: 'tenant-p', name: 'Resetting', lifecycle_state: 'resetting', lifecycle_generation: 1 }];
+      await harness.go(accountPage, '/profile');
+      await accountPage.waitForFunction(() => !document.querySelector('[data-account="tokens"]')?.innerText.includes('Loading tokens…'));
+      await accountPage.getByText('Choose a tenant to issue a token.').waitFor();
+      assert.equal(await accountPage.locator('[data-testid="create-token"]').isDisabled(), true, 'create-token enabled with no selectable tenant');
+      assert.equal(analytics.length, mark, 'account routes performed an analytics read');
+    }, 'A6 profile default Active/—, Use tenant enabled and stores default, resetting Use tenant disabled, none-selectable token copy');
+
+    const assertUnmarkedLifecycle = async (tenantFixture, wantState) => {
+      await lifecycle.reset();
+      lifecycle.state.tenants = lifecycle.state.tenants.concat([tenantFixture]);
+      await lifecyclePage.goto(harness.lifecycleUrl('default'));
+      await lifecyclePage.waitForFunction(() => document.querySelectorAll('#tenants tr[data-tenant-id]').length === 4);
+      assert.equal(await lifecyclePage.locator('#tenant-select').inputValue(), 'default', `${wantState} default not selected`);
+      assert.equal(await lifecyclePage.locator('#selection-note').isVisible(), false, `${wantState} selection note shown`);
+      const cells = lifecyclePage.locator('tr[data-tenant-id="default"] td');
+      assert.deepEqual((await cells.allTextContents()).slice(0, 4), ['default', 'default', wantState, 'not assigned yet']);
+      assert.equal(await lifecyclePage.locator('tr[data-tenant-id="default"]').getByRole('button', { name: /^(Reset tenant|Delete tenant)$/ }).count(), 0, `${wantState} offered Reset/Delete`);
+      assert.equal((await cells.nth(4).textContent() || '').trim(), 'No lifecycle marker yet, so reset and delete are not offered. This tenant can still be selected and used. It gets a marker when the server next starts with adoption enabled.');
+    };
+
+    await group('P1-A7', async () => {
+      await assertUnmarkedLifecycle(defaultFixture('unsupported'), 'unsupported');
+      await assertUnmarkedLifecycle(defaultFixture('unmarked'), 'unmarked');
+      await lifecycle.reset();
+      lifecycle.state.tenants = lifecycle.state.tenants.concat([defaultFixture('unsupported')]);
+      await lifecyclePage.goto(harness.lifecycleUrl('foreign'));
+      await lifecyclePage.waitForFunction(() => document.querySelectorAll('#tenants tr[data-tenant-id]').length === 4);
+      assert.equal(await lifecyclePage.locator('#selection-note').isVisible(), true, 'foreign tenant kept the selection note hidden');
+    }, 'A7 lifecycle default selected, unmarked/unsupported state, not-assigned generation, exact note, no buttons, foreign keeps selection note');
+    analytics.splice(plan31Start);
+
+    // ----- Plan 31 Phase 2 C1-C6: scale line, typed phrase, stale count -----
+    // Group ids are prefixed P2- because this file already reports Plan 30's
+    // C1 checks; the DESIGN acceptance ids remain C1-C6.
+    const defaultActive = { id: 'default', name: 'default', lifecycle_state: 'active', lifecycle_generation: '3f9a0c1d7e22b4a65c80d1e9f2a7b304' };
+    const countsBody = tenant_total => ({
+      matched: { events: 0, rejections: 0, rows: 0 },
+      tenant_total,
+      unit: 'retained_record'
+    });
+    const openDefaultLifecycle = async tenantTotal => {
+      lifecycle.reset();
+      lifecycle.state.tenants = lifecycle.state.tenants.concat([defaultActive]);
+      lifecycle.state.counts.body = countsBody(tenantTotal);
+      await lifecyclePage.goto(harness.lifecycleUrl('default'));
+      await lifecyclePage.waitForFunction(() => document.querySelectorAll('#tenants tr[data-tenant-id]').length === 4);
+    };
+    const openDefaultOp = async op => {
+      await lifecyclePage.locator('tr[data-tenant-id="default"]').getByRole('button', { name: op === 'reset' ? 'Reset tenant' : 'Delete tenant' }).click();
+      await lifecyclePage.locator('#confirm-dialog').waitFor();
+      await openDialogReady();
+    };
+    const scaleText = async () => (await lifecyclePage.locator('#op-scale').textContent() || '').trim();
+    const phraseLabelText = async () => (await lifecyclePage.locator('#phrase-label').textContent() || '').replace(/\s+/g, ' ').trim();
+
+    await group('P2-C1', async () => {
+      await openDefaultLifecycle({ events: 1418332, rejections: 212, rows: 1418544 });
+      await openDefaultOp('delete');
+      assert.equal(await scaleText(), 'This tenant holds 1,418,544 stored records (1,418,332 events, 212 rejected). Deleting erases all of them and cannot be undone.');
+      assert.equal((await lifecyclePage.locator('#op-effect').textContent() || '').trim(), 'Permanently remove this tenant, all its data and keys, and your ownership link. Every key for this tenant stops working, including the key your sync uses.');
+      assert.equal(await phraseLabelText(), 'Type delete all data to confirm');
+      await lifecyclePage.locator('#cancel-action').click();
+      await openDefaultOp('reset');
+      assert.equal(await scaleText(), 'This tenant holds 1,418,544 stored records (1,418,332 events, 212 rejected). Resetting erases all of them and cannot be undone.');
+      assert.equal(await phraseLabelText(), 'Type reset all data to confirm');
+    }, 'C1 delete/reset name the exact scale, effect and phrase labels');
+
+    await group('P2-C2', async () => {
+      await openDefaultLifecycle({ events: 5, rejections: 0, rows: 5 });
+      let release;
+      let signalHeld;
+      const firstHeld = new Promise(resolve => { signalHeld = resolve; });
+      lifecycle.state.counts.gate = () => { signalHeld(); return new Promise(done => { release = done; }); };
+      await lifecyclePage.locator('tr[data-tenant-id="default"]').getByRole('button', { name: 'Delete tenant' }).click();
+      await lifecyclePage.locator('#confirm-dialog').waitFor();
+      await firstHeld;
+      await lifecyclePage.waitForFunction(() => (document.querySelector('#op-scale')?.textContent || '').startsWith('Checking'));
+      assert.equal(await lifecyclePage.locator('#confirm-action').isDisabled(), true, 'Confirm enabled while counts load');
+      release();
+      await openDialogReady();
+      const confirm = lifecyclePage.locator('#confirm-action');
+      const typedId = lifecyclePage.locator('#typed-id');
+      const typedPhrase = lifecyclePage.locator('#typed-phrase');
+      await typedId.fill('default');
+      assert.equal(await confirm.isDisabled(), true, 'enabled with only the id');
+      await typedId.fill('');
+      await typedPhrase.fill('delete all data');
+      assert.equal(await confirm.isDisabled(), true, 'enabled with only the phrase');
+      await typedId.fill('default');
+      await typedPhrase.fill('delete all dat');
+      assert.equal(await confirm.isDisabled(), true, 'enabled with a one-character-wrong phrase');
+      await typedPhrase.fill('delete all data');
+      assert.equal(await confirm.isDisabled(), false, 'disabled with both exact');
+      await typedPhrase.fill('delete all datax');
+      assert.equal(await confirm.isDisabled(), true, 'stayed enabled when the phrase changed');
+      await typedPhrase.fill('delete all data');
+      assert.equal(await confirm.isDisabled(), false, 'disabled after restoring the phrase');
+      await typedId.fill('defaul');
+      assert.equal(await confirm.isDisabled(), true, 'stayed enabled when the id changed');
+      await typedId.fill('default');
+      assert.equal(await confirm.isDisabled(), false, 'disabled after restoring the id');
+    }, 'C2 Confirm gated on the loaded count, exact id and exact phrase both ways');
+
+    await group('P2-C3', async () => {
+      await openDefaultLifecycle({ events: 5, rejections: 0, rows: 5 });
+      const requestsBefore = lifecycle.state.requests.length;
+      await openDefaultOp('delete');
+      await lifecyclePage.locator('#cancel-action').click();
+      assert.equal(lifecycle.state.requests.length, requestsBefore, 'Cancel issued a lifecycle request');
+      assert.equal(lifecycle.calls('/v1/tenants/default', 'DELETE').length, 0, 'Cancel issued a destructive request');
+      await openDefaultOp('delete');
+      await lifecyclePage.locator('#typed-id').fill('default');
+      await lifecyclePage.locator('#typed-phrase').fill('delete all data');
+      await lifecyclePage.locator('#confirm-action').click();
+      await lifecyclePage.waitForFunction(() => document.querySelectorAll('#tenants tr[data-tenant-id]').length === 3);
+      const deletes = lifecycle.calls('/v1/tenants/default', 'DELETE');
+      assert.equal(deletes.length, 1, `expected exactly one DELETE, got ${deletes.length}`);
+      assert.match(deletes[0].headers['content-type'] || '', /application\/json/);
+      assert.equal(deletes[0].headers['x-yakka-ui'], 'tenant-lifecycle');
+      assert.deepEqual(JSON.parse(deletes[0].body), { confirm_tenant_id: 'default' });
+    }, 'C3 Cancel sends nothing; Confirm sends exactly one unchanged DELETE');
+
+    await group('P2-C4', async () => {
+      await openDefaultLifecycle({ events: 0, rejections: 0, rows: 0 });
+      await openDefaultOp('delete');
+      assert.equal(await scaleText(), 'This tenant holds no stored records.');
+      assert.equal(await lifecyclePage.locator('#phrase-label').evaluate(node => node.hidden), true, 'phrase label shown for an empty tenant');
+      await lifecyclePage.locator('#typed-id').fill('default');
+      assert.equal(await lifecyclePage.locator('#confirm-action').isDisabled(), false);
+    }, 'C4 zero counts hide the phrase and ask only for the id');
+
+    await group('P2-C5', async () => {
+      const unreadable = 'The size of this tenant could not be read. Assume it holds data.';
+      const setups = [
+        () => { lifecycle.state.counts.abort = true; },
+        () => { lifecycle.state.counts.status = 500; },
+        () => { lifecycle.state.counts.body = countsBody({ events: 'x', rejections: 0, rows: 0 }); }
+      ];
+      for (const setup of setups) {
+        await openDefaultLifecycle({ events: 0, rejections: 0, rows: 0 });
+        setup();
+        await openDefaultOp('delete');
+        assert.equal(await scaleText(), unreadable);
+        assert.equal(await lifecyclePage.locator('#phrase-label').evaluate(node => node.hidden), false, 'phrase label hidden on an unreadable count');
+        await lifecyclePage.locator('#typed-id').fill('default');
+        assert.equal(await lifecyclePage.locator('#confirm-action').isDisabled(), true);
+        await lifecyclePage.locator('#typed-phrase').fill('delete all data');
+        assert.equal(await lifecyclePage.locator('#confirm-action').isDisabled(), false);
+        await lifecyclePage.locator('#cancel-action').click();
+      }
+    }, 'C5 network error, 500 and non-numeric body all assume data and require the phrase');
+
+    await group('P2-C6', async () => {
+      lifecycle.reset();
+      lifecycle.state.counts.body = countsBody({ events: 11, rejections: 1, rows: 12 });
+      let releaseFirst;
+      let signalHeld;
+      const firstHeld = new Promise(resolve => { signalHeld = resolve; });
+      lifecycle.state.counts.gate = entry => entry.search.includes('tenant=t-a')
+        ? (signalHeld(), new Promise(done => { releaseFirst = done; }))
+        : undefined;
+      await lifecyclePage.goto(harness.lifecycleUrl('t-a'));
+      await lifecyclePage.waitForFunction(() => document.querySelectorAll('#tenants tr[data-tenant-id]').length === 3);
+      await lifecyclePage.locator('tr[data-tenant-id="t-a"]').getByRole('button', { name: 'Reset tenant' }).click();
+      await lifecyclePage.locator('#confirm-dialog').waitFor();
+      await firstHeld;
+      await lifecyclePage.locator('#cancel-action').click();
+      lifecycle.state.counts.body = countsBody({ events: 22, rejections: 2, rows: 24 });
+      const firstResponse = lifecyclePage.waitForResponse(response => {
+        const url = new URL(response.url());
+        return url.pathname === '/v1/analytics/event-counts' && url.searchParams.get('tenant') === 't-a';
+      });
+      await lifecyclePage.locator('tr[data-tenant-id="t-b"]').getByRole('button', { name: 'Reset tenant' }).click();
+      await lifecyclePage.locator('#confirm-dialog').waitFor();
+      await openDialogReady();
+      const second = 'This tenant holds 24 stored records (22 events, 2 rejected). Resetting erases all of them and cannot be undone.';
+      assert.equal(await scaleText(), second);
+      releaseFirst();
+      await firstResponse;
+      await lifecyclePage.evaluate(() => new Promise(done => requestAnimationFrame(() => requestAnimationFrame(done))));
+      assert.equal(await scaleText(), second, 'stale t-a count replaced the t-b dialog scale');
+      assert.equal(await lifecyclePage.locator('#confirm-action').isDisabled(), true);
+    }, 'C6 a cancelled dialog\'s late count never touches the next dialog');
 
     // ----- F7 -----
     await group('F7', async () => {
@@ -642,7 +919,7 @@ test('plan30 phase 3 acceptance', { skip: SKIP }, async t => {
       assert.ok(Math.abs((await select.boundingBox()).width - 260) <= 1);
       assert.equal(await select.inputValue(), 'tenant-a');
       assert.deepEqual(await select.locator('option').evaluateAll(nodes => nodes.map(node => [node.textContent, node.disabled])), [
-        ['Alpha · tenant-a', false], ['Beta · tenant-b', false], ['Pending · tenant-p · pending', true]
+        ['Alpha · tenant-a', false], ['Beta · tenant-b', false], ['Resetting · tenant-p · resetting', true]
       ]);
       await accountPage.selectOption('#tenant-select', 'tenant-b');
       await accountPage.waitForFunction(() => new URL(location.href).searchParams.get('tenant') === 'tenant-b');
@@ -650,7 +927,7 @@ test('plan30 phase 3 acceptance', { skip: SKIP }, async t => {
       await openReady('/login');
       assert.equal(await accountPage.locator('#tenant-select').isDisabled(), true);
       assert.match(await accountPage.locator('#tenant-select option').textContent(), /Sign in to select a tenant/);
-    }, 'C1 shared tenant select: /me order, {name} · {id}, pending disabled, committed selection');
+    }, 'C1 shared tenant select: /me order, {name} · {id}, resetting disabled, committed selection');
 
     // ----- C10/V1-V5 on every account screen in both themes -----
     const openScreen = async id => {
@@ -770,7 +1047,7 @@ test('plan30 phase 3 acceptance', { skip: SKIP }, async t => {
       assert.equal(await lifecyclePage.locator('#tenant-select').inputValue(), 't-b');
       assert.equal(await lifecyclePage.locator('tr[data-tenant-id="t-b"]').getAttribute('data-selected'), 'true');
       assert.deepEqual(await lifecyclePage.locator('#tenant-select option').evaluateAll(nodes => nodes.map(node => [node.textContent, node.disabled])), [
-        ['Alpha · t-a', false], ['Beta · t-b', false], ['Pending · t-p · pending', true]
+        ['Alpha · t-a', false], ['Beta · t-b', false], ['Resetting · t-p · resetting', true]
       ]);
       await lifecyclePage.selectOption('#tenant-select', 't-a');
       await lifecyclePage.waitForFunction(() => new URL(location.href).searchParams.get('tenant') === 't-a');

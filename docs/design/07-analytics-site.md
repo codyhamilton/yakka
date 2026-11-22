@@ -63,19 +63,21 @@ MCP tool or key/bearer path.
 Each confirmation names the operation, display name and immutable tenant id, requires typing that
 id, and says: **“Only the human owner may reset or delete a tenant. Agents must not perform or attempt this on a user's behalf.”**
 Reset explains that it erases data/revokes keys but keeps identity/ownership for reuse after
-rekeying. Delete explains permanent removal of tenant/data/keys/ownership. Cancellation or a
+rekeying. Delete explains permanent removal of tenant/data/keys/ownership. The dialog also names the
+stored-record scale from `GET /v1/analytics/event-counts?tenant=<id>` and requires a second typed
+phrase (`reset all data` or `delete all data`) whenever the tenant holds stored records or its size
+could not be read; an empty tenant asks only for the id, and every server-side gate is unchanged.
+See the [Plan 31 record](../plans/31-legacy-tenant-adoption.md). Cancellation or a
 rejected request changes neither selection nor data. Both may target the selected/only tenant;
 after `204`, clear target selection and cached reads/cursors across the acting UI origin's tabs,
 refresh `/v1/me` and require explicit re-selection/create on profile, without automatic fallback.
 Global login and other owned tenants remain usable. API-origin and Pages localStorage are
 separate. Owned `/v1/me` entries carry `lifecycle_state`
-(`active`, `resetting`, `deleting`, `unsupported`) and `lifecycle_generation` (opaque, null for
-unsupported legacy), read from registry/journal metadata without lazy-open. Disable lifecycle
-actions while recovery is unresolved. Pending entries remain owner-visible; reset changes generation and delete
+(`active`, `resetting`, `deleting`, `unmarked`) and `lifecycle_generation` (opaque, null only while unmarked), read from registry/journal metadata without lazy-open. Disable lifecycle
+actions while recovery is unresolved. In-progress entries remain owner-visible; reset changes generation and delete
 removes the entry. Both origins revalidate on return/focus/pageshow and before tenant reads,
 compare remembered id/generation, clear absent/changed selections and caches without automatic
-fallback, and suspend target reads during cleanup. Eligible remembered selections lacking a
-generation require explicit re-selection. Same-origin tabs receive invalidation notices; other
+fallback, and suspend target reads during cleanup. A remembered selection whose tenant has no marker yet stays valid; an empty generation is not a change. Same-origin tabs receive invalidation notices; other
 origins/browsers observe it on their next validation. Failed reads show completion unknown. Do not replay a destructive request automatically
 after an ambiguous response; refresh state before a new typed confirmation.
 

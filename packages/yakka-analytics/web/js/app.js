@@ -3,7 +3,7 @@ import { resolveReadContext } from './core/read-context.js';
 import { createScheduler } from './core/request-scheduler.js';
 import { createTransport, isCollectorMode, resolvedBase } from '../contract/transport.js';
 import { legacyErrorMessage } from './core/legacy-error.js';
-import { authorizedTenant, activeTenants, sessionGateDecision, shouldRecoverTenant, tenantOptionLabel } from '../contract/session-gate.js';
+import { authorizedTenant, selectableTenants, tenantCleanupState, sessionGateDecision, shouldRecoverTenant, tenantOptionLabel } from '../contract/session-gate.js';
 import { renderIdentity } from './identity/flows.js';
 import { createRouter, isAccountRoute, loadExplorer } from './core/router.js';
 import { createFollow } from './core/follow.js';
@@ -107,15 +107,15 @@ function mountTenantHeader({ me = null, meStatus = 0, auth = null, state = {}, l
     tenantSelect.append(option);
   }
   for (const tenant of tenants) {
-    const lifecycle = String(tenant.lifecycle_state || tenant.state || 'active');
-    const option = element('option', '', lifecycle === 'active' ? tenantOptionLabel(tenant) : `${tenantOptionLabel(tenant)} · ${lifecycle}`);
+    const cleanup = tenantCleanupState(tenant);
+    const option = element('option', '', cleanup ? `${tenantOptionLabel(tenant)} · ${cleanup}` : tenantOptionLabel(tenant));
     option.value = tenant.id;
     option.selected = tenant.id === selected;
-    option.disabled = lifecycle !== 'active';
+    option.disabled = Boolean(cleanup);
     tenantSelect.append(option);
   }
   if (!selected) {
-    const first = activeTenants(me)[0];
+    const first = selectableTenants(me)[0];
     if (first) { selected = first.id; tenantSelect.value = first.id; }
   }
   tenantSelect.disabled = false;
@@ -973,7 +973,7 @@ async function render(record) {
   if (auth.unavailable) {
     root.append(
       element('h1', '', record.title || 'Tenant unavailable'),
-      element('p', 'tenant-unavailable', 'This tenant is unavailable to your account.')
+      element('p', 'tenant-unavailable', auth.reason === 'cleanup' ? 'This tenant is being reset or deleted. Choose it again when that finishes.' : 'This tenant is unavailable to your account.')
     );
     const choose = element('button', '', 'Choose a tenant');
     choose.type = 'button';

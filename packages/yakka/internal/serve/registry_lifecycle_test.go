@@ -1,12 +1,22 @@
 package serve
 
 import (
+	"bytes"
+	"encoding/hex"
 	"errors"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
 )
+
+func isHex32(v string) bool {
+	if len(v) != 32 {
+		return false
+	}
+	_, err := hex.DecodeString(v)
+	return err == nil
+}
 
 func tenantByID(infos []TenantInfo, id string) (TenantInfo, bool) {
 	for _, in := range infos {
@@ -85,7 +95,7 @@ func TestMeReportsActiveLifecycle(t *testing.T) {
 	}
 }
 
-func TestLegacyTenantReportsUnsupported(t *testing.T) {
+func TestUnmarkedTenantReportsUnmarked(t *testing.T) {
 	dir := t.TempDir()
 	doc := `{"version":1,"policy":{"mode":"everyone"},"sessions":{},"owners":{"t-legacy":"204"},"names":{"t-legacy":"old"},"token_hashes":[]}`
 	if err := os.WriteFile(filepath.Join(dir, registryFileName), []byte(doc), 0o600); err != nil {
@@ -99,7 +109,7 @@ func TestLegacyTenantReportsUnsupported(t *testing.T) {
 	if len(got) != 1 || got[0].ID != "t-legacy" || got[0].Name != "old" {
 		t.Fatalf("owned: %+v", got)
 	}
-	if got[0].LifecycleState != lifecycleStateUnsupported || got[0].LifecycleGeneration != nil {
+	if got[0].LifecycleState != lifecycleStateUnmarked || got[0].LifecycleGeneration != nil {
 		t.Fatalf("legacy lifecycle: %+v", got[0])
 	}
 	if _, ok := r.TenantLifecycle("t-legacy"); ok {
@@ -116,6 +126,174 @@ func TestLegacyTenantReportsUnsupported(t *testing.T) {
 	}
 	if err := r.BeginTenantReset(204, "t-absent"); !errors.Is(err, ErrTenantNotFound) {
 		t.Fatalf("absent begin: %v", err)
+	}
+}
+
+func TestAdoptUnmarkedTenants(t *testing.T) {
+	dir := t.TempDir()
+	doc := `{"version":1,"policy":{"mode":"everyone"},"sessions":{},"owners":{"default":"204","t-legacy":"204","t-marked":"204"},"names":{"default":"default","t-legacy":"old","t-marked":"kept"},"token_hashes":[],"lifecycle":{"t-marked":{"marker":"11111111111111111111111111111111","generation":"22222222222222222222222222222222","state":"active"}}}`
+	if err := os.WriteFile(filepath.Join(dir, registryFileName), []byte(doc), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	r, err := OpenRegistry(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	marked, ok := r.TenantLifecycle("t-marked")
+	if !ok || marked.State != lifecycleStateActive || marked.Marker != "11111111111111111111111111111111" {
+		t.Fatalf("fixture marked tenant: ok=%v %+v", ok, marked)
+	}
+
+	adopted, err := r.AdoptUnmarkedTenants()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(adopted) != 2 || adopted[0] != "default" || adopted[1] != "t-legacy" {
+		t.Fatalf("adopted=%v want [default t-legacy]", adopted)
+	}
+
+	records := map[string]TenantLifecycleRecord{}
+	for _, id := range adopted {
+		rec, ok := r.TenantLifecycle(id)
+		if !ok {
+			t.Fatalf("%q has no lifecycle record after adoption", id)
+		}
+		if !isHex32(rec.Marker) || !isHex32(rec.Generation) {
+			t.Fatalf("%q marker/generation not 32-char hex: %+v", id, rec)
+		}
+		if rec.State != lifecycleStateActive || rec.Operation != "" {
+			t.Fatalf("%q adopted record: %+v", id, rec)
+		}
+		records[id] = rec
+	}
+	if records["default"].Marker == records["t-legacy"].Marker {
+		t.Fatal("adopted tenants share a marker")
+	}
+	if records["default"].Generation == records["t-legacy"].Generation {
+		t.Fatal("adopted tenants share a generation")
+	}
+	if got, _ := r.TenantLifecycle("t-marked"); got != marked {
+		t.Fatalf("marked tenant changed: %+v want %+v", got, marked)
+	}
+
+	// Re-opening from disk gives identical records.
+	reopened, err := OpenRegistry(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"default", "t-legacy", "t-marked"} {
+		want := records[id]
+		if id == "t-marked" {
+			want = marked
+		}
+		got, ok := reopened.TenantLifecycle(id)
+		if !ok || got != want {
+			t.Fatalf("%q on disk: ok=%v %+v want %+v", id, ok, got, want)
+		}
+	}
+
+	// A second call adopts nothing and writes nothing.
+	before, err := os.ReadFile(filepath.Join(dir, registryFileName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	again, err := r.AdoptUnmarkedTenants()
+	if err != nil || again != nil {
+		t.Fatalf("second adopt: ids=%v err=%v", again, err)
+	}
+	after, err := os.ReadFile(filepath.Join(dir, registryFileName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(before, after) {
+		t.Fatal("second adopt rewrote registry.json")
+	}
+
+	owned := r.tenantsOwnedBy(204)
+	if len(owned) != 3 {
+		t.Fatalf("owned after adoption: %+v", owned)
+	}
+	for _, info := range owned {
+		if info.LifecycleState != lifecycleStateActive || info.LifecycleGeneration == nil || *info.LifecycleGeneration == "" {
+			t.Fatalf("tenant %q not active with generation: %+v", info.ID, info)
+		}
+	}
+	if err := r.BeginTenantReset(204, "default"); err != nil {
+		t.Fatalf("begin reset on adopted tenant: %v", err)
+	}
+}
+
+func TestAdoptSkipsNamesWithoutOwner(t *testing.T) {
+	dir := t.TempDir()
+	doc := `{"version":1,"policy":{"mode":"everyone"},"sessions":{},"owners":{"t-owned":"204"},"names":{"t-owned":"owned","t-orphan":"orphan"},"token_hashes":[]}`
+	if err := os.WriteFile(filepath.Join(dir, registryFileName), []byte(doc), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	r, err := OpenRegistry(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	adopted, err := r.AdoptUnmarkedTenants()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(adopted) != 1 || adopted[0] != "t-owned" {
+		t.Fatalf("adopted=%v want [t-owned]", adopted)
+	}
+	if _, ok := r.TenantLifecycle("t-owned"); !ok {
+		t.Fatal("owned tenant was not adopted")
+	}
+	if _, ok := r.TenantLifecycle("t-orphan"); ok {
+		t.Fatal("name without an owner got a lifecycle record")
+	}
+}
+
+func TestAdoptSaveFailureRestoresMemory(t *testing.T) {
+	dir := t.TempDir()
+	doc := `{"version":1,"policy":{"mode":"everyone"},"sessions":{},"owners":{"t-legacy":"7"},"names":{"t-legacy":"old"},"token_hashes":[]}`
+	if err := os.WriteFile(filepath.Join(dir, registryFileName), []byte(doc), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	r, err := OpenRegistry(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dirtyBefore := r.dirty
+	savedPath := r.path
+	r.path = filepath.Join(dir, "missing-parent", registryFileName)
+
+	adopted, err := r.AdoptUnmarkedTenants()
+	if err == nil {
+		t.Fatal("adopt saved despite an unwritable registry")
+	}
+	if adopted != nil {
+		t.Fatalf("failed adopt returned ids: %v", adopted)
+	}
+	if _, ok := r.TenantLifecycle("t-legacy"); ok {
+		t.Fatal("failed adopt left a lifecycle record in memory")
+	}
+	if r.dirty != dirtyBefore {
+		t.Fatalf("failed adopt changed dirty: %v want %v", r.dirty, dirtyBefore)
+	}
+
+	r.path = savedPath
+	adopted, err = r.AdoptUnmarkedTenants()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(adopted) != 1 || adopted[0] != "t-legacy" {
+		t.Fatalf("later adopt=%v want [t-legacy]", adopted)
+	}
+	rec, ok := r.TenantLifecycle("t-legacy")
+	if !ok || rec.State != lifecycleStateActive {
+		t.Fatalf("later adopt record: ok=%v %+v", ok, rec)
+	}
+	disk, err := OpenRegistry(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, ok := disk.TenantLifecycle("t-legacy"); !ok || got != rec {
+		t.Fatalf("later adopt not persisted: ok=%v %+v want %+v", ok, got, rec)
 	}
 }
 

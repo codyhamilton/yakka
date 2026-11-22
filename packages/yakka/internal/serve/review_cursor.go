@@ -102,8 +102,7 @@ func restoreReviewID(item map[string]any) {
 }
 
 // tenantReviewGeneration reads the tenant's current lifecycle generation from registry metadata only;
-// it never opens tenant storage. Keyed/local tenants and unsupported legacy tenants have no
-// trustworthy record, so their generation is empty and a reset cannot apply to them.
+// it never opens tenant storage. Keyed/local tenants and unmarked tenants (flag off, or adoption failed) have no trustworthy record, so their generation is empty and a reset cannot apply to them.
 func (s *Server) tenantReviewGeneration(tenant string) string {
 	if s.registry == nil {
 		return ""

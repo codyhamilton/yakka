@@ -300,21 +300,13 @@ func (r *Registry) createTenantLocked(name, owner string) (string, error) {
 		if _, taken := r.owners[id]; taken {
 			continue
 		}
-		marker, err := newLifecycleValue()
-		if err != nil {
-			return "", err
-		}
-		generation, err := newLifecycleValue()
+		rec, err := newActiveLifecycleRecord()
 		if err != nil {
 			return "", err
 		}
 		r.owners[id] = owner
 		r.names[id] = name
-		r.lifecycle[id] = TenantLifecycleRecord{
-			Marker:     marker,
-			Generation: generation,
-			State:      lifecycleStateActive,
-		}
+		r.lifecycle[id] = rec
 		r.dirty = true
 		return id, nil
 	}
