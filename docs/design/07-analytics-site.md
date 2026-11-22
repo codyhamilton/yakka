@@ -63,7 +63,11 @@ MCP tool or key/bearer path.
 Each confirmation names the operation, display name and immutable tenant id, requires typing that
 id, and says: **“Only the human owner may reset or delete a tenant. Agents must not perform or attempt this on a user's behalf.”**
 Reset explains that it erases data/revokes keys but keeps identity/ownership for reuse after
-rekeying. Delete explains permanent removal of tenant/data/keys/ownership. Cancellation or a
+rekeying. Delete explains permanent removal of tenant/data/keys/ownership. The dialog also names the
+stored-record scale from `GET /v1/analytics/event-counts?tenant=<id>` and requires a second typed
+phrase (`reset all data` or `delete all data`) whenever the tenant holds stored records or its size
+could not be read; an empty tenant asks only for the id, and every server-side gate is unchanged.
+See the [Plan 31 record](../plans/31-legacy-tenant-adoption.md). Cancellation or a
 rejected request changes neither selection nor data. Both may target the selected/only tenant;
 after `204`, clear target selection and cached reads/cursors across the acting UI origin's tabs,
 refresh `/v1/me` and require explicit re-selection/create on profile, without automatic fallback.
