@@ -1,14 +1,20 @@
-// `score-strips`: file-weighted artifact observations. One mark per returned
+// `score-strips`: file-weighted artifact observations. One mark per latest
 // artifact file, keyed by its canonical (repo_id, path) identity so the shared
-// inspector opens the artifact reader.
+// inspector opens the artifact reader. A file is never counted as a content
+// version, and the strip is always grouped by document kind.
 
 import '../charts/yk-ranges.js';
 import { cancelledState, emptyState, errorState, unsupportedState } from '../core/panel-state.js';
 import { table } from './pulse-strips.js';
+import { registerCaption } from './captions.js';
 import {
-  ensureP10Styles, requestParams, schemaGrain, whenPanelBody, whenPanelSlot
+  ensureP10Styles, mountPanelViews, requestParams, schemaGrain, whenPanelBody, whenPanelSlot
 } from './p10-shared.js';
-import { QUALITY_KINDS, catalogueChecks, qualityScope, renderQualityChooser } from './score-ranges.js';
+import {
+  SCORE_UNIT, defaultCheck, fetchContentBaselines, fetchScoreCatalogue, installScoreControls, multiKindRefusal,
+  renderScoreControls, requestedScore, resolveScorer, scoreApplicabilityRefusal, scoreCaption,
+  scoreKind, scorerNames
+} from './score-ranges.js';
 
 export const ARTIFACT_LENSES = ['kind', 'plan', 'repo_id', 'harness', 'session_model', 'source', 'screen_verdict'];
 export const READER_NOTICE = 'Open this identity in the artifact reader.';
@@ -42,30 +48,66 @@ export function artifactDestination(identity = {}) {
   return `/artifact?${params.toString()}`;
 }
 
+function observedOf(row = {}) {
+  const lens = row.l || {};
+  const value = lens.observed ?? lens.observed_at ?? lens.ts ?? row.observed ?? row.observed_at ?? row.ts ?? null;
+  return value === null || value === undefined ? '—' : String(value);
+}
+
 export function stripRows(body = {}, check = '', lens = 'kind') {
   const measure = `score:${check}`;
   const entities = {};
-  const rows = (Array.isArray(body?.rows) ? body.rows : []).map(row => {
+  const byIdentity = new Map();
+  for (const row of Array.isArray(body?.rows) ? body.rows : []) {
     const identity = scoreIdentity(row);
     const key = JSON.stringify({ path: identity.path, repo_id: identity.repo_id });
     const measureMap = row.m || {};
     const value = measureMap[measure] ?? measureMap.score ?? null;
     const group = String(row.l?.[lens] ?? row.l?.kind ?? '(none)');
-    entities[key] = {
-      destination: artifactDestination(identity),
-      entity: { grain: 'artifact', path: identity.path, repo_id: identity.repo_id, content_hash: identity.hash, kind: row.l?.kind ?? '' }
-    };
-    return {
+    const observed = observedOf(row);
+    // One dot per latest file: a repeated identity is the same file, so keep a
+    // single mark (the last row when the server did not order observed times).
+    if (byIdentity.has(key)) continue;
+    byIdentity.set(key, {
       key,
       group,
       label: identity.path || key,
       values: { [measure]: value === null || value === undefined ? null : Number(value) },
       sampled: row.flags?.sampled === true,
       n: 1,
-      identity
+      identity,
+      score: value === null || value === undefined ? null : Number(value),
+      scorer: row.l?.scorer ?? row.scorer ?? '',
+      observed,
+      kind: row.l?.kind ?? ''
+    });
+    entities[key] = {
+      destination: artifactDestination(identity),
+      entity: { grain: 'artifact', path: identity.path, repo_id: identity.repo_id, content_hash: identity.hash, kind: row.l?.kind ?? '' }
     };
+  }
+  const rows = [...byIdentity.values()].sort((a, b) => {
+    return String(a.identity.repo_id).localeCompare(String(b.identity.repo_id))
+      || String(a.identity.path).localeCompare(String(b.identity.path))
+      || String(a.identity.hash).localeCompare(String(b.identity.hash));
   });
   return { rows, entities, measure, population: body?.population || null };
+}
+
+export function stripTableColumns() {
+  return ['Repository', 'Path', 'Kind', `Score (${SCORE_UNIT})`, 'Scorer', 'Observed'];
+}
+
+export function stripTableRows(rows = []) {
+  const value = item => item === null || item === undefined ? '—' : String(item);
+  return rows.map(row => [
+    row.identity.repo_id || '—',
+    row.identity.path || '—',
+    row.kind || '—',
+    value(row.score),
+    row.scorer || '—',
+    row.observed || '—'
+  ]);
 }
 
 export function stripPopulationText(body = {}) {
@@ -78,11 +120,6 @@ export function stripPopulationText(body = {}) {
   return parts.join('; ');
 }
 
-async function fetchCatalogue(transport, kind, options) {
-  const { response, body } = await transport.get('scores', new URLSearchParams({ kind }), options);
-  return { response, body, checks: catalogueChecks(body) };
-}
-
 // The same-kind check catalogue the artifact grain advertises. Older schemas
 // without it fall back to the `/scores?kind=` read, never to another kind.
 export function kindChecks(schema, kind = '') {
@@ -91,37 +128,57 @@ export function kindChecks(schema, kind = '') {
   return list.filter(name => typeof name === 'string' && name);
 }
 
+registerCaption('score-strips', ({ spec = {} } = {}) => {
+  const key = spec?.scope?.captionKey || 'G-strips';
+  const check = spec?.scope?.check || 'clarity';
+  return scoreCaption(key, { check });
+});
+
 export async function load(context = {}) {
   const { scope = {}, spec = {}, transport, tenant = '', signal } = context;
   const doc = context.doc || globalThis.document;
   ensureP10Styles('/css/trends.css', doc);
   ensureP10Styles('/css/quality.css', doc);
+  const resolvedKind = scoreKind(scope, spec);
+  if (resolvedKind.multi) return multiKindRefusal();
   try {
     const schema = context.schema || (await transport.schema(tenant)).body;
     const panel = context.panel || SCORE_STRIPS_PANEL;
-    const requested = qualityScope(spec);
-    const kind = QUALITY_KINDS.includes(requested.kind) ? requested.kind : 'design';
+    const refusal = scoreApplicabilityRefusal({ panel, spec, scope, schema, grain: 'artifact' });
+    if (refusal) return refusal;
+    const requested = requestedScore(spec, scope);
+    const kind = resolvedKind.kind;
     let checks = kindChecks(schema, kind);
     if (!checks.length) {
-      const catalogue = await fetchCatalogue(transport, kind, { tenant, signal, stateKey: 'score-strips-catalogue' });
+      const catalogue = await fetchScoreCatalogue(transport, kind, { tenant, signal, stateKey: 'score-strips-catalogue' });
       if (!catalogue.response.ok) return errorState({ message: catalogue.body?.error || `The server returned ${catalogue.response.status}.`, code: catalogue.body?.code || String(catalogue.response.status || '') });
       checks = catalogue.checks;
     }
-    if (!checks.length) return emptyState([{ kind: 'scope', label: `no checks are catalogued for ${kind}`, clear: null }]);
+    if (!checks.length) {
+      installScoreControls({ panelId: panel.id, panel, spec, doc, check: '', scorer: '' });
+      whenPanelBody(panel.id, doc, host => host.replaceChildren());
+      return emptyState([{ kind: 'scope', label: `no checks are catalogued for ${kind}`, clear: null }]);
+    }
     if (requested.check && !checks.includes(requested.check)) {
       return unsupportedState({ measure: `check ${requested.check}`, reason: 'not in the score catalogue for this kind', source: 'server /schema', nearest: checks[0] });
     }
-    const check = requested.check || checks[0];
-    const splits = artifactSplits(schema);
-    const lens = defaultArtifactSplit(splits, spec.split || '');
-    if (spec.split && !splits.includes(spec.split)) {
-      return unsupportedState({ lens: `lens ${spec.split}`, reason: 'not published for the artifact grain', source: 'server /schema', nearest: lens || null });
+    const check = requested.check || defaultCheck(checks);
+    const baselines = await fetchContentBaselines(transport, { kind, check, scorer: requested.scorer, tenant, signal, stateKey: 'score-strips-baseline' });
+    if (!baselines.response.ok) return errorState({ message: baselines.body?.error || `The server returned ${baselines.response.status}.`, code: baselines.body?.code || String(baselines.response.status || '') });
+    const resolved = resolveScorer(baselines.body, check, requested.scorer);
+    if (resolved.unknown) {
+      return unsupportedState({ measure: `scorer ${requested.scorer}`, reason: 'not in the content baseline for this check', source: 'server /baselines', nearest: scorerNames(baselines.body)[0] || null });
     }
+    if (!resolved.scorer) {
+      installScoreControls({ panelId: panel.id, panel, spec, doc, kind, check, checks, scorer: '', scorers: scorerNames(baselines.body) });
+      return unsupportedState({ measure: `a scorer for ${check}`, reason: 'no scorer is published for this check', source: 'server /baselines', nearest: null });
+    }
+    installScoreControls({ panelId: panel.id, panel, spec, doc, kind, check, checks, scorer: resolved.scorer, scorers: scorerNames(baselines.body) });
     const pageMax = Number(schema?.budgets?.page_max) || 0;
     const params = requestParams({
-      scope, spec: { ...spec, split: '' }, measure: '',
+      scope: { ...scope, kind }, spec: { ...spec, split: '' }, measure: '',
       extra: {
-        grain: 'artifact', check,
+        grain: 'artifact', check, ...(resolved.scorer ? { scorer: resolved.scorer } : {}),
         fields: [`score:${check}`],
         sort: `score:${check}:asc`,
         ...(pageMax ? { limit: String(pageMax) } : {})
@@ -129,7 +186,9 @@ export async function load(context = {}) {
     });
     const { response, body } = await transport.get('entities', params, { tenant, signal, stateKey: 'score-strips' });
     if (!response.ok) return errorState({ message: body?.error || `The server returned ${response.status}.`, code: body?.code || String(response.status || '') });
-    const model = stripRows(body, check, lens);
+    const post = scoreApplicabilityRefusal({ panel, spec, scope, schema, grain: 'artifact', ignoredFilters: Array.isArray(body?.ignored_filters) ? body.ignored_filters.map(String) : [] });
+    if (post) return post;
+    const model = stripRows(body, check, 'kind');
     if (!model.rows.length) {
       whenPanelBody(panel.id, doc, host => host.replaceChildren());
       return emptyState([{ kind: 'scope', label: `no scored artifact files in window ${scope.win || 'all'}`, clear: null }]);
@@ -137,47 +196,48 @@ export async function load(context = {}) {
     whenPanelBody(panel.id, doc, host => {
       const wrapper = doc.createElement('div');
       wrapper.className = 'p10-quality';
-      const basis = doc.createElement('p');
-      basis.className = 'p10-basis';
-      basis.textContent = `Basis: file-weighted artifact observations (one mark per returned file), scored ${check}. ${stripPopulationText(body)}. Files are a different population from content hashes.`;
       const node = doc.createElement('yk-ranges');
       node.className = 'p10-quality-chart';
       node.spec = {
         chart: 'ranges', type: 'strip',
-        title: `${check} per artifact file by ${lens}`,
-        units: 'score',
-        timeBasis: 'the selected artifact version; files, not content hashes',
-        series: [{ key: model.measure, label: check, unit: 'score', kind: 'number' }],
+        title: `${check} per artifact file by kind`,
+        units: SCORE_UNIT,
+        timeBasis: 'the selected artifact version; files, not content versions',
+        series: [{ key: model.measure, label: check, unit: SCORE_UNIT, kind: 'number' }],
         entities: model.entities
       };
       node.data = model.rows;
+      const tableNode = table(doc, {
+        caption: `${check} scored artifact files (${SCORE_UNIT})`,
+        columns: stripTableColumns().map((label, index) => ({ label, numeric: index === 3 })),
+        rows: stripTableRows(model.rows)
+      });
+      const views = mountPanelViews({
+        panelId: panel.id, chart: node, table: tableNode, doc,
+        defaultView: 'chart', label: 'Score strips view'
+      });
+      views.element.removeAttribute('data-panel');
+      const basis = doc.createElement('p');
+      basis.className = 'p10-basis';
+      basis.textContent = `Basis: one dot per latest artifact file, scored ${check} by ${resolved.scorer}. ${stripPopulationText(body)}. Files are a different population from content versions.`;
       const note = doc.createElement('p');
       note.className = 'p10-note';
-      note.textContent = `${READER_NOTICE} Population: ${stripPopulationText(body)}.`;
-      const columns = [{ label: 'File' }, { label: 'Repo' }, { label: 'Score', numeric: true }, { label: 'Group' }];
-      const rows = model.rows.map(row => [
-        row.identity.path || '—',
-        row.identity.repo_id || '—',
-        row.values[model.measure] === null || row.values[model.measure] === undefined ? '—' : String(row.values[model.measure]),
-        row.group
-      ]);
-      wrapper.append(basis, node, note, table(doc, { caption: `${check} scored artifact files`, columns, rows }));
+      note.textContent = `${READER_NOTICE} Scores are a ${SCORE_UNIT}.`;
+      wrapper.append(views.element, basis, note);
       host.replaceChildren(wrapper);
     });
     whenPanelSlot(panel.id, 'chooser', doc, slot => {
-      const rendered = renderQualityChooser({
-        panelId: panel.id, panel, spec, doc, kind, check, scorer: requested.scorer,
-        checks, scorers: [], includeScorer: false,
-        lens, lenses: splits, chart: 'strip'
-      });
-      slot.replaceChildren(rendered.element);
+      slot.replaceChildren(renderScoreControls({
+        panelId: panel.id, panel, spec, doc, kind, check, scorer: resolved.scorer,
+        checks, scorers: scorerNames(baselines.body), split: 'kind', splits: ['kind'], includeSplit: false
+      }));
     });
     return {
-      state: 'ready', kind, check, split: lens,
+      state: 'ready', kind, check, scorer: resolved.scorer, split: 'kind',
       population: body.population || null,
       stripPopulation: stripPopulationText(body),
-      basis: `${check} file-weighted artifacts by ${lens}; ${stripPopulationText(body)}`,
-      tableRows: model.rows.map(row => [row.identity.path, row.identity.repo_id, row.values[model.measure], row.group]),
+      basis: `${check} file-weighted artifacts by kind; ${stripPopulationText(body)}`,
+      tableRows: stripTableRows(model.rows),
       entities: model.entities
     };
   } catch (error) {
@@ -188,13 +248,13 @@ export async function load(context = {}) {
 
 export const SCORE_STRIPS_PANEL = {
   id: 'score-strips',
-  title: 'Score strips',
+  title: 'Artifact clarity by kind',
   grain: 'artifact',
   measures: ['score'],
   lenses: ARTIFACT_LENSES,
   charts: ['strip'],
   requires: ['entities_artifact', 'scores_by_lens'],
-  caveats: 'File-weighted; one mark per returned artifact file. The identity (repo_id, path) opens the artifact reader. Files are never counted as content hashes.',
+  caveats: 'File-weighted; one mark per latest artifact file. The identity (repo_id, path) opens the artifact reader. Files are never counted as content versions.',
   measureBasis: 'the selected artifact version’s latest score',
   requests: () => [{ route: '/v1/analytics/entities', method: 'GET', params: { grain: 'artifact', check: 'clarity', fields: ['score:clarity'] } }],
   load

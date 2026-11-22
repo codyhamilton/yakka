@@ -5,7 +5,7 @@ import {
   normaliseSpec, stackBands, transformSeriesData
 } from '../../web/js/charts/series.js';
 import {
-  buildScales, dataToPx, pxToData, scaleGroupKey, xToPx, yToPx
+  buildScales, columnBarLayout, dataToPx, formatTimeAxisTick, normaliseDash, pxToData, scaleGroupKey, timeAxisValues, xToPx, yToPx
 } from '../../web/js/charts/scales.js';
 import { thresholdModel, thresholdValueText } from '../../web/js/charts/thresholds.js';
 import { formatCount, formatValue } from '../../web/js/charts/formatters.js';
@@ -73,12 +73,22 @@ test('normaliseSpec defaults mode and type and keeps stable series order and key
   assert.equal(spec.series[0].label, 'z');
 });
 
-test('scales give one time or numeric x scale, one y scale and a zero-based y for columns', () => {
+test('scales keep millisecond X data numeric and format temporal ticks as event time', () => {
   const time = buildScales({ x: { kind: 'time' } });
-  assert.equal(time.x.time, true);
+  assert.equal(time.x.time, false);
   assert.deepEqual(Object.keys(time), ['x', 'y']);
   const numeric = buildScales({ x: { kind: 'number' } });
   assert.equal(numeric.x.time, false);
+
+  const values = timeAxisValues({ x: { kind: 'time', timeZone: 'UTC' } });
+  assert.deepEqual(values(null, [Date.parse('2026-09-01T00:00:00Z'), Date.parse('2026-09-02T00:00:00Z')]), ['1 Sept', '2 Sept']);
+  assert.equal(formatTimeAxisTick(Date.parse('2026-09-01T23:00:00Z'), { timeZone: 'Australia/Brisbane' }), '2 Sept');
+  assert.deepEqual(
+    timeAxisValues({ x: { kind: 'time', axisMode: 'elapsed', axisOrigin: Date.parse('2026-09-01T00:00:00Z') } })(null,
+      [Date.parse('2026-09-01T00:00:00Z'), Date.parse('2026-09-02T00:00:00Z')]),
+    ['0d', '1d']
+  );
+  assert.equal(formatTimeAxisTick(58810, { kind: 'time', timeZone: 'UTC' }), '1 Jan');
 
   const column = buildScales({ x: { kind: 'time' } }, { zeroBased: true });
   assert.deepEqual(column.y.range(null, 5, 10), [0, 10]);
@@ -87,6 +97,36 @@ test('scales give one time or numeric x scale, one y scale and a zero-based y fo
 
   assert.equal(scaleGroupKey({ scaleGroup: 'paired-days' }), 'paired-days');
   assert.equal(scaleGroupKey({}), null);
+});
+
+test('an explicit yRange pins the shared domain and overrides zero-based auto', () => {
+  const shared = buildScales({ yRange: { min: 0, max: 12 } });
+  assert.deepEqual(shared.y.range(), [0, 12]);
+  const overZero = buildScales({ yRange: { min: 0, max: 12 } }, { zeroBased: true });
+  assert.deepEqual(overZero.y.range(null, 3, 7), [0, 12]);
+  assert.equal(buildScales({ yRange: { min: 5, max: 5 } }).y.range, undefined);
+  assert.equal(buildScales({ yRange: { min: 0, max: Infinity } }).y.range, undefined);
+});
+
+test('a series dash becomes a uPlot dash array or nothing at all', () => {
+  assert.deepEqual(normaliseDash('dashed'), [6, 4]);
+  assert.deepEqual(normaliseDash('dotted'), [2, 3]);
+  assert.deepEqual(normaliseDash([3, 2]), [3, 2]);
+  assert.equal(normaliseDash('solid'), null);
+  assert.equal(normaliseDash(undefined), null);
+  assert.equal(normaliseDash([]), null);
+});
+
+test('grouped columns split one category band while stacked columns keep it whole', () => {
+  const stacked = columnBarLayout([{ key: 'a' }, { key: 'b' }, { key: 'c' }]);
+  assert.equal(stacked.grouped, false);
+  assert.deepEqual(stacked.size, [0.72, Infinity, 1]);
+  assert.deepEqual(stacked.aligns, [0, 0, 0]);
+
+  const grouped = columnBarLayout([{ key: 'current', align: -1 }, { key: 'previous', align: 1 }]);
+  assert.equal(grouped.grouped, true);
+  assert.deepEqual(grouped.size, [0.5, Infinity, 1]);
+  assert.deepEqual(grouped.aligns, [-1, 1]);
 });
 
 test('pixel and data conversions are inverse and plot-relative', () => {

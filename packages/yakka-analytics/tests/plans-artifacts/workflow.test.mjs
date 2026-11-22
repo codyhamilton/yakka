@@ -106,27 +106,31 @@ test('harness and repo grouping name the missing execution aggregate, never a pa
   }
 });
 
-test('plan events and executions map to artifact-kind lanes and one execution lane', () => {
+test('plan events and executions map to one plan lane with marker kinds by event type', () => {
   const events = p12PlanEvents({ repo_id: 'repo-a', plan: '20', limit: 500 });
   const executions = p12ExecutionEntities({ plan: '20', repo_id: 'repo-a', limit: 500 });
   const model = timelineModel({ eventsBody: events, executionsBody: executions, identity: identity20 });
-  const laneKeys = model.lanes.map(lane => lane.key);
-  assert.deepEqual(laneKeys, ['artifact:design', 'artifact:brief', 'artifact:report', 'execution']);
-  assert.equal(model.versionMarkers, 8);
+  assert.deepEqual(model.lanes.map(lane => lane.key), ['plan:repo-a:20']);
+  assert.deepEqual(model.series.map(series => series.key), ['artifact_version', 'commit', 'execution']);
+  assert.equal(model.versionMarkers, 9);
   assert.equal(model.executionMarkers, 5);
   assert.equal(model.otherEvents, 1);
-  assert.ok(model.tableRows.some(row => row.lane === 'Other event' && /not drawn \(not an artifact_version\)/.test(row.note)));
-  assert.ok(model.tableRows.some(row => /unpriced \(all calls\)/.test(row.note)));
-  assert.ok(model.tableRows.some(row => /\$4\.00\+/.test(row.note)));
+  assert.ok(model.tableRows.every(row => row.plan === '20' && row.repo === 'repo-a'));
+  assert.ok(model.tableRows.some(row => row.type === 'commit'));
+  assert.ok(model.tableRows.some(row => /unpriced \(all calls\)/.test(row.cost)));
+  assert.ok(model.tableRows.some(row => /\$4\.00\+/.test(row.cost)));
+  const times = model.tableRows.map(row => row.at);
+  assert.deepEqual(times, [...times].sort((a, b) => a - b), 'event time ASC');
+  assert.ok(model.data.every(marker => marker.start === undefined && marker.end === undefined), 'markers never carry duration');
   const lanesModel = buildLanesModel({ spec: { type: 'timeline', lanes: model.lanes, series: model.series }, data: model.data });
   assert.equal(lanesModel.state, 'ready');
-  assert.equal(lanesModel.rows.length, 13);
+  assert.equal(lanesModel.rows.length, 14);
   assert.ok(model.entities[model.data[0].key].destination.startsWith('/plans/'));
 });
 
 test('the plan chooser falls back to the first served plan and never silently switches', () => {
   const rows = p12PlanEntities({ sort: 'last_ts:desc', limit: 100 }).rows;
-  assert.deepEqual(chooserFallback(rows), { repo_id: 'repo-a', plan: '20' });
+  assert.deepEqual(chooserFallback(rows), { repo_id: 'repo-a', plan: '23' });
   assert.deepEqual(chooserFallback(rows, planChoiceKey({ repo_id: 'repo-b', plan: '26' })), { repo_id: 'repo-b', plan: '26' });
   assert.equal(chooserFallback(rows, planChoiceKey({ repo_id: 'repo-z', plan: '99' })), null);
   assert.equal(chooserFallback([]), null);
@@ -220,16 +224,11 @@ test('the stacked process shape opens the plan and names unsupported groupings',
     window.dispatchEvent(new PopStateEvent('popstate'));
   });
   await page.waitForFunction(() => document.querySelector('[data-panel="shape-bars"]')?.dataset.idle === 'true');
-  await page.selectOption('[data-panel="shape-bars"] .p12-grouping', 'harness');
-  await page.waitForFunction(() => document.querySelector('[data-panel="shape-bars"]')?.dataset.state === 'unsupported');
-  let text = await page.locator('[data-panel="shape-bars"]').innerText();
-  assert.match(text, /execution aggregate grouping/);
-  assert.match(text, /no execution aggregate mode/);
-  assert.match(text, /plan grouping/);
-  await page.selectOption('[data-panel="shape-bars"] .p12-grouping', 'repo');
-  await page.waitForFunction(() => document.querySelector('[data-panel="shape-bars"]')?.dataset.state === 'unsupported');
-  text = await page.locator('[data-panel="shape-bars"]').innerText();
-  assert.match(text, /execution aggregate grouping/);
+  const groupingOptions = await page.$$eval('[data-panel="shape-bars"] .p12-grouping option', options => options.map(option => option.value));
+  assert.deepEqual(groupingOptions, ['plan'], 'P7 offers Plan only; harness and repo are absent');
+  const groupingText = await page.locator('[data-panel="shape-bars"]').innerText();
+  assert.match(groupingText, /Showing the top \d+ plans by unreported executions/);
+  assert.doesNotMatch(groupingText, /execution aggregate mode/);
 
   await diagnostics.assertClean();
   const stats = await (await fetch(`${harness.origin}/__test/stats`)).json();
@@ -246,25 +245,34 @@ test('the timeline draws version and execution markers, keeps non-version events
 
   await mountWorkflow(page, harness.origin);
   const timeline = page.locator('[data-panel="plan-timeline"]');
+  await page.selectOption('[data-panel="plan-timeline"] .p12-plan-chooser', planChoiceKey(identity20));
+  await page.waitForFunction(() => {
+    const panel = document.querySelector('[data-panel="plan-timeline"]');
+    return panel?.dataset.idle === 'true' && panel.dataset.state === 'ready' && /repo-a · 20/.test(panel.textContent);
+  });
   assert.equal(await timeline.getAttribute('data-state'), 'ready');
+  assert.match(await timeline.innerText(), /Each marker shows a recorded plan event at its event time/);
   assert.match(await timeline.innerText(), /4 of 9 events; 4 of 5 executions/);
   const lanes = await page.evaluate(() => {
     const element = document.querySelector('[data-panel="plan-timeline"] yk-lanes');
     const view = element.inspect();
     return { marks: view.marks.length, series: view.series.map(series => series.key) };
   });
-  assert.ok(lanes.series.includes('artifact:design'));
-  assert.ok(lanes.series.includes('artifact:brief'));
+  assert.ok(lanes.series.includes('artifact_version'));
+  assert.ok(lanes.series.includes('commit'));
   assert.ok(lanes.series.includes('execution'));
   assert.ok(lanes.marks > 0);
+  const columns = await page.$$eval('[data-panel="plan-timeline"] table.pulse-table thead th', cells => cells.map(cell => cell.textContent));
+  assert.deepEqual(columns, ['Event time', 'Event type', 'Repository', 'Plan', 'Path', 'Conversation', 'Session cost (USD)']);
   const firstRows = await page.locator('[data-panel="plan-timeline"] table.pulse-table tbody tr').count();
   assert.equal(firstRows, 8);
-  assert.match(await timeline.innerText(), /not drawn \(not an artifact_version\)/);
+  const rowText = await page.$$eval('[data-panel="plan-timeline"] table.pulse-table tbody tr', rows => rows.map(row => row.textContent));
+  assert.ok(rowText.some(text => /commit/.test(text)), 'the commit event stays in the table');
 
   await page.locator('.p12-load-more-events').click();
   await page.waitForFunction(() => document.querySelectorAll('[data-panel="plan-timeline"] table.pulse-table tbody tr').length === 12);
   const moreSeries = await page.evaluate(() => document.querySelector('[data-panel="plan-timeline"] yk-lanes').inspect().series.map(series => series.key));
-  assert.ok(moreSeries.includes('artifact:report'), 'a later page adds an observed artifact kind lane');
+  assert.deepEqual(moreSeries, ['artifact_version', 'commit', 'execution'], 'a later page never invents another lane');
   await page.locator('.p12-load-more-events').click();
   await page.waitForFunction(() => document.querySelectorAll('[data-panel="plan-timeline"] table.pulse-table tbody tr').length === 13);
   await page.locator('.p12-load-more-executions').click();

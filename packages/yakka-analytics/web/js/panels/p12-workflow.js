@@ -32,15 +32,16 @@ export const WORKFLOW_SPECS = {
   'shape-bars': {
     grain: 'plan',
     measures: ['executions_complete', 'executions_unreported', 'executions_started', 'complete_share', 'last_ts'],
-    chart: 'bars'
+    chart: 'bars',
+    scope: { captionKey: 'G-shapes' }
   },
-  'plan-timeline': { grain: 'plan', measures: ['ts', 'session_cost_usd'], chart: 'lanes' },
-  rank: { grain: 'plan', measures: ['associated_cost_usd'], chart: 'rank' },
+  'plan-timeline': { grain: 'plan', measures: ['ts', 'session_cost_usd'], chart: 'lanes', scope: { captionKey: 'G-planline' } },
+  rank: { grain: 'plan', measures: ['associated_cost_usd'], chart: 'rank', scope: { captionKey: 'G-planrank' } },
   'scatter-plan': {
     grain: 'plan', measures: ['associated_cost_usd', 'artifacts'], split: 'repo_id', chart: 'scatter',
-    scope: { x: 'associated_cost_usd', y: 'artifacts', colour: 'repo_id' }
+    scope: { x: 'associated_cost_usd', y: 'artifacts', colour: 'repo_id', captionKey: 'G-planxy' }
   },
-  river: { grain: 'activity observation', measures: ['observation'], chart: 'lanes' }
+  river: { grain: 'activity observation', measures: ['observation'], chart: 'lanes', scope: { captionKey: 'G-activity' } }
 };
 
 export function registerP12WorkflowPanels() {
@@ -52,7 +53,8 @@ export function registerP12WorkflowPanels() {
     id: WORKFLOW_PRESET_ID,
     title: lookupPreset(WORKFLOW_PRESET_ID)?.title || 'Workflow',
     panels: WORKFLOW_PANEL_IDS.slice(),
-    specs: WORKFLOW_SPECS
+    specs: WORKFLOW_SPECS,
+    fullWidth: ['river']
   });
   return true;
 }

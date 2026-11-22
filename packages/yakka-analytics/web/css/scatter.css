@@ -28,7 +28,7 @@
 
 .p11-scatter-chart {
   width: 100%;
-  min-height: 240px;
+  min-height: 160px;
 }
 
 .p11-chooser {
@@ -57,6 +57,13 @@
 }
 
 .scatter-marginals {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  min-width: 0;
+}
+
+.scatter-marginal-strips {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
   gap: 0.75rem;
@@ -83,31 +90,6 @@
   min-height: 140px;
 }
 
-.scatter-marginal table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 12px;
-}
-
-.scatter-marginal caption {
-  text-align: left;
-  font-size: 12px;
-  color: var(--yk-muted);
-}
-
-.scatter-marginal th,
-.scatter-marginal td {
-  padding: 3px 6px;
-  border-bottom: 1px solid var(--yk-border);
-  text-align: left;
-}
-
-.scatter-marginal td.numeric,
-.scatter-marginal th.numeric {
-  text-align: right;
-  font-variant-numeric: tabular-nums;
-}
-
 @media (pointer: coarse) {
   .p11-chooser-field select {
     min-height: 44px;
@@ -115,14 +97,8 @@
 }
 
 @media (max-width: 900px) {
-  .scatter-marginals {
+  .scatter-marginal-strips {
     grid-template-columns: minmax(0, 1fr);
-  }
-
-  .scatter-marginal table {
-    display: block;
-    max-width: 100%;
-    overflow-x: auto;
   }
 }
 

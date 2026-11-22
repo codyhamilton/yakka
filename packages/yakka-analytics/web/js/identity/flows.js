@@ -1,10 +1,10 @@
 import { oauthCallbackTarget, oauthLoginPath, safeReturnPath } from '../../contract/return-path.js';
-import { formTenant, rememberedTenant } from '../../contract/session-gate.js';
+import { renderAccountConsole } from './account-console.js';
 
 const node = (tag, text, attrs = {}) => { const el = document.createElement(tag); if (text !== undefined) el.textContent = text; for (const [k, v] of Object.entries(attrs)) { if (k === 'className') el.className = v; else if (k.startsWith('on')) el.addEventListener(k.slice(2), v); else if (v !== undefined) el.setAttribute(k, v); } return el; };
-const field = (form, label, name, value = '', type = 'text') => { const wrap = node('label', `${label} `); const input = node('input', undefined, { name, type, value, autocomplete: name === 'key' ? 'off' : undefined }); wrap.append(input); form.append(wrap); return input; };
-const button = (form, text, type = 'submit') => { const b = node('button', text, { type }); form.append(b); return b; };
-function status(root, text, error = false) { let out = root.querySelector('[data-identity-status]'); if (!out) { out = node('p', undefined, { 'data-identity-status': '', className: 'notice' }); root.append(out); } out.textContent = text; out.classList.toggle('error', error); }
+const field = (form, label, name, value = '', type = 'text', attrs = {}) => { const wrap = node('label', `${label} `); const input = node('input', undefined, { name, type, value, autocomplete: 'off', ...attrs }); wrap.append(input); form.append(wrap); return input; };
+function status(root, text, error = false) { let out = root.querySelector('[data-identity-status]'); if (!out) { out = node('p', undefined, { 'data-identity-status': '', className: 'account-status', role: 'status' }); root.append(out); } out.textContent = text; out.classList.toggle('error', error); }
+const accountNote = root => root.append(node('p', 'Account controls use the selected tenant. Time, repository and kind filters apply on analytics pages.', { className: 'account-context' }));
 async function call(api, path, options) { const { response, body } = await api.request(path, options); if (!response.ok) throw new Error(body?.error || `Request failed (${response.status})`); return body; }
 const lifetimeOptions = [['1d','1 day'],['1w','1 week'],['1m','1 month'],['3m','3 months'],['6m','6 months'],['1y','1 year']];
 export const normalizeUserCode = value => String(value || '').trim().toUpperCase();
@@ -15,103 +15,170 @@ export function deviceApprovalPayload({ user_code, tenant, scope, lifetime, name
 }
 export const deviceDenialPayload = userCode => ({ user_code: normalizeUserCode(userCode), action: 'deny' });
 
-export async function renderIdentity(root, path, api, me, isCurrent = () => true) {
+function storageGet(key) { try { return localStorage.getItem(key) || ''; } catch { return ''; } }
+// response.url is always absolute; the request URL is relative when no API base
+// is configured (same-origin collector). Compare them in one absolute space so a
+// successful callback is not mistaken for an unexpected redirect.
+const absoluteUrl = value => { try { return new URL(value, globalThis.location.href).href; } catch { return String(value || ''); } };
+function isHttpUrl(value) { try { const url = new URL(value); return url.protocol === 'http:' || url.protocol === 'https:'; } catch { return false; } }
+
+export async function renderIdentity(root, path, api, me, isCurrent = () => true, account = null) {
   if (path === '/login') return login(root);
   if (path === '/oauth/callback') return callback(root, api, isCurrent);
   if (path === '/settings') return settings(root, api);
-  if (path === '/device') return device(root, api, me);
-  if (path === '/profile') return profile(root, api, me);
+  if (path === '/device') return device(root, api, me, account);
+  if (path === '/profile') return profile(root, account || { api, me });
 }
 function login(root) {
-  root.append(node('p', 'Sign in to your Yakka account to continue.'));
+  accountNote(root);
+  const section = node('section', undefined, { className: 'account-section account-connection' });
+  section.append(node('p', 'Sign in to your Yakka account to continue.'));
   const ret = safeReturnPath(new URLSearchParams(location.search).get('return')) || '/';
-  root.append(node('a', 'Continue with GitHub', { href: oauthLoginPath(ret), 'data-testid': 'identity-login' }));
-  const error = new URLSearchParams(location.search).get('error'); if (error) status(root, error, true);
+  section.append(node('a', 'Continue with GitHub', { href: oauthLoginPath(ret), 'data-testid': 'identity-login' }));
+  root.append(section);
+  const error = new URLSearchParams(location.search).get('error'); if (error) status(section, error, true);
 }
 async function callback(root, api, isCurrent = () => true) {
-  root.append(node('p', 'Completing sign in…'));
+  accountNote(root);
+  const section = node('section', undefined, { className: 'account-section account-connection' });
+  root.append(section);
+  status(section, 'Completing sign in…');
   try {
     const { response, body, requestUrl } = await api.callback(new URLSearchParams(location.search));
     if (!isCurrent()) return;
-    if (response.redirected || (response.url && response.url !== requestUrl) || response.type === 'opaqueredirect') throw new Error('The sign-in callback redirected unexpectedly.');
+    if (response.redirected || (response.url && absoluteUrl(response.url) !== absoluteUrl(requestUrl)) || response.type === 'opaqueredirect') throw new Error('The sign-in callback redirected unexpectedly.');
     const target = oauthCallbackTarget(body);
-    if (!response.ok || !target) throw new Error(body?.error || 'Sign in failed. Please try again.');
+    if (!response.ok || !target) throw new Error('Sign in failed. Please try again.');
     location.assign(target);
-  } catch (error) { if (isCurrent()) status(root, error.message || 'Sign in failed. Please try again.', true); }
+  } catch {
+    if (!isCurrent()) return;
+    status(section, 'Sign in failed. Please try again.', true);
+    if (!section.querySelector('[data-testid="identity-retry"]')) {
+      const ret = safeReturnPath(new URLSearchParams(location.search).get('return'));
+      section.append(node('a', 'Try sign in again', { href: ret ? `/login?return=${encodeURIComponent(ret)}` : '/login', 'data-testid': 'identity-retry' }));
+    }
+  }
 }
 function settings(root, api) {
-  const heading = node('p', 'Connection settings'); root.append(heading);
-  const form = node('form'); root.append(form);
-  const base = field(form, 'API base URL', 'base', localStorageSafe('yakka-analytics-base')); base.dataset.testid = 'settings-base';
-  const key = field(form, 'Bearer token', 'key', localStorageSafe('yakka-analytics-key'), 'password'); key.dataset.testid = 'settings-key';
-  const save = button(form, 'Save settings'); save.dataset.testid = 'settings-save';
-  form.addEventListener('submit', event => { event.preventDefault(); try { localStorage.setItem('yakka-analytics-base', base.value.trim().replace(/\/+$/, '')); localStorage.setItem('yakka-analytics-key', key.value.trim()); status(root, 'Settings saved.'); } catch { status(root, 'Browser storage is unavailable.', true); } });
-  const clear = node('button', 'Clear settings', { type: 'button', 'data-testid': 'settings-clear' }); root.append(clear);
-  clear.addEventListener('click', () => { try { localStorage.removeItem('yakka-analytics-base'); localStorage.removeItem('yakka-analytics-key'); base.value = ''; key.value = ''; status(root, 'Settings cleared.'); } catch { status(root, 'Browser storage is unavailable.', true); } });
-  const signout = node('button', 'Sign out', { type: 'button' }); root.append(signout);
-  signout.addEventListener('click', async () => { try { const res = await api.logout(); if (!res.ok && res.status !== 204) throw new Error('Sign out failed.'); location.assign('/login'); } catch (e) { status(root, e.message, true); } });
+  accountNote(root);
+  const section = node('section', undefined, { className: 'account-section account-connection' });
+  section.append(node('h2', 'Connection'));
+  const form = node('form', undefined, { className: 'account-form-column', method: 'post', autocomplete: 'off' });
+  const base = field(form, 'API base URL', 'base', storageGet('yakka-analytics-base'));
+  base.dataset.testid = 'settings-base';
+  const key = field(form, 'Bearer token', 'key', '', 'password');
+  key.dataset.testid = 'settings-key';
+  const actions = node('div', undefined, { className: 'account-form-actions' });
+  const save = node('button', 'Save settings', { type: 'submit', 'data-testid': 'settings-save' });
+  const clear = node('button', 'Clear settings', { type: 'button', 'data-testid': 'settings-clear' });
+  const signout = node('button', 'Sign out', { type: 'button', 'data-testid': 'settings-signout' });
+  actions.append(save, clear, signout);
+  form.append(actions);
+  section.append(form);
+  root.append(section);
+  form.addEventListener('submit', event => {
+    event.preventDefault();
+    const nextBase = base.value.trim().replace(/\/+$/, '');
+    if (nextBase && !isHttpUrl(nextBase)) { status(section, 'Enter an absolute http(s) API base URL.', true); return; }
+    try {
+      localStorage.setItem('yakka-analytics-base', nextBase);
+      const nextKey = key.value.trim();
+      if (nextKey) localStorage.setItem('yakka-analytics-key', nextKey);
+      location.reload();
+    } catch { status(section, 'Browser storage is unavailable.', true); }
+  });
+  clear.addEventListener('click', () => {
+    try {
+      localStorage.removeItem('yakka-analytics-base');
+      localStorage.removeItem('yakka-analytics-key');
+      location.reload();
+    } catch { status(section, 'Browser storage is unavailable.', true); }
+  });
+  signout.addEventListener('click', async () => {
+    if (signout.disabled) return;
+    signout.disabled = true;
+    try {
+      const response = await api.logout();
+      if (!response.ok && response.status !== 204) throw new Error('Sign out failed.');
+      location.assign('/login');
+    } catch {
+      signout.disabled = false;
+      status(section, 'Sign out failed.', true);
+    }
+  });
 }
-function localStorageSafe(key) { try { return localStorage.getItem(key) || ''; } catch { return ''; } }
 
-async function device(root, api, me) {
-  if (!me && ['localhost', '127.0.0.1', '::1'].includes(location.hostname) && !localStorageSafe('yakka-analytics-base')) {
+async function device(root, api, me, account = null) {
+  accountNote(root);
+  if (!me && ['localhost', '127.0.0.1', '::1'].includes(location.hostname) && !storageGet('yakka-analytics-base')) {
     status(root, 'Device approval is available through the hosted collector. Configure the API connection in Settings to continue.');
     root.append(node('a', 'Open Settings', { href: '/settings' }));
     return;
   }
+  const tenants = Array.isArray(me?.tenants) ? me.tenants : [];
+  const tenant = account?.tenant || '';
   let code = normalizeUserCode(new URLSearchParams(location.search).get('user_code'));
-  root.append(node('p', 'Check this matches the code in your terminal.'));
-  const entry = node('form'); root.append(entry);
-  const codeInput = field(entry, 'User code', 'user_code', code); codeInput.dataset.testid = 'device-user-code';
-  const continueButton = button(entry, 'Continue'); continueButton.dataset.testid = 'device-code-submit';
-  const form = node('form'); form.hidden = !code; form.dataset.testid = 'device-authorize-form'; root.append(form);
-  const hostLine = node('p', ''); root.append(hostLine);
+  const section = node('section', undefined, { className: 'account-section account-connection' });
+  section.append(node('h2', 'Check this code matches your terminal'));
+  const entry = node('form', undefined, { className: 'account-form-column' });
+  const codeInput = field(entry, 'User code', 'user_code', code);
+  codeInput.dataset.testid = 'device-user-code';
+  entry.append(node('button', 'Continue', { type: 'submit', 'data-testid': 'device-code-submit' }));
+  section.append(entry);
+  const hostLine = node('p', '', { className: 'account-note' });
+  section.append(hostLine);
+  const form = node('form', undefined, { className: 'account-form-column', 'data-testid': 'device-authorize-form' });
+  form.hidden = !code;
+  section.append(form);
+  root.append(section);
   const query = () => { const next = normalizeUserCode(codeInput.value); codeInput.value = next; const safe = `/device?user_code=${encodeURIComponent(next)}`; history.replaceState(null, '', safe); return next; };
   const load = async () => {
     code = query(); if (!code) { form.hidden = true; return; }
     try { const params = new URLSearchParams({ user_code: code }); const grant = await call(api, `device/grant?${params}`); hostLine.textContent = grant.host ? `Request from ${grant.host}` : 'Check the code in your terminal.'; }
-    catch (e) { status(root, e.message, true); }
+    catch (e) { status(section, e.message, true); }
     form.hidden = false;
+    updateReady();
   };
   entry.addEventListener('submit', e => { e.preventDefault(); load(); });
-  const tenants = Array.isArray(me?.tenants) ? me.tenants : [];
-  let tenantSelect;
-  if (tenants.length > 1) { tenantSelect = node('select'); tenantSelect.dataset.testid = 'device-tenant'; tenantSelect.append(node('option', 'Select tenant', { value: '' })); for (const t of tenants) tenantSelect.append(node('option', t.name, { value: t.id })); tenantSelect.value = formTenant(me); const label = node('label', 'Tenant '); label.append(tenantSelect); form.append(label); }
-  const scope = node('select'); scope.dataset.testid = 'device-grant'; scope.append(node('option','Choose access',{value:''})); for (const [v, label] of [['read','Read'],['read_write','Read and write']]) scope.append(node('option', label, { value: v }));
-  const lifetime = node('select'); lifetime.dataset.testid = 'device-lifetime'; for (const [v,label] of lifetimeOptions) lifetime.append(node('option', label, { value: v })); lifetime.value = '3m';
-  const scopeLabel = node('label', 'Access '); scopeLabel.append(scope); form.append(scopeLabel);
+  const scope = node('select', undefined, { name: 'scope', 'data-testid': 'device-grant' });
+  scope.append(node('option', 'Choose access', { value: '' }));
+  for (const [value, label] of [['read', 'Read'], ['read_write', 'Read and write']]) scope.append(node('option', label, { value }));
+  const scopeLabel = node('label', 'Scope '); scopeLabel.append(scope); form.append(scopeLabel);
+  const lifetime = node('select', undefined, { name: 'lifetime', 'data-testid': 'device-lifetime' });
+  for (const [value, label] of lifetimeOptions) lifetime.append(node('option', label, { value }));
+  lifetime.value = '3m';
   const lifeLabel = node('label', 'Lifetime '); lifeLabel.append(lifetime); form.append(lifeLabel);
-  const name = field(form, 'Token name (optional)', 'name'); name.dataset.testid = 'device-token-name';
-  const approve = button(form, 'Approve'); approve.dataset.testid = 'device-submit';
-  const deny = button(form, 'Deny', 'button'); deny.dataset.testid = 'device-deny';
+  const name = field(form, 'Token name', 'name');
+  name.dataset.testid = 'device-token-name';
+  const actions = node('div', undefined, { className: 'account-form-actions' });
+  const approve = node('button', 'Approve', { type: 'submit', 'data-testid': 'device-submit' });
+  const deny = node('button', 'Deny', { type: 'button', 'data-testid': 'device-deny' });
+  actions.append(approve, deny);
+  form.append(actions);
+  const updateReady = () => { approve.disabled = !code || !scope.value || !tenant; deny.disabled = !code; };
+  scope.addEventListener('change', updateReady);
   deny.addEventListener('click', () => authorize(deviceDenialPayload(code)));
-  form.addEventListener('submit', e => { e.preventDefault(); const tenant = form.querySelector('[data-testid="device-tenant"]')?.value || tenants[0]?.id || ''; authorize(deviceApprovalPayload({ user_code: code, tenant, scope: scope.value, lifetime: lifetime.value, name: name.value })); });
-  const updateReady = () => { approve.disabled = !code || !scope.value || tenants.length === 0 || (tenants.length > 1 && !tenantSelect.value); };
-  scope.addEventListener('change', updateReady); tenantSelect?.addEventListener('change', () => { try { if (tenantSelect.value) localStorage.setItem('yakka-analytics-tenant', tenantSelect.value); } catch {} updateReady(); }); updateReady();
-  async function authorize(body) { try { await call(api, 'device/authorize', { method: 'POST', body }); status(root, body.action ? 'Denied.' : 'Approved.'); approve.disabled = true; deny.disabled = true; } catch(e) { status(root, e.message, true); } }
+  form.addEventListener('submit', e => {
+    e.preventDefault();
+    if (approve.disabled) return;
+    authorize(deviceApprovalPayload({ user_code: code, tenant, scope: scope.value, lifetime: lifetime.value, name: name.value }));
+  });
+  async function authorize(body) {
+    approve.disabled = true; deny.disabled = true;
+    try {
+      await call(api, 'device/authorize', { method: 'POST', body });
+      status(section, body.action ? 'Device denied.' : 'Device approved.');
+    } catch (e) {
+      status(section, e.message, true);
+      updateReady();
+    }
+  }
+  updateReady();
   if (code) await load();
-  if (!me) root.append(node('a', 'Sign in to approve this request', { href: oauthLoginPath(`${location.pathname}${location.search}`) }));
-  else if (!tenants.length) root.append(node('a', 'Create a tenant in Profile', { href: '/profile' }));
+  if (!me) section.append(node('a', 'Sign in to approve this request', { href: oauthLoginPath(`${location.pathname}${location.search}`) }));
+  else if (!tenant) section.append(node('a', tenants.length ? 'Choose a tenant in Profile' : 'Create a tenant in Profile', { href: '/profile' }));
 }
 
-async function profile(root, api, me) {
-  const tenants = Array.isArray(me?.tenants) ? me.tenants : [];
-  root.append(node('p', me?.github_login ? `Signed in as ${me.github_login}` : 'Profile and access tokens'));
-  if (tenants.length > 1) {
-    const active = node('select'); for (const t of tenants) active.append(node('option', t.name, { value: t.id })); active.value = rememberedTenant(me);
-    const label = node('label', 'Active tenant '); label.append(active); root.append(label);
-    active.addEventListener('change', () => { try { localStorage.setItem('yakka-analytics-tenant', active.value); } catch { status(root, 'Browser storage is unavailable.', true); } });
-  }
-  const tenantForm = node('form'); root.append(tenantForm); field(tenantForm, 'New tenant', 'name'); button(tenantForm, 'Create tenant');
-  tenantForm.addEventListener('submit', async e => { e.preventDefault(); try { const name = tenantForm.elements.name.value; const created = await call(api, 'tenants', { method: 'POST', body: { name } }); status(root, `Created ${created.name}.`); location.reload(); } catch(err) { status(root, err.message, true); } });
-  if (tenants.length) {
-    const tokenForm = node('form'); root.append(tokenForm);
-    const tenant = node('select'); for (const t of tenants) tenant.append(node('option', t.name, { value: t.id })); tenant.value = formTenant(me); tenant.addEventListener('change', () => { try { localStorage.setItem('yakka-analytics-tenant', tenant.value); } catch {} });
-    const label = node('label', 'Tenant '); label.append(tenant); tokenForm.append(label);
-    const scope = node('select'); for (const [v,l] of [['read','Read'],['read_write','Read and write']]) scope.append(node('option',l,{value:v})); const sl = node('label','Scope '); sl.append(scope); tokenForm.append(sl);
-    const life = node('select'); for (const [v,l] of lifetimeOptions) life.append(node('option',l,{value:v})); life.value='3m'; const ll=node('label','Lifetime ');ll.append(life);tokenForm.append(ll);
-    field(tokenForm,'Token name','name','token'); button(tokenForm,'Create token');
-    tokenForm.addEventListener('submit',async e=>{e.preventDefault();try{const body={tenant:tenant.value,scope:scope.value,lifetime:life.value};if(tokenForm.elements.name.value.trim())body.name=tokenForm.elements.name.value.trim();const minted=await call(api,'tokens',{method:'POST',body}); const out=node('code',minted.token); out.dataset.testid='issued-token-once'; status(root,'Copy this token now. It will not be shown again.'); root.append(out);}catch(err){status(root,err.message,true);}});
-  } else root.append(node('p','Create a tenant to issue a token.'));
-  try { const tokens = await call(api, 'tokens'); const list = node('ul'); for (const token of tokens) { const li = node('li', `${token.name || 'token'} · ${token.tenant_name} · ${token.scope}`); if (!token.revoked) { const revoke=node('button','Revoke',{type:'button'});revoke.addEventListener('click',async()=>{try{await call(api,`tokens/${encodeURIComponent(token.id)}/revoke`,{method:'POST',body:{}});li.textContent+=' · revoked';}catch(e){status(root,e.message,true);}});li.append(' ',revoke);} list.append(li); } root.append(node('h2','Tokens'),list); } catch(e) { status(root,e.message,true); }
+async function profile(root, account) {
+  return renderAccountConsole(root, account);
 }

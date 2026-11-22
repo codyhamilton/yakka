@@ -1,6 +1,6 @@
 import { decodePanelSpec, encodePanelSpec } from '../js/core/view-spec.js';
 
-const RESERVED = new Set(['win', 'from', 'to', 'tz', 'exclude', 'ca', 'cb', 'cc', 'cd', 'pick', 'sel', 'hide', 'cmp', 'v']);
+const RESERVED = new Set(['tenant', 'win', 'from', 'to', 'tz', 'exclude', 'ca', 'cb', 'cc', 'cd', 'pick', 'sel', 'hide', 'cmp', 'v']);
 const PANEL = /^p\d+$/;
 const VALID_WINDOW = /^(?:all|\d+[hdwmy])$/;
 const FILTERS = new Set(['repo_id', 'harness', 'kind', 'plan', 'norm_event', 'event', 'tool', 'model', 'source', 'conversation_id']);
@@ -9,6 +9,7 @@ export function decodeUrlState(search = '') {
   const params = new URLSearchParams(search);
   const rawWin = params.get('win');
   const state = {
+    tenant: params.get('tenant') || '',
     win: rawWin && VALID_WINDOW.test(rawWin) ? rawWin : '30d',
     from: params.get('from') || '', to: params.get('to') || '', tz: params.get('tz') || '',
     exclude: params.getAll('exclude'), cohorts: Object.fromEntries(['ca', 'cb', 'cc', 'cd'].map(k => [k, params.get(k) || ''])),
@@ -41,6 +42,7 @@ export function encodeUrlState(state, current = '') {
     if (RESERVED.has(key) || PANEL.test(key) || FILTERS.has(key)) continue;
     if (!(key in (state.unknown || {}))) out.append(key, value);
   }
+  if (state.tenant) out.set('tenant', state.tenant);
   if (state.from || state.to) { if (state.from) out.set('from', state.from); if (state.to) out.set('to', state.to); }
   else out.set('win', VALID_WINDOW.test(state.win || '') ? state.win : '30d');
   if (state.tz) out.set('tz', state.tz);

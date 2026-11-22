@@ -121,8 +121,41 @@ export function slopePairs(rows, series) {
     });
 }
 
+// Horizontal stacked geometry: X is the count from 0 and Y is the category.
+// The returned rects are pure numbers so tests can prove segments run
+// left-to-right without a DOM.
+export function horizontalStackRects(rows = [], series = [], { width = 1, height = 1, max = null } = {}) {
+  const totals = rows.map(row => series.reduce((sum, item) => sum + (numeric(row.values?.[item.key]) ?? 0), 0));
+  const explicitMax = max === null || max === undefined ? NaN : Number(max);
+  const domain = Number.isFinite(explicitMax) ? explicitMax : Math.max(1, ...totals);
+  const safeDomain = domain > 0 ? domain : 1;
+  const rowHeight = height / Math.max(1, rows.length);
+  const centreOf = index => (index + 0.5) * rowHeight;
+  const barHeight = Math.min(28, rowHeight * 0.6);
+  return rows.map((row, index) => {
+    const stacked = stackSegments([row], series)[0];
+    return {
+      key: row.key,
+      index,
+      total: stacked.total,
+      totalPx: (Math.max(0, stacked.total) / safeDomain) * width,
+      y: centreOf(index),
+      barHeight,
+      segments: stacked.segments.map(segment => ({
+        key: segment.key,
+        value: segment.value,
+        from: segment.from,
+        to: segment.to,
+        x: (segment.from / safeDomain) * width,
+        width: ((segment.to - segment.from) / safeDomain) * width
+      }))
+    };
+  });
+}
+
 export function buildBarsModel({ spec = {}, data = [] } = {}) {
   const type = normaliseBarsType(spec.type);
+  const orientation = spec.orientation === 'horizontal' ? 'horizontal' : 'vertical';
   const declared = (spec.series || []).map(item => ({ ...item }));
   if (!declared.length) return { state: 'unsupported', reason: 'bars needs a series spec', rows: [], series: [], tableRows: [] };
   const rows = data.map(row => ({
@@ -161,13 +194,16 @@ export function buildBarsModel({ spec = {}, data = [] } = {}) {
   }
 
   modelRows = modelRows.map(row => ({ ...row, label: row.label ?? labelOf(row.key) }));
-  const height = type === 'ranked' || type === 'lollipop'
+  const horizontal = orientation === 'horizontal';
+  const stackedHorizontal = horizontal && (type === 'stacked' || type === 'percent');
+  const height = type === 'ranked' || type === 'lollipop' || stackedHorizontal
     ? Math.max(DEFAULT_HEIGHT, modelRows.length * 44 + 56)
     : DEFAULT_HEIGHT;
   const x = { label: spec.x?.label || 'Entity', kind: 'text' };
   return {
     state: 'ready',
     type,
+    orientation,
     series,
     rows: modelRows,
     entityKeys: modelRows.map(row => row.key),
@@ -177,7 +213,7 @@ export function buildBarsModel({ spec = {}, data = [] } = {}) {
     window: null,
     height,
     sorted,
-    spec: { chart: spec.chart || 'bars', type }
+    spec: { chart: spec.chart || 'bars', type, ...(horizontal ? { orientation: 'horizontal' } : {}) }
   };
 }
 
@@ -199,6 +235,9 @@ export class YkBars extends SvgChartElement {
     svg.append(group);
     if (model.type === 'ranked' || model.type === 'lollipop') {
       return this.#horizontal({ doc, group, model, spec, plot, styleFor, hidden });
+    }
+    if ((model.type === 'stacked' || model.type === 'percent') && model.orientation === 'horizontal') {
+      return this.#stackedHorizontal({ doc, group, model, spec, plot, styleFor, hidden });
     }
     if (model.type === 'stacked' || model.type === 'percent') {
       return this.#columns({ doc, group, model, spec, plot, styleFor, hidden });
@@ -258,6 +297,67 @@ export class YkBars extends SvgChartElement {
       marks.push({
         key: row.key, index, x: row.key, y: value, values: row.values,
         px: length, py: center(index), style, label: row.label, element: groupMark
+      });
+    });
+
+    return {
+      marks,
+      xToPx, xToData, yToPx, yToData,
+      xScale: { key: 'x', min: 0, max, width: plot.width },
+      yScale: { key: 'y', min: 0, max: rows.length, height: plot.height }
+    };
+  }
+
+  #stackedHorizontal({ doc, group, model, spec, plot, styleFor, hidden }) {
+    const rows = model.rows;
+    const visible = model.series.filter(item => !hidden.has(item.key));
+    const totals = rows.map(row => visible.reduce((sum, item) => sum + (numeric(row.values?.[item.key]) ?? 0), 0));
+    const max = model.type === 'percent' ? 1 : Math.max(1, ...totals);
+    const rects = horizontalStackRects(rows, visible, { width: plot.width, height: plot.height, max });
+    const rowHeight = plot.height / Math.max(1, rows.length);
+    const centre = index => (index + 0.5) * rowHeight;
+    const xToPx = value => (Math.max(0, Number(value) || 0) / max) * plot.width;
+    const xToData = px => (px / plot.width) * max;
+    const yToPx = index => centre(index);
+    const yToData = px => Math.max(0, Math.min(rows.length - 1, Math.floor(px / rowHeight)));
+    const marks = [];
+
+    for (const tick of tickValues(max)) {
+      const x = xToPx(tick);
+      group.append(svgNode(doc, 'line', { class: 'yk-cat-grid', x1: x, y1: 0, x2: x, y2: plot.height }));
+      group.append(textNode(doc, formatValue(tick, { kind: model.type === 'percent' ? 'percent' : (visible[0]?.kind || 'number'), compact: true }), {
+        class: 'yk-cat-tick', x, y: plot.height + 18, 'text-anchor': 'middle'
+      }));
+    }
+
+    rows.forEach((row, index) => {
+      const rect = rects[index];
+      const style = styleFor(row.key);
+      const groupMark = svgNode(doc, 'g', { class: 'yk-mark', 'data-shape': style.shape, 'data-pattern': style.pattern || '' });
+      for (const segment of rect.segments) {
+        if (hidden.has(segment.key)) continue;
+        const seriesStyle = styleFor(segment.key);
+        groupMark.append(svgNode(doc, 'rect', {
+          class: 'yk-mark-shape', x: segment.x, y: rect.y - rect.barHeight / 2,
+          width: Math.max(0, segment.width), height: rect.barHeight, fill: seriesStyle.colour
+        }));
+        const pattern = patternId(seriesStyle.pattern);
+        if (pattern && segment.width > 0) {
+          groupMark.append(svgNode(doc, 'rect', {
+            x: segment.x, y: rect.y - rect.barHeight / 2, width: segment.width, height: rect.barHeight,
+            fill: `url(#${pattern})`, 'pointer-events': 'none'
+          }));
+        }
+      }
+      groupMark.append(svgNode(doc, 'rect', {
+        class: 'yk-mark-hit', 'data-hit': 'true', x: 0, y: rect.y - Math.max(rect.barHeight, MIN_TOUCH_PX) / 2,
+        width: plot.width, height: Math.max(rect.barHeight, MIN_TOUCH_PX)
+      }));
+      group.append(groupMark);
+      group.append(textNode(doc, row.label, { class: 'yk-cat-label', x: -8, y: rect.y + 4, 'text-anchor': 'end' }));
+      marks.push({
+        key: row.key, index, x: row.key, y: totals[index], values: row.values,
+        px: rect.totalPx, py: rect.y, style, label: row.label, element: groupMark
       });
     });
 

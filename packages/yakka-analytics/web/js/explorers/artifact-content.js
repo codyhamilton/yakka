@@ -133,6 +133,14 @@ export function baselineKey(kind, check, scorer) {
   return `${kind}\u001f${check}\u001f${scorer}`;
 }
 
+// A viewer may offer local copy/download only when the server returned the
+// complete body. A refusal, prefix or empty answer keeps the exact error state.
+export function completeBytes(result) {
+  return Boolean(result && result.ok === true && typeof result.text === 'string');
+}
+
+export const COMPLETE_BYTES_HINT = 'Exact version; analytics time filter does not alter these bytes';
+
 // Repeated versions with the same kind/check/scorer share one `/baselines`
 // request. Content-population baselines are the only source of a band.
 export function createBaselineCache({ transport, tenant = '', signal } = {}) {

@@ -11,7 +11,8 @@ import { planDestination, planIdentity } from './scatter-plan.js';
 import { cancelledState, emptyState, errorState, unsupportedState } from '../core/panel-state.js';
 import { canonicalPanelSpec } from '../core/view-spec.js';
 import { formatCount, formatPercent } from '../charts/formatters.js';
-import { requestParams, schemaGrain, whenPanelSlot } from './p10-shared.js';
+import { mountPanelViews, requestParams, schemaGrain, whenPanelSlot } from './p10-shared.js';
+import { registerCaption } from './captions.js';
 import { table, whenPanelBody } from './pulse-strips.js';
 
 let stylesLoaded = false;
@@ -27,17 +28,44 @@ export function ensureWorkflowStyles(doc = globalThis.document) {
   doc.head?.append(link);
 }
 
+export const SHAPE_CAPTION = 'Each bar counts a plan’s complete, unreported and started executions; completion describes recorded steps, not whether the work succeeded.';
+export const SHAPE_TABLE_COLUMNS = [
+  'Repository', 'Plan', 'Complete executions', 'Unreported executions',
+  'Started executions', 'Complete share (%)', 'Last observed'
+];
+export const SHAPE_TOP = 12;
+
+registerCaption('shape-bars', () => SHAPE_CAPTION);
+
+// Status tokens: complete=good, unreported=warn, started=info. These are
+// completion states, never success.
 export const SHAPE_SERIES = [
-  { key: 'executions_complete', label: 'Complete', unit: 'executions', kind: 'count' },
-  { key: 'executions_unreported', label: 'Unreported', unit: 'executions', kind: 'count' },
-  { key: 'executions_started', label: 'Started', unit: 'executions', kind: 'count' }
+  { key: 'executions_complete', label: 'Complete', unit: 'executions', kind: 'count', status: 'good', cssVar: '--yk-status-good', token: '--yk-status-good' },
+  { key: 'executions_unreported', label: 'Unreported', unit: 'executions', kind: 'count', status: 'warn', cssVar: '--yk-status-warn', token: '--yk-status-warn' },
+  { key: 'executions_started', label: 'Started', unit: 'executions', kind: 'count', status: 'info', cssVar: '--yk-status-info', token: '--yk-status-info' }
 ];
 
+// P7: only Plan is enabled. Harness and Repo are absent, not disabled or
+// clickable, because the server publishes no execution aggregate API.
 export const SHAPE_GROUPINGS = [
-  { value: 'plan', label: 'Plan' },
-  { value: 'harness', label: 'Harness' },
-  { value: 'repo', label: 'Repo' }
+  { value: 'plan', label: 'Plan' }
 ];
+
+// Top 12 by unreported executions descending, then plan identity ascending.
+export function sortShapeRows(rows = []) {
+  return [...(Array.isArray(rows) ? rows : [])].sort((a, b) => {
+    const av = a?.values?.executions_unreported;
+    const bv = b?.values?.executions_unreported;
+    const an = av === null || av === undefined;
+    const bn = bv === null || bv === undefined;
+    if (an !== bn) return an ? 1 : -1;
+    if (!an && av !== bv) return bv - av;
+    const ar = String(a?.identity?.repo_id || '');
+    const br = String(b?.identity?.repo_id || '');
+    if (ar !== br) return ar.localeCompare(br);
+    return String(a?.identity?.plan || '').localeCompare(String(b?.identity?.plan || ''));
+  });
+}
 
 const GROUPING_MISSING = 'execution aggregate grouping';
 
@@ -195,7 +223,7 @@ export async function load(context = {}) {
     if (!schemaGrain(schema, 'plan')) {
       return unsupportedState({ grain: 'plan', reason: 'the server publishes no plan grain', source: 'server /schema' });
     }
-    const top = shapeTop(schema, 12);
+    const top = shapeTop(schema, SHAPE_TOP);
     const params = requestParams({ scope, extra: { grain: 'plan', sort: 'executions_unreported:desc', limit: String(top) } });
     const sessionModel = scope.session_model;
     if (Array.isArray(sessionModel)) {
@@ -215,14 +243,16 @@ export async function load(context = {}) {
     }
     const population = body.population || null;
     const populationText = shapePopulationText(population);
-    const entities = entitiesFor(rows);
+    const ordered = sortShapeRows(rows);
+    const entities = entitiesFor(ordered);
+    const topLabel = `Showing the top ${top} plans by unreported executions.`;
     let painted = null;
     whenPanelBody('shape-bars', doc, host => {
       const wrapper = doc.createElement('div');
       wrapper.className = 'p12-shape';
       const note = doc.createElement('p');
       note.className = 'p12-shape-label';
-      note.textContent = 'Execution completion, not success. Bars stack complete, unreported and started executions per plan; last observation age is lifetime, not an outcome.';
+      note.textContent = `Execution completion, not success. ${topLabel} Last observation age is lifetime, not an outcome.`;
       const basis = doc.createElement('p');
       basis.className = 'p12-shape-basis';
       basis.textContent = `Basis: plan measures over the scope window, sorted by unreported executions; ${populationText}.`;
@@ -231,6 +261,7 @@ export async function load(context = {}) {
       node.spec = {
         chart: 'bars',
         type: 'stacked',
+        orientation: 'horizontal',
         title: 'Process shape per plan (completion, not success)',
         timeBasis: 'the scope window; last observation age is lifetime',
         units: 'executions',
@@ -238,24 +269,22 @@ export async function load(context = {}) {
         entities,
         empty: 'no plan has execution measures in this window'
       };
-      node.data = rows.map(cleanRow);
+      node.data = ordered.map(cleanRow);
       painted = node;
-      wrapper.append(note, basis, node);
-      const tableRows = rows.map(row => [
-        row.identity.plan || '—',
+      const tableRows = ordered.map(row => [
         row.identity.repo_id || '—',
+        row.identity.plan || '—',
         row.values.executions_complete === null ? '—' : String(row.values.executions_complete),
         row.values.executions_unreported === null ? '—' : String(row.values.executions_unreported),
         row.values.executions_started === null ? '—' : String(row.values.executions_started),
         completeShareText(row),
         observedAge(row.last_ts)
       ]);
-      const columns = [
-        { label: 'Plan' }, { label: 'Repo' },
-        { label: 'Complete', numeric: true }, { label: 'Unreported', numeric: true }, { label: 'Started', numeric: true },
-        { label: 'Complete share', numeric: true }, { label: 'Last observed' }
-      ];
-      wrapper.append(table(doc, { caption: `Process shape, ${populationText}`, columns, rows: tableRows }));
+      const columns = SHAPE_TABLE_COLUMNS.map((label, index) => ({ label, numeric: index >= 2 && index <= 5 }));
+      const tableNode = table(doc, { caption: `Process shape, ${populationText}; ${topLabel}`, columns, rows: tableRows });
+      const views = mountPanelViews({ panelId: 'shape-bars', chart: node, table: tableNode, doc, defaultView: 'chart', label: 'Process shape view' });
+      views.element.removeAttribute('data-panel');
+      wrapper.append(note, basis, views.element);
       host.replaceChildren(wrapper);
     });
     await painted?.whenSettled?.();

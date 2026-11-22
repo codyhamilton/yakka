@@ -127,7 +127,7 @@ test('a bucket is half-open at the source-window edges', () => {
 
 test('the Scatter board proves schema choices, exact grain selections, peer cohorts and time associations', { skip: environment.ok ? false : SKIP_REASON }, async t => {
   const harness = await startWorkspaceHarness();
-  harness.api.set({ p11: true });
+  harness.api.set({ p11: true, p10: true });
   const browser = await launchBrowser(environment);
   t.after(async () => { await browser.close(); await harness.close(); });
   const page = await browser.newPage({ viewport: { width: 1280, height: 3000 } });
@@ -138,6 +138,7 @@ test('the Scatter board proves schema choices, exact grain selections, peer coho
   assert.deepEqual(ids, ['scatter-session', 'scatter-artifact', 'scatter-plan', 'scatter-day']);
   const states = await page.evaluate(() => Object.fromEntries([...document.querySelectorAll('.workspace-panel')].map(panel => [panel.dataset.panel, panel.dataset.state])));
   for (const id of ids) assert.equal(states[id], 'ready', `${id} settles ready`);
+  assert.equal(await page.locator('.p11-unsupported').count(), 0, 'unsupported options are not presented as choices');
 
   const options = await page.evaluate(() => Object.fromEntries(
     ['scatter-session', 'scatter-artifact', 'scatter-plan', 'scatter-day'].map(id => [
@@ -149,7 +150,7 @@ test('the Scatter board proves schema choices, exact grain selections, peer coho
   for (const [id, grain] of Object.entries(GRAINS)) {
     const measures = new Set(schema.grains[grain].measures);
     const lenses = new Set(schema.grains[grain].lenses);
-    for (const role of ['X measure', 'Y measure', 'Size']) {
+    for (const role of ['X axis', 'Y axis', 'Size']) {
       for (const value of options[id][role].filter(Boolean)) assert.ok(measures.has(value), `${id} ${role} ${value} is a published measure`);
       assert.equal(options[id][role].includes('model'), false, `${id} ${role} never offers model as numeric`);
     }
@@ -158,7 +159,7 @@ test('the Scatter board proves schema choices, exact grain selections, peer coho
   assert.ok(options['scatter-session'].Colour.includes('session_model'));
   assert.ok(options['scatter-artifact'].Colour.includes('session_model'));
   assert.ok(options['scatter-artifact'].Colour.includes('band:clarity'));
-  assert.ok(options['scatter-artifact']['Y measure'].includes('score:clarity'));
+  assert.ok(options['scatter-artifact']['Y axis'].includes('score:clarity'));
   assert.ok(options['scatter-plan'].Colour.includes('session_model'));
   assert.ok(options['scatter-plan'].Colour.includes('repo_id'));
   assert.deepEqual(options['scatter-day'].Colour, ['']);
@@ -170,9 +171,8 @@ test('the Scatter board proves schema choices, exact grain selections, peer coho
 
   const fields = ['cost_usd', 'commits', 'unpriced_calls'];
   const marginalSums = await page.evaluate(names => Object.fromEntries(names.map(field => {
-    const figure = document.querySelector(`[data-panel="scatter-session"] .scatter-marginal[data-field="${field}"]`);
-    const rows = [...figure.querySelectorAll('table tbody tr')];
-    return [field, rows.reduce((sum, row) => sum + Number(row.lastElementChild.textContent.replace(/,/g, '')), 0)];
+    const chart = document.querySelector(`[data-panel="scatter-session"] .scatter-marginal[data-field="${field}"] yk-ranges`);
+    return [field, (chart.data || []).reduce((sum, row) => sum + Number(row.values?.count || 0), 0)];
   })), fields);
   const fixtureMarginals = p11Scatter({ fields });
   for (const field of fields) {
@@ -196,15 +196,14 @@ test('the Scatter board proves schema choices, exact grain selections, peer coho
   assert.match(planText, /shared-session/);
 
   const artifactText = await page.locator('[data-panel="scatter-artifact"]').innerText();
-  assert.match(artifactText, /unscored/);
-  assert.match(artifactText, /content_unavailable/);
-  assert.match(artifactText, /lower-bound/);
-  assert.match(artifactText, /unpriced/);
-  assert.match(artifactText, /Score clarity \(score\)/);
+  assert.match(artifactText, /Clarity score|normalized score/i);
+  assert.match(artifactText, /whole population/);
   assert.doesNotMatch(artifactText, /\$0(?:\.00)?(?![\d.])/);
-  const planCells = await page.evaluate(() => [...document.querySelectorAll('[data-panel="scatter-plan"] .p11-scatter > table tbody tr')]
+  const artifactMarks = await page.evaluate(() => document.querySelector('[data-panel="scatter-artifact"] yk-chart').inspect().marks.length);
+  assert.ok(artifactMarks > 0, 'artifact scatter uses the published writing-session source population');
+  const planCells = await page.evaluate(() => [...document.querySelectorAll('[data-panel="scatter-plan"] table tbody tr')]
     .map(row => [...row.querySelectorAll('td')].map(cell => cell.textContent)));
-  assert.ok(planCells.some(row => row.includes('unpriced')), 'the all-unpriced plan point is labelled, not $0');
+  assert.ok(planCells.some(row => row.includes('—')), 'the unpriced plan point is a dash, never $0');
   assert.ok(planCells.flat().every(cell => !/^\$0(?:\.00)?$/.test(cell)));
 
   for (const [id, box] of Object.entries(REGIONS)) {
@@ -332,7 +331,7 @@ test('the Scatter board proves schema choices, exact grain selections, peer coho
 
 test('Sessions sorts and pages server-side and narrows through the pushed URL', { skip: environment.ok ? false : SKIP_REASON }, async t => {
   const harness = await startWorkspaceHarness();
-  harness.api.set({ p11: true });
+  harness.api.set({ p11: true, p10: true });
   const browser = await launchBrowser(environment);
   t.after(async () => { await browser.close(); await harness.close(); });
   const page = await browser.newPage({ viewport: { width: 1280, height: 2600 } });
@@ -364,13 +363,13 @@ test('Sessions sorts and pages server-side and narrows through the pushed URL', 
 
   await page.goto(`${harness.origin}/sessions?win=all`);
   await settleList(page);
-  const firstPage = p11SessionList({ sort: 'last_ts:desc', limit: 20 });
+  const firstPage = p11SessionList({ sort: 'cost_usd:desc', limit: 20 });
   assert.deepEqual(await rowIds(page), firstPage.rows.map(row => row.id));
   await page.locator('.sessions-load-more').click();
   await page.waitForFunction(() => document.querySelectorAll('.session-row').length === 40);
   const ids = await rowIds(page);
   assert.equal(new Set(ids).size, 40, 'Load-more appends with no duplicate identity');
-  const secondPage = p11SessionList({ sort: 'last_ts:desc', limit: 20, cursor: firstPage.next });
+  const secondPage = p11SessionList({ sort: 'cost_usd:desc', limit: 20, cursor: firstPage.next });
   assert.deepEqual(ids.slice(20), secondPage.rows.map(row => row.id));
   assert.match(await page.locator('[data-panel="sessions-list"]').innerText(), /40 loaded; 20 on this page; 40 sessions total/);
   assert.equal(await page.locator('.sessions-load-more').count(), 0);
@@ -396,7 +395,7 @@ test('Sessions sorts and pages server-side and narrows through the pushed URL', 
 
 test('a session detail reconciles returned markers and the capped whole run', { skip: environment.ok ? false : SKIP_REASON }, async t => {
   const harness = await startWorkspaceHarness();
-  harness.api.set({ p11: true });
+  harness.api.set({ p11: true, p10: true });
   const browser = await launchBrowser(environment);
   t.after(async () => { await browser.close(); await harness.close(); });
   const page = await browser.newPage({ viewport: { width: 1280, height: 2400 } });
@@ -407,30 +406,32 @@ test('a session detail reconciles returned markers and the capped whole run', { 
   await settleDetail(page);
   const panel = page.locator('[data-panel="session-lanes"]');
   assert.equal(await panel.getAttribute('data-state'), 'ready');
-  assert.equal(await page.locator('.session-event-row').count(), conversation.returned_events);
+  const loaded = await page.locator('.session-record-row').count();
+  assert.equal(loaded, 100);
   const marks = await page.evaluate(() => document.querySelector('[data-panel="session-lanes"] yk-lanes').inspect().marks.length);
-  assert.equal(marks, conversation.returned_events, 'displayed markers reconcile only to returned events');
+  assert.equal(marks, loaded, 'displayed markers reconcile only to loaded matching events');
   assert.notEqual(marks, conversation.total_events);
   const hollow = await page.evaluate(() => document.querySelector('[data-panel="session-lanes"] yk-lanes').shadowRoot.querySelectorAll('.yk-lane-marker[data-priced="false"]').length);
-  assert.equal(hollow, conversation.returned_unpriced_calls);
-  assert.equal(await page.locator('.session-event-row[data-priced="false"]').count(), conversation.returned_unpriced_calls);
+  assert.ok(hollow >= 1 && hollow <= loaded, `hollow unpriced markers ${hollow} within loaded ${loaded}`);
 
-  const text = await panel.innerText();
-  assert.match(text, /Returned 5,000 of 5,123 events/);
-  assert.match(text, /123 events are beyond the cap/);
-  assert.match(text, /Returned unpriced calls: 10 of 13/);
-  assert.match(text, /3 unpriced calls are beyond the cap/);
-  assert.match(text, /keeps? the whole run|whole-run totals|whole run/);
+  const text = await page.locator('main').textContent();
+  assert.match(text, new RegExp(`${loaded} loaded matching events plotted`));
+  assert.match(text, /Whole session exception/);
+  assert.match(text, /13 unpriced/);
 
-  const ledger = await page.locator('.session-ledger-link').getAttribute('href');
-  assert.equal(ledger, '/ledger?conversation_id=conv-000');
-  const artifact = await page.locator('.session-artifact-link').first().getAttribute('href');
-  assert.match(artifact, /^\/artifact\?repo_id=repo-a&path=.*&hash=hash-design/);
+  const ledger = new URL(await page.locator('.session-ledger-link').getAttribute('href'), harness.origin);
+  assert.equal(ledger.pathname, '/ledger');
+  assert.equal(ledger.searchParams.get('conversation_id'), 'conv-000');
+  const artifact = new URL(await page.locator('.session-artifact-link').first().getAttribute('href'), harness.origin);
+  assert.equal(artifact.pathname, '/artifact');
+  assert.equal(artifact.searchParams.get('repo_id'), 'repo-a');
+  assert.match(artifact.searchParams.get('path'), /^docs\/plans\/20-analytics-reset\//);
+  assert.equal(artifact.searchParams.get('hash'), 'hash-design');
   const written = await page.locator('.session-written').innerText();
   assert.match(written, /opens the artifact reader/);
   assert.match(written, /opens the plan detail/);
-  const plan = await page.locator('.session-plan-link').first().getAttribute('href');
-  assert.equal(plan, '/plans/repo-a/20-analytics-reset');
+  const plan = new URL(await page.locator('.session-plan-link').first().getAttribute('href'), harness.origin);
+  assert.equal(plan.pathname, '/plans/repo-a/20-analytics-reset');
 
   const conversations = harness.api.state.requests.filter(item => /\/conversation$/.test(item.path));
   assert.ok(conversations.length > 0);

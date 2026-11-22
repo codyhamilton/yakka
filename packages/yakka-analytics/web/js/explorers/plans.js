@@ -1,8 +1,8 @@
-// `/plans` explorer: a server-sorted, cursor-paged ranked table of plans plus
-// the delivered `scatter-plan` panel over the same scope. One plan identity is
-// `(repo_id, plan)`; inspect opens the plan inspector, a scatter rectangle
-// becomes a typed plan cohort in the shared tray. It adds no route, grain, join,
-// chart type or gesture, and reuses the shared frame, chips, tray and inspector.
+// `/plans` explorer: a table-only, server-sorted, cursor-paged ranked list of
+// plans. One plan identity is `(repo_id, plan)`; inspect opens the plan
+// inspector and Open preserves the committed scope. It adds no route, grain,
+// join, chart type or gesture, and reuses the shared frame, chips, tray and
+// inspector.
 
 import { decodeUrlState } from '../../contract/url-state.js';
 import { createScheduler } from '../core/request-scheduler.js';
@@ -10,30 +10,43 @@ import { createTransport } from '../../contract/transport.js';
 import { rememberedTenant } from '../../contract/session-gate.js';
 import { createPanelFrame } from '../panels/panel-frame.js';
 import { hasPanel, registerPanel } from '../panels/registry.js';
-import { addFilterChip, createChips, stateUrl } from '../core/chips.js';
+import { addFilterChip, createChips, resetScopeState, stateUrl } from '../core/chips.js';
 import { createSelectionTray } from '../core/selection-tray.js';
 import { createInspector } from '../core/inspector.js';
 import { decodeCohort, encodeCohort } from '../core/selection-model.js';
-import { cancelledState, emptyCauses, emptyState, errorState, unsupportedState } from '../core/panel-state.js';
+import { emptyCauses, emptyState, errorState, unsupportedState } from '../core/panel-state.js';
+import { filterLabel, refusalMessage } from '../core/filter-applicability.js';
 import { formatMoney, formatNumber, formatPercent } from '../charts/formatters.js';
-import { resolveWindow } from '../panels/ledger-table.js';
+import { resolveWindow, sanitizeApiCode } from '../panels/ledger-table.js';
 import { parseRoute } from '../core/router.js';
-import { SCATTER_PLAN_PANEL, planDestination, planIdentity, planOverlap } from '../panels/scatter-plan.js';
+import { planDestination, planIdentity, planOverlap } from '../panels/scatter-plan.js';
 import { canonicalRowKey } from '../panels/scatter-shared.js';
-import { artifactKind, bandFor, createBaselineCache, fetchArtifactText } from './artifact-content.js';
+import { artifactKind, bandFor, createBaselineCache } from './artifact-content.js';
 import { PLAN_TIMELINE_PANEL } from '../panels/plan-timeline.js';
 
 export const title = 'Plans';
 export const phase = 12;
 
+// S-plans offers only these measures in its server sort, in contract order.
 export const PLAN_MEASURES = [
-  'artifacts', 'versions', 'sessions', 'shared_sessions', 'associated_cost_usd', 'unpriced_calls',
-  'executions_complete', 'executions_unreported', 'executions_started', 'complete_share',
-  'span_days', 'first_ts', 'last_ts'
+  'associated_cost_usd', 'sessions', 'shared_sessions', 'artifacts', 'versions',
+  'executions_complete', 'complete_share', 'last_ts'
 ];
 
+// Visible labels for the sort control; the value on the wire stays the measure.
+export const PLAN_MEASURE_LABELS = {
+  associated_cost_usd: 'Associated cost USD',
+  sessions: 'Sessions',
+  shared_sessions: 'Shared sessions',
+  artifacts: 'Files',
+  versions: 'Versions',
+  executions_complete: 'Complete executions',
+  complete_share: 'Complete share %',
+  last_ts: 'Last observed'
+};
+
 export const PLAN_FILTERS = ['repo_id', 'harness', 'session_model', 'id'];
-export const DEFAULT_SORT = 'last_ts:desc';
+export const DEFAULT_SORT = 'associated_cost_usd:desc';
 
 export const PLANS_LIST_PANEL = {
   id: 'plans-list',
@@ -67,17 +80,20 @@ export function parseSort(raw, allowed = PLAN_MEASURES) {
   const at = text.lastIndexOf(':');
   const measure = at === -1 ? text : text.slice(0, at);
   const dir = at === -1 ? '' : text.slice(at + 1);
-  const fallback = allowed.includes('last_ts') ? 'last_ts' : (allowed[0] || 'last_ts');
+  const fallback = allowed.includes('associated_cost_usd') ? 'associated_cost_usd' : (allowed[0] || 'associated_cost_usd');
   if (!text) return { measure: fallback, dir: 'desc', raw: `${fallback}:desc` };
   if (!allowed.includes(measure)) return { measure: fallback, dir: 'desc', raw: `${fallback}:desc` };
   const direction = dir === 'asc' ? 'asc' : 'desc';
   return { measure, dir: direction, raw: `${measure}:${direction}` };
 }
 
+// The capability intersection: only contract measures the schema publishes, in
+// the contract's order. A schema that publishes none gets the contract list.
 export function allowedMeasures(schema) {
   const published = schema?.grains?.plan?.measures;
   if (!Array.isArray(published) || !published.length) return PLAN_MEASURES.slice();
-  const filtered = published.filter(name => typeof name === 'string' && name && name !== 'id');
+  const names = new Set(published.filter(name => typeof name === 'string' && name));
+  const filtered = PLAN_MEASURES.filter(name => names.has(name));
   return filtered.length ? filtered : PLAN_MEASURES.slice();
 }
 
@@ -186,14 +202,14 @@ export function identityFromKey(key = '') {
 
 export function mapPlanListResponse({ status = 0, body = null } = {}) {
   const payload = body && typeof body === 'object' ? body : {};
-  if (!status) return errorState({ message: 'The server did not answer.', code: '' });
+  if (!status) return { ...errorState({ message: 'The server did not answer.', code: '' }), status };
   if (status === 404) {
     return unsupportedState({
       feature: '/entities?grain=plan', reason: 'this server does not serve it', source: 'the analytics server',
       nearest: 'the workflow board over the same window'
     });
   }
-  if (status >= 400) return errorState({ message: payload.error || `The server returned ${status}.`, code: payload.code || String(status) });
+  if (status >= 400) return { ...errorState({ message: payload.error || `The server returned ${status}.`, code: payload.code || String(status) }), status };
   const rows = Array.isArray(payload.rows) ? payload.rows : [];
   const next = typeof payload.next === 'string' && payload.next ? payload.next : null;
   const population = payload.population && typeof payload.population === 'object' ? payload.population : null;
@@ -286,8 +302,8 @@ export function planCoverageNotes({ population = null, rows = [] } = {}) {
   return notes;
 }
 
-// The plan scatter spec is the delivered panel's canonical configuration. The
-// same `scatter-plan` panel is mounted, never a second implementation.
+// The plan scatter spec remains the delivered panel's canonical configuration
+// for the Scatter route; the Plans list itself is table-only.
 export function planScatterSpec() {
   return {
     grain: 'plan',
@@ -347,17 +363,30 @@ function register() {
   if (!hasPanel(PLANS_LIST_PANEL.id)) registerPanel(PLANS_LIST_PANEL);
 }
 
-const COLUMNS = [
-  { key: 'associated_cost_usd', label: 'Associated cost' },
-  { key: 'sessions', label: 'Sessions' },
-  { key: 'shared_sessions', label: 'Shared sessions' },
-  { key: 'artifacts', label: 'Artifacts' },
-  { key: 'versions', label: 'Versions' },
-  { key: 'executions', label: 'Exec / unreported / started' },
-  { key: 'complete_share', label: 'Complete share' },
-  { key: 'design_score', label: 'Latest design score(s)' },
-  { key: 'last_ts', label: 'Last observed' }
+export const PLAN_LIST_COLUMNS = [
+  { key: 'identity', label: 'Plan identity', width: '220px', text: true },
+  { key: 'associated_cost_usd', label: 'Associated cost USD', width: '110px' },
+  { key: 'sessions', label: 'Sessions', width: '70px' },
+  { key: 'shared_sessions', label: 'Shared sessions', width: '80px' },
+  { key: 'artifacts', label: 'Files', width: '60px' },
+  { key: 'versions', label: 'Versions', width: '70px' },
+  { key: 'executions', label: 'Complete/unreported/started executions', width: '160px' },
+  { key: 'complete_share', label: 'Complete share %', width: '100px' },
+  { key: 'design_score', label: 'Latest design score / scorer', width: '180px' },
+  { key: 'last_ts', label: 'Last observed', width: '150px', text: true },
+  { key: 'open', label: 'Open', width: '70px' }
 ];
+
+function observedText(value) {
+  if (value === null || value === undefined || value === '') return '—';
+  const seconds = Number(value);
+  if (!Number.isFinite(seconds)) return String(value);
+  const date = new Date(seconds * 1000);
+  if (Number.isNaN(date.getTime())) return String(value);
+  return new Intl.DateTimeFormat('en-AU', {
+    day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'UTC'
+  }).format(date);
+}
 
 function columnText(row, key) {
   const m = row.m || {};
@@ -365,67 +394,124 @@ function columnText(row, key) {
   if (key === 'executions') return executionShapeText(row);
   if (key === 'complete_share') return completeShareText(row);
   if (key === 'design_score') return designScoreText(row);
+  if (key === 'last_ts') return observedText(m[key]);
   return cellText(m[key]);
 }
 
-function renderPlanTable(container, { rows = [], doc = globalThis.document, onInspect, onOpen } = {}) {
+// T1–T3 vocabulary for the plans table. The sentence names the table, the
+// code is sanitized, and Retry repeats the committed scope.
+export function planStateModel(state = 'loading', { status = 0, code = '', retry = false } = {}) {
+  if (state === 'loading') return { state, text: 'Loading Plans…', busy: true, detail: '', code: '', actions: [] };
+  if (state === 'empty') {
+    return { state, text: 'No records match these filters.', busy: false, detail: '', code: '', actions: [
+      { id: 'all-history', label: 'All history' }, { id: 'reset-filters', label: 'Reset filters' }
+    ] };
+  }
+  const clean = sanitizeApiCode(code);
+  const numeric = Number(status) || 0;
+  const failure = (detail, actions = []) => ({ state: 'error', text: 'Could not load Plans.', busy: false, detail, code: clean, actions });
+  if (numeric === 401) return failure('', [{ id: 'sign-in', label: 'Sign in', href: '/login' }]);
+  if (numeric === 403) return failure('You do not have access to this tenant');
+  if (numeric === 503 || state === 'busy') return failure('The server is busy; retry shortly.', retry ? [{ id: 'retry', label: 'Retry' }] : []);
+  if (state === 'timeout' || /timeout/i.test(clean)) return failure('The read timed out; retry.', retry ? [{ id: 'retry', label: 'Retry' }] : []);
+  return failure('', retry ? [{ id: 'retry', label: 'Retry' }] : []);
+}
+
+function planStateRow(doc, model, handlers = {}) {
+  const tr = el(doc, 'tr', 'plans-state-row');
+  tr.dataset.state = model.state;
+  const cell = el(doc, 'td', 'plans-state-cell');
+  cell.colSpan = PLAN_LIST_COLUMNS.length;
+  cell.append(el(doc, 'span', 'plans-state-text', model.text));
+  if (model.detail) cell.append(el(doc, 'span', 'plans-state-detail', ` ${model.detail}`));
+  if (model.code) cell.append(el(doc, 'code', 'plans-state-code', ` ${model.code}`));
+  for (const item of model.actions || []) {
+    const button = item.href ? el(doc, 'a', 'plans-state-action', item.label) : el(doc, 'button', 'plans-state-action', item.label);
+    if (item.href) button.href = item.href;
+    else { button.type = 'button'; button.addEventListener('click', () => handlers[item.id]?.()); }
+    button.dataset.action = item.id;
+    cell.append(doc.createTextNode(' '), button);
+  }
+  tr.append(cell);
+  return tr;
+}
+
+function renderPlanTable(container, { rows = [], doc = globalThis.document, onInspect, onOpen, status = null, handlers = {} } = {}) {
   container.replaceChildren();
+  const wrapper = el(doc, 'div', 'plans-table-wrap');
   const table = doc.createElement('table');
   table.className = 'plans-table';
-  table.append(el(doc, 'caption', '', `Plans, ${formatNumber(rows.length)} rows shown. Identity is repo/plan; open one for its detail.`));
+  table.append(el(doc, 'caption', 'plans-caption', `Plans, ${formatNumber(rows.length)} rows shown. Identity is repo/plan; open one for its detail.`));
+  const colgroup = doc.createElement('colgroup');
+  for (const column of PLAN_LIST_COLUMNS) {
+    const col = doc.createElement('col');
+    col.setAttribute('width', String(parseInt(column.width, 10)));
+    colgroup.append(col);
+  }
   const thead = doc.createElement('thead');
   const head = doc.createElement('tr');
-  for (const label of ['Plan', ...COLUMNS.map(column => column.label), 'Open']) {
-    const th = el(doc, 'th', '', label); th.scope = 'col'; head.append(th);
+  for (const column of PLAN_LIST_COLUMNS) {
+    const th = el(doc, 'th', '', column.label); th.scope = 'col'; head.append(th);
   }
   thead.append(head);
   const tbody = doc.createElement('tbody');
   tbody.className = 'plans-body';
-  for (const row of rows) {
-    const key = planRowKey(row);
-    const malformed = isMalformedPlanRow(row);
-    const identity = planIdentity(row);
-    const tr = doc.createElement('tr');
-    tr.className = 'plan-row';
-    tr.dataset.entityKey = key;
-    tr.dataset.planIdentity = `${identity.repo_id}/${identity.plan}`;
-    tr.tabIndex = 0;
-    if (malformed) tr.dataset.malformed = 'true';
-    tr.append(el(doc, 'td', 'plans-id', malformed ? 'invalid plan identity' : `${identity.repo_id}/${identity.plan}`));
-    for (const column of COLUMNS) {
-      const td = el(doc, 'td', 'numeric', malformed ? '—' : columnText(row, column.key));
-      td.dataset.key = column.key;
-      tr.append(td);
-    }
-    const openCell = el(doc, 'td', 'plans-open-cell');
-    if (!malformed) {
-      const open = el(doc, 'button', 'plan-open', 'Open');
-      open.type = 'button';
-      open.addEventListener('click', event => { event.stopPropagation(); onOpen?.(row); });
-      openCell.append(open);
-    } else {
-      openCell.append(doc.createTextNode('—'));
-    }
-    tr.append(openCell);
-    tr.addEventListener('click', event => {
-      if (malformed || event.target.closest('input,button,a')) return;
-      onInspect?.(row, tr);
-    });
-    tr.addEventListener('keydown', event => {
-      if (malformed) return;
-      if (event.key === 'Enter') { event.preventDefault(); onInspect?.(row, tr); }
-      else if (event.key === 'o' || event.key === 'O') { event.preventDefault(); onOpen?.(row); }
-      else if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
-        event.preventDefault();
-        const all = [...tbody.querySelectorAll('.plan-row:not([data-malformed])')];
-        const at = all.indexOf(tr);
-        all[Math.max(0, Math.min(all.length - 1, at + (event.key === 'ArrowDown' ? 1 : -1)))]?.focus();
+  if (status) {
+    tbody.append(planStateRow(doc, status, handlers));
+    if (status.busy) tbody.setAttribute('aria-busy', 'true');
+  } else {
+    for (const row of rows) {
+      const key = planRowKey(row);
+      const malformed = isMalformedPlanRow(row);
+      const identity = planIdentity(row);
+      const identityText = malformed ? 'invalid plan identity' : `${identity.repo_id}/${identity.plan}`;
+      const tr = doc.createElement('tr');
+      tr.className = 'plan-row';
+      tr.dataset.entityKey = key;
+      tr.dataset.planIdentity = `${identity.repo_id}/${identity.plan}`;
+      tr.tabIndex = 0;
+      if (malformed) tr.dataset.malformed = 'true';
+      for (const column of PLAN_LIST_COLUMNS) {
+        if (column.key === 'open') {
+          const openCell = el(doc, 'td', 'plans-open-cell');
+          if (!malformed) {
+            const open = el(doc, 'button', 'plan-open', 'Open');
+            open.type = 'button';
+            open.addEventListener('click', event => { event.stopPropagation(); onOpen?.(row); });
+            openCell.append(open);
+          } else {
+            openCell.append(doc.createTextNode('—'));
+          }
+          tr.append(openCell);
+          continue;
+        }
+        const text = column.key === 'identity' ? identityText : (malformed ? '—' : columnText(row, column.key));
+        const td = el(doc, 'td', column.key === 'identity' ? 'plans-id' : 'numeric', text);
+        td.dataset.key = column.key;
+        if (text !== '—') td.title = text;
+        tr.append(td);
       }
-    });
-    tbody.append(tr);
+      tr.addEventListener('click', event => {
+        if (malformed || event.target.closest('input,button,a')) return;
+        onInspect?.(row, tr);
+      });
+      tr.addEventListener('keydown', event => {
+        if (malformed) return;
+        if (event.key === 'Enter') { event.preventDefault(); onInspect?.(row, tr); }
+        else if (event.key === 'o' || event.key === 'O') { event.preventDefault(); onOpen?.(row); }
+        else if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+          event.preventDefault();
+          const all = [...tbody.querySelectorAll('.plan-row:not([data-malformed])')];
+          const at = all.indexOf(tr);
+          all[Math.max(0, Math.min(all.length - 1, at + (event.key === 'ArrowDown' ? 1 : -1)))]?.focus();
+        }
+      });
+      tbody.append(tr);
+    }
   }
-  table.append(thead, tbody);
-  container.append(table);
+  table.append(colgroup, thead, tbody);
+  wrapper.append(table);
+  container.append(wrapper);
   return container;
 }
 
@@ -462,6 +548,116 @@ export function parsePlanDetailPath(pathname = '') {
     const plan = decodeURIComponent(match[2]);
     return repo_id && plan ? { repo_id, plan } : null;
   } catch { return null; }
+}
+
+// S-plan-detail region order: identity/summary, G-planline, then the four
+// collections. Each collection keeps its own source and paging.
+export const PLAN_DETAIL_REGIONS = ['summary', 'planline', 'artifacts', 'executions', 'sessions', 'events'];
+
+// Exact table columns. `identity`/path columns are 240px and time columns are
+// 150px; the remaining columns split the rest equally under table-layout.
+export const PLAN_DETAIL_COLUMNS = {
+  artifacts: [
+    { key: 'kind', label: 'Kind' },
+    { key: 'path', label: 'Path', width: 240, identity: true },
+    { key: 'versions', label: 'Latest version' },
+    { key: 'scores', label: 'Score/scorer/band' },
+    { key: 'content', label: 'Content' },
+    { key: 'screen_verdict', label: 'Screen verdict' },
+    { key: 'writing_cost', label: 'Writing session cost USD' },
+    { key: 'open', label: 'Open' }
+  ],
+  executions: [
+    { key: 'shape', label: 'Shape' },
+    { key: 'brief_path', label: 'Brief path', width: 240, identity: true },
+    { key: 'time', label: 'Time', width: 150, time: true },
+    { key: 'session_cost', label: 'Session cost USD' },
+    { key: 'scores', label: 'Brief/report scores' },
+    { key: 'session', label: 'Session' }
+  ],
+  sessions: [
+    { key: 'conversation', label: 'Conversation', width: 240, identity: true },
+    { key: 'last_observed', label: 'Last observed', width: 150, time: true },
+    { key: 'cost', label: 'Cost USD' },
+    { key: 'unpriced', label: 'Unpriced calls' }
+  ],
+  events: [
+    { key: 'time', label: 'Time', width: 150, time: true },
+    { key: 'type', label: 'Type' },
+    { key: 'event', label: 'Event' },
+    { key: 'path', label: 'Path', width: 240, identity: true },
+    { key: 'conversation', label: 'Conversation' }
+  ]
+};
+
+// Which shared filter each entity region can apply. Exact collections accept
+// identity and window only, so any other active filter refuses that region.
+const REGION_FILTERS = {
+  artifacts: new Set(['kind', 'harness', 'session_model']),
+  executions: new Set(['harness', 'session_model']),
+  sessions: new Set(),
+  events: new Set()
+};
+
+const SCOPE_KEYS = new Set(['win', 'from', 'to', 'tz', 'all', 'cohorts', 'sel', 'pick', 'hide', 'cmp', 'exclude']);
+
+function activeFilterNames(state = {}) {
+  const names = new Set();
+  for (const key of Object.keys(state.filters || {})) {
+    if (!SCOPE_KEYS.has(key) && (state.filters[key] || []).length) names.add(key);
+  }
+  for (const [key, values] of Object.entries(state.unknown || {})) {
+    if (key === 'sort' || SCOPE_KEYS.has(key)) continue;
+    if ((values || []).length) names.add(key);
+  }
+  for (const raw of state.exclude || []) {
+    const at = String(raw).indexOf(':');
+    if (at > 0) names.add(String(raw).slice(0, at));
+  }
+  return names;
+}
+
+function cohortActive(state = {}) {
+  return Object.values(state.cohorts || {}).some(text => Boolean(text));
+}
+
+// A region shows the one F refusal sentence when an active scope cannot be
+// applied faithfully; it never shows unfiltered rows.
+export function planRegionRefusal(region, identity = {}, state = {}) {
+  const labels = new Set();
+  if (cohortActive(state)) labels.add('cohort');
+  const repos = state.filters?.repo_id || [];
+  if (repos.some(value => String(value) !== String(identity.repo_id || ''))) labels.add(filterLabel('repo_id'));
+  const applies = REGION_FILTERS[region] || new Set();
+  for (const name of activeFilterNames(state)) {
+    if (name === 'repo_id') continue;
+    if (applies.has(name)) continue;
+    labels.add(filterLabel(name));
+  }
+  const sorted = [...labels].sort();
+  if (!sorted.length) return null;
+  return { labels: sorted, message: refusalMessage(sorted) };
+}
+
+function appendRegionFilters(params, state = {}, region = '') {
+  const applies = REGION_FILTERS[region] || new Set();
+  for (const key of applies) {
+    for (const value of state.filters?.[key] || []) params.append(key, value);
+  }
+  for (const raw of state.exclude || []) {
+    const at = String(raw).indexOf(':');
+    const lens = at === -1 ? '' : String(raw).slice(0, at);
+    if (applies.has(lens)) params.append('exclude', raw);
+  }
+  return params;
+}
+
+export function planBackDestination(search = '') {
+  return `/plans${String(search || '')}`;
+}
+
+export function planSessionDestination(id = '', search = '') {
+  return `/sessions/${encodeURIComponent(String(id || ''))}${String(search || '')}`;
 }
 
 function windowParams(state = {}, now = Date.now(), window = null) {
@@ -501,6 +697,7 @@ export function planArtifactsParams(identity = {}, { state = {}, window = null, 
   const params = windowParams(state, Date.now(), window);
   params.set('grain', 'artifact');
   for (const [key, value] of identityParams(identity)) params.set(key, value);
+  appendRegionFilters(params, state, 'artifacts');
   return withPaging(params, { limit, cursor });
 }
 
@@ -508,6 +705,7 @@ export function planExecutionsParams(identity = {}, { state = {}, window = null,
   const params = windowParams(state, Date.now(), window);
   params.set('grain', 'execution');
   for (const [key, value] of identityParams(identity)) params.set(key, value);
+  appendRegionFilters(params, state, 'executions');
   return withPaging(params, { limit, cursor });
 }
 
@@ -664,10 +862,15 @@ export function detailMoney(amount, lower = false, nullReason = '') {
 
 // The artifact entity row does not expose a version content_hash; the reader is
 // linked at its latest version, labelled as such. No hash is invented.
-export function artifactLatestDestination(identity = {}, path = '') {
+export function artifactLatestDestination(identity = {}, path = '', search = '') {
   const params = new URLSearchParams();
   if (identity.repo_id) params.set('repo_id', identity.repo_id);
   if (path) params.set('path', path);
+  const scope = new URLSearchParams(String(search || '').replace(/^\?/, ''));
+  for (const [key, value] of scope) {
+    if (key === 'repo_id' || key === 'path' || key === 'hash') continue;
+    params.append(key, value);
+  }
   const query = params.toString();
   return `/artifact${query ? `?${query}` : ''}`;
 }
@@ -724,23 +927,42 @@ function detailTable(doc, { caption, columns, rows }) {
   const table = doc.createElement('table');
   table.className = 'plans-detail-table';
   const cap = el(doc, 'caption', '', caption);
-  table.append(cap);
+  const colgroup = doc.createElement('colgroup');
+  for (const column of columns) {
+    const col = doc.createElement('col');
+    if (column.width) col.setAttribute('width', String(column.width));
+    colgroup.append(col);
+  }
   const thead = doc.createElement('thead');
   const head = doc.createElement('tr');
-  for (const label of columns) { const th = el(doc, 'th', '', label); th.scope = 'col'; head.append(th); }
+  for (const column of columns) {
+    const th = el(doc, 'th', column.time ? 'numeric' : '', column.label);
+    th.scope = 'col';
+    if (column.width) th.setAttribute('width', String(column.width));
+    head.append(th);
+  }
   thead.append(head);
   const tbody = doc.createElement('tbody');
   for (const cells of rows) {
     const tr = doc.createElement('tr');
-    for (const cell of cells) {
+    cells.forEach((cell, index) => {
+      const column = columns[index] || {};
       const td = doc.createElement('td');
-      if (cell && typeof cell === 'object' && cell.node) td.append(cell.node);
-      else td.textContent = cell === null || cell === undefined || cell === '' ? '—' : String(cell);
+      td.className = column.time ? 'numeric' : (column.identity ? 'plans-detail-id' : '');
+      td.dataset.key = column.key || '';
+      if (cell && typeof cell === 'object' && cell.node) {
+        td.append(cell.node);
+        if (cell.title) td.title = cell.title;
+      } else {
+        const text = cell === null || cell === undefined || cell === '' ? '—' : String(cell);
+        td.textContent = text;
+        if (text !== '—' && String(text).length > 18) td.title = text;
+      }
       tr.append(td);
-    }
+    });
     tbody.append(tr);
   }
-  table.append(thead, tbody);
+  table.append(cap, colgroup, thead, tbody);
   return table;
 }
 
@@ -766,24 +988,18 @@ function detailTimestamp(value) {
 async function renderDetail(root, doc, { signal, identity, tenant = '', readContext = null } = {}) {
   ensurePlansStyles(doc);
   root.replaceChildren();
-  const state = readScope(decodeUrlState(globalThis.location?.search || ''));
+  const search = globalThis.location?.search || '';
+  const state = readScope(decodeUrlState(search));
   root.append(el(doc, 'h1', '', 'Plan'));
   root.append(el(doc, 'p', 'plans-detail-identity', `${identity.repo_id} / ${identity.plan}`));
-  const notApplied = planDetailNotApplied(state);
-  if (notApplied.length) {
-    const note = el(doc, 'p', 'plans-detail-not-applied', `Not applied here: ${notApplied.join(', ')}. This fixed plan page sends only the shared window; it never sends cohort= to /entity.`);
-    note.setAttribute('role', 'note');
-    root.append(note);
-  }
 
   const header = detailSection(doc, 'summary', 'Plan measures');
+  const timeline = detailSection(doc, 'planline', 'Plan activity over time');
   const artifacts = detailSection(doc, 'artifacts', 'Artifacts by kind');
   const executions = detailSection(doc, 'executions', 'Executions');
-  const sessions = detailSection(doc, 'sessions', 'Sessions');
-  const events = detailSection(doc, 'events', 'Events');
-  const timeline = detailSection(doc, 'timeline', 'Version and execution timeline');
-  const design = detailSection(doc, 'design', 'Stored design context');
-  for (const section of [header, artifacts, executions, sessions, events, timeline, design]) root.append(section.section);
+  const sessions = detailSection(doc, 'sessions', 'Associated sessions');
+  const events = detailSection(doc, 'events', 'Plan events');
+  for (const section of [header, timeline, artifacts, executions, sessions, events]) root.append(section.section);
 
   const controller = new AbortController();
   if (signal) {
@@ -802,7 +1018,6 @@ async function renderDetail(root, doc, { signal, identity, tenant = '', readCont
   const executionsState = { rows: [], next: '', population: null };
   const sessionsState = { rows: [], next: '', population: null, resolved: new Map() };
   const eventsState = { rows: [], next: '', population: null };
-  let designState = { row: null, text: null, failure: '' };
   let planRow = null;
 
   const get = (route, params, stateKey) => fetchJson(route, params, { tenant, signal: controller.signal, stateKey });
@@ -868,7 +1083,7 @@ async function renderDetail(root, doc, { signal, identity, tenant = '', readCont
         ? 'content_unavailable'
         : `${formatNumber(Number(row.m.content_bytes))} bytes`;
       const open = doc.createElement('a');
-      open.href = artifactLatestDestination(identity, path);
+      open.href = artifactLatestDestination(identity, path, search);
       open.className = 'plans-artifact-open';
       open.textContent = 'Open (latest version)';
       return [
@@ -885,7 +1100,7 @@ async function renderDetail(root, doc, { signal, identity, tenant = '', readCont
     artifacts.state('ready', '');
     artifacts.body.append(detailTable(doc, {
       caption: 'Artifacts by kind. Scores, scorers and bands are latest-version only; the reader opens the latest version, no hash is invented.',
-      columns: ['Kind', 'Path', 'Latest version', 'Score · scorer · band', 'Content', 'Screen verdict', 'Writing session cost', 'Open'],
+      columns: PLAN_DETAIL_COLUMNS.artifacts,
       rows
     }));
     artifacts.body.append(el(doc, 'p', 'plans-detail-population', detailPopulationText(artifactsState.population, artifactsState.rows)));
@@ -901,7 +1116,7 @@ async function renderDetail(root, doc, { signal, identity, tenant = '', readCont
         ...scores.report.map(item => `report ${item.check} ${item.score === null ? '—' : Number(item.score).toFixed(2)}`)].join('; ') || 'no scores';
       const conv = String(row.id?.conversation_id || '');
       const link = doc.createElement('a');
-      link.href = `/sessions/${encodeURIComponent(conv)}`;
+      link.href = planSessionDestination(conv, search);
       link.className = 'plans-execution-session';
       link.textContent = conv || '—';
       return [
@@ -916,7 +1131,7 @@ async function renderDetail(root, doc, { signal, identity, tenant = '', readCont
     executions.state('ready', '');
     executions.body.append(detailTable(doc, {
       caption: 'Execution completion, not success.',
-      columns: ['Shape', 'Brief path', 'Time', 'Session cost', 'Brief / report scores', 'Session'],
+      columns: PLAN_DETAIL_COLUMNS.executions,
       rows
     }));
     executions.body.append(el(doc, 'p', 'plans-detail-population', detailPopulationText(executionsState.population, executionsState.rows)));
@@ -930,7 +1145,7 @@ async function renderDetail(root, doc, { signal, identity, tenant = '', readCont
       const conv = String(row.conversation_id || row.conversationId || '');
       const resolved = sessionsState.resolved.get(conv) || null;
       const link = doc.createElement('a');
-      link.href = `/sessions/${encodeURIComponent(conv)}`;
+      link.href = planSessionDestination(conv, search);
       link.className = 'plans-session-link';
       link.textContent = conv || '—';
       return [
@@ -946,7 +1161,7 @@ async function renderDetail(root, doc, { signal, identity, tenant = '', readCont
     sessions.body.append(note);
     sessions.body.append(detailTable(doc, {
       caption: 'Sessions with a lifetime artifact under this plan; last observed ts from the sessions collection.',
-      columns: ['Conversation', 'Last observed', 'Cost', 'Unpriced calls'],
+      columns: PLAN_DETAIL_COLUMNS.sessions,
       rows
     }));
     sessions.body.append(el(doc, 'p', 'plans-detail-population', detailPopulationText(sessionsState.population, sessionsState.rows)));
@@ -969,7 +1184,7 @@ async function renderDetail(root, doc, { signal, identity, tenant = '', readCont
     ]);
     events.body.append(detailTable(doc, {
       caption: 'Time-ordered events; paged independently of every other section.',
-      columns: ['Time', 'Event type', 'Event', 'Path', 'Conversation'],
+      columns: PLAN_DETAIL_COLUMNS.events,
       rows
     }));
     events.body.append(el(doc, 'p', 'plans-detail-population', detailPopulationText(eventsState.population, eventsState.rows)));
@@ -985,51 +1200,6 @@ async function renderDetail(root, doc, { signal, identity, tenant = '', readCont
       try { await loader(store.next); } finally { button.disabled = false; }
     });
     section.body.append(button);
-  }
-
-  function paintDesign() {
-    design.body.replaceChildren();
-    design.state('ready', '');
-    if (designState.row) {
-      const link = doc.createElement('a');
-      link.className = 'plans-design-open';
-      link.href = artifactLatestDestination(identity, designState.row.id?.path || `docs/plans/${identity.plan}/DESIGN.md`);
-      link.textContent = 'Open design content (latest version)';
-      design.body.append(link);
-    }
-    if (!designState.row) {
-      design.body.append(el(doc, 'p', 'plans-design-missing', 'no stored design content'));
-    } else if (designState.failure) {
-      design.body.append(el(doc, 'p', 'plans-design-failure', designState.failure));
-    } else if (designState.text !== null) {
-      const phases = parseDesignPhases(designState.text);
-      const briefs = parseBriefPaths(artifactsState.rows);
-      const { phases: paired, unpaired } = pairBriefs(phases, briefs);
-      if (!phases.length) design.body.append(el(doc, 'p', 'plans-design-no-phases', 'no `### Phase <n>` headings observed in the stored design content'));
-      const list = doc.createElement('ol');
-      list.className = 'plans-phases';
-      for (const phase of paired.slice(0, 100)) {
-        const item = doc.createElement('li');
-        item.className = 'plans-phase';
-        item.dataset.phase = String(phase.number);
-        item.append(el(doc, 'strong', 'plans-phase-heading', `Phase ${phase.number} — ${phase.heading}`));
-        item.append(el(doc, 'p', 'plans-phase-outcome', phase.outcome === null ? 'Outcome: not observed in the design body' : `Outcome: ${phase.outcome}`));
-        item.append(el(doc, 'p', 'plans-phase-briefs', phase.briefs.length
-          ? `Brief paths: ${phase.briefs.map(brief => `phase ${brief.phase}, unit ${brief.unitText}, ${brief.slug} (${brief.path})`).join('; ')}`
-          : 'no brief path observed in the loaded artifact rows'));
-        list.append(item);
-      }
-      if (paired.length) design.body.append(list);
-      if (phases.length > 100) design.body.append(el(doc, 'p', 'plans-design-more', 'more phases not shown'));
-      if (unpaired.length) {
-        design.body.append(el(doc, 'h3', '', 'Unpaired briefs'));
-        const ul = doc.createElement('ul');
-        ul.className = 'plans-unpaired-briefs';
-        for (const brief of unpaired) ul.append(el(doc, 'li', '', `${brief.path} (phase ${brief.phase}, unit ${brief.unitText}, slug ${brief.slug})`));
-        design.body.append(ul);
-      }
-      design.body.append(el(doc, 'p', 'plans-design-basis', 'Parsed in the browser for display only; phases and brief paths are never counted as measures.'));
-    }
   }
 
   function paintTimeline() {
@@ -1059,7 +1229,6 @@ async function renderDetail(root, doc, { signal, identity, tenant = '', readCont
     artifactsState.population = body.population || artifactsState.population;
     artifactsState.bands = await bandsFor(artifactsState.rows);
     paintArtifacts();
-    if (designState.row || designState.text !== null || designState.failure) paintDesign();
   }
 
   async function loadExecutions(cursor = '') {
@@ -1166,7 +1335,6 @@ async function renderDetail(root, doc, { signal, identity, tenant = '', readCont
       for (const section of [header, artifacts, executions, sessions, events, timeline]) {
         section.state('unsupported', 'entities_plan is not advertised by this server; supplied by Plan 20 Phase 6.');
       }
-      design.state('unsupported', 'entities_plan is not advertised by this server; supplied by Plan 20 Phase 6.');
       return;
     }
 
@@ -1195,48 +1363,35 @@ async function renderDetail(root, doc, { signal, identity, tenant = '', readCont
     }
     paintHeader();
 
-    // Artifacts settle first: the design row is found among the artifact rows
-    // the page already loaded, and the phases/briefs pairing reads them.
-    await Promise.allSettled([loadArtifacts()]);
-    if (disposed) return;
-    await Promise.allSettled([loadDesign(), loadExecutions(), loadSessions(), loadEvents()]);
+    const refusals = {
+      artifacts: planRegionRefusal('artifacts', identity, state),
+      executions: planRegionRefusal('executions', identity, state),
+      sessions: planRegionRefusal('sessions', identity, state),
+      events: planRegionRefusal('events', identity, state)
+    };
+    const regions = { artifacts, executions, sessions, events };
+    for (const [key, refusal] of Object.entries(refusals)) {
+      if (refusal) regions[key].state('unsupported', refusal.message);
+    }
+    const loaders = [];
+    if (!refusals.artifacts) loaders.push(loadArtifacts());
+    if (!refusals.executions) loaders.push(loadExecutions());
+    if (!refusals.sessions) loaders.push(loadSessions());
+    if (!refusals.events) loaders.push(loadEvents());
+    await Promise.allSettled(loaders);
     if (disposed) return;
     paintTimeline();
   }
 
   function showAbsent(message) {
-    for (const section of [artifacts, executions, sessions, events, timeline, design]) {
+    for (const section of [artifacts, executions, sessions, events, timeline]) {
       section.state('empty', message);
     }
     const link = doc.createElement('a');
-    link.href = '/plans';
+    link.href = planBackDestination(search);
     link.className = 'plans-detail-back';
     link.textContent = 'Back to plans';
     header.body.append(el(doc, 'p', 'plans-detail-absent', message), link);
-  }
-
-  async function loadDesign() {
-    design.state('loading', 'Loading stored design content…');
-    const designPath = `docs/plans/${identity.plan}/DESIGN.md`;
-    // The design row is found among the artifact rows the page already loads;
-    // its exact blob comes from the artifact entity route, then /content.
-    const artifactRows = artifactsState.rows;
-    const row = artifactRows.find(item => String(item.id?.path || '') === designPath) || null;
-    designState = { row, text: null, failure: '' };
-    if (!row) { paintDesign(); return; }
-    try {
-      const entity = await get('entity', planDesignArtifactParams(identity), 'plan-detail-design-entity');
-      if (!entity.response.ok) { designState.failure = errorText(entity.response, entity.body, 'The design artifact request failed.'); paintDesign(); return; }
-      const hash = entity.body?.latest?.content_hash || '';
-      if (!hash) { designState.failure = 'no stored design content'; paintDesign(); return; }
-      const content = await fetchArtifactText({ scheduler, repo: identity.repo_id, path: designPath, hash, tenant, signal: controller.signal, stateKey: 'plan-detail-design-content' });
-      if (content.ok) designState.text = content.text;
-      else designState.failure = detailContentFailure(content);
-    } catch (error) {
-      if (error?.name === 'AbortError') return;
-      designState.failure = error?.message || 'The design content request failed.';
-    }
-    paintDesign();
   }
 
   start().catch(error => {
@@ -1251,13 +1406,6 @@ async function renderDetail(root, doc, { signal, identity, tenant = '', readCont
   };
 }
 
-function detailContentFailure(result = {}) {
-  if (result.code === 'content_unavailable') return `content unavailable: ${result.reason || 'no reason given'}`;
-  if (result.code === 'content_too_large') return `content too large: ${result.size_bytes ?? 'unknown'} bytes exceeds the ${result.limit_bytes ?? 'unknown'}-byte limit`;
-  if (result.code === 'content_integrity') return 'content integrity check failed';
-  if (result.status === 404) return 'not found';
-  return result.message || 'The content request failed.';
-}
 
 export function render(root, doc = globalThis.document, { signal, tenant = '', readContext = null } = {}) {
   const route = parseRoute(globalThis.location?.pathname || '/', globalThis.location?.search || '');
@@ -1272,7 +1420,7 @@ export function renderList(root, doc = globalThis.document, { signal, tenant = '
   register();
   root.replaceChildren();
   root.append(el(doc, 'h1', '', title));
-  root.append(el(doc, 'p', 'plans-intro', 'Plans sorted by any published plan measure, paged by the server cursor, beside the delivered plan scatter over the same scope. Totals come from the server population, never a partial page; associated cost is a sum of associated sessions and is non-additive across plans.'));
+  root.append(el(doc, 'p', 'plans-intro', 'Plans sorted by a published plan measure, paged by the server cursor. Totals come from the server population, never a partial page; associated cost is a sum of associated sessions and is non-additive across plans.'));
 
   const router = routeAdapter();
   const state = readScope(decodeUrlState(globalThis.location?.search || ''));
@@ -1293,10 +1441,6 @@ export function renderList(root, doc = globalThis.document, { signal, tenant = '
   const tray = createSelectionTray({ doc, router, path: '/plans' });
   root.append(tray.element, inspector.element);
 
-  const scatterSection = el(doc, 'section', 'plans-scatter');
-  scatterSection.append(el(doc, 'h2', '', 'Associated cost against artifacts'));
-  root.append(scatterSection);
-
   let schema = null;
   let measures = PLAN_MEASURES.slice();
   let filters = PLAN_FILTERS.slice();
@@ -1309,12 +1453,9 @@ export function renderList(root, doc = globalThis.document, { signal, tenant = '
   let disposed = false;
   let runId = 0;
   let controller = new AbortController();
-  let scatterFrame = null;
   let selection = null;
-  // The shared scatter request seam sends the FILTER_KEYS it knows; a plan
-  // `session_model` lens is not among them, so it is named as not applied to
-  // the scatter rather than dropped silently.
-  let scatterNote = '';
+  let pending = false;
+  let nextPageError = '';
   if (signal) {
     if (signal.aborted) controller.abort();
     else signal.addEventListener('abort', () => controller.abort(), { once: true });
@@ -1339,10 +1480,18 @@ export function renderList(root, doc = globalThis.document, { signal, tenant = '
     });
   }
 
+  function detailDestination(identity) {
+    const params = new URLSearchParams(globalThis.location?.search || '');
+    params.delete('sort');
+    params.delete('cursor');
+    const query = params.toString();
+    return `${planDestination(identity)}${query ? `?${query}` : ''}`;
+  }
+
   function openRow(row) {
     const identity = planIdentity(row);
     if (!identity.repo_id || !identity.plan) return;
-    router.push(planDestination(identity));
+    router.push(detailDestination(identity));
   }
 
   function inspectRow(row, opener) {
@@ -1367,7 +1516,7 @@ export function renderList(root, doc = globalThis.document, { signal, tenant = '
         { label: 'Latest design score(s)', value: designScoreText(row) },
         { label: 'Last observed (epoch s)', value: m.last_ts }
       ],
-      destination: planDestination(identity),
+      destination: detailDestination(identity),
       unit: 'plan', population: selectedPopulation(), opener: opener || null, url: globalThis.location?.href || ''
     });
   }
@@ -1378,12 +1527,19 @@ export function renderList(root, doc = globalThis.document, { signal, tenant = '
     notes.append(el(doc, 'p', 'plans-population', populationText(population, rows)));
     const coverage = planCoverageNotes({ population, rows });
     if (coverage.length) notes.append(el(doc, 'p', 'plans-coverage', coverage.join(' · ')));
-    notes.append(el(doc, 'p', 'plans-note', cursor ? 'More plans remain; use Load more.' : 'End of the server result.'));
+    notes.append(el(doc, 'p', 'plans-note', cursor ? 'More plans remain; load another page.' : 'End of the server result.'));
     body.append(notes);
-    if (cursor) {
-      const more = el(doc, 'button', 'plans-load-more', 'Load more');
+    if (nextPageError) {
+      const failure = el(doc, 'p', 'plans-next-error', nextPageError);
+      const retry = el(doc, 'button', 'plans-load-more plans-retry-next', 'Retry next page');
+      retry.type = 'button';
+      retry.addEventListener('click', () => { nextPageError = ''; loadMore(); });
+      body.append(failure, retry);
+    } else if (cursor) {
+      const more = el(doc, 'button', 'plans-load-more', pending ? 'Loading…' : 'Load more plans');
       more.type = 'button';
-      more.addEventListener('click', () => { more.disabled = true; loadMore(); });
+      more.disabled = pending;
+      more.addEventListener('click', () => loadMore());
       body.append(more);
     }
     paintBanner();
@@ -1406,7 +1562,7 @@ export function renderList(root, doc = globalThis.document, { signal, tenant = '
     for (const name of measures) {
       const option = doc.createElement('option');
       option.value = name;
-      option.textContent = name === 'associated_cost_usd' ? 'by associated cost' : name;
+      option.textContent = PLAN_MEASURE_LABELS[name] || name;
       option.selected = name === sort.measure;
       measure.append(option);
     }
@@ -1417,7 +1573,7 @@ export function renderList(root, doc = globalThis.document, { signal, tenant = '
     for (const value of ['desc', 'asc']) {
       const option = doc.createElement('option');
       option.value = value;
-      option.textContent = value;
+      option.textContent = value === 'desc' ? 'Descending' : 'Ascending';
       option.selected = value === sort.dir;
       direction.append(option);
     }
@@ -1426,56 +1582,44 @@ export function renderList(root, doc = globalThis.document, { signal, tenant = '
     sortBar.append(el(doc, 'span', 'plans-sort-current', `server sort: ${sort.raw}`));
   }
 
-  function mountScatter() {
-    const scope = currentScope();
-    if (scope.filters?.session_model?.length) scatterNote = 'session_model is not applied here: the shared plan scatter request seam carries repo_id, harness, excludes and cohort only.';
-    if (schema?.features && schema.features.entities_plan === false) {
-      scatterSection.append(el(doc, 'p', 'plans-scatter-unsupported', 'scatter-plan is not supported (not advertised by this server). Supplied by Plan 20 Phase 6 entities_plan.'));
-      return;
+  function commitScope(next) {
+    router.pushScope(stateUrl(next, '', '/plans'));
+  }
+
+  function allHistory() {
+    return { ...currentScope(), win: 'all', from: '', to: '' };
+  }
+
+  function resetFilters() {
+    return resetScopeState(currentScope());
+  }
+
+  function stateHandlers() {
+    return {
+      'all-history': () => commitScope(allHistory()),
+      'reset-filters': () => commitScope(resetFilters()),
+      retry: () => firstPage()
+    };
+  }
+
+  function renderState(kind, result = {}) {
+    rows = [];
+    population = null;
+    cursor = '';
+    pending = false;
+    nextPageError = '';
+    notes.replaceChildren();
+    body.replaceChildren();
+    paintBanner();
+    renderPlanTable(body, {
+      rows: [], doc,
+      status: planStateModel(kind, { status: result.status, code: result.code, retry: kind === 'error' }),
+      handlers: stateHandlers()
+    });
+    if (kind === 'empty') {
+      body.append(el(doc, 'p', 'plans-state-hint', 'Loaded rows are never presented as a total.'));
     }
-    if (scatterNote) scatterSection.append(el(doc, 'p', 'plans-scatter-not-applied', scatterNote));
-    const frozen = readContext?.window || null;
-    const scatterScope = { ...flatScope(scope), ...(frozen ? { from: frozen.from || '', to: frozen.to || '' } : {}) };
-    scatterFrame = createPanelFrame({
-      panel: SCATTER_PLAN_PANEL, spec: planScatterSpec(), scope: scatterScope,
-      transport, scheduler, tenant, schema, doc
-    });
-    scatterSection.append(scatterFrame.element);
-    scatterFrame.element.addEventListener('inspect', event => {
-      const detail = event.detail || {};
-      const entity = event.target?.spec?.entities?.[detail.key] || null;
-      const identity = entity?.identity || identityFromKey(detail.key);
-      if (!identity.repo_id || !identity.plan) return;
-      const values = detail.values || {};
-      const value = name => (values[name] === null || values[name] === undefined ? '—' : values[name]);
-      inspector.open({
-        grain: 'plan', key: detail.key,
-        title: `Plan ${identity.repo_id}/${identity.plan}`,
-        facts: [
-          { label: 'Repo', value: identity.repo_id },
-          { label: 'Plan', value: identity.plan },
-          { label: 'Associated cost', value: formatPlanCost({ m: values, flags: { associated_cost_lower_bound: Number(values.unpriced_calls) > 0 } }) },
-          { label: 'Artifacts', value: value('artifacts') },
-          { label: 'Versions', value: value('versions') },
-          { label: 'Sessions', value: value('sessions') },
-          { label: 'Shared sessions', value: value('shared_sessions') },
-          { label: 'Unpriced calls', value: value('unpriced_calls') }
-        ],
-        destination: entity?.destination || planDestination(identity),
-        unit: 'plan', population: selectedPopulation(),
-        selection, opener: event.target, url: globalThis.location?.href || ''
-      });
-    });
-    scatterFrame.element.addEventListener('select', event => {
-      const detail = event.detail || {};
-      const next = detail.selection || null;
-      // The raw rectangle has no exact count yet; use the re-emitted predicate
-      // with its server counts, and never expand sampled marks into identities.
-      if (detail.source === 'scatter-rectangle' || !next || !next.predicate) return;
-      selection = next;
-      updateTray();
-    });
-    scatterFrame.load().catch(() => {});
+    frame.setState(kind, { ...result, renderStatus: false });
   }
 
   async function firstPage() {
@@ -1484,7 +1628,12 @@ export function renderList(root, doc = globalThis.document, { signal, tenant = '
     controller = new AbortController();
     if (signal?.aborted) controller.abort();
     else signal?.addEventListener('abort', () => controller.abort(), { once: true });
-    frame.setState('loading', { inFlight: 1 });
+    rows = []; population = null; cursor = ''; pending = false; nextPageError = '';
+    notes.replaceChildren();
+    body.replaceChildren();
+    paintBanner();
+    renderPlanTable(body, { rows: [], doc, status: planStateModel('loading'), handlers: stateHandlers() });
+    frame.setState('loading', { inFlight: 1, renderStatus: false });
     base = planListParams({ state: currentScope(), filters, measures, sort: sort.raw, limit: pageLimit, window: readContext?.window || null });
     try {
       const { response, body: payload } = await transport.get('entities', base, { tenant, signal: controller.signal, stateKey: 'plans' });
@@ -1494,13 +1643,14 @@ export function renderList(root, doc = globalThis.document, { signal, tenant = '
         rows = result.rows;
         population = result.population;
         cursor = result.next || '';
+        nextPageError = '';
         frame.setState('ready', {});
         frame.setPopulation(population);
         show();
       } else if (result.state === 'empty') {
-        rows = []; population = null; cursor = '';
-        body.replaceChildren(); notes.replaceChildren();
-        frame.setState('empty', { causes: listCauses(currentScope(), url => router.pushScope(url)) });
+        renderState('empty');
+      } else if (result.state === 'error') {
+        renderState('error', result);
       } else {
         result.retry = firstPage;
         body.replaceChildren();
@@ -1508,34 +1658,37 @@ export function renderList(root, doc = globalThis.document, { signal, tenant = '
       }
     } catch (error) {
       if (disposed || id !== runId) return;
-      const result = error?.name === 'AbortError'
-        ? cancelledState({ retry: firstPage })
-        : errorState({ message: error?.message || 'The plans request failed.', retry: firstPage });
-      frame.setState(result.state, result);
+      if (error?.name === 'AbortError') return;
+      renderState('error', { status: Number(error?.status) || 0, code: error?.code || '' });
     }
   }
 
   async function loadMore() {
-    if (!cursor) return;
-    const id = ++runId;
-    frame.setState('loading', { inFlight: 1 });
+    if (!cursor || pending) return;
+    pending = true;
+    nextPageError = '';
+    show();
     try {
       const { response, body: payload } = await transport.get('entities', planPageParams(base, { cursor, limit: pageLimit }), { tenant, signal: controller.signal, stateKey: 'plans' });
-      if (disposed || id !== runId) return;
+      if (disposed) return;
       const result = mapPlanListResponse({ status: response.status, body: payload });
-      if (result.state !== 'ready') { result.retry = loadMore; frame.setState(result.state, result); return; }
+      pending = false;
+      if (result.state !== 'ready') {
+        if (result.state === 'cancelled') return;
+        nextPageError = 'Could not load the next page.';
+        show();
+        return;
+      }
       rows = mergePlanRows(rows, result.rows).rows;
       population = result.population || population;
       cursor = result.next || '';
-      frame.setState('ready', {});
-      frame.setPopulation(population);
       show();
     } catch (error) {
-      if (disposed || id !== runId) return;
-      const result = error?.name === 'AbortError'
-        ? cancelledState({ retry: loadMore })
-        : errorState({ message: error?.message || 'The next page failed.', retry: loadMore });
-      frame.setState(result.state, result);
+      if (disposed) return;
+      pending = false;
+      if (error?.name === 'AbortError') return;
+      nextPageError = 'Could not load the next page.';
+      show();
     }
   }
 
@@ -1571,17 +1724,15 @@ export function renderList(root, doc = globalThis.document, { signal, tenant = '
     pageLimit = Number.isFinite(max) && max > 0 ? Math.floor(max) : null;
     if (schema?.features && schema.features.entities_plan === false) {
       frame.setState('unsupported', { missing: 'entities_plan', reason: 'not advertised by this server', source: 'Plan 20 Phase 6 (entities_plan)', nearest: 'the workflow board' });
-      scatterSection.append(el(doc, 'p', 'plans-scatter-unsupported', 'scatter-plan is not supported (not advertised by this server). Supplied by Plan 20 Phase 6 entities_plan.'));
       return;
     }
     paintScope();
-    mountScatter();
     firstPage();
   }
 
   start();
 
-  return () => { disposed = true; controller.abort(); inspector.destroy(); scatterFrame?.destroy(); };
+  return () => { disposed = true; controller.abort(); inspector.destroy(); };
 }
 
 export default { title, phase, render };

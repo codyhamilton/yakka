@@ -1,6 +1,5 @@
 /* `/plans` explorer chrome: the ranked plan table, its sort bar and overlap
-   banner, the not-applied note, and the plan scatter section. Charts and shared
-   frames keep their own styles; this file adds no chart styling. */
+   banner. The list is table-only; shared frames keep their own styles. */
 
 .plans-intro {
   max-width: 70ch;
@@ -33,9 +32,19 @@
   font-size: 0.92rem;
 }
 
-.plans-table {
+.plans-table-wrap {
   width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  border: 1px solid var(--yk-border);
+  border-radius: 2px;
+}
+
+.plans-table-wrap > .plans-table {
+  width: 100%;
+  min-width: 1416px;
   border-collapse: collapse;
+  table-layout: fixed;
   font-size: 12px;
   line-height: 1.5;
 }
@@ -44,17 +53,21 @@
   caption-side: top;
   text-align: left;
   color: var(--yk-muted);
-  padding-bottom: 6px;
+  padding: 6px 8px;
   font-size: 0.92rem;
 }
 
 .plans-table th,
 .plans-table td {
-  padding: 3px 8px;
+  padding: 0 8px;
+  height: 30px;
+  max-height: 30px;
   border-bottom: 1px solid var(--yk-border);
   text-align: left;
   vertical-align: middle;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .plans-table .plan-open {
@@ -72,7 +85,7 @@
 }
 
 .plans-table td.numeric {
-  text-align: right;
+  text-align: left;
   font-variant-numeric: tabular-nums;
 }
 
@@ -91,18 +104,47 @@
   color: var(--yk-muted);
 }
 
-.plans-scatter {
-  margin-top: 1rem;
+.plans-state-row td {
+  height: 30px;
+  max-height: 30px;
+  text-align: left;
 }
 
-.plans-scatter-not-applied {
-  font-size: 0.92rem;
-  color: var(--yk-warning);
+.plans-state-text {
+  font-weight: 600;
 }
 
-.plans-scatter-unsupported {
+.plans-state-detail,
+.plans-state-code {
+  margin-left: 0.25rem;
+}
+
+.plans-state-code {
+  font-family: ui-monospace, monospace;
+  font-size: 11px;
+}
+
+.plans-state-action {
+  font: inherit;
+  min-height: 28px;
+  padding: 2px 8px;
+  margin-left: 0.25rem;
+  border: 1px solid var(--yk-border);
+  border-radius: 2px;
+  background: transparent;
+  color: var(--yk-text);
+  cursor: pointer;
+}
+
+.plans-state-hint,
+.plans-next-error {
+  margin: 0.5rem 0.25rem;
   font-size: 0.92rem;
-  color: var(--yk-muted);
+}
+
+.plans-next-error {
+  color: var(--yk-danger);
+  font-weight: 600;
 }
 
 /* Plan detail: one fixed plan identity, its named collections and the stored
@@ -230,4 +272,39 @@
   .plans-table .plan-open {
     min-height: 44px;
   }
+}
+
+/* S-plan-detail (Plan 30 U9): full-width regions in contract order, fixed
+   tables with a 1416px internal scroll, 30px left-aligned rows and ellipsised
+   identities whose titles expose the full value. */
+.plans-detail-section {
+  width: 100%;
+}
+
+.plans-detail-table {
+  width: 100%;
+  min-width: 1416px;
+  table-layout: fixed;
+}
+
+.plans-detail-table th,
+.plans-detail-table td {
+  height: 30px;
+  max-height: 30px;
+  padding: 0 8px;
+  vertical-align: middle;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.plans-detail-table td.numeric,
+.plans-detail-table th.numeric {
+  text-align: left;
+  font-variant-numeric: tabular-nums;
+}
+
+.plans-detail-table td.plans-detail-id {
+  font-family: ui-monospace, monospace;
 }

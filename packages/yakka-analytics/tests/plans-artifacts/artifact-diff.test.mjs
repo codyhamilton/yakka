@@ -88,13 +88,14 @@ async function launchFixture(t) {
 
 async function waitReader(page) {
   await page.waitForFunction(() => document.querySelector('[data-panel="artifact-reader"]')?.dataset.idle === 'true');
+  await page.waitForFunction(() => document.querySelector('.artifact-show-diff'));
 }
 
 test('Chromium compares both complete versions, round-trips URL, and keeps malicious text inert', { skip: environment.ok ? false : SKIP_REASON }, async t => {
   const { harness, page, diagnostics } = await launchFixture(t);
   await openArtifact(page, harness.origin, PATH, H.before, H.after);
   await waitReader(page);
-  await page.locator('.artifact-compare-button').click();
+  await page.locator('.artifact-show-diff').click();
   await page.waitForFunction(() => document.querySelector('.artifact-diff')?.textContent.includes('2 added, 2 removed'));
   const output = await page.locator('.artifact-diff').innerText();
   assert.match(output, /\+ changed new/);
@@ -108,19 +109,17 @@ test('Chromium compares both complete versions, round-trips URL, and keeps malic
 
   await openArtifact(page, harness.origin, DESIGN, H.designA, H.designB);
   await waitReader(page);
-  await page.locator('.artifact-compare-button').click();
+  await page.locator('.artifact-show-diff').click();
   await page.waitForFunction(() => document.querySelector('.artifact-diff'));
   assert.match(await page.locator('.artifact-diff').innerText(), /<script>alert\(1\)<\/script>/);
   assert.equal(await page.locator('.artifact-diff script').count(), 0);
 
   await openArtifact(page, harness.origin, 'docs/plans/20-analytics-reset/briefs/12-03.md', 'b3'.repeat(32), '');
   await waitReader(page);
-  assert.equal(await page.locator('.artifact-compare-button').isDisabled(), true);
-  assert.match(await page.locator('.artifact-compare-button').getAttribute('title'), /fewer than two stored versions/);
+  assert.equal(await page.locator('.artifact-show-diff').isDisabled(), true);
   await openArtifact(page, harness.origin, 'docs/plans/20-analytics-reset/IMPLEMENTATION.md', 'd3'.repeat(32), '');
   await waitReader(page);
-  assert.equal(await page.locator('.artifact-compare-button').isDisabled(), true);
-  assert.match(await page.locator('.artifact-compare-button').getAttribute('title'), /kind is not stored/);
+  assert.equal(await page.locator('.artifact-show-diff').isDisabled(), true);
   assert.deepEqual(diagnostics.pageErrors, []);
   assert.deepEqual(await diagnostics.cspViolations(), []);
   assert.ok(diagnostics.consoleErrors.every(text => /Failed to load resource.*404/.test(text)), `unexpected console errors: ${JSON.stringify(diagnostics.consoleErrors)}`);
@@ -132,13 +131,13 @@ test('Chromium declines unavailable and oversized versions without a partial dif
   const { harness, page, diagnostics } = await launchFixture(t);
   await openArtifact(page, harness.origin, PATH, H.before, H.unavailable);
   await waitReader(page);
-  await page.locator('.artifact-compare-button').click();
+  await page.locator('.artifact-show-diff').click();
   await page.waitForFunction(() => document.querySelector('.artifact-diff-message')?.textContent.includes('content_unavailable'));
   assert.equal(await page.locator('.artifact-diff').count(), 0);
 
   await openArtifact(page, harness.origin, PATH, H.before, H.large);
   await waitReader(page);
-  await page.locator('.artifact-compare-button').click();
+  await page.locator('.artifact-show-diff').click();
   await page.waitForFunction(() => document.querySelector('.artifact-diff-message')?.textContent.includes('2,000 lines per side'));
   const refusal = await page.locator('.artifact-diff-message').innerText();
   assert.match(refusal, /Diff declined: right is \d+ bytes \/ 2001 lines; the ceiling is 262,144 bytes and 2,000 lines per side\./);

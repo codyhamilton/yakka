@@ -64,7 +64,8 @@ test('a legacy server names the missing feature and shows range too wide verbati
 
   // No clip or rewrite: the window stays exactly what the URL asked for.
   const settings = await page.evaluate(() => ({ search: location.search, bar: document.querySelector('.scope-bar')?.textContent || '' }));
-  if (settings.search !== '?win=30d') problems.push(`the panel rewrote the window: ${settings.search}`);
+  const scopeParams = new URLSearchParams(settings.search);
+  if (scopeParams.get('win') !== '30d' || [...scopeParams.keys()].some(key => !['win', 'tenant'].includes(key))) problems.push(`the panel rewrote the window: ${settings.search}`);
   if (!/window 30d/.test(settings.bar)) problems.push(`the scope bar was rewritten: ${JSON.stringify(settings.bar)}`);
 
   // The deliberate 4xx is the server's honest answer; Chromium logs one

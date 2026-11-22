@@ -8,6 +8,19 @@ import { panelSpecFromState, mergePanelSpec, effectiveScope, canonicalPanelSpec 
 
 export const MAX_BOARD_PANELS = 12;
 
+// The two-column geometry is a twelve-column grid whose half-width span is six
+// columns. The prescribed full-width ids span twelve; when the remaining flow
+// panels are odd, the final one also spans the full width (the design's
+// odd-final rule). Panel ids are unique within a preset, so a map is enough.
+export function boardSpans(panelIds = [], fullWidth = []) {
+  const full = new Set(fullWidth);
+  const flow = panelIds.filter(id => !full.has(id));
+  if (flow.length % 2 === 1) full.add(flow[flow.length - 1]);
+  const spans = {};
+  for (const id of panelIds) spans[id] = full.has(id) ? '12' : '6';
+  return spans;
+}
+
 export function boardScope(state = {}) {
   const scope = {};
   for (const key of ['win', 'from', 'to', 'tz']) if (state[key]) scope[key] = state[key];
@@ -34,6 +47,8 @@ export function assembleBoard({ presetId, state = {} } = {}) {
     return { kind: 'invalid', presetId, reason: `A board holds at most ${MAX_BOARD_PANELS} panels; ${presetId} has ${preset.panels.length}.` };
   }
   const scope = boardScope(state);
+  const fullWidth = Array.isArray(preset.fullWidth) ? preset.fullWidth.slice() : [];
+  const spans = boardSpans(preset.panels, fullWidth);
   const panels = [];
   const reasons = [];
   preset.panels.forEach((panelId, index) => {
@@ -47,7 +62,12 @@ export function assembleBoard({ presetId, state = {} } = {}) {
     const presetSpec = preset.specs?.[panelId] ? canonicalPanelSpec(preset.specs[panelId]) : null;
     const override = panelSpecFromState(state, key);
     const spec = mergePanelSpec(presetSpec, override);
-    panels.push({ key, panelId, panel, spec, scope: effectiveScope(scope, spec?.scope), reason: null });
+    // The caption key is a panel-unit selector inside the spec, never a runtime
+    // scope field. Keep it on `spec.scope` and out of the scope the panel sees,
+    // so no cause/read treats it as an applied filter.
+    const panelScope = { ...(spec?.scope || {}) };
+    delete panelScope.captionKey;
+    panels.push({ key, panelId, panel, spec, scope: effectiveScope(scope, panelScope), reason: null });
   });
-  return { kind: 'board', presetId, title: preset.title, scope, panels, reasons };
+  return { kind: 'board', presetId, title: preset.title, scope, panels, reasons, fullWidth, spans };
 }

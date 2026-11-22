@@ -105,13 +105,15 @@ test('movers ranks by change and names a missing per-group n instead of inventin
 
 test('coverage keeps typed populations in their own units and never blends a percentage', () => {
   const model = coverageModel({ coverage: makeSchema().coverage, summary: summary() });
-  const keys = model.groups.map(group => group.key);
-  assert.ok(keys.includes('facts') && keys.includes('sessions') && keys.includes('scored') && keys.includes('pricing') && keys.includes('rejections'));
+  assert.deepEqual(model.columns, ['Source', 'Latest retained timestamp', 'Age', 'Missing-data count', 'Unit']);
+  const sources = model.rows.map(row => row.source);
+  assert.deepEqual([...sources].sort(), sources, 'source rows are codepoint ascending');
   const serialized = JSON.stringify(model);
   assert.equal(/%/.test(serialized), false);
-  assert.ok(serialized.includes('sessions') && serialized.includes('calls') && serialized.includes('content hashes'));
-  const pricing = model.groups.find(group => group.key === 'pricing');
-  assert.ok(pricing.rows.some(row => /priced calls/.test(row[0])));
+  assert.ok(serialized.includes('unpriced calls'));
+  const usage = model.rows.find(row => row.source === 'usage');
+  assert.equal(usage.unit, 'unpriced calls');
+  assert.equal(usage.missing, String(summary().unpriced_calls ?? 0));
 });
 
 test('river maps four observation types with their clocks and entity keys', () => {
@@ -136,7 +138,7 @@ test('calendar rows map to day cells and coarsening is named', () => {
 });
 
 test('the five pulse panels are valid registry entries with real chart names and one preset worth', () => {
-  assert.deepEqual(PULSE_PANELS.map(panel => panel.id), ['river', 'pulse-strips', 'movers', 'calendar', 'coverage']);
+  assert.deepEqual(PULSE_PANELS.map(panel => panel.id), ['pulse-strips', 'river', 'movers', 'calendar', 'coverage']);
   for (const panel of PULSE_PANELS) {
     assert.doesNotThrow(() => validatePanelEntry(panel));
     for (const chart of panel.charts) assert.ok(CHART_NAMES.has(chart), `${panel.id} chart ${chart}`);
@@ -248,7 +250,7 @@ test('the pulse preset settles five panels, inspects the river, and brushes then
     await openPulse(page, harness.origin);
 
     const ids = await page.evaluate(() => [...document.querySelectorAll('.workspace-panel')].map(panel => panel.dataset.panel));
-    assert.deepEqual(ids, ['river', 'pulse-strips', 'movers', 'calendar', 'coverage']);
+    assert.deepEqual(ids, ['pulse-strips', 'river', 'movers', 'calendar', 'coverage']);
     const states = await page.evaluate(() => Object.fromEntries([...document.querySelectorAll('.workspace-panel')].map(panel => [panel.dataset.panel, panel.dataset.state])));
     assert.equal(states.river, 'ready');
     assert.equal(states['pulse-strips'], 'ready');
@@ -256,7 +258,11 @@ test('the pulse preset settles five panels, inspects the river, and brushes then
     assert.equal(states.calendar, 'ready');
     assert.equal(states.coverage, 'ready');
 
-    // River: four observation types, then inspect opens provenance.
+    // River: table by default; the lanes chart is the alternative view.
+    const riverTable = await page.evaluate(() => document.querySelector('[data-panel="river"] .pulse-table')?.textContent || '');
+    assert.match(riverTable, /Brief execution/);
+    await page.locator('[data-panel="river"] button', { hasText: 'Show chart' }).click();
+    await page.waitForFunction(() => document.querySelector('[data-panel="river"] yk-lanes')?.dataset.state === 'ready');
     const lanes = await page.evaluate(() => {
       const chart = document.querySelector('[data-panel="river"] yk-lanes');
       return { categories: chart.inspect().categories, series: chart.inspect().series.map(series => series.key), state: chart.dataset.state };
@@ -271,25 +277,26 @@ test('the pulse preset settles five panels, inspects the river, and brushes then
     assert.match(inspected, /fix-/);
     await page.keyboard.press('Escape');
 
-    // Strips: current vs previous, unpriced is never $0.
+    // Strips: current vs previous and unpriced is never $0 (table view).
+    await page.locator('[data-panel="pulse-strips"] button', { hasText: 'Show table' }).click();
     const strips = await page.evaluate(() => document.querySelector('[data-panel="pulse-strips"]').textContent);
     assert.match(strips, /previous/i);
     assert.match(strips, /unpriced/i);
-    assert.doesNotMatch(strips, /\$0\.00/);
+    assert.match(strips, /Priced spend\$12\.50\+ \(1 unpriced\)/);
+    assert.doesNotMatch(strips, /Priced spend\$0\.00/);
 
-    // Movers: schema-limited measure chooser, repo lens named absent.
+    // Movers: one combined priced-spend chart and table; no measure chooser.
     const movers = await page.evaluate(() => {
       const root = document.querySelector('[data-panel="movers"]');
       return {
-        options: [...new Set([...root.querySelectorAll('select option')].map(option => option.value))],
-        text: root.textContent,
-        bars: root.querySelectorAll('yk-bars').length
+        options: [...root.querySelectorAll('select option')].map(option => option.value),
+        headers: [...root.querySelectorAll('.pulse-table thead th')].map(cell => cell.textContent),
+        text: root.textContent
       };
     });
-    assert.deepEqual(movers.options.sort(), ['commits', 'cost_usd', 'model_calls']);
-    assert.equal(movers.options.includes('unpriced_calls'), false);
+    assert.deepEqual(movers.options, []);
+    assert.deepEqual(movers.headers, ['Harness/model', 'Current priced spend (USD)', 'Previous priced spend (USD)', 'Change (USD)', 'Unpriced calls']);
     assert.match(movers.text, /Repository lens not offered/);
-    assert.ok(movers.bars >= 2);
 
     // Calendar: brush previews with no URL change, zoom commits and clears sel.
     const caveat = await page.evaluate(() => document.querySelector('[data-panel="calendar"] .pulse-calendar-caveat').textContent);

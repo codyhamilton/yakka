@@ -1,16 +1,30 @@
-// `ops-footprint` tenant panel: the only panel that reads /v1/admin/status.
-// It renders the server's point-in-time status exactly as returned, never
-// infers administrator rights, and keeps every tenant separate. Pure
-// formatters/mappers are exported for the node checks.
+// `ops-footprint` tenant panel: the only surface that reads /v1/admin/status.
+// It selects the committed tenant by exact id, renders the retained-byte
+// categories as bars and an exact-byte table, and states the server's refusal
+// honestly. No tenant is summed with another and no admin right is inferred.
 
 import { formatNumber } from '../charts/formatters.js';
-import { cancelledState, errorState, unsupportedState } from '../core/panel-state.js';
+import { cancelledState, errorState } from '../core/panel-state.js';
+import { mountPanelViews } from './p10-shared.js';
 
-export const FAILURE_CAP = 25;
-export const STATE_KEY = 'ops-status';
 export const STATUS_ROUTE = 'admin/status';
+export const STATE_KEY = 'ops-status';
+export const FOOTPRINT_CAPTION = 'Each bar shows retained bytes for one storage category in this tenant; longer bars mean more space used.';
+export const ADMIN_ONLY_TEXT = 'Storage information is available to server administrators only.';
+export const FOOTPRINT_LOADING_TEXT = 'Loading Retained storage…';
+export const FOOTPRINT_EMPTY_TEXT = 'No records match these filters.';
+export const FOOTPRINT_ERROR_TEXT = 'Could not load Retained storage.';
 
-const BYTE_UNITS = ['B', 'KB', 'MB', 'GB', 'TB', 'PB'];
+const BYTE_UNITS = ['B', 'KiB', 'MiB', 'GiB', 'TiB', 'PiB'];
+
+const CATEGORIES = [
+  ['ledger_bytes', 'Ledger'],
+  ['wal_bytes', 'WAL'],
+  ['archive_bytes', 'Archive'],
+  ['blob_bytes', 'Blobs'],
+  ['pending_bytes', 'Pending'],
+  ['other_bytes', 'Other']
+];
 
 function missing(value) {
   return value === null || value === undefined || value === '';
@@ -26,149 +40,56 @@ function asString(value) {
   return missing(value) ? null : String(value);
 }
 
-// Bytes with the unit named on the value itself, never a bare number.
+// Binary display, unit named on the value; a missing byte count is unavailable.
 export function formatBytes(value) {
   const number = asNumber(value);
-  if (number === null) return 'not supplied';
+  if (number === null) return '—';
   let amount = Math.max(0, number);
   let index = 0;
   while (amount >= 1024 && index < BYTE_UNITS.length - 1) { amount /= 1024; index += 1; }
-  const rounded = index === 0 ? String(Math.round(amount)) : amount >= 100 ? amount.toFixed(0) : amount.toFixed(1).replace(/\.0$/, '');
+  const rounded = index === 0 ? String(Math.round(amount)) : amount >= 100 ? amount.toFixed(0) : amount.toFixed(2).replace(/\.0+$/, '').replace(/(\.\d)0$/, '$1');
   return `${rounded} ${BYTE_UNITS[index]}`;
 }
 
-// Unix seconds, displayed as UTC. Zero means "never" for a rescore time.
+export function formatCount(value) {
+  const number = asNumber(value);
+  return number === null ? '—' : formatNumber(number);
+}
+
 export function formatUnixSeconds(value) {
   const number = asNumber(value);
-  if (number === null) return 'not supplied';
+  if (number === null) return '—';
   if (number === 0) return 'never';
   return new Date(number * 1000).toISOString();
 }
 
-export function formatCount(value, unit) {
-  const number = asNumber(value);
-  if (number === null) return 'not supplied';
-  const label = number === 1 && unit.endsWith('s') ? unit.slice(0, -1) : unit;
-  return `${formatNumber(number)} ${label}`;
+// Bytes descending, category ascending; an unavailable value sorts last.
+export function footprintRows(tenant = {}) {
+  const footprint = tenant && typeof tenant.footprint === 'object' ? tenant.footprint : null;
+  const rows = CATEGORIES.map(([key, label]) => ({ key, label, bytes: asNumber(footprint?.[key]) }));
+  return rows.sort((left, right) => {
+    const a = left.bytes === null ? -Infinity : left.bytes;
+    const b = right.bytes === null ? -Infinity : right.bytes;
+    if (a !== b) return b - a;
+    return left.label.localeCompare(right.label);
+  });
 }
 
-// The server caps the recent-failure list; label the cap rather than implying
-// that the list is complete.
-export function failureCapText(shown) {
-  const count = asNumber(shown);
-  if (count === null) return `recent screen failures; the server caps this list at ${FAILURE_CAP}`;
-  return `${formatNumber(count)} shown; recent screen failures, the server caps this list at ${FAILURE_CAP}`;
-}
-
-export function rescoreProgress(rescore) {
-  if (!rescore) return 'not supplied';
-  const total = asNumber(rescore.total);
-  const done = asNumber(rescore.done);
-  const failed = asNumber(rescore.failed);
-  const started = asNumber(rescore.started);
-  if (!rescore.running && !started && !total) return 'never run';
-  const status = rescore.running ? 'running' : 'finished';
-  const head = `${status}: ${formatCount(done, 'content items')} of ${formatCount(total, 'content items')} scored`;
-  return failed ? `${head}, ${formatCount(failed, 'failures')}` : head;
-}
-
-export function mapScoring(scoring) {
-  if (!scoring || typeof scoring !== 'object') return null;
-  return {
-    scorer: Boolean(scoring.scorer),
-    checks: Boolean(scoring.checks),
-    rescorable: Boolean(scoring.rescorable)
-  };
-}
-
-export function mapVolume(volume) {
-  if (!volume || typeof volume !== 'object') return null;
-  return { total_bytes: asNumber(volume.total_bytes), free_bytes: asNumber(volume.free_bytes) };
-}
-
-const FOOTPRINT_FIELDS = [
-  ['ledger_bytes', 'Ledger'],
-  ['wal_bytes', 'WAL'],
-  ['archive_bytes', 'Archive'],
-  ['blob_bytes', 'Blobs'],
-  ['pending_bytes', 'Pending'],
-  ['other_bytes', 'Other']
-];
-
-const FOOTPRINT_COUNTS = [
-  ['archive_files', 'Archive files', 'files'],
-  ['blobs', 'Blobs', 'blobs'],
-  ['pending', 'Pending items', 'items']
-];
-
-export function mapTenant(tenant) {
+export function mapTenant(tenant = {}) {
   const source = tenant && typeof tenant === 'object' ? tenant : {};
-  const footprint = source.footprint && typeof source.footprint === 'object'
-    ? {
-        bytes: FOOTPRINT_FIELDS.map(([key, label]) => ({ key, label, value: asNumber(source.footprint[key]) })),
-        counts: FOOTPRINT_COUNTS.map(([key, label, unit]) => ({ key, label, unit, value: asNumber(source.footprint[key]) }))
-      }
-    : null;
-  const screens = source.screens && typeof source.screens === 'object'
-    ? {
-        verdicts: Object.entries(source.screens.verdicts || {}).map(([verdict, count]) => ({ verdict, count: asNumber(count) })),
-        scored_content: asNumber(source.screens.scored_content),
-        score_rows: asNumber(source.screens.score_rows),
-        rejections: Array.isArray(source.screens.rejections)
-          ? source.screens.rejections.map(row => ({
-              stage: asString(row?.stage),
-              pattern: asString(row?.pattern),
-              count: asNumber(row?.count),
-              last: asNumber(row?.last)
-            }))
-          : null,
-        total_rejections: asNumber(source.screens.total_rejections)
-      }
-    : null;
   return {
     id: asString(source.id),
     name: asString(source.name),
     error: asString(source.error) || '',
-    facts: asNumber(source.facts),
-    compaction: asString(source.compaction),
-    footprint,
-    screens,
-    failuresSupplied: Array.isArray(source.failures),
-    failures: Array.isArray(source.failures)
-      ? source.failures.map(row => ({
-          stage: asString(row?.stage),
-          pattern: asString(row?.pattern),
-          reason: asString(row?.reason),
-          path: asString(row?.path),
-          content_hash: asString(row?.content_hash),
-          at: asNumber(row?.at)
-        }))
-      : [],
-    rescore: source.rescore && typeof source.rescore === 'object'
-      ? {
-          running: Boolean(source.rescore.running),
-          total: asNumber(source.rescore.total),
-          done: asNumber(source.rescore.done),
-          failed: asNumber(source.rescore.failed),
-          started: asNumber(source.rescore.started),
-          finished: asNumber(source.rescore.finished),
-          error: asString(source.rescore.error) || ''
-        }
-      : null
+    footprint: source.footprint && typeof source.footprint === 'object' ? source.footprint : null
   };
 }
 
-// 403 is the only honest "not for you" answer: the server decides, never a
-// client-side role guess. 401 stays the shell's session gate; the panel shows
-// the server's failure rather than inventing an administrator message.
-export function mapStatusResponse({ status, body } = {}) {
+// 403 is the server's administrator-session refusal, never an owner guess.
+export function mapStatusResponse({ status, body, tenant = '' } = {}) {
   const payload = body && typeof body === 'object' ? body : {};
   if (status === 403) {
-    return unsupportedState({
-      feature: 'Administrator status',
-      reason: 'administrator only',
-      source: '/v1/admin/status'
-    });
+    return { state: 'unsupported', message: ADMIN_ONLY_TEXT, reason: 'administrator only' };
   }
   if (status === 401) {
     return errorState({ message: 'The session is not signed in.', code: '401' });
@@ -179,219 +100,147 @@ export function mapStatusResponse({ status, body } = {}) {
       code: payload.code || (status ? String(status) : '')
     });
   }
-  const tenantRows = Array.isArray(payload.tenants) ? payload.tenants.map(mapTenant) : [];
+  const tenants = Array.isArray(payload.tenants) ? payload.tenants.map(mapTenant) : null;
+  const selected = tenants ? tenants.find(item => item.id === String(tenant)) || null : null;
   return {
     state: 'ready',
     version: asString(payload.version),
-    scoring: mapScoring(payload.scoring),
-    volume: mapVolume(payload.volume),
-    tenantsSupplied: Array.isArray(payload.tenants),
-    tenants: tenantRows,
-    basis: 'server status snapshot (point in time), not a historical series',
-    population: { unit: 'tenant', returned_n: tenantRows.length, eligible_n: tenantRows.length }
+    tenants,
+    selected,
+    tenantFound: Boolean(selected),
+    basis: 'server status snapshot (point in time), not a historical series'
   };
 }
 
 function el(doc, tag, className, value) {
   const node = doc.createElement(tag);
   if (className) node.className = className;
-  if (value !== undefined) node.textContent = value;
+  if (value !== undefined && value !== null) node.textContent = String(value);
   return node;
 }
 
-function block(doc, parent, title) {
-  const section = el(doc, 'section', 'ops-block');
-  if (title) section.append(el(doc, 'h3', 'ops-block-title', title));
-  parent.append(section);
-  return section;
+function svgNode(doc, tag) {
+  return doc.createElementNS('http://www.w3.org/2000/svg', tag);
 }
 
-function definitionList(doc, parent, pairs) {
-  const list = el(doc, 'dl', 'ops-dl');
-  for (const [term, value] of pairs) {
-    list.append(el(doc, 'dt', '', term), el(doc, 'dd', '', value));
-  }
-  parent.append(list);
+function bars(doc, rows) {
+  const host = el(doc, 'div', 'ops-footprint-chart');
+  const max = Math.max(1, ...rows.map(row => (row.bytes === null ? 0 : row.bytes)));
+  const height = Math.max(160, rows.length * 26 + 40);
+  const svg = svgNode(doc, 'svg');
+  svg.setAttribute('viewBox', `0 0 640 ${height}`);
+  svg.setAttribute('role', 'img');
+  svg.setAttribute('aria-label', FOOTPRINT_CAPTION);
+  host.append(svg);
+  const labelWidth = 120;
+  const left = labelWidth;
+  const right = 620;
+  rows.forEach((row, index) => {
+    const y = 12 + index * 26;
+    const label = svgNode(doc, 'text');
+    label.setAttribute('x', '6');
+    label.setAttribute('y', String(y + 13));
+    label.setAttribute('class', 'ops-chart-label');
+    label.textContent = row.label;
+    svg.append(label);
+    if (row.bytes === null) {
+      const missingText = svgNode(doc, 'text');
+      missingText.setAttribute('x', String(left + 4));
+      missingText.setAttribute('y', String(y + 13));
+      missingText.setAttribute('class', 'ops-chart-missing');
+      missingText.textContent = 'not supplied';
+      svg.append(missingText);
+      return;
+    }
+    const width = Math.max(row.bytes > 0 ? 1 : 0, (right - left) * (row.bytes / max));
+    const bar = svgNode(doc, 'rect');
+    bar.setAttribute('x', String(left));
+    bar.setAttribute('y', String(y));
+    bar.setAttribute('width', String(width));
+    bar.setAttribute('height', '16');
+    bar.setAttribute('class', 'ops-chart-bar');
+    const title = svgNode(doc, 'title');
+    title.textContent = `${row.label}: ${formatCount(row.bytes)} bytes (${formatBytes(row.bytes)})`;
+    bar.append(title);
+    svg.append(bar);
+    const value = svgNode(doc, 'text');
+    value.setAttribute('x', String(Math.min(right - 4, left + width + 6)));
+    value.setAttribute('y', String(y + 13));
+    value.setAttribute('class', 'ops-chart-value');
+    value.textContent = formatBytes(row.bytes);
+    svg.append(value);
+  });
+  const axis = svgNode(doc, 'line');
+  axis.setAttribute('x1', String(left));
+  axis.setAttribute('x2', String(left));
+  axis.setAttribute('y1', '4');
+  axis.setAttribute('y2', String(height - 24));
+  axis.setAttribute('class', 'ops-chart-grid');
+  svg.append(axis);
+  axisLabel(doc, svg, left, 12 + rows.length * 26 + 8, '0');
+  axisLabel(doc, svg, right, 12 + rows.length * 26 + 8, 'Bytes retained (binary units)', 'end');
+  return host;
 }
 
-// A real table with a caption and scoped column headers.
-function table(doc, parent, { caption, columns, rows, empty = 'none reported' }) {
-  const node = el(doc, 'table', 'ops-table');
-  node.append(el(doc, 'caption', '', caption));
+function axisLabel(doc, svg, x, y, text, anchor = 'start') {
+  const node = svgNode(doc, 'text');
+  node.setAttribute('x', String(x));
+  node.setAttribute('y', String(y));
+  node.setAttribute('text-anchor', anchor);
+  node.setAttribute('class', 'ops-chart-label');
+  node.textContent = text;
+  svg.append(node);
+}
+
+function footprintTable(doc, rows) {
+  const table = el(doc, 'table', 'ops-table ops-footprint-table');
+  const caption = el(doc, 'caption', '', 'Retained storage');
+  table.append(caption);
   const head = doc.createElement('thead');
   const headRow = doc.createElement('tr');
-  for (const column of columns) {
-    const cell = el(doc, 'th', column.numeric ? 'numeric' : '', column.label);
+  for (const [label, width] of [['Storage category', 240], ['Retained bytes', 160], ['Display size', null]]) {
+    const cell = el(doc, 'th', '', label);
     cell.scope = 'col';
+    if (width) cell.setAttribute('width', String(width));
     headRow.append(cell);
   }
   head.append(headRow);
   const body = doc.createElement('tbody');
-  if (!rows.length) {
-    const row = doc.createElement('tr');
-    const cell = el(doc, 'td', '', empty);
-    cell.colSpan = columns.length;
-    row.append(cell);
-    body.append(row);
-  }
   for (const row of rows) {
     const tr = doc.createElement('tr');
-    row.forEach((value, index) => tr.append(el(doc, 'td', columns[index]?.numeric ? 'numeric' : '', value)));
+    tr.append(el(doc, 'td', '', row.label));
+    tr.append(el(doc, 'td', '', row.bytes === null ? '—' : formatCount(row.bytes)));
+    tr.append(el(doc, 'td', '', formatBytes(row.bytes)));
     body.append(tr);
   }
-  node.append(head, body);
-  parent.append(node);
+  table.append(head, body);
+  return table;
 }
 
-function absentLine(doc, parent, labels) {
-  if (!labels.length) return;
-  parent.append(el(doc, 'p', 'ops-missing', `Not supplied by the server: ${labels.join(', ')}.`));
-}
-
-function renderTenant(doc, parent, tenant) {
-  const section = el(doc, 'section', 'ops-tenant');
-  if (tenant.id) section.dataset.tenant = tenant.id;
-  const title = tenant.name || 'tenant';
-  section.append(el(doc, 'h3', 'ops-tenant-title', tenant.id ? `${title} (${tenant.id})` : title));
-  if (tenant.error) {
-    section.append(el(doc, 'p', 'ops-tenant-error', `This tenant could not be read: ${tenant.error}. Other tenants are unaffected.`));
-    parent.append(section);
-    return;
-  }
-  const absent = [];
-
-  const summary = block(doc, section, 'Ledger');
-  if (tenant.facts === null) { absent.push('facts'); summary.append(el(doc, 'p', 'ops-missing', 'Facts: not supplied.')); }
-  else definitionList(doc, summary, [['Facts', formatCount(tenant.facts, 'facts')]]);
-  if (tenant.compaction === null) { absent.push('compaction'); summary.append(el(doc, 'p', 'ops-missing', 'Compaction: not supplied.')); }
-  else definitionList(doc, summary, [['Compaction', tenant.compaction]]);
-
-  const disk = block(doc, section, 'Disk footprint');
-  if (!tenant.footprint) {
-    absent.push('footprint');
-    disk.append(el(doc, 'p', 'ops-missing', 'Footprint: not supplied.'));
-  } else {
-    table(doc, disk, {
-      caption: 'Footprint by component (bytes)',
-      columns: [{ label: 'Component' }, { label: 'Bytes', numeric: true }],
-      rows: tenant.footprint.bytes.map(item => [item.label, formatBytes(item.value)]),
-      empty: 'not supplied'
-    });
-    definitionList(doc, disk, tenant.footprint.counts.map(item => [item.label, formatCount(item.value, item.unit)]));
-  }
-
-  const screens = block(doc, section, 'Screens');
-  if (!tenant.screens) {
-    absent.push('screens');
-    screens.append(el(doc, 'p', 'ops-missing', 'Screens: not supplied.'));
-  } else {
-    table(doc, screens, {
-      caption: 'Screen verdicts',
-      columns: [{ label: 'Verdict' }, { label: 'Screens', numeric: true }],
-      rows: tenant.screens.verdicts.map(item => [item.verdict, formatCount(item.count, 'screens')]),
-      empty: 'none reported'
-    });
-    definitionList(doc, screens, [
-      ['Scored content', formatCount(tenant.screens.scored_content, 'content items')],
-      ['Score rows', formatCount(tenant.screens.score_rows, 'rows')],
-      ['Total rejections', formatCount(tenant.screens.total_rejections, 'rejections')]
-    ]);
-    if (tenant.screens.rejections === null) {
-      screens.append(el(doc, 'p', 'ops-missing', 'Rejections by stage: not supplied.'));
-    } else {
-      table(doc, screens, {
-        caption: 'Rejections by stage (the returned list, not a claimed total)',
-        columns: [{ label: 'Stage' }, { label: 'Pattern' }, { label: 'Rejections', numeric: true }, { label: 'Last (UTC)' }],
-        rows: tenant.screens.rejections.map(row => [row.stage ?? 'not supplied', row.pattern ?? 'not supplied', formatCount(row.count, 'rejections'), formatUnixSeconds(row.last)]),
-        empty: 'none reported'
-      });
-    }
-  }
-
-  const failures = block(doc, section, 'Recent failures');
-  if (!tenant.failuresSupplied) {
-    absent.push('failures');
-    failures.append(el(doc, 'p', 'ops-missing', 'Recent failures: not supplied.'));
-  } else {
-    table(doc, failures, {
-      caption: `Recent screen failures (${failureCapText(tenant.failures.length)})`,
-      columns: [
-        { label: 'Stage' }, { label: 'Pattern' }, { label: 'Reason' }, { label: 'Path' },
-        { label: 'Content hash' }, { label: 'At (UTC)' }
-      ],
-      rows: tenant.failures.map(row => [
-        row.stage ?? 'not supplied', row.pattern ?? 'not supplied', row.reason ?? 'not supplied',
-        row.path ?? 'not supplied', row.content_hash ?? 'not supplied', formatUnixSeconds(row.at)
-      ]),
-      empty: 'none reported'
-    });
-  }
-
-  const rescore = block(doc, section, 'Rescore');
-  if (!tenant.rescore) {
-    absent.push('rescore');
-    rescore.append(el(doc, 'p', 'ops-missing', 'Rescore: not supplied.'));
-  } else {
-    definitionList(doc, rescore, [
-      ['Running', tenant.rescore.running ? 'yes' : 'no'],
-      ['Progress', rescoreProgress(tenant.rescore)],
-      ['Failed', formatCount(tenant.rescore.failed, 'failures')],
-      ['Started (UTC)', formatUnixSeconds(tenant.rescore.started)],
-      ['Finished (UTC)', formatUnixSeconds(tenant.rescore.finished)],
-      ['Error', tenant.rescore.error || 'none']
-    ]);
-  }
-
-  absentLine(doc, section, absent);
-  parent.append(section);
-}
-
-// Render the whole snapshot into the frame's body. The body is owned by the
-// explorer (the shared frame has no chart/table renderer); every value here is
-// the response or an explicit "not supplied".
-export function renderOpsStatus(container, result, doc = globalThis.document) {
+export function renderFootprint(container, result, doc = globalThis.document) {
   container.replaceChildren();
   if (!result || result.state !== 'ready') return container;
-  const wrapper = el(doc, 'div', 'ops-status');
-  wrapper.append(el(doc, 'p', 'ops-basis', 'Basis: server status snapshot (point in time), not a historical series.'));
-  definitionList(doc, block(doc, wrapper, 'Server'), [
-    ['Version', result.version || 'not supplied'],
-    ...(result.scoring
-      ? [
-          ['Scorer', result.scoring.scorer ? 'configured' : 'not configured'],
-          ['Checks', result.scoring.checks ? 'configured' : 'not configured'],
-          ['Rescorable', result.scoring.rescorable ? 'yes' : 'no']
-        ]
-      : [['Scoring', 'not supplied']])
-  ]);
-  if (!result.scoring) wrapper.append(el(doc, 'p', 'ops-missing', 'Scoring: not supplied.'));
-
-  const volume = block(doc, wrapper, 'Server volume');
-  if (!result.volume) volume.append(el(doc, 'p', 'ops-missing', 'Server volume: not supplied.'));
-  else {
-    table(doc, volume, {
-      caption: 'Server volume (bytes, all tenants together)',
-      columns: [{ label: 'Measure' }, { label: 'Bytes', numeric: true }],
-      rows: [['Total', formatBytes(result.volume.total_bytes)], ['Free', formatBytes(result.volume.free_bytes)]],
-      empty: 'not supplied'
-    });
+  if (!result.tenants) {
+    container.append(el(doc, 'p', 'ops-missing', 'Tenants: not supplied by the server.'));
+    return container;
   }
-
-  if (!result.tenantsSupplied) {
-    wrapper.append(el(doc, 'p', 'ops-missing', 'Tenants: not supplied by the server.'));
-  } else if (!result.tenants.length) {
-    wrapper.append(el(doc, 'p', 'ops-missing', 'The server returned no tenants.'));
-  } else {
-    for (const tenant of result.tenants) renderTenant(doc, wrapper, tenant);
+  if (!result.tenantFound) {
+    container.append(el(doc, 'p', 'ops-missing', 'This tenant was not reported by the server.'));
+    return container;
   }
-  container.append(wrapper);
+  const rows = footprintRows(result.selected);
+  const views = mountPanelViews({
+    panelId: 'ops-footprint', chart: bars(doc, rows), table: footprintTable(doc, rows),
+    doc, defaultView: 'chart', label: 'Retained storage view'
+  });
+  container.append(views.element);
   return container;
 }
 
-async function load({ transport, signal } = {}) {
+async function load({ transport, signal, tenant = '' } = {}) {
   try {
     const { response, body } = await transport.request(STATUS_ROUTE, { signal, stateKey: STATE_KEY });
-    return mapStatusResponse({ status: response.status, body });
+    return mapStatusResponse({ status: response.status, body, tenant });
   } catch (error) {
     if (error?.name === 'AbortError') return cancelledState();
     return errorState({ message: error?.message || 'The status request failed.' });
@@ -400,15 +249,16 @@ async function load({ transport, signal } = {}) {
 
 export const OPS_PANEL = {
   id: 'ops-footprint',
-  title: 'Tenant footprint',
+  title: 'Retained storage',
   grain: 'tenant',
-  measures: ['facts'],
+  measures: ['bytes'],
   lenses: [],
-  charts: [],
+  charts: ['bars'],
   table: true,
   requires: [],
-  caveats: 'Administrator-only, point-in-time server status. Read-only: it never starts a rescore.',
+  caveats: 'Administrator-only, point-in-time server status for the selected tenant. Read-only.',
   measureBasis: 'server status snapshot, point in time',
+  caption: FOOTPRINT_CAPTION,
   requests: () => [{ route: `/v1/${STATUS_ROUTE}`, method: 'GET', session: true }],
   load
 };

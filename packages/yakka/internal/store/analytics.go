@@ -349,6 +349,64 @@ func (f AnalyticsFilter) rejWhere() (string, []any) {
 	return w, args
 }
 
+// retainedRecordRejWhere is the corrected rejection-side predicate shared by ExplorePage and
+// event-counts. Fact-side fields use factWhere semantics. On the rejection side time is at,
+// kind is wf_kind(path), plan is wf_plan(path), conversation_id and stage are stored columns, and
+// repo_id, harness, norm_event, event, tool, model and source are absent and compare as empty
+// strings. Every include field is OR within its repeated values and AND across fields; a nonempty
+// include cannot match an absent field. Exclusions use the same values, so excluding a nonempty
+// absent value does not exclude a rejection. Other rejection routes keep rejWhere.
+func (f AnalyticsFilter) retainedRecordRejWhere() (string, []any, error) {
+	args := []any{f.From.UnixNano(), f.To.UnixNano()}
+	w := "at >= ? AND at <= ?"
+	w += inList("''", f.Repos, &args)
+	w += inList("''", f.Harnesses, &args)
+	w += inList("wf_kind(path)", f.Kinds, &args)
+	w += inList("wf_plan(path)", f.Plans, &args)
+	w += inList("''", f.NormEvents, &args)
+	w += inList("''", f.Events, &args)
+	w += inList("''", f.Tools, &args)
+	w += inList("''", f.Models, &args)
+	w += inList("''", f.Sources, &args)
+	w += inList("conversation_id", f.ConversationIDs, &args)
+	if values := f.Excludes["stage"]; len(values) > 0 {
+		for _, v := range values {
+			args = append(args, v)
+		}
+		w += " AND stage NOT IN (?" + strings.Repeat(",?", len(values)-1) + ")"
+	}
+	cols := map[string]string{
+		"repo_id": "''", "harness": "''", "kind": "wf_kind(path)", "plan": "wf_plan(path)",
+		"norm_event": "''", "event": "''", "tool": "''", "model": "''", "source": "''",
+		"conversation_id": "conversation_id",
+	}
+	for dim, values := range f.Excludes {
+		if dim == "stage" { // already applied above using the rejection stage column
+			continue
+		}
+		col, ok := cols[dim]
+		if !ok {
+			return "", nil, fmt.Errorf("unsupported_filter: %s", dim)
+		}
+		if len(values) == 0 {
+			continue
+		}
+		for _, v := range values {
+			args = append(args, v)
+		}
+		w += " AND " + col + " NOT IN (?" + strings.Repeat(",?", len(values)-1) + ")"
+	}
+	if f.CohortSQL != "" {
+		operator := " IN "
+		if f.CohortExclude {
+			operator = " NOT IN "
+		}
+		w += " AND conversation_id" + operator + "(" + f.CohortSQL + ")"
+		args = append(args, f.CohortArgs...)
+	}
+	return w, args, nil
+}
+
 func (t *Tenant) strings(ctx context.Context, q string, args ...any) ([]string, error) {
 	rows, err := t.rdb.QueryContext(ctx, q, args...)
 	if err != nil {
@@ -1221,7 +1279,10 @@ func (t *Tenant) ExplorePage(ctx context.Context, f AnalyticsFilter, cur *Explor
 		cur = &copy
 	}
 	fw, fargs := f.factWhere()
-	rw, rargs := f.rejWhere()
+	rw, rargs, err := f.retainedRecordRejWhere()
+	if err != nil {
+		return nil, false, nil, err
+	}
 
 	fq := `SELECT type, ts, harness, repo_id, plan, kind, event,
 		CASE WHEN type='hook_event' THEN tool ELSE '' END AS tool,

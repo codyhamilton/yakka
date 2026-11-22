@@ -477,7 +477,7 @@ export class SvgChartElement extends (typeof HTMLElement === 'undefined' ? class
     const doc = this.shadowRoot.ownerDocument;
     const details = doc.createElement('details');
     details.className = 'yk-chart-table';
-    details.open = true;
+    details.open = false;
     const summary = doc.createElement('summary');
     summary.textContent = 'Table';
     const tableSpec = { ...spec, series: model.tableSeries || spec.series, x: model.x || spec.x };

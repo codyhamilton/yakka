@@ -57,6 +57,19 @@ test('session routes use cookies without bearer; foreign-base data can use its b
   assert.equal(data.credentials, 'omit');
 });
 
+test('token-bound mode still sends management routes through the browser session', () => {
+  globalThis.location = { hostname: 'collector.example' };
+  installStorage({ 'yakka-analytics-base': 'https://api.example', 'yakka-analytics-key': 'fixture-key' });
+  for (const path of ['v1/me', 'v1/tenants', 'v1/tokens', 'v1/tokens/abc/revoke']) {
+    const auth = authInit(path);
+    assert.equal(auth.headers.has('Authorization'), false, `${path} must not send the saved bearer`);
+    assert.equal(auth.credentials, 'include', `${path} must use browser-session credentials`);
+  }
+  const data = authInit('analytics/schema');
+  assert.equal(data.headers.get('Authorization'), 'Bearer fixture-key');
+  assert.equal(data.credentials, 'omit');
+});
+
 test('device approval normalizes the code and emits only the documented fields', () => {
   assert.equal(normalizeUserCode('  abcd-efgh  '), 'ABCD-EFGH');
   assert.deepEqual(deviceApprovalPayload({ user_code: ' abcd-efgh ', tenant: 'tenant-a', scope: 'read', lifetime: '1w', name: ' workstation ', ignored: 'x' }), {

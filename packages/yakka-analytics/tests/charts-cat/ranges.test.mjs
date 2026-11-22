@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
-  SUMMARY_FIELDS, aggregateDots, buildRangesModel, fiveNumberSummary, percentile, sampleLabel
+  SUMMARY_FIELDS, aggregateDots, buildRangesModel, fiveNumberSummary, percentile, rangePeriodStyle, sampleLabel
 } from '../../web/js/charts/yk-ranges.js';
 import { formatValue } from '../../web/js/charts/formatters.js';
 import {
@@ -75,6 +75,14 @@ test('dots aggregate duplicate keys into one dot per category', () => {
   const model = buildRangesModel({ spec: dotsSpec(), data: dotsRows() });
   assert.equal(model.state, 'ready');
   assert.equal(model.rows.length, dotsRows().length);
+});
+
+test('the previous range row is dashed and outlined while current stays solid', () => {
+  assert.deepEqual(rangePeriodStyle('current'), { previous: false, dash: null, fillOpacity: 0.35 });
+  assert.deepEqual(rangePeriodStyle('previous'), { previous: true, dash: '6 4', fillOpacity: 0 });
+  assert.equal(rangePeriodStyle('').previous, false, 'a single-mode row is current');
+  assert.equal(rangePeriodStyle('Cohort A').previous, false, 'cohort A is the current side of a cohort compare');
+  assert.equal(rangePeriodStyle('Cohort B').previous, true);
 });
 
 test('the ranges gallery proves every mode, table, interaction and both themes in Chromium', async t => {
@@ -282,6 +290,7 @@ test('the ranges gallery proves every mode, table, interaction and both themes i
     selection = await inspect('ranges-box');
     assert.ok(selection.selection.exclude.includes(thirdKey));
 
+    await page.evaluate(() => { document.getElementById('ranges-box').shadowRoot.querySelector('details.yk-chart-table').open = true; });
     await page.locator('yk-ranges#ranges-box .yk-table-select').nth(0).check();
     selection = await inspect('ranges-box');
     assert.ok(selection.selection.include.includes(firstKey));

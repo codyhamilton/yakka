@@ -36,6 +36,7 @@ export function createInspector({ doc = globalThis.document, router, onAction = 
   element.hidden = true;
   const media = typeof doc.defaultView?.matchMedia === 'function' ? doc.defaultView.matchMedia(SHEET) : null;
   let opener = null;
+  let openerFallback = null;
   let open = false;
 
   function position() {
@@ -49,9 +50,15 @@ export function createInspector({ doc = globalThis.document, router, onAction = 
     open = false;
     element.dataset.open = 'false';
     element.hidden = true;
-    const target = opener;
+    let target = opener?.isConnected ? opener : openerFallback;
     opener = null;
-    if (target && typeof target.focus === 'function') target.focus({ preventScroll: true });
+    openerFallback = null;
+    if (target?.isConnected && typeof target.focus === 'function') {
+      if (!target.matches?.('[tabindex], button, a[href], input, select, textarea')) {
+        target = target.shadowRoot?.querySelector('[tabindex="0"], button, a[href]') || target;
+      }
+      target.focus({ preventScroll: true });
+    }
     onAction?.({ action: 'close' });
   }
 
@@ -90,8 +97,12 @@ export function createInspector({ doc = globalThis.document, router, onAction = 
 
   function openInspector(context = {}) {
     element._context = context;
+    const wasOpen = open;
     open = true;
-    opener = context.opener || doc.activeElement || null;
+    if (!wasOpen) {
+      opener = context.opener || doc.activeElement || null;
+      openerFallback = context.openerHost || opener?.getRootNode?.()?.host || null;
+    }
     position();
     element.hidden = false;
     element.dataset.open = 'true';

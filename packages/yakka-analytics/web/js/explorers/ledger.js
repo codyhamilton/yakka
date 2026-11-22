@@ -7,18 +7,21 @@ import { createScheduler } from '../core/request-scheduler.js';
 import { createTransport } from '../../contract/transport.js';
 import { createPanelFrame } from '../panels/panel-frame.js';
 import { hasPanel, registerPanel } from '../panels/registry.js';
-import { createChips, addFilterChip, stateUrl } from '../core/chips.js';
+import { createChips, addFilterChip, resetScopeState, stateUrl } from '../core/chips.js';
 import { buildCohort, createSelectionTray, nextCohortSlot, writeCohort } from '../core/selection-tray.js';
 import { createInspector } from '../core/inspector.js';
 import { decodePick, encodePick } from '../core/selection-model.js';
 import { emptyCauses } from '../core/panel-state.js';
+import { currentEventCounts } from '../core/event-counts.js';
 import {
-  BASIS, DECLARED_FILTERS, LEDGER_PANEL, LEDGER_SCHEMA,
-  appendPage, fetchLedgerPage, filterToParameters, formatRowCost, mapLoadError,
-  entityKeyForRow, pageParameters, pagingSummary, renderLedgerNotes, renderLedgerTable, rowKey, selectionGrain
+  BASIS, DECLARED_FILTERS, LEDGER_CAPTION, LEDGER_LOADING_MORE_TEXT, LEDGER_MORE_TEXT,
+  LEDGER_PANEL, LEDGER_RETRY_NEXT_TEXT, LEDGER_SCHEMA, hasUnsafeLegacyRecordFilters,
+  appendPage, fetchLedgerPage, filterToParameters, formatRowCost, ledgerPageLimit, ledgerPopulationText,
+  ledgerRowElement, mapLoadError, entityKeyForRow, pageParameters, renderLedgerNotes, renderLedgerState,
+  renderLedgerTable, retryNextPage, rowKey, selectionGrain
 } from '../panels/ledger-table.js';
 
-export const title = 'Ledger';
+export const title = 'Event ledger';
 export const phase = 9;
 
 const scheduler = createScheduler();
@@ -115,9 +118,6 @@ export function render(root, doc = globalThis.document, { signal, tenant = '', r
   frame.setBasis(BASIS);
   root.append(frame.element);
   const body = frame.element.querySelector('.workspace-panel-body');
-  const notes = doc.createElement('div');
-  notes.className = 'ledger-footer';
-
   const router = routeAdapter();
   const chips = createChips({ doc, router, path: '/ledger' });
   frame.chipSlot.append(chips.element);
@@ -150,9 +150,64 @@ export function render(root, doc = globalThis.document, { signal, tenant = '', r
   let base = null;
   let cursor = '';
   let truncated = false;
-  let pageLimit;
+  let pageLimit = 100;
   let disposed = false;
   let runId = 0;
+  let pending = false;
+  let nextPageError = '';
+  let moreButton = null;
+  let populationNode = null;
+  let countsWatch = null;
+  let tableShell = null;
+  let recordFiltersSupported = false;
+
+  function countsModel() {
+    const state = doc.querySelector?.('.event-counts')?.dataset?.state || '';
+    if (state === 'success') return { counts: currentEventCounts(), state: 'ready' };
+    return { counts: null, state };
+  }
+
+  function updatePopulation() {
+    if (!populationNode) return;
+    const { counts, state } = countsModel();
+    const text = ledgerPopulationText({ loaded: rows.length, counts, state });
+    if (populationNode.textContent !== text) populationNode.textContent = text;
+  }
+
+  function watchCounts() {
+    if (typeof MutationObserver !== 'function' || !doc?.querySelector) return;
+    let strip = doc.querySelector('.event-counts');
+    let observer = null;
+    const observeStrip = () => {
+      if (!strip) return;
+      observer = new MutationObserver(() => updatePopulation());
+      observer.observe(strip, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ['data-state'] });
+      updatePopulation();
+    };
+    observeStrip();
+    if (!strip) {
+      observer = new MutationObserver(() => {
+        strip = doc.querySelector('.event-counts');
+        if (!strip) return;
+        observer.disconnect();
+        observeStrip();
+      });
+      observer.observe(doc.body || doc.documentElement, { childList: true, subtree: true });
+    }
+    countsWatch = { disconnect() { observer?.disconnect(); observer = null; } };
+  }
+
+  function allHistory() {
+    return { ...state, win: 'all', from: '', to: '' };
+  }
+
+  function resetFilters() {
+    return resetScopeState(state);
+  }
+
+  function commitScope(next) {
+    router.pushScope(stateUrl(next, '', '/ledger'));
+  }
 
   function selectedRows() {
     return rows.filter(row => selected.has(entityKeyForRow(row)));
@@ -203,11 +258,32 @@ export function render(root, doc = globalThis.document, { signal, tenant = '', r
     updateSelectionUI();
   }
 
+  // Open names an exact artifact only when the row carries repo and path, an
+  // exact session only when it carries a conversation id, and otherwise has no
+  // broader destination. The committed scope rides along.
+  function rowDestination(row) {
+    const scope = new URLSearchParams(globalThis.location?.search || '');
+    scope.delete('pick');
+    scope.delete('cursor');
+    const query = scope.toString();
+    const suffix = query ? `?${query}` : '';
+    if (row.repo_id && row.path) {
+      const exact = new URLSearchParams({ repo_id: String(row.repo_id), path: String(row.path) });
+      return `/artifact?${exact.toString()}${query ? `&${query}` : ''}`;
+    }
+    if (row.conversation_id) return `/sessions/${encodeURIComponent(String(row.conversation_id))}${suffix}`;
+    return '';
+  }
+
   function inspectRow(row, opener) {
-    const grain = selectionGrain([row]);
+    const destination = rowDestination(row);
+    const grain = destination.startsWith('/artifact')
+      ? 'artifact'
+      : destination.startsWith('/sessions/') ? 'session' : 'event';
     inspector.open({
-      grain: grain.grain,
-      key: grain.key || rowKey(row),
+      grain,
+      key: rowKey(row),
+      destination: destination || undefined,
       title: `${row.type || 'event'} at ${row.ts || 'unknown time'}`,
       facts: [
         { label: 'Type', value: row.type },
@@ -246,29 +322,99 @@ export function render(root, doc = globalThis.document, { signal, tenant = '', r
     }
   }
 
-  function renderRows(summary) {
-    renderLedgerTable(body, {
+  function renderFooter() {
+    body.querySelector('.ledger-footer')?.remove();
+    const footer = doc.createElement('div');
+    footer.className = 'ledger-footer';
+
+    const noteHost = doc.createElement('div');
+    renderLedgerNotes(noteHost, { rows, summary: 'Each row is one retained record; rows shown are the loaded pages, never a total.', doc });
+    footer.append(noteHost);
+
+    if (nextPageError) {
+      const failure = doc.createElement('p');
+      failure.className = 'ledger-next-error';
+      failure.textContent = nextPageError;
+      const retry = doc.createElement('button');
+      retry.type = 'button';
+      retry.className = 'ledger-load-more ledger-retry-next';
+      retry.textContent = retryNextPage({ page: 'next', result: { state: 'error' } }).label || LEDGER_RETRY_NEXT_TEXT;
+      retry.addEventListener('click', () => { nextPageError = ''; loadMore(); });
+      footer.append(failure, retry);
+    } else if (cursor) {
+      moreButton = doc.createElement('button');
+      moreButton.type = 'button';
+      moreButton.className = 'ledger-load-more';
+      moreButton.textContent = pending ? LEDGER_LOADING_MORE_TEXT : LEDGER_MORE_TEXT;
+      moreButton.disabled = pending;
+      moreButton.addEventListener('click', () => loadMore());
+      footer.append(moreButton);
+    } else {
+      moreButton = null;
+    }
+
+    body.append(footer);
+    updatePopulation();
+    updateSelectionUI();
+  }
+
+  function showFirstPage() {
+    tableShell = renderLedgerTable(body, {
       rows, selected, doc,
       onInspect: inspectRow,
       onSelect: selectRow
     });
-    notes.replaceChildren();
-    renderLedgerNotes(notes, { rows, summary, doc });
-    body.append(notes);
+    attachPopulation();
+    renderFooter();
   }
 
-  function show() {
-    const summaryText = pagingSummary({ shown: rows.length, truncated, hasNext: Boolean(cursor) });
-    renderRows(summaryText);
-    updateSelectionUI();
-    if (cursor) {
-      const more = doc.createElement('button');
-      more.type = 'button';
-      more.className = 'ledger-load-more';
-      more.textContent = 'Load more';
-      more.addEventListener('click', () => { more.disabled = true; loadMore(); });
-      body.append(more);
+  function appendLoaded(newRows) {
+    if (!tableShell) { showFirstPage(); return; }
+    for (const row of newRows) {
+      tableShell.body.append(ledgerRowElement(doc, row, { selected, body: tableShell.body, onInspect: inspectRow, onSelect: selectRow }));
     }
+    renderFooter();
+  }
+
+  function stateHandlers() {
+    return {
+      'all-history': () => commitScope(allHistory()),
+      'reset-filters': () => commitScope(resetFilters()),
+      retry: () => firstPage()
+    };
+  }
+
+  function clearPageState() {
+    rows = [];
+    cursor = '';
+    truncated = false;
+    nextPageError = '';
+    pending = false;
+    moreButton = null;
+    populationNode = null;
+    tableShell = null;
+  }
+
+  function attachPopulation() {
+    body.querySelector('.ledger-population')?.remove();
+    populationNode = doc.createElement('p');
+    populationNode.className = 'ledger-population';
+    body.prepend(populationNode);
+    updatePopulation();
+  }
+
+  function showFirstPageError(result) {
+    clearPageState();
+    frame.setState(result.state === 'unsupported' ? 'unsupported' : 'error', { ...result, renderStatus: false });
+    renderLedgerState(body, 'error', {
+      doc,
+      caption: LEDGER_CAPTION,
+      status: result.status,
+      code: result.code,
+      retry: firstPage,
+      handlers: stateHandlers()
+    });
+    attachPopulation();
   }
 
   async function firstPage() {
@@ -277,8 +423,18 @@ export function render(root, doc = globalThis.document, { signal, tenant = '', r
     controller = new AbortController();
     if (signal?.aborted) controller.abort();
     else signal?.addEventListener('abort', () => controller.abort(), { once: true });
-    frame.setState('loading', { inFlight: 1 });
-    base = filterToParameters(state, { now: Date.now(), window: readContext?.window || null });
+    clearPageState();
+    if (!recordFiltersSupported && hasUnsafeLegacyRecordFilters(currentState())) {
+      frame.setState('unsupported', { renderStatus: false });
+      renderLedgerState(body, 'refused', { doc, caption: LEDGER_CAPTION });
+      attachPopulation();
+      return;
+    }
+    frame.setState('loading', { inFlight: 1, renderStatus: false });
+    renderLedgerState(body, 'loading', { doc, caption: LEDGER_CAPTION });
+    base = readContext?.paramsFor
+      ? readContext.paramsFor()
+      : filterToParameters(state, { now: Date.now(), window: readContext?.window || null });
     try {
       const result = await fetchLedgerPage({ transport, params: pageParameters(base, { limit: pageLimit }), signal: controller.signal, stateKey: 'ledger', tenant });
       if (disposed || id !== runId) return;
@@ -286,52 +442,58 @@ export function render(root, doc = globalThis.document, { signal, tenant = '', r
         rows = result.rows;
         cursor = result.next || '';
         truncated = result.truncated;
-        frame.setState('ready', {});
-        show();
+        frame.setState('ready', { renderStatus: false });
+        showFirstPage();
       } else if (result.state === 'empty') {
-        rows = [];
-        cursor = '';
-        truncated = false;
-        frame.setState('empty', { causes: ledgerTableCauses(state, url => router.pushScope(url)) });
-        body.replaceChildren();
-        notes.replaceChildren();
+        clearPageState();
+        frame.setState('empty', { causes: ledgerTableCauses(state, url => router.pushScope(url)), renderStatus: false });
+        renderLedgerState(body, 'empty', { doc, caption: LEDGER_CAPTION, handlers: stateHandlers() });
+        attachPopulation();
       } else {
-        rows = [];
-        body.replaceChildren();
-        result.retry = firstPage;
-        frame.setState(result.state, result);
+        showFirstPageError(result);
       }
     } catch (error) {
       if (disposed || id !== runId) return;
-      const result = mapLoadError(error);
-      result.retry = firstPage;
-      frame.setState(result.state, result);
+      showFirstPageError(mapLoadError(error));
     }
   }
 
   async function loadMore() {
-    if (!cursor) return;
+    if (!cursor || pending) return;
     const id = ++runId;
-    frame.setState('loading', { inFlight: 1 });
+    pending = true;
+    nextPageError = '';
+    if (moreButton) {
+      moreButton.disabled = true;
+      moreButton.textContent = LEDGER_LOADING_MORE_TEXT;
+    }
     try {
       const result = await fetchLedgerPage({ transport, params: pageParameters(base, { cursor, limit: pageLimit }), signal: controller.signal, stateKey: 'ledger', tenant });
       if (disposed || id !== runId) return;
       if (result.state !== 'ready') {
-        result.retry = loadMore;
-        frame.setState(result.state, result);
+        pending = false;
+        if (result.state === 'cancelled') return;
+        nextPageError = retryNextPage({ page: 'next', result }).retryNextPage
+          ? 'Could not load the next page.'
+          : 'The next page did not arrive.';
+        renderFooter();
         return;
       }
+      const before = rows.length;
       const merged = appendPage(rows, result.rows);
       rows = merged.rows;
       cursor = result.next || '';
       truncated = result.truncated;
-      frame.setState('ready', {});
-      show();
+      pending = false;
+      frame.setState('ready', { renderStatus: false });
+      appendLoaded(rows.slice(before));
     } catch (error) {
       if (disposed || id !== runId) return;
+      pending = false;
       const result = mapLoadError(error);
-      result.retry = loadMore;
-      frame.setState(result.state, result);
+      if (result.state === 'cancelled') return;
+      nextPageError = 'Could not load the next page.';
+      renderFooter();
     }
   }
 
@@ -340,6 +502,7 @@ export function render(root, doc = globalThis.document, { signal, tenant = '', r
     try {
       const { response, body } = await transport.schema(tenant);
       if (!response.ok || !body) return undefined;
+      recordFiltersSupported = body.features?.record_filters === true;
       const budgets = body.budgets || {};
       const candidates = [budgets.explore_page_max, budgets.page_max].map(Number).filter(value => Number.isFinite(value) && value > 0);
       return candidates.length ? Math.min(...candidates) : undefined;
@@ -348,15 +511,17 @@ export function render(root, doc = globalThis.document, { signal, tenant = '', r
     }
   }
 
+  watchCounts();
   resolvePageLimit().then(limit => {
     if (disposed) return;
-    pageLimit = limit;
+    pageLimit = ledgerPageLimit(limit);
     firstPage();
   });
 
   function destroy() {
     disposed = true;
     controller.abort();
+    countsWatch?.disconnect();
     inspector.destroy();
   }
 

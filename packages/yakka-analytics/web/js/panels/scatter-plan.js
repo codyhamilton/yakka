@@ -7,14 +7,29 @@
 
 import { cancelledState, emptyState, errorState, unsupportedState } from '../core/panel-state.js';
 import { formatMoney, formatNumber, formatPercent } from '../charts/formatters.js';
-import { formatP10Value, measureMeta, schemaGrain, whenPanelBody, whenPanelSlot } from './p10-shared.js';
-import { table } from './pulse-strips.js';
+import { filterRefusal, table } from './pulse-strips.js';
+import { registerCaption } from './captions.js';
+import { formatP10Value, measureMeta, mountPanelViews, schemaGrain, whenPanelBody, whenPanelSlot } from './p10-shared.js';
 import {
-  canonicalRowKey, countSelection, marginalModel, regionPredicate, renderMarginals,
-  renderScatterChooser, scatterCaveat, scatterParams, scatterPopulationText, subtractRegion, unionRegion
+  canonicalRowKey, countSelection, formatScatterCell, marginalModel, regionPredicate,
+  renderMarginals, renderScatterChooser, resolveScatterFields, scatterApplies, scatterCaveat, scatterDefaults,
+  scatterFilterScope,
+  scatterLabel, scatterParams, scatterPopulationText, scatterTableColumns, scatterTemplate,
+  scatterUnit, subtractRegion, unionRegion
 } from './scatter-shared.js';
 import { ensureScatterStyles } from './scatter-session.js';
 import { catalogueChecks } from './score-ranges.js';
+
+export const PLAN_CAPTION = 'Each dot is a plan, with associated session spend across and file count up; plans can share the same session costs.';
+
+registerCaption('scatter-plan', ({ spec = {} } = {}) => {
+  const scope = spec?.scope || {};
+  const x = scope.x || 'associated_cost_usd';
+  const y = scope.y || 'artifacts';
+  const size = scope.size !== undefined ? scope.size : '';
+  if (x === 'associated_cost_usd' && y === 'artifacts' && !size) return PLAN_CAPTION;
+  return scatterTemplate({ entity: 'plan', x, y, size });
+});
 
 const PLAN_FIXED = [
   'artifacts', 'versions', 'sessions', 'shared_sessions', 'associated_cost_usd', 'unpriced_calls',
@@ -182,21 +197,12 @@ export async function load(context = {}) {
   try {
     const schema = context.schema || (await transport.schema(tenant)).body;
     const panel = context.panel || SCATTER_PLAN_PANEL;
+    const refusal = filterRefusal({ panel: { ...panel, applies: scatterApplies(panel) }, spec, scope: scatterFilterScope(scope), schema });
+    if (refusal) return refusal;
     const axisModel = planAxes(schema, context.catalogue || null);
     const colourModel = planColours(schema);
-    const axes = axisModel.axes;
-    const requested = spec?.scope || {};
-    const measureList = Array.isArray(spec.measures) ? spec.measures : [];
-    const roleX = requested.x || measureList[0] || '';
-    const roleY = requested.y || measureList[1] || '';
-    const roleSize = requested.size !== undefined ? requested.size : (measureList[2] || '');
-    const roleColour = spec.split || requested.colour || '';
-    const x = axes.includes(roleX) ? roleX : (axes.includes('associated_cost_usd') ? 'associated_cost_usd' : (axes[0] || ''));
-    const y = axes.includes(roleY) && roleY !== x ? roleY : (axes.includes('artifacts') && 'artifacts' !== x ? 'artifacts' : (axes.find(name => name !== x) || ''));
-    const size = axes.includes(roleSize) && roleSize !== x && roleSize !== y ? roleSize : '';
-    const colour = colourModel.colours.includes(roleColour)
-      ? roleColour
-      : (colourModel.colours.includes('repo_id') ? 'repo_id' : (colourModel.colours[0] || ''));
+    const rolePanel = { ...panel, measures: axisModel.axes, lenses: colourModel.colours };
+    const { x, y, size, colour } = resolveScatterFields({ spec, schema, panel: rolePanel });
     if (!x || !y) {
       return unsupportedState({ grain: 'plan', reason: 'the server publishes fewer than two numeric plan measures', source: 'server /schema', nearest: axisModel.unsupported[0]?.try || null });
     }
@@ -212,6 +218,11 @@ export async function load(context = {}) {
       }
       return errorState({ message: body?.error || `The server returned ${response.status}.`, code: body?.code || String(response.status || '') });
     }
+    const post = filterRefusal({
+      panel: { ...panel, applies: scatterApplies(panel) }, spec, scope: scatterFilterScope(scope), schema,
+      ignoredFilters: Array.isArray(body?.ignored_filters) ? body.ignored_filters.map(String) : []
+    });
+    if (post) return post;
     const points = (Array.isArray(body.rows) ? body.rows : []).map(row => planPoint(row, sandbox));
     const drawn = points.filter(point => point.drawn);
     const population = body.population || null;
@@ -226,9 +237,9 @@ export async function load(context = {}) {
     const overlap = planOverlap(body.rows || []);
     const nullText = planNullText(points);
     const unsupported = [...axisModel.unsupported, ...colourModel.unsupported];
-    const xMeta = measureInfo(schema, x);
-    const yMeta = measureInfo(schema, y);
-    const sizeMeta = size ? measureInfo(schema, size) : null;
+    const xMeta = { label: scatterLabel(x), unit: scatterUnit(x), kind: measureMeta(schema, x).kind };
+    const yMeta = { label: scatterLabel(y), unit: scatterUnit(y), kind: measureMeta(schema, y).kind };
+    const sizeMeta = size ? { label: scatterLabel(size), unit: scatterUnit(size) } : null;
     const entities = {};
     for (const point of drawn) {
       entities[point.key] = {
@@ -260,18 +271,13 @@ export async function load(context = {}) {
       empty: 'no eligible plan has both axes'
     };
     const marginals = marginalModel(body.marginals, [x, y, size].filter(Boolean));
-    const columns = [
-      { label: 'Plan' }, { label: 'Repo' },
-      { label: xMeta.label, numeric: true }, { label: yMeta.label, numeric: true },
-      { label: 'Shared sessions', numeric: true }, { label: 'Unpriced calls', numeric: true }
-    ];
-    const tableRows = points.map(point => [
-      point.identity.plan || '—',
-      point.identity.repo_id || '—',
-      formatCell(point.x, xMeta),
-      formatCell(point.y, yMeta),
-      point.shared_sessions === null || point.shared_sessions === undefined ? '—' : String(point.shared_sessions),
-      point.unpriced_calls === null || point.unpriced_calls === undefined ? '—' : String(point.unpriced_calls)
+    const ordered = [...points].sort((a, b) => String(a.key).localeCompare(String(b.key)));
+    const tableRows = ordered.map(point => [
+      `${point.identity.repo_id || '—'}/${point.identity.plan || '—'}`,
+      formatScatterCell(point.x, x),
+      formatScatterCell(point.y, y),
+      ...(size ? [formatScatterCell(point.size, size)] : []),
+      ...(colour ? [point.group === null || point.group === undefined ? '—' : String(point.group)] : [])
     ]);
     let painted = null;
     whenPanelBody(panel.id, doc, host => {
@@ -280,43 +286,42 @@ export async function load(context = {}) {
       const banner = doc.createElement('p');
       banner.className = 'p11-scatter-banner';
       banner.textContent = overlap.text;
+      const node = doc.createElement('yk-chart');
+      node.className = 'p11-scatter-chart';
+      node.spec = chartSpec;
+      node.data = ordered.filter(point => point.drawn);
+      const tableNode = table(doc, {
+        caption: `Plans by ${xMeta.label} and ${yMeta.label}`,
+        columns: scatterTableColumns({ x, y, size, colour }),
+        rows: tableRows
+      });
+      const views = mountPanelViews({ panelId: panel.id, chart: node, table: tableNode, doc, label: 'Scatter view' });
+      views.element.removeAttribute('data-panel');
+      const details = doc.createElement('details');
+      details.className = 'p10-details';
+      const summary = doc.createElement('summary');
+      summary.textContent = 'Data details';
       const basis = doc.createElement('p');
       basis.className = 'p11-scatter-basis';
       basis.textContent = `Basis: ${xMeta.label} (${xMeta.unit || 'count'}) against ${yMeta.label} (${yMeta.unit || 'count'})${colour ? ` coloured by ${colour}` : ''}${size ? `, sized by ${sizeMeta.label}` : ''}. ${populationText}.`;
       const caveats = doc.createElement('p');
       caveats.className = 'p11-scatter-caveat';
       caveats.textContent = caveat.text;
-      const node = doc.createElement('yk-chart');
-      node.className = 'p11-scatter-chart';
-      node.spec = chartSpec;
-      node.data = drawn;
-      wrapper.append(banner, basis, caveats);
-      if (unsupported.length) {
-        const list = doc.createElement('ul');
-        list.className = 'p11-unsupported';
-        list.setAttribute('aria-label', 'Unsupported scatter choices');
-        for (const item of unsupported) {
-          const entry = doc.createElement('li');
-          entry.dataset.kind = item.kind;
-          entry.textContent = `${item.kind} ${item.name} is unsupported: ${item.reason}. Try ${item.try}.`;
-          list.append(entry);
-        }
-        wrapper.append(list);
-      }
-      wrapper.append(node);
+      const note = doc.createElement('p');
+      note.className = 'p11-scatter-note';
+      note.textContent = PLAN_EXPLORER_NOTICE;
+      details.append(summary, basis, caveats);
       if (nullText) {
         const nullNote = doc.createElement('p');
         nullNote.className = 'p11-scatter-note';
         nullNote.textContent = nullText;
-        wrapper.append(nullNote);
+        details.append(nullNote);
       }
-      const note = doc.createElement('p');
-      note.className = 'p11-scatter-note';
-      note.textContent = PLAN_EXPLORER_NOTICE;
-      wrapper.append(note);
+      details.append(note);
+      wrapper.append(banner, views.element);
       const strip = renderMarginals(body, [x, y, size].filter(Boolean), { doc, schema });
       if (strip.childNodes.length) wrapper.append(strip);
-      wrapper.append(table(doc, { caption: `${x} against ${y} (plan)`, columns, rows: tableRows }));
+      wrapper.append(details);
       host.replaceChildren(wrapper);
       painted = node;
 
@@ -354,8 +359,7 @@ export async function load(context = {}) {
     });
     await painted?.whenSettled?.();
     whenPanelSlot(panel.id, 'chooser', doc, slot => {
-      const chooserPanel = { ...panel, measures: axes, lenses: colourModel.colours };
-      const rendered = renderScatterChooser({ panelId: panel.id, panel: chooserPanel, spec: sandbox, schema, doc });
+      const rendered = renderScatterChooser({ panelId: panel.id, panel: rolePanel, spec: sandbox, schema, doc, defaults: scatterDefaults(panel) });
       slot.replaceChildren(rendered.element);
     });
     return {

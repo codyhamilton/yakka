@@ -14,8 +14,7 @@ function sessionRoute(path) {
   return route === 'me' || route.startsWith('device/') || route.startsWith('tenants') || route.startsWith('tokens') || route.startsWith('admin/');
 }
 export function authInit(path) {
-  const collector = isCollectorMode();
-  const session = collector && sessionRoute(path);
+  const session = sessionRoute(path);
   const key = storage('yakka-analytics-key');
   const headers = new Headers();
   if (!session && key && resolvedBase()) headers.set('Authorization', `Bearer ${key}`);
@@ -76,6 +75,13 @@ export function createTransport(scheduler, { fetchImpl = fetch } = {}) {
     },
     invalidateSchema(tenant = '') {
       schemas.delete(tenant);
+    },
+    // A tenant change or lifecycle revalidation invalidates every cached read
+    // that was served for that tenant. Schema is the only cross-request cache
+    // here; panels keep their own route-scoped state.
+    invalidateTenant(tenant = '') {
+      schemas.delete(tenant);
+      if (!tenant) schemas.clear();
     },
     // Adapt at the one boundary and cache only a successful adapted schema. A
     // non-OK response, network failure or adapter exception reaches the caller

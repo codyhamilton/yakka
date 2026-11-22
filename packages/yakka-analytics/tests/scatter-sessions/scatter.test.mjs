@@ -4,6 +4,8 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { formatScatterTick } from '../../web/js/charts/canvas-scatter.js';
+import { scatterLayout } from '../../web/js/charts/scatter.js';
 
 import {
   associationLines, associationTotals, canonicalJson, canonicalPredicate, decodeCohort, timeCohortSource
@@ -17,6 +19,14 @@ import { watchPage } from '../gallery/harness.mjs';
 import {
   SCATTER_DAY_PANEL, bucketInterval, bucketIntersectsWindow, timeBucketInfo, timePoint, timeScatterParams
 } from '../../web/js/panels/scatter-day.js';
+
+test('integer scatter measures never receive fractional ticks', () => {
+  assert.equal(formatScatterTick(1.6, 'commits'), '2');
+  assert.equal(formatScatterTick(2.4, 'artifact_versions'), '2');
+  assert.equal(formatScatterTick(1.6, 'cost_usd'), '1.6');
+  const layout = scatterLayout([{ x: 0, y: 0 }, { x: 1, y: 1 }, { x: 2, y: 2 }], { xInteger: true, yInteger: true });
+  assert.deepEqual([layout.xScale.min, layout.xScale.max, layout.yScale.min, layout.yScale.max], [0, 2, 0, 2]);
+});
 import {
   canonicalRowKey, countSelection, marginalModel, regionPredicate, scatterAxes, scatterCaveat,
   scatterColours, scatterParams, scatterPopulationText, scatterRows, scatterSpecFields,
@@ -418,7 +428,8 @@ async function waitTray(page, pattern) {
 
 test('the delivered Scatter board proves the four panels, rectangles, time cohorts and associations', { skip: environment.ok ? false : SKIP_REASON }, async t => {
   const harness = await startWorkspaceHarness();
-  harness.api.set({ p11: true });
+  // p10 supplies the content baseline catalogue the artifact P5 scorer reads.
+  harness.api.set({ p11: true, p10: true });
   const browser = await launchBrowser(environment);
   t.after(async () => { await browser.close(); await harness.close(); });
   const page = await browser.newPage({ viewport: { width: 1280, height: 2800 } });
@@ -437,39 +448,41 @@ test('the delivered Scatter board proves the four panels, rectangles, time cohor
         .map(select => [select.getAttribute('aria-label'), [...select.options].map(option => option.value)]))
     ])
   ));
-  assert.ok(options['scatter-session']['X measure'].includes('cost_usd'));
+  assert.ok(options['scatter-session']['X axis'].includes('cost_usd'));
   assert.ok(options['scatter-session'].Colour.includes('session_model'));
   assert.ok(options['scatter-session'].Size.includes('unpriced_calls'));
-  assert.ok(options['scatter-artifact']['X measure'].includes('writing_session_cost_usd'));
+  assert.ok(options['scatter-artifact']['X axis'].includes('writing_session_cost_usd'));
   assert.ok(options['scatter-artifact'].Colour.includes('session_model'));
   assert.ok(options['scatter-plan'].Colour.includes('repo_id'));
-  assert.ok(options['scatter-day']['X measure'].includes('cost_usd'));
-  assert.ok(options['scatter-day']['Y measure'].includes('commits'));
+  assert.ok(options['scatter-day']['X axis'].includes('cost_usd'));
+  assert.ok(options['scatter-day']['Y axis'].includes('commits'));
   assert.deepEqual(options['scatter-day'].Colour, ['']);
 
   const sessionText = await page.locator('[data-panel="scatter-session"]').innerText();
   assert.match(sessionText, /sample of 38 of 1,880/);
-  const marginalMarks = await page.evaluate(() => [...document.querySelectorAll('[data-panel="scatter-session"] .scatter-marginal[data-field="cost_usd"] table tbody tr')]
-    .map(row => Number(row.lastElementChild.textContent.replace(/,/g, ''))));
-  assert.equal(marginalMarks.reduce((sum, value) => sum + value, 0), p11Scatter({ fields: ['cost_usd'] }).marginals.cost_usd.bins.reduce((sum, bin) => sum + bin.n, 0));
+  const marginalMarks = await page.evaluate(() => [...document.querySelectorAll('[data-panel="scatter-session"] .scatter-marginals > table tbody tr')]
+    .filter(row => row.firstElementChild?.textContent === 'Priced spend')
+    .map(row => Number(row.children[3].textContent.replace(/,/g, ''))));
+  assert.equal(marginalMarks.reduce((sum, value) => sum + value, 0), 1_880, 'the price marginal is the whole scope population');
 
   const tableRows = await page.evaluate(() => Object.fromEntries(
     ['scatter-artifact', 'scatter-plan', 'scatter-day'].map(id => [
       id,
-      [...document.querySelectorAll(`[data-panel="${id}"] .p11-scatter > table tbody tr`)].map(row => [...row.querySelectorAll('td')].map(cell => cell.textContent))
+      [...document.querySelectorAll(`[data-panel="${id}"] .p10-views table tbody tr`)].map(row => [...row.querySelectorAll('td')].map(cell => cell.textContent))
     ])
   ));
   assert.equal(tableRows['scatter-artifact'].length, 6);
   assert.equal(tableRows['scatter-plan'].length, 2);
   const dayRows = tableRows['scatter-day'];
   assert.equal(dayRows.length, 5);
-  assert.equal(dayRows[0][0], '2026-09-01T00:00:00.000Z');
-  assert.equal(dayRows[0][2], '$1.00');
-  assert.equal(dayRows[3][3], '—');
-  assert.equal(dayRows[0][4], 'partial');
-  assert.equal(dayRows[1][4], '—');
-  assert.match(await page.locator('[data-panel="scatter-day"]').innerText(), /day grid, step 1/);
-  assert.match(await page.locator('[data-panel="scatter-day"]').innerText(), /partial bucket/i);
+  assert.equal(dayRows[0][0], '2026-09-01T00:00:00.000Z · incomplete');
+  assert.equal(dayRows[0][1], '$1.00');
+  assert.equal(dayRows[0][2], '2');
+  assert.equal(dayRows[3][1], '—');
+  assert.match(dayRows[3][0], / · incomplete$/, 'a price-missing bucket is marked, not zero-filled');
+  assert.match(dayRows[4][0], / · incomplete$/, 'a price-missing bucket stays marked, never zero-filled');
+  assert.match(await page.locator('[data-panel="scatter-day"]').innerText(), /day grid/);
+  assert.match(await page.locator('[data-panel="scatter-day"]').innerText(), /buckets without prices remain marked as incomplete/i);
 
   await selectRegion(page, 'scatter-session', { x: { min: 0.5, max: 3 }, y: { min: 1, max: 5 } });
   await page.waitForFunction(() => /143 sessions/.test(document.querySelector('.selection-tray-summary')?.textContent || ''));

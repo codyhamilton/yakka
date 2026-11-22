@@ -15,8 +15,11 @@ function finite(value) {
   return typeof value === 'number' && Number.isFinite(value);
 }
 
-function formatTick(value) {
+const INTEGER_FIELDS = new Set(['artifacts', 'artifact_versions', 'commits', 'conversations', 'distinct_content', 'model_calls', 'rejections', 'sessions', 'shared_sessions', 'unpriced_calls', 'versions']);
+
+export function formatScatterTick(value, field = '') {
   if (!finite(value)) return '';
+  if (INTEGER_FIELDS.has(field)) return new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 }).format(Math.round(value));
   const magnitude = Math.abs(value);
   if (magnitude >= 1000) return value.toFixed(0);
   if (magnitude >= 10) return value.toFixed(1).replace(/\.0$/, '');
@@ -87,7 +90,10 @@ export function createCanvasScatter({
       canvas.style.width = `${width}px`;
       canvas.style.height = `${height}px`;
     }
-    layout = scatterLayout(points, { width, height, padding: SCATTER_PADDING });
+    layout = scatterLayout(points, {
+      width, height, padding: SCATTER_PADDING,
+      xInteger: INTEGER_FIELDS.has(spec.x?.key), yInteger: INTEGER_FIELDS.has(spec.y?.key)
+    });
     marks = projectScatter(points, layout).map(point => {
       const style = styleFor ? styleFor(point) : null;
       return {
@@ -116,26 +122,27 @@ export function createCanvasScatter({
     ctx.fillStyle = tokens.muted || '#586579';
     ctx.lineWidth = 1;
     ctx.font = '12px system-ui, sans-serif';
-    const ticks = 5;
-    for (let i = 0; i <= ticks; i += 1) {
-      const x = plot.left + (plot.width * i) / ticks;
+    const xTicks = INTEGER_FIELDS.has(spec.x?.key) ? Math.max(1, Math.min(5, Math.ceil(xScale.max - xScale.min))) : 5;
+    const yTicks = INTEGER_FIELDS.has(spec.y?.key) ? Math.max(1, Math.min(5, Math.ceil(yScale.max - yScale.min))) : 5;
+    for (let i = 0; i <= xTicks; i += 1) {
+      const x = plot.left + (plot.width * i) / xTicks;
       ctx.beginPath();
       ctx.moveTo(x, plot.top);
       ctx.lineTo(x, plot.top + plot.height);
       ctx.stroke();
-      const value = xScale.min + ((xScale.max - xScale.min) * i) / ticks;
-      ctx.textAlign = i === 0 ? 'left' : i === ticks ? 'right' : 'center';
-      ctx.fillText(formatTick(value), x, plot.top + plot.height + 16);
+      const value = xScale.min + ((xScale.max - xScale.min) * i) / xTicks;
+      ctx.textAlign = i === 0 ? 'left' : i === xTicks ? 'right' : 'center';
+      ctx.fillText(formatScatterTick(value, spec.x?.key), x, plot.top + plot.height + 16);
     }
-    for (let i = 0; i <= ticks; i += 1) {
-      const y = plot.top + (plot.height * i) / ticks;
+    for (let i = 0; i <= yTicks; i += 1) {
+      const y = plot.top + (plot.height * i) / yTicks;
       ctx.beginPath();
       ctx.moveTo(plot.left, y);
       ctx.lineTo(plot.left + plot.width, y);
       ctx.stroke();
-      const value = yScale.max - ((yScale.max - yScale.min) * i) / ticks;
+      const value = yScale.max - ((yScale.max - yScale.min) * i) / yTicks;
       ctx.textAlign = 'right';
-      ctx.fillText(formatTick(value), plot.left - 6, y + 4);
+      ctx.fillText(formatScatterTick(value, spec.y?.key), plot.left - 6, y + 4);
     }
     ctx.textAlign = 'left';
     ctx.fillStyle = tokens.text || '#18212f';

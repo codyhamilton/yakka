@@ -588,3 +588,62 @@ export function formatP10Value(value, meta = {}) {
   if (meta.kind === 'tokens') return formatCount(Number(value), { unit: 'tokens' });
   return formatNumber(Number(value), { digits: meta.kind === 'percent' ? 2 : 0 });
 }
+
+// The shared chart/table display seam. Toggling is local state only: it never
+// calls the transport, mutates the URL or refetches. A table-only panel
+// (panel.table === true and no charts) omits the toggle entirely.
+export function panelViewsEnabled(panel = {}) {
+  const charts = Array.isArray(panel?.charts) ? panel.charts : [];
+  return !(panel?.table === true && charts.length === 0);
+}
+
+function viewNode(value) {
+  return value && value.nodeType ? value : value?.element || null;
+}
+
+export function mountPanelViews({ panelId, chart = null, table = null, doc = globalThis.document, defaultView = 'chart', label = 'Panel view' } = {}) {
+  const host = doc.createElement('div');
+  host.className = 'p10-views';
+  host.dataset.panel = panelId || '';
+  const controls = doc.createElement('div');
+  controls.className = 'p10-view-controls';
+  controls.setAttribute('role', 'group');
+  controls.setAttribute('aria-label', label);
+
+  const chartButton = viewButton('Show chart');
+  const tableButton = viewButton('Show table');
+  controls.append(chartButton, tableButton);
+  host.append(controls);
+
+  const chartNode = viewNode(chart);
+  const tableNode = viewNode(table);
+  if (chartNode) host.append(chartNode);
+  if (tableNode) host.append(tableNode);
+
+  const initial = defaultView === 'table' && tableNode ? 'table' : chartNode ? 'chart' : tableNode ? 'table' : defaultView;
+  setView(initial);
+
+  return { element: host, controls, chartButton, tableButton, setView, get view() { return host.dataset.view; } };
+
+  function viewButton(text) {
+    const button = doc.createElement('button');
+    button.type = 'button';
+    button.className = 'p10-view-toggle';
+    button.textContent = text;
+    button.dataset.view = text === 'Show table' ? 'table' : 'chart';
+    button.addEventListener('click', () => setView(button.dataset.view));
+    return button;
+  }
+
+  function setView(view) {
+    const next = view === 'table' ? 'table' : 'chart';
+    host.dataset.view = next;
+    if (chartNode) chartNode.hidden = next !== 'chart';
+    if (tableNode) tableNode.hidden = next !== 'table';
+    chartButton.setAttribute('aria-pressed', String(next === 'chart'));
+    tableButton.setAttribute('aria-pressed', String(next === 'table'));
+    chartButton.hidden = next === 'chart';
+    tableButton.hidden = next === 'table';
+    return next;
+  }
+}

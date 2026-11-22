@@ -270,10 +270,13 @@ test('a second compare panel issues both cohort requests and compare plus split 
 
     const requests = harness.api.state.requests;
     const callDistributions = requests.filter(item => /distribution/.test(item.path) && /grain=call/.test(item.search) && /dim=model/.test(item.search));
-    assert.ok(callDistributions.length >= 4, 'both distribution panels issued both sides: ' + JSON.stringify(callDistributions.map(r => r.search)));
+    // Compare fixes all three distribution panels to call/model, so the shared
+    // scheduler collapses their identical concurrent URLs to one request per
+    // cohort side. Both cohorts must still reach the wire.
+    assert.ok(callDistributions.length >= 2, 'the call/model distribution URL carries both cohorts: ' + JSON.stringify(callDistributions.map(r => r.search)));
     const values = callDistributions.map(item => new URLSearchParams(item.search.slice(1)).get('cohort'));
-    assert.ok(values.includes(a), 'Cohort A is requested for a second panel');
-    assert.ok(values.includes(b), 'Cohort B is requested for a second panel');
+    assert.ok(values.includes(a), 'Cohort A is requested');
+    assert.ok(values.includes(b), 'Cohort B is requested');
 
     const hist = await page.evaluate(() => document.querySelector('[data-panel="dist-hist"]').textContent);
     assert.match(hist, /Cohort A/, 'the histogram names the first population');
@@ -295,7 +298,7 @@ test('a second compare panel issues both cohort requests and compare plus split 
   }
 });
 
-test('the Cost preset mounts repo, harness and model investigations and Tools refuses a repo split', async t => {
+test('the Cost preset mounts repo, harness and model investigations and Tools keeps its fixed tool_kind × harness split', async t => {
   const environment = loadBrowserEnvironment();
   if (!environment.ok) { t.skip(environment.reason || SKIP_REASON); return; }
   const harness = await startWorkspaceHarness();
@@ -322,14 +325,18 @@ test('the Cost preset mounts repo, harness and model investigations and Tools re
     const override = encodeURIComponent(JSON.stringify({
       grain: 'time', measures: ['hook_events'], split: 'repo_id', chart: 'bars', scope: { second: 'harness', mode: 'stacked' }
     }));
+    const before = harness.api.state.requests.length;
     await page.goto(`${harness.origin}/b/tools?win=30d&p1=${override}`);
     await settle(page);
     const tools = await page.evaluate(() => ({
       state: document.querySelector('[data-panel="mix"]')?.dataset.state,
       text: document.querySelector('[data-panel="mix"]')?.textContent || ''
     }));
-    assert.equal(tools.state, 'unsupported');
-    assert.match(tools.text, /harness/);
+    assert.equal(tools.state, 'ready', 'G-mix ignores a deep-link split override');
+    assert.match(tools.text, /hook events for a tool category, split by harness/);
+    const reads = harness.api.state.requests.slice(before).filter(entry => entry.path === '/v1/analytics/query');
+    assert.ok(reads.some(entry => entry.search.includes('dim=tool_kind') && entry.search.includes('dim=harness')), 'fixed tool_kind × harness read');
+    assert.ok(!reads.some(entry => entry.search.includes('dim=repo_id')), 'no repo split read');
     await diagnostics.assertClean();
   } finally {
     if (browser) await browser.close();

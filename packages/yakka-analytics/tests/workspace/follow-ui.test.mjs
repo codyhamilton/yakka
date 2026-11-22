@@ -53,7 +53,7 @@ test('river Follow is off at load, reports late counts, acknowledges once and ke
     const counts = await page.evaluate(() => [...document.querySelectorAll('[data-panel="river"] .river-follow-counts li')].map(item => item.textContent));
     assert.ok(counts.some(text => /Session start: 2 sessions/.test(text)), counts.join('|'));
     assert.ok(counts.some(text => /Artifact version: 5 versions/.test(text)), counts.join('|'));
-    assert.ok(counts.some(text => /Execution: 3 executions/.test(text)), counts.join('|'));
+    assert.ok(counts.some(text => /Brief execution: 3 executions/.test(text)), counts.join('|'));
     assert.ok(counts.some(text => /Rejection: 2 rejections/.test(text)), counts.join('|'));
     assert.match(await page.evaluate(() => document.querySelector('[data-panel="river"] .river-follow-watermark').textContent), /none/);
 

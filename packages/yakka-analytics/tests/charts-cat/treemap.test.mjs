@@ -290,6 +290,7 @@ test('the treemap gallery proves labels, table, interaction, legend and both the
     selection = await inspect('treemap-composition');
     assert.ok(selection.selection.exclude.includes(third.key));
 
+    await page.evaluate(() => { document.getElementById('treemap-composition').shadowRoot.querySelector('details.yk-chart-table').open = true; });
     await page.locator('yk-treemap#treemap-composition .yk-table-select').nth(0).check();
     selection = await inspect('treemap-composition');
     assert.ok(selection.selection.include.length >= 1);

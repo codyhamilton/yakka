@@ -10,8 +10,113 @@ import { buildLanesModel } from '../charts/yk-lanes.js';
 import { formatNumber } from '../charts/formatters.js';
 import { cancelledState, emptyState, errorState } from '../core/panel-state.js';
 import { whenPanelBody } from './pulse-strips.js';
+import { registerCaption } from './captions.js';
 
 export const CONVERSATION_CAP = 5000;
+
+// G-sessionlanes keeps this caption verbatim.
+export const SESSION_LANES_CAPTION = 'Each marker shows a retained event in this session matching the filters; gaps between markers do not prove the session was idle.';
+registerCaption('session-lanes', () => SESSION_LANES_CAPTION);
+
+// The chart's own table view (7 columns) is distinct from the full-width
+// Session records table (5 columns); both column sets are explicit.
+export const SESSION_LANES_TABLE_COLUMNS = ['Event time', 'Event type', 'Repository', 'Plan', 'Path', 'Conversation', 'Session cost (USD)'];
+export const SESSION_RECORD_COLUMNS = [
+  { key: 'time', label: 'Time', width: 150, time: true },
+  { key: 'type', label: 'Event type', width: 120 },
+  { key: 'repository', label: 'Repository', width: 180 },
+  { key: 'path_event', label: 'Path/event', remaining: true, width: null },
+  { key: 'cost', label: 'Cost USD', width: 110, cost: true }
+];
+export const SESSION_MARK_LIMIT = 5000;
+
+// "{n} loaded matching events plotted" — n is capped at the 5,000-mark budget,
+// while the records table may continue past it.
+export function plottedStatement(loaded = 0) {
+  const plotted = Math.min(Math.max(0, Number(loaded) || 0), SESSION_MARK_LIMIT);
+  return `${formatNumber(plotted)} loaded matching events plotted`;
+}
+
+function eventCostText(row = {}) {
+  if (row.priced === false) return 'unpriced';
+  if (row.cost_usd === null || row.cost_usd === undefined || row.cost_usd === '') return 'unpriced';
+  const number = Number(row.cost_usd);
+  return Number.isFinite(number) ? `$${number.toFixed(2)}` : 'unpriced';
+}
+
+function rowIdentity(row = {}) {
+  return [row.conversation_id, row.type, row.path, row.event, row.sha].map(value => asString(value)).join('|');
+}
+
+// Event time DESC, then event type ASC, then stable identity ASC.
+export function sessionRecordsModel(rows = []) {
+  return (Array.isArray(rows) ? rows : []).slice().sort((a, b) => {
+    const at = Date.parse(a?.ts) || 0;
+    const bt = Date.parse(b?.ts) || 0;
+    if (at !== bt) return bt - at;
+    const type = asString(a?.type).localeCompare(asString(b?.type));
+    if (type) return type;
+    return rowIdentity(a).localeCompare(rowIdentity(b));
+  });
+}
+
+export function sessionRecordCells(row = {}) {
+  const pathEvent = asString(row.path) || asString(row.event) || asString(row.norm_event) || asString(row.sha) || '';
+  return [
+    asString(row.ts) || '—',
+    asString(row.type) || '—',
+    asString(row.repo_id) || '—',
+    pathEvent || '—',
+    eventCostText(row)
+  ];
+}
+
+// One lane per recorded event type, X = event time, markers only; no duration
+// is ever inferred between two marks.
+export function sessionLaneModelFromRows(rows = []) {
+  const sorted = sessionRecordsModel(rows);
+  const lanes = [];
+  const series = [];
+  const data = [];
+  const tableRows = sorted.map((row, index) => {
+    const type = asString(row.type) || 'event';
+    if (!lanes.some(lane => lane.key === type)) lanes.push({ key: type, label: type });
+    if (!series.some(item => item.key === type)) series.push({ key: type, label: type, unit: 'events', kind: 'count' });
+    data.push({
+      key: `event:${index}:${asString(row.ts)}:${rowIdentity(row)}`,
+      kind: type,
+      lane: type,
+      at: row.ts,
+      priced: row.priced !== false,
+      values: {
+        type,
+        repo_id: asString(row.repo_id),
+        plan: asString(row.plan),
+        path: asString(row.path),
+        conversation_id: asString(row.conversation_id),
+        cost: eventCostText(row)
+      }
+    });
+    return {
+      time: asString(row.ts),
+      type,
+      repo_id: asString(row.repo_id),
+      plan: asString(row.plan),
+      path: asString(row.path),
+      conversation_id: asString(row.conversation_id),
+      cost: eventCostText(row)
+    };
+  });
+  const spec = {
+    chart: 'lanes',
+    type: 'timeline',
+    title: 'Session events over time',
+    timeBasis: 'event ts (UTC); one marker per loaded matching event',
+    lanes,
+    series
+  };
+  return { spec, data, lanes, series, tableRows, plotted: Math.min(data.length, SESSION_MARK_LIMIT) };
+}
 
 const TOOL_KINDS = new Set(['shell', 'read', 'edit', 'search', 'web', 'agent', 'plan', 'mcp', 'other']);
 

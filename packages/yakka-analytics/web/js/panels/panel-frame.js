@@ -5,6 +5,8 @@
 
 import { badgeModel, createBadges } from '../charts/badges.js';
 import { classifyResult, isSettled, unsupportedText } from '../core/panel-state.js';
+import { applicability, applicabilityState as applicabilityResultState } from '../core/filter-applicability.js';
+import { captionFor } from './captions.js';
 
 function text(doc, tag, className, value) {
   const node = doc.createElement(tag);
@@ -33,7 +35,7 @@ function badgeInput(result = {}) {
   return meta;
 }
 
-export function createPanelFrame({ panel, spec = {}, scope = {}, transport, scheduler, tenant = '', schema = null, doc = globalThis.document } = {}) {
+export function createPanelFrame({ panel, spec = {}, scope = {}, transport, scheduler, tenant = '', schema = null, doc = globalThis.document, onEditFilters = null, editFilters = null, onAllHistory = null, onResetFilters = null } = {}) {
   if (!panel || !panel.id) throw new Error('panel frame needs a registered panel');
   const element = doc.createElement('section');
   element.className = 'workspace-panel';
@@ -49,6 +51,8 @@ export function createPanelFrame({ panel, spec = {}, scope = {}, transport, sche
   heading.append(badges.element);
   element.append(heading);
 
+  const caption = text(doc, 'p', 'workspace-panel-caption', '');
+
   const chipSlot = doc.createElement('div');
   chipSlot.className = 'workspace-panel-chips';
   chipSlot.setAttribute('aria-label', 'Applied scope');
@@ -59,6 +63,7 @@ export function createPanelFrame({ panel, spec = {}, scope = {}, transport, sche
   const status = doc.createElement('p');
   status.className = 'workspace-panel-status';
   status.setAttribute('aria-live', 'polite');
+  status.setAttribute('role', 'status');
   const population = doc.createElement('p');
   population.className = 'workspace-panel-population';
   const basis = doc.createElement('p');
@@ -68,10 +73,77 @@ export function createPanelFrame({ panel, spec = {}, scope = {}, transport, sche
   const meta = doc.createElement('div');
   meta.className = 'workspace-panel-meta';
   meta.append(status, population, basis);
-  element.append(chipSlot, chooserSlot, body, meta, inspectorSlot);
+  element.append(caption, chipSlot, chooserSlot, body, meta, inspectorSlot);
 
   let controller = null;
   let state = 'loading';
+
+  const declaredApplies = panel.applies !== undefined || panel.scopeFilters !== undefined;
+
+  function renderCaption(result = null) {
+    caption.textContent = captionFor(panel, spec, { scope, schema, result });
+    return caption.textContent;
+  }
+
+  function ignoredFrom(result) {
+    const lists = [
+      result?.ignoredFilters,
+      result?.ignored_filters,
+      result?.body?.ignored_filters,
+      result?.raw?.ignored_filters,
+      result?.response?.ignored_filters
+    ];
+    return [...new Set(lists.flatMap(list => Array.isArray(list) ? list.map(String) : []))];
+  }
+
+  function addEditFilters() {
+    const handler = editFilters || onEditFilters || panel.editFilters;
+    if (typeof handler !== 'function') return;
+    const button = text(doc, 'button', 'workspace-panel-edit-filters', 'Edit filters');
+    button.type = 'button';
+    button.addEventListener('click', handler);
+    status.append(button);
+  }
+
+  function recovery(label, handler) {
+    if (typeof handler !== 'function') return;
+    const button = text(doc, 'button', 'workspace-panel-recovery', label);
+    button.type = 'button';
+    button.addEventListener('click', handler);
+    status.append(button);
+  }
+
+  function tableCaption() {
+    return String(panel.tableCaption || panel.title || panel.id);
+  }
+
+  function sanitizedCode(value) {
+    const code = String(value || '').trim();
+    return /^[A-Za-z0-9_.:-]{1,64}$/.test(code) ? code : '';
+  }
+
+  // Panels often return state "error" with the HTTP status stuffed into code.
+  // T3 still names 401, 403, busy and timeout instead of a generic load failure.
+  function namedFailure(options = {}) {
+    const status = Number(options.status) || 0;
+    const code = String(options.code || '');
+    const numeric = status || (/^\d{3}$/.test(code) ? Number(code) : 0);
+    if (numeric === 401) return 'sign-in';
+    if (numeric === 403) return 'forbidden';
+    if (code === 'busy') return 'busy';
+    if (numeric === 504 || /timeout/i.test(code)) return 'timeout';
+    return '';
+  }
+
+  function showApplicability(result) {
+    const next = applicabilityResultState(result);
+    if (!next) return false;
+    body.replaceChildren();
+    setState('unsupported', { renderStatus: false });
+    status.textContent = next.message;
+    addEditFilters();
+    return true;
+  }
 
   function setState(next, options = {}) {
     state = next;
@@ -80,51 +152,72 @@ export function createPanelFrame({ panel, spec = {}, scope = {}, transport, sche
     if (options.inFlight !== undefined) element.dataset.inFlight = String(options.inFlight);
     badges.update(badgeModel(badgeInput(options)));
     status.replaceChildren();
+    // Opt-in: a panel that owns its exact T1–T4 rows in the table body passes
+    // renderStatus:false so the generic frame vocabulary does not double it.
+    if (options.renderStatus === false) return;
     if (next === 'loading') {
-      const count = Number(options.inFlight) || 0;
-      status.textContent = `Loading${count ? ` (${count} in flight)` : ''}…`;
+      status.setAttribute('aria-busy', 'true');
+      status.textContent = `Loading ${tableCaption()}…`;
       return;
     }
+    status.removeAttribute('aria-busy');
     if (next === 'ready') {
       status.textContent = '';
       return;
     }
     if (next === 'empty') {
-      status.append(text(doc, 'strong', '', 'No rows match. '));
-      const causes = options.causes || [];
-      if (!causes.length) status.append(doc.createTextNode('The scope produced zero.'));
-      for (const cause of causes) {
-        status.append(doc.createTextNode(`${cause.label} `));
-        if (cause.clear) {
-          const button = text(doc, 'button', '', `Clear ${cause.kind}`);
-          button.type = 'button';
-          button.addEventListener('click', cause.clear);
-          status.append(button);
-        }
-      }
+      status.append(text(doc, 'strong', '', 'No records match these filters.'));
+      recovery('All history', onAllHistory);
+      recovery('Reset filters', onResetFilters);
       return;
     }
     if (next === 'error') {
-      status.append(text(doc, 'strong', '', options.message || 'The server did not answer.'));
-      if (options.code) status.append(doc.createTextNode(` (${options.code})`));
+      const named = namedFailure(options);
+      if (named === 'sign-in') {
+        status.append(text(doc, 'strong', '', 'Sign in to load this table.'));
+        const link = text(doc, 'a', '', 'Sign in');
+        link.href = `/login${globalThis.location?.search || ''}`;
+        status.append(link);
+        return;
+      }
+      if (named === 'forbidden') {
+        status.append(text(doc, 'strong', '', 'You do not have access to this tenant'));
+        return;
+      }
+      if (named === 'busy') {
+        status.append(text(doc, 'strong', '', `The server is busy; could not load ${tableCaption()}.`));
+        addRetry(options.retry);
+        return;
+      }
+      if (named === 'timeout') {
+        status.append(text(doc, 'strong', '', `The request timed out; could not load ${tableCaption()}.`));
+        addRetry(options.retry);
+        return;
+      }
+      status.append(text(doc, 'strong', '', `Could not load ${tableCaption()}.`));
+      const code = sanitizedCode(options.code);
+      if (code) status.append(doc.createTextNode(` (${code})`));
       addRetry(options.retry);
       return;
     }
     if (next === 'unauthorized') {
-      status.append(text(doc, 'strong', '', options.message || 'This read is not authorized.'));
-      if (options.code) status.append(doc.createTextNode(` (${options.code})`));
-      addRetry(options.retry);
+      if (Number(options.status) === 403 || String(options.code) === '403') {
+        status.append(text(doc, 'strong', '', 'You do not have access to this tenant'));
+      } else {
+        status.append(text(doc, 'strong', '', 'Sign in to load this table.'));
+        const link = text(doc, 'a', '', 'Sign in');
+        link.href = `/login${globalThis.location?.search || ''}`;
+        status.append(link);
+      }
       return;
     }
     if (next === 'busy') {
-      status.append(text(doc, 'strong', '', options.message || 'The server is busy; retry shortly.'));
-      if (options.code) status.append(doc.createTextNode(` (${options.code})`));
+      status.append(text(doc, 'strong', '', `The server is busy; could not load ${tableCaption()}.`));
       addRetry(options.retry);
       return;
     }
     if (next === 'timeout') {
-      status.append(text(doc, 'strong', '', options.message || 'The read timed out; narrow the window or retry.'));
-      if (options.code) status.append(doc.createTextNode(` (${options.code})`));
+      status.append(text(doc, 'strong', '', `The request timed out; could not load ${tableCaption()}.`));
       addRetry(options.retry);
       return;
     }
@@ -159,9 +252,17 @@ export function createPanelFrame({ panel, spec = {}, scope = {}, transport, sche
   }
 
   async function load() {
+    renderCaption();
     if (!panel.load) {
       setState('unsupported', { missing: panel.id, reason: 'no loader', source: 'this phase' });
       return;
+    }
+    if (declaredApplies) {
+      const pre = applicability({ panel, spec, scope, schema });
+      if (!pre.applicable) {
+        showApplicability(pre);
+        return;
+      }
     }
     controller?.abort();
     controller = new AbortController();
@@ -178,9 +279,21 @@ export function createPanelFrame({ panel, spec = {}, scope = {}, transport, sche
     }
     if (signal.aborted) return;
     const classified = classifyResult(result);
+    renderCaption(result);
     const withRetry = (classified.state === 'error' || classified.state === 'cancelled') && typeof classified.retry !== 'function'
       ? { ...classified, retry: load }
       : classified;
+    if (withRetry.state === 'unsupported' && withRetry.applicability) {
+      showApplicability(withRetry);
+      return;
+    }
+    if (declaredApplies && withRetry.state !== 'error' && withRetry.state !== 'cancelled') {
+      const post = applicability({ panel, spec, scope, schema, ignoredFilters: ignoredFrom(result) });
+      if (!post.applicable) {
+        showApplicability(post);
+        return;
+      }
+    }
     setState(withRetry.state, withRetry);
     if (withRetry.population) setPopulation(withRetry.population);
     if (withRetry.basis) setBasis(withRetry.basis);
@@ -193,5 +306,6 @@ export function createPanelFrame({ panel, spec = {}, scope = {}, transport, sche
 
   setState('loading', { inFlight: 0 });
   setBasis(panel.measureBasis || '');
-  return { element, load, destroy, setState, setPopulation, setBasis, chipSlot, chooserSlot, inspectorSlot, get state() { return state; } };
+  renderCaption();
+  return { element, load, destroy, setState, setPopulation, setBasis, caption, chipSlot, chooserSlot, inspectorSlot, get state() { return state; } };
 }

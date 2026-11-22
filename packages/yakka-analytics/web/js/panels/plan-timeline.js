@@ -11,8 +11,14 @@ import { cancelledState, emptyState, errorState, unsupportedState } from '../cor
 import { canonicalPanelSpec } from '../core/view-spec.js';
 import { planDestination, planIdentity } from './scatter-plan.js';
 import { ensureWorkflowStyles } from './shape-bars.js';
-import { requestParams, schemaGrain, whenPanelSlot } from './p10-shared.js';
+import { mountPanelViews, requestParams, schemaGrain, whenPanelSlot } from './p10-shared.js';
+import { registerCaption } from './captions.js';
 import { panelBody, table, whenPanelBody } from './pulse-strips.js';
+
+export const PLANLINE_CAPTION = 'Each marker shows a recorded plan event at its event time; rows separate plans and do not imply continuous work between markers.';
+export const TIMELINE_TABLE_COLUMNS = ['Event time', 'Event type', 'Repository', 'Plan', 'Path', 'Conversation', 'Session cost (USD)'];
+export const TIMELINE_EMPTY_TEXT = 'No records match these filters.';
+registerCaption('plan-timeline', () => PLANLINE_CAPTION);
 
 export const ARTIFACT_KINDS = ['design', 'brief', 'report'];
 const KIND_LABELS = { design: 'Design', brief: 'Brief', report: 'Report', other: 'Other artifact' };
@@ -55,40 +61,41 @@ function laneLabel(kind) {
   return KIND_LABELS[kind] || KIND_LABELS.other;
 }
 
-// One lane per observed artifact kind plus one execution lane. A non-version
-// event stays in the table (named as not drawn) so the events table is not
-// mistaken for a version timeline. A null count or cost is never zero.
+// G-planline: event time on X, one lane per selected plan, marker style is the
+// recorded event type. Markers carry a single instant; no continuous duration
+// is inferred between them. A null cost is never shown as zero.
+export function planLaneKey(identity = {}) {
+  return `plan:${String(identity?.repo_id || '')}:${String(identity?.plan || '')}`;
+}
+
 export function timelineModel({ eventsBody = {}, executionsBody = {}, identity = null } = {}) {
   const events = Array.isArray(eventsBody.rows) ? eventsBody.rows : [];
   const executions = Array.isArray(executionsBody.rows) ? executionsBody.rows : [];
-  const observed = [];
   const data = [];
   const tableRows = [];
+  const kinds = [];
+  const lane = planLaneKey(identity);
+  const repo = String(identity?.repo_id || '');
+  const plan = String(identity?.plan || '');
 
   events.forEach((row, index) => {
-    const type = String(row?.event_type || '');
+    const type = String(row?.event_type || 'event');
     const path = String(row?.path || '');
     const conversation = String(row?.conversation_id || '');
     const at = tsToMs(row?.ts);
-    if (type === 'artifact_version') {
-      const kind = artifactKind(path);
-      if (!observed.includes(kind)) observed.push(kind);
-      const lane = artifactLaneKey(kind);
-      data.push({
-        key: `event:${index}:${row?.ts}:${path}`,
-        lane,
-        kind: lane,
-        at,
-        label: `${laneLabel(kind)} ${path.split('/').pop() || ''}`.trim(),
-        path,
-        conversation_id: conversation,
-        event_type: type,
-        values: { path }
-      });
-      tableRows.push({ at, lane: laneLabel(kind), kind: 'Artifact version', path, conversation, note: '' });
-    } else {
-      tableRows.push({ at, lane: 'Other event', kind: type || 'event', path: path || row?.event || '—', conversation, note: 'not drawn (not an artifact_version)' });
-    }
+    if (!kinds.includes(type)) kinds.push(type);
+    data.push({
+      key: `event:${index}:${row?.ts}:${path}`,
+      lane,
+      kind: type,
+      at,
+      label: `${type} ${path.split('/').pop() || ''}`.trim(),
+      path,
+      conversation_id: conversation,
+      event_type: type,
+      values: {}
+    });
+    tableRows.push({ at, type, repo, plan, path, conversation, cost: null });
   });
 
   executions.forEach((row, index) => {
@@ -98,9 +105,10 @@ export function timelineModel({ eventsBody = {}, executionsBody = {}, identity =
     const at = tsToMs(row?.m?.ts);
     const flags = row?.flags || {};
     const priced = !(row?.m?.session_cost_usd === null || flags.session_cost_null_reason === 'all_unpriced');
+    if (!kinds.includes(EXECUTION_LANE)) kinds.push(EXECUTION_LANE);
     data.push({
       key: `execution:${index}:${row?.m?.ts}:${conversation}:${briefPath}`,
-      lane: EXECUTION_LANE,
+      lane,
       kind: EXECUTION_LANE,
       at,
       label: `Execution ${shape}`,
@@ -109,28 +117,25 @@ export function timelineModel({ eventsBody = {}, executionsBody = {}, identity =
       brief_path: briefPath,
       priced,
       lower_bound: flags.session_cost_lower_bound === true,
-      values: { shape, session_cost_usd: row?.m?.session_cost_usd ?? null }
+      values: { session_cost_usd: row?.m?.session_cost_usd ?? null }
     });
-    tableRows.push({
-      at,
-      lane: 'Executions',
-      kind: shape,
-      path: briefPath || '—',
-      conversation,
-      note: executionCostText(row)
-    });
+    tableRows.push({ at, type: shape || EXECUTION_LANE, repo, plan, path: briefPath, conversation, cost: executionCostText(row) });
   });
 
-  const lanes = observed.map(kind => ({ key: artifactLaneKey(kind), label: laneLabel(kind) }));
-  lanes.push({ key: EXECUTION_LANE, label: 'Executions' });
-  const series = observed.map(kind => ({ key: artifactLaneKey(kind), label: laneLabel(kind), unit: 'versions', kind: 'count' }));
-  series.push({ key: EXECUTION_LANE, label: 'Executions', unit: 'executions', kind: 'count' });
+  const lanes = identity ? [{ key: lane, label: `${repo} · ${plan}`.trim() }] : [];
+  const series = kinds
+    .sort((a, b) => String(a).localeCompare(String(b)))
+    .map(kind => ({ key: kind, label: kind, unit: 'events', kind: 'count' }));
 
   tableRows.sort((a, b) => {
-    const av = a.at === null ? -Infinity : a.at;
-    const bv = b.at === null ? -Infinity : b.at;
-    if (av !== bv) return bv - av;
-    return String(a.lane).localeCompare(String(b.lane));
+    const av = a.at === null ? Infinity : a.at;
+    const bv = b.at === null ? Infinity : b.at;
+    if (av !== bv) return av - bv;
+    const type = String(a.type).localeCompare(String(b.type));
+    if (type) return type;
+    const path = String(a.path).localeCompare(String(b.path));
+    if (path) return path;
+    return String(a.conversation).localeCompare(String(b.conversation));
   });
 
   const entities = {};
@@ -151,9 +156,9 @@ export function timelineModel({ eventsBody = {}, executionsBody = {}, identity =
     data,
     tableRows,
     entities,
-    versionMarkers: data.filter(marker => marker.lane !== EXECUTION_LANE).length,
-    executionMarkers: data.filter(marker => marker.lane === EXECUTION_LANE).length,
-    otherEvents: tableRows.filter(row => row.lane === 'Other event').length,
+    versionMarkers: events.length,
+    executionMarkers: executions.length,
+    otherEvents: events.filter(row => String(row?.event_type || '') !== 'artifact_version').length,
     eventsPopulation: eventsBody.population || null,
     executionsPopulation: executionsBody.population || null
   };
@@ -185,10 +190,65 @@ export function fixedPlan(spec = {}) {
   return parsePlanChoice(spec?.scope?.p12_plan);
 }
 
-// Without a fixed plan the first served plan is the default; an unserved choice
-// never silently falls back to another plan.
+// The served first plan page sorted unreported DESC then plan identity ASC.
+export function sortedPlanIdentities(rows = []) {
+  return [...(Array.isArray(rows) ? rows : [])]
+    .map(row => ({ identity: planIdentity(row), unreported: row?.m?.executions_unreported }))
+    .sort((a, b) => {
+      const av = a.unreported;
+      const bv = b.unreported;
+      const an = av === null || av === undefined;
+      const bn = bv === null || bv === undefined;
+      if (an !== bn) return an ? 1 : -1;
+      if (!an && av !== bv) return bv - av;
+      const repo = String(a.identity.repo_id || '').localeCompare(String(b.identity.repo_id || ''));
+      if (repo) return repo;
+      return String(a.identity.plan || '').localeCompare(String(b.identity.plan || ''));
+    })
+    .map(item => item.identity);
+}
+
+export function planOptions(rows = []) {
+  return sortedPlanIdentities(rows).map(identity => ({
+    identity,
+    key: planChoiceKey(identity),
+    label: `${identity.repo_id || '—'} · ${identity.plan || '—'}`
+  }));
+}
+
+// A selected global plan (URL plan filter, with repo_id when present) wins over
+// the panel-local choice. A fixed plan from spec.plan remains the direct path.
+export function scopePlan(scope = {}) {
+  const raw = scope?.plan;
+  const value = Array.isArray(raw) ? raw.find(Boolean) : raw;
+  if (!value) return null;
+  const repoRaw = scope?.repo_id;
+  const repo = Array.isArray(repoRaw) ? repoRaw.find(Boolean) : repoRaw;
+  return { repo_id: String(repo || ''), plan: String(value) };
+}
+
+export function resolveTimelinePlan({ rows = [], spec = {}, scope = {} } = {}) {
+  const fixed = fixedPlan(spec);
+  if (fixed) return { identity: fixed, source: 'fixed' };
+  const options = sortedPlanIdentities(rows);
+  const global = scopePlan(scope);
+  if (global) {
+    const match = options.find(identity => identity.plan === global.plan
+      && (!global.repo_id || identity.repo_id === global.repo_id));
+    return { identity: match || global, source: 'global' };
+  }
+  const wanted = parsePlanChoice(spec?.scope?.p12_plan);
+  if (wanted) {
+    const match = options.find(identity => identity.repo_id === wanted.repo_id && identity.plan === wanted.plan);
+    return { identity: match || null, source: 'local' };
+  }
+  return { identity: options[0] || null, source: 'default' };
+}
+
+// Without a fixed plan the first sorted served plan is the default; an unserved
+// choice never silently falls back to another plan.
 export function chooserFallback(rows = [], choice = null) {
-  const identities = rows.map(row => planIdentity(row));
+  const identities = sortedPlanIdentities(rows);
   if (!identities.length) return null;
   const wanted = parsePlanChoice(choice);
   if (!wanted) return identities[0];
@@ -213,8 +273,12 @@ function appendSessionModel(params, scope = {}) {
   else if (typeof value === 'string' && value) params.set('session_model', value);
 }
 
-function planListParams(scope) {
-  const params = requestParams({ scope, extra: { grain: 'plan', sort: 'last_ts:desc', limit: '12' } });
+export function planListLimit(schema) {
+  return Math.min(100, pageLimit(schema));
+}
+
+function planListParams(scope, limit) {
+  const params = requestParams({ scope, extra: { grain: 'plan', sort: 'executions_unreported:desc', limit: String(limit) } });
   appendSessionModel(params, scope);
   return params;
 }
@@ -245,21 +309,33 @@ function renderPlanChooser({ doc, rows, selected }) {
   const label = el(doc, 'label', 'p12-chooser-field', 'Plan ');
   const select = el(doc, 'select', 'p12-plan-chooser');
   select.setAttribute('aria-label', 'Plan');
-  for (const row of rows) {
-    const identity = planIdentity(row);
-    const option = doc.createElement('option');
-    option.value = planChoiceKey(identity);
-    option.textContent = `${identity.repo_id} · ${identity.plan}`;
-    option.selected = selected ? option.value === planChoiceKey(selected) : false;
-    select.append(option);
+  for (const option of planOptions(rows)) {
+    const node = doc.createElement('option');
+    node.value = option.key;
+    node.textContent = option.label;
+    node.selected = selected ? option.key === planChoiceKey(selected) : false;
+    select.append(node);
   }
   select.addEventListener('change', () => {
     const host = doc.querySelector('[data-panel="plan-timeline"]') || doc;
-    const next = canonicalPanelSpec({ grain: 'plan', measures: ['ts', 'session_cost_usd'], chart: 'lanes', scope: { p12_plan: select.value } });
+    const choice = parsePlanChoice(select.value);
+    const next = canonicalPanelSpec({
+      grain: 'plan',
+      measures: ['ts', 'session_cost_usd'],
+      chart: 'lanes',
+      scope: { p12_plan: select.value, plan: choice?.plan, repo_id: choice?.repo_id }
+    });
     host.dispatchEvent(new CustomEvent('spec', { bubbles: true, composed: true, detail: { spec: next } }));
   });
   label.append(select);
   return label;
+}
+
+function renderEmptyPlanList(doc, host) {
+  const wrapper = el(doc, 'div', 'p12-timeline-empty');
+  const row = el(doc, 'p', 'p12-timeline-empty-row', TIMELINE_EMPTY_TEXT);
+  wrapper.append(row);
+  host.replaceChildren(wrapper);
 }
 
 function renderMissingPlan(doc, identity, host) {
@@ -294,22 +370,30 @@ export async function load(context = {}) {
       return unsupportedState({ grain: 'plan · execution', reason: 'the server does not publish the plan and execution grains', source: 'server /schema' });
     }
     const limit = pageLimit(schema);
+    const fixed = fixedPlan(spec);
     let rows = [];
-    let identity = fixedPlan(spec);
+    let source = 'fixed';
+    let identity = fixed;
     if (!identity) {
-      const { response, body } = await transport.get('entities', planListParams(scope), { tenant, signal, stateKey: 'plan-timeline-plans' });
+      const listLimit = planListLimit(schema);
+      const { response, body } = await transport.get('entities', planListParams(scope, listLimit), { tenant, signal, stateKey: 'plan-timeline-plans' });
       if (!response.ok) {
         if (response.status === 400) return unsupportedState({ missing: 'plan list', reason: body?.error || 'the server refused the plan list', source: 'server /schema' });
         return errorState({ message: body?.error || `The server returned ${response.status}.`, code: body?.code || String(response.status || '') });
       }
       rows = Array.isArray(body.rows) ? body.rows : [];
-      identity = chooserFallback(rows, spec?.scope?.p12_plan);
       if (!rows.length) {
-        whenPanelBody('plan-timeline', doc, host => renderMissingPlan(doc, { repo_id: '', plan: '' }, host));
-        return emptyState([{ kind: 'scope', label: `no plans in window ${scope.win || 'all'}`, clear: null }]);
+        whenPanelBody('plan-timeline', doc, host => renderEmptyPlanList(doc, host));
+        whenPanelSlot('plan-timeline', 'chooser', doc, slot => slot.replaceChildren());
+        return emptyState([{ kind: 'scope', label: `no plans in window ${scope.win || 'all'}`, clear: null, text: TIMELINE_EMPTY_TEXT }]);
       }
+      const resolved = resolveTimelinePlan({ rows, spec, scope });
+      identity = resolved.identity;
+      source = resolved.source;
       if (!identity) {
-        whenPanelBody('plan-timeline', doc, host => renderMissingPlan(doc, parsePlanChoice(spec?.scope?.p12_plan), host));
+        const wanted = parsePlanChoice(spec?.scope?.p12_plan);
+        whenPanelBody('plan-timeline', doc, host => renderMissingPlan(doc, wanted, host));
+        whenPanelSlot('plan-timeline', 'chooser', doc, slot => slot.replaceChildren(renderPlanChooser({ doc, rows, selected: null })));
         return emptyState([{ kind: 'scope', label: 'the selected plan is not served', clear: null }]);
       }
     }
@@ -326,6 +410,7 @@ export async function load(context = {}) {
     }
     if (isMissingPlan(events.body, executions.body)) {
       whenPanelBody('plan-timeline', doc, host => renderMissingPlan(doc, identity, host));
+      whenPanelSlot('plan-timeline', 'chooser', doc, slot => slot.replaceChildren());
       return emptyState([{ kind: 'scope', label: `no served plan (${identity.repo_id}, ${identity.plan})`, clear: null }]);
     }
 
@@ -349,38 +434,35 @@ export async function load(context = {}) {
         identity
       });
       const wrapper = el(doc, 'div', 'p12-timeline');
-      const basis = el(doc, 'p', 'p12-timeline-basis', `Basis: ${identity.repo_id} · ${identity.plan}; event and execution ts in the scope window. ${populationText(model)}.`);
-      const note = el(doc, 'p', 'p12-timeline-note', 'Markers are sized by nothing. The events collection does not serve a version content_hash, so a marker opens the plan, never an invented historical hash.');
+      const basis = el(doc, 'p', 'p12-timeline-basis', `Basis: ${identity.repo_id} · ${identity.plan}; recorded event and execution times in the scope window. ${populationText(model)}.`);
+      const note = el(doc, 'p', 'p12-timeline-note', 'Each marker is a recorded event at its event time; markers are sized by nothing and no continuous duration is inferred between them. The events collection serves no version content_hash, so a marker opens the plan, never an invented historical hash.');
       const chart = el(doc, 'yk-lanes', 'p12-timeline-chart');
       chart.spec = {
         chart: 'lanes',
         type: 'timeline',
-        title: 'Plan artifact versions and executions',
-        timeBasis: 'event ts and execution ts in the scope window',
-        units: 'versions × executions',
+        title: 'Plan activity over time',
+        timeBasis: 'recorded event and execution times in the scope window',
+        units: 'events',
         lanes: model.lanes,
         series: model.series,
         entities: model.entities,
-        empty: 'no artifact version or execution marker for this plan'
+        empty: 'no recorded plan event or execution marker for this plan'
       };
       chart.data = model.data;
       state.painted = chart;
-      wrapper.append(basis, note, chart);
-
-      const columns = [
-        { label: 'Time (UTC)' }, { label: 'Lane' }, { label: 'Kind' },
-        { label: 'Path / shape' }, { label: 'Conversation' }, { label: 'Cost / note' }
-      ];
+      const columns = TIMELINE_TABLE_COLUMNS.map((label, index) => ({ label, numeric: label === 'Session cost (USD)' && index === 6 }));
       const tableRows = model.tableRows.map(row => [
         row.at === null ? '—' : formatLaneTime(row.at),
-        row.lane,
-        row.kind,
-        row.path,
+        row.type || '—',
+        row.repo || '—',
+        row.plan || '—',
+        row.path || '—',
         row.conversation || '—',
-        row.note || '—'
+        row.cost === null || row.cost === undefined ? '—' : row.cost
       ]);
-      wrapper.append(table(doc, { caption: `Plan events and executions, ${model.tableRows.length} rows`, columns, rows: tableRows }));
-
+      const tableNode = table(doc, { caption: `Plan events and executions, ${model.tableRows.length} rows`, columns, rows: tableRows });
+      const views = mountPanelViews({ panelId: 'plan-timeline', chart, table: tableNode, doc, defaultView: 'chart', label: 'Plan activity view' });
+      views.element.removeAttribute('data-panel');
       const actions = el(doc, 'div', 'p12-timeline-more');
       if (state.eventsNext) {
         const button = el(doc, 'button', 'p12-load-more-events', 'Load more events');
@@ -414,6 +496,7 @@ export async function load(context = {}) {
         });
         actions.append(button);
       }
+      wrapper.append(basis, note, views.element);
       if (actions.childNodes.length) wrapper.append(actions);
       host.replaceChildren(wrapper);
     };
@@ -424,14 +507,17 @@ export async function load(context = {}) {
     else whenPanelBody('plan-timeline', doc, later => { state.host = later; paint(); });
     await state.painted?.whenSettled?.();
 
-    if (!fixedPlan(spec) && rows.length) {
+    if (!fixed && source !== 'global' && rows.length) {
       whenPanelSlot('plan-timeline', 'chooser', doc, slot => slot.replaceChildren(renderPlanChooser({ doc, rows, selected: identity })));
+    } else {
+      whenPanelSlot('plan-timeline', 'chooser', doc, slot => slot.replaceChildren());
     }
 
     const model = timelineModel({ eventsBody: { rows: state.events }, executionsBody: { rows: state.executions }, identity });
     return {
       state: 'ready',
       plan: identity,
+      planSource: source,
       population: eventsPopulation || executionsPopulation,
       versionMarkers: model.versionMarkers,
       executionMarkers: model.executionMarkers,
@@ -454,10 +540,10 @@ export const PLAN_TIMELINE_PANEL = {
   charts: ['lanes'],
   table: true,
   requires: ['entities_plan', 'entities_execution'],
-  caveats: 'Artifact markers come from plan-associated events and execution markers from the execution grain; markers are sized by nothing. The events collection serves no version content_hash, so Open reaches the plan, never a historical hash.',
+  caveats: 'Markers come from plan-associated events and the execution grain; they are sized by nothing and no continuous duration is inferred. The events collection serves no version content_hash, so Open reaches the plan, never a historical hash.',
   measureBasis: 'event ts and execution ts in the scope window',
   requests: () => [
-    { route: '/v1/analytics/entities', method: 'GET', params: { grain: 'plan', sort: 'last_ts:desc', limit: '12' } },
+    { route: '/v1/analytics/entities', method: 'GET', params: { grain: 'plan', sort: 'executions_unreported:desc', limit: '100' } },
     { route: '/v1/analytics/entity', method: 'GET', params: { grain: 'plan', collection: 'events', repo_id: '<repo_id>', plan: '<plan>' } },
     { route: '/v1/analytics/entities', method: 'GET', params: { grain: 'execution', repo_id: '<repo_id>', plan: '<plan>' } }
   ],

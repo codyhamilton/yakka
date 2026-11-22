@@ -4,20 +4,134 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Tenant lifecycle</title>
+<script>
+"use strict";
+(function () {
+  var theme = "system";
+  try { var stored = localStorage.getItem("yakka-analytics-theme"); if (stored === "light" || stored === "dark") theme = stored; } catch (e) {}
+  var resolved = theme === "system" ? (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light") : theme;
+  document.documentElement.dataset.theme = resolved;
+})();
+</script>
 <style>
-:root{color-scheme:light dark}body{font:15px/1.5 system-ui,sans-serif;margin:0 auto;max-width:52rem;padding:1.5rem}h1{font-size:1.4rem}ul{list-style:none;margin:0;padding:0}li{border:1px solid #8884;border-radius:8px;margin:.75rem 0;padding:.75rem 1rem}li strong{font-size:1.05rem}.meta{color:#666;font-size:.9rem}.pending{color:#9a6700}#status{min-height:1.5em;color:#b00020;white-space:pre-wrap}#recovery{border:1px solid #b00020;border-radius:8px;padding:.75rem 1rem}dialog{max-width:34rem}dialog p{margin:.5rem 0}.human{font-weight:600}.effect{border-left:3px solid #8884;padding-left:.75rem}label{display:block;margin-top:.75rem}input{font:inherit;width:100%;box-sizing:border-box;padding:.4rem}.actions{display:flex;gap:.5rem;margin-top:1rem}button{font:inherit;padding:.35rem .8rem}
+:root{
+  color-scheme:light;
+  --yk-bg:#eef1f4;
+  --yk-surface:#f4f6f8;
+  --yk-surface-alt:#e9edf1;
+  --yk-text:#18212f;
+  --yk-muted:#586579;
+  --yk-border:#d6dde7;
+  --yk-grid:#e6ebf2;
+  --yk-focus:#176b87;
+  --yk-danger:#a3262a;
+  --yk-warning:#b45309;
+  --yk-warning-bg:#fdf1d4;
+  --yk-error-bg:#fbe4e4;
+  --yk-selected:#dbeafe;
+  --gutter:12px;
+}
+html[data-theme='dark']{
+  color-scheme:dark;
+  --yk-bg:#111923;
+  --yk-surface:#1b2734;
+  --yk-surface-alt:#223141;
+  --yk-text:#edf3f8;
+  --yk-muted:#b5c0cc;
+  --yk-border:#405061;
+  --yk-grid:#2a3948;
+  --yk-focus:#83c9df;
+  --yk-danger:#ff9696;
+  --yk-warning:#fbbf24;
+  --yk-warning-bg:#3a2d10;
+  --yk-error-bg:#3a1d1f;
+  --yk-selected:#23445a;
+}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{width:100%;min-height:100vh;background:var(--yk-bg);color:var(--yk-text);font:13px/1.35 system-ui,sans-serif}
+a{color:var(--yk-focus)}
+h1{font-size:19px;margin:0}
+h2{font-size:14px;margin:0}
+button,select,input{font:inherit;min-height:28px}
+button,select{color:var(--yk-text);background:var(--yk-surface-alt);border:1px solid var(--yk-border);border-radius:2px;padding:0 8px}
+button:disabled{color:var(--yk-muted)}
+.top{width:100%;background:var(--yk-surface);border-bottom:1px solid var(--yk-border)}
+.identity-row{display:flex;align-items:center;gap:12px;height:46px;padding:0 var(--gutter);border-bottom:1px solid var(--yk-border)}
+.brand{font-weight:700;text-decoration:none;color:var(--yk-text);white-space:nowrap}
+.brand span{font-weight:400;color:var(--yk-muted)}
+.tenant-field{display:inline-flex;align-items:center;gap:4px;color:var(--yk-muted);font-size:12px;white-space:nowrap}
+.tenant-select{width:260px;max-width:260px}
+.return-link{margin-left:auto;white-space:nowrap}
+.analytics-nav,.account-nav{display:flex;align-items:center;gap:18px;height:32px;padding:0 var(--gutter);border-bottom:1px solid var(--yk-border);overflow:hidden}
+.analytics-nav a,.account-nav a{text-decoration:none;white-space:nowrap}
+main{width:100%;padding:0 var(--gutter)}
+.page-title{display:flex;align-items:center;height:32px}
+.account-context{display:flex;flex-direction:column;gap:4px;padding:4px 0;color:var(--yk-muted)}
+.account-context p{margin:0}
+#identity{color:var(--yk-text)}
+#status{min-height:0;margin:0;color:var(--yk-danger);white-space:pre-wrap}
+#status:empty{display:none}
+#recovery{margin:8px 0 0;padding:8px;border:1px solid var(--yk-danger);border-radius:2px;background:var(--yk-error-bg);color:var(--yk-text)}
+#selection-note{margin:8px 0 0;color:var(--yk-text)}
+.profile-note{margin:8px 0 0;color:var(--yk-muted)}
+.table-wrap{width:100%;overflow-x:auto;margin-top:8px}
+.tenant-table{width:100%;min-width:900px;border-collapse:collapse;table-layout:fixed;font-variant-numeric:tabular-nums;background:var(--yk-surface);border:1px solid var(--yk-border);border-radius:2px}
+.tenant-table caption{text-align:left;padding:0 6px 4px;color:var(--yk-muted)}
+.tenant-table th,.tenant-table td{height:30px;line-height:30px;padding:0 6px;border-bottom:1px solid var(--yk-border);text-align:left;vertical-align:middle;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tenant-table thead th{background:var(--yk-surface);color:var(--yk-muted);font-weight:600}
+.tenant-table tbody tr:nth-child(even){background:var(--yk-surface-alt)}
+.tenant-table th:nth-child(1),.tenant-table td:nth-child(1){width:240px}
+.tenant-table th:nth-child(2),.tenant-table td:nth-child(2){width:260px}
+.tenant-table th:nth-child(3),.tenant-table td:nth-child(3){width:180px}
+.tenant-table th:nth-child(4),.tenant-table td:nth-child(4){width:100px}
+.tenant-table tr.selected{background:var(--yk-selected)}
+.tenant-table td button{min-height:28px;padding:0 8px;line-height:26px}
+.tenant-table .actions button{margin-right:4px}
+.tenant-table .pending{color:var(--yk-warning)}
+dialog{position:fixed;inset:12px auto auto 12px;margin:0;width:min(600px,calc(100vw - 24px));max-width:none;max-height:calc(100vh - 24px);overflow:auto;padding:8px;border:1px solid var(--yk-border);border-radius:2px;background:var(--yk-surface);color:var(--yk-text)}
+dialog::backdrop{background:rgba(0,0,0,.4)}
+dialog p{margin:4px 0}
+.human{font-weight:600}
+.effect{border-left:3px solid var(--yk-border);padding-left:8px;color:var(--yk-muted)}
+dialog label{display:block;margin-top:8px;color:var(--yk-muted)}
+dialog input{width:100%;padding:0 6px;min-height:28px;color:var(--yk-text);background:var(--yk-surface-alt);border:1px solid var(--yk-border);border-radius:2px}
+.dialog-actions{display:flex;gap:8px;margin-top:8px}
 </style>
 </head>
 <body>
-<h1>Tenant lifecycle</h1>
-<p>Only the human owner may reset or delete a tenant. Agents must not perform or attempt this on a user's behalf.</p>
+<header class="top">
+<div class="identity-row">
+<a class="brand" href="https://yakka.build/">Yakka <span>Analytics</span></a>
+<label class="tenant-field">Tenant <select id="tenant-select" class="tenant-select" aria-label="Tenant"></select></label>
+<button id="theme-toggle" type="button">Theme</button>
+<a id="return-link" class="return-link" href="https://yakka.build/">Return to analytics</a>
+</div>
+<nav class="analytics-nav" aria-label="Analytics">
+<a href="https://yakka.build/">Start</a><a href="https://yakka.build/b/pulse">Pulse</a><a href="https://yakka.build/b/trends">Trends</a><a href="https://yakka.build/b/cost">Cost</a><a href="https://yakka.build/b/quality">Quality</a><a href="https://yakka.build/b/tools">Tools</a><a href="https://yakka.build/b/workflow">Workflow</a><a href="https://yakka.build/b/compare">Compare</a><a href="https://yakka.build/b/scatter">Scatter</a><a href="https://yakka.build/plans">Plans</a><a href="https://yakka.build/sessions">Sessions</a><a href="https://yakka.build/ledger">Ledger</a><a href="https://yakka.build/ops">Operations</a>
+</nav>
+<nav class="account-nav" aria-label="Account">
+<a href="https://yakka.build/profile#tokens">Tokens</a><a href="https://yakka.build/profile#tenants">Tenants</a><a href="https://yakka.build/profile#membership">Membership</a><a href="https://yakka.build/settings">Settings</a><a href="https://yakka.build/device">Device approval</a>
+</nav>
+</header>
+<main>
+<div class="page-title"><h1>Tenant lifecycle</h1></div>
+<div class="account-context">
 <p id="identity" hidden></p>
+<p>Only the human owner may reset or delete a tenant. Agents must not perform or attempt this on a user's behalf.</p>
 <p><a id="signin" href="/oauth/login" hidden>Sign in</a></p>
+</div>
 <p id="status" role="status" aria-live="polite"></p>
 <p id="recovery" hidden>completion unknown: the owner lifecycle state could not be read. Lifecycle actions are disabled until a later successful read.</p>
-<ul id="tenants"></ul>
+<div class="table-wrap">
+<table class="tenant-table">
+<caption>Owner tenant lifecycle</caption>
+<thead><tr><th scope="col">Tenant name</th><th scope="col">Immutable ID</th><th scope="col">Lifecycle state</th><th scope="col">Generation</th><th scope="col">Actions</th></tr></thead>
+<tbody id="tenants"></tbody>
+</table>
+</div>
 <p id="selection-note" hidden>Tenant selection was cleared. Choose a tenant explicitly; this page never auto-selects a fallback. To create a new key after a reset, use the profile.</p>
-<p>Token creation and other profile actions live on the <a href="https://yakka.build/profile">profile</a>.</p>
+<p class="profile-note">Token creation and other profile actions live on the <a href="https://yakka.build/profile">profile</a>.</p>
 <dialog id="confirm-dialog">
 <h2 id="op-title"></h2>
 <p id="op-name"></p>
@@ -25,8 +139,9 @@
 <p id="op-effect" class="effect"></p>
 <p class="human">Only the human owner may reset or delete a tenant. Agents must not perform or attempt this on a user's behalf.</p>
 <label>Type the immutable tenant id to confirm <input id="typed-id" data-testid="typed-id" autocomplete="off" spellcheck="false"></label>
-<div class="actions"><button id="cancel-action" type="button">Cancel</button><button id="confirm-action" type="button" disabled>Confirm</button></div>
+<div class="dialog-actions"><button id="cancel-action" type="button">Cancel</button><button id="confirm-action" type="button" disabled>Confirm</button></div>
 </dialog>
+</main>
 <script>
 "use strict";
 const HUMAN = "Only the human owner may reset or delete a tenant. Agents must not perform or attempt this on a user's behalf.";
@@ -34,10 +149,19 @@ const RESET_EFFECT = "Erase all tenant data and revoke its keys. Keep this tenan
 const DELETE_EFFECT = "Permanently remove this tenant, all its data and keys, and your ownership link.";
 const SELECTION_KEY = "yakka-analytics-tenant", GENERATION_KEY = "yakka-analytics-tenant-generation";
 const INVALIDATED_KEY = "yakka-analytics-tenant-invalidated";
+const THEME_KEY = "yakka-analytics-theme";
+const PAGES_ORIGIN = "https://yakka.build";
 const CHANNEL = typeof BroadcastChannel === "function" ? new BroadcastChannel("yakka-analytics-tenant-selection") : null;
-const state = { me: null, signedOut: false, recoveryFailed: false, busy: false, pending: null };
+const state = { me: null, signedOut: false, recoveryFailed: false, busy: false, pending: null, selected: "", returnTenant: "", selectionInitialized: false, refusedSelection: false };
 const byId = (id) => document.getElementById(id);
 function setStatus(text) { byId("status").textContent = text; }
+function tenantLabel(tenant) {
+  const name = String(tenant.name || tenant.id || "");
+  const id = String(tenant.id || "");
+  return id ? name + " \u00b7 " + id : name;
+}
+function tenantLifecycle(tenant) { return String(tenant.lifecycle_state || "active"); }
+function activeTenants(list) { return (list || []).filter(function (tenant) { return tenantLifecycle(tenant) === "active"; }); }
 function clearRemembered() {
   try {
     localStorage.removeItem(SELECTION_KEY); localStorage.removeItem(GENERATION_KEY);
@@ -54,6 +178,12 @@ if (CHANNEL) CHANNEL.onmessage = function () { loadMe(); };
 window.addEventListener("storage", function (event) {
   if (event.key === SELECTION_KEY || event.key === GENERATION_KEY || event.key === INVALIDATED_KEY) loadMe();
 });
+function currentTheme() { return document.documentElement.dataset.theme === "dark" ? "dark" : "light"; }
+byId("theme-toggle").addEventListener("click", function () {
+  const next = currentTheme() === "dark" ? "light" : "dark";
+  document.documentElement.dataset.theme = next;
+  try { localStorage.setItem(THEME_KEY, next); } catch (e) { /* storage may be unavailable */ }
+});
 async function loadMe() {
   setStatus("");
   try {
@@ -69,32 +199,109 @@ function unauth() { state.me = null; state.signedOut = true; state.recoveryFaile
 function render() {
   const list = byId("tenants"); list.textContent = "";
   byId("identity").hidden = !state.me; byId("signin").hidden = !state.signedOut;
-  byId("recovery").hidden = !state.recoveryFailed; byId("selection-note").hidden = true;
+  byId("recovery").hidden = !state.recoveryFailed; byId("selection-note").hidden = !state.refusedSelection;
   if (state.me) {
     byId("identity").textContent = "Signed in as " + state.me.github_login + " (" + state.me.github_id + ")";
     state.me.tenants.forEach(function (tenant) { list.appendChild(renderTenant(tenant)); });
   }
+  renderSelect();
+  if (!state.selectionInitialized) initSelection(); else { paintSelection(); updateReturnLink(); }
   updateButtons();
 }
-function renderTenant(tenant) {
-  const li = document.createElement("li");
-  const title = document.createElement("strong"); title.textContent = tenant.name; li.appendChild(title);
-  const idLine = document.createElement("div"); idLine.className = "meta"; idLine.textContent = "immutable id: " + tenant.id; li.appendChild(idLine);
-  const generation = tenant.lifecycle_generation === null ? "none (legacy)" : tenant.lifecycle_generation;
-  const meta = document.createElement("div"); meta.className = "meta";
-  meta.textContent = "lifecycle_state: " + tenant.lifecycle_state + " \u00b7 generation: " + generation; li.appendChild(meta);
-  if (tenant.lifecycle_state === "active") {
-    li.appendChild(actionButton("Reset", tenant, "reset")); li.appendChild(actionButton("Delete", tenant, "delete"));
-  } else if (tenant.lifecycle_state === "unsupported") {
-    const note = document.createElement("p"); note.className = "pending";
-    note.textContent = "legacy_tenant_cleanup_unsupported: this legacy tenant has no trustworthy lifecycle marker and no lifecycle actions are offered.";
-    li.appendChild(note);
-  } else {
-    const note = document.createElement("p"); note.className = "pending";
-    note.textContent = "Cleanup in progress (" + tenant.lifecycle_state + "). Lifecycle actions are disabled until the owner state is active again.";
-    li.appendChild(note);
+function renderSelect() {
+  const select = byId("tenant-select"); select.textContent = "";
+  const tenants = state.me ? state.me.tenants : [];
+  if (!state.selected) {
+    const placeholder = document.createElement("option");
+    placeholder.value = ""; placeholder.textContent = "Choose a tenant"; placeholder.disabled = true; placeholder.selected = true;
+    select.appendChild(placeholder);
   }
-  return li;
+  tenants.forEach(function (tenant) {
+    const lifecycle = tenantLifecycle(tenant);
+    const option = document.createElement("option");
+    option.value = tenant.id;
+    option.textContent = lifecycle === "active" ? tenantLabel(tenant) : tenantLabel(tenant) + " \u00b7 " + lifecycle;
+    option.disabled = lifecycle !== "active";
+    option.selected = tenant.id === state.selected;
+    select.appendChild(option);
+  });
+  select.disabled = !state.me || tenants.length === 0;
+}
+function initSelection() {
+  if (state.selectionInitialized || !state.me) return;
+  state.selectionInitialized = true;
+  const wanted = new URLSearchParams(location.search).get("tenant") || "";
+  const owned = state.me.tenants || [];
+  if (wanted) {
+    // A named tenant that is foreign, deleted or not active must not be replaced
+    // with another owned tenant. Reset and delete stay on an explicit choice.
+    const match = owned.find(function (tenant) { return tenant.id === wanted && tenantLifecycle(tenant) === "active"; });
+    if (match) { selectTenant(match.id, false); return; }
+    state.selected = "";
+    state.refusedSelection = true;
+    renderSelect();
+    paintSelection();
+    updateReturnLink();
+    byId("selection-note").hidden = false;
+    return;
+  }
+  const first = activeTenants(owned)[0];
+  if (first) selectTenant(first.id, true); else { paintSelection(); updateReturnLink(); }
+}
+function selectTenant(id, writeUrl) {
+  state.selected = id || ""; state.returnTenant = "";
+  if (state.selected) state.refusedSelection = false;
+  renderSelect();
+  if (writeUrl) {
+    const params = new URLSearchParams(location.search);
+    if (state.selected) params.set("tenant", state.selected); else params.delete("tenant");
+    const qs = params.toString();
+    const url = location.pathname + (qs ? "?" + qs : "") + location.hash;
+    try { history.replaceState(null, "", url); } catch (e) { /* URL may be read-only */ }
+  }
+  paintSelection(); updateReturnLink();
+  if (state.selected) byId("selection-note").hidden = true;
+}
+function paintSelection() {
+  document.querySelectorAll("#tenants tr[data-tenant-id]").forEach(function (row) {
+    const on = row.dataset.tenantId === state.selected;
+    row.classList.toggle("selected", on);
+    if (on) row.dataset.selected = "true"; else delete row.dataset.selected;
+  });
+}
+function updateReturnLink() {
+  const link = byId("return-link");
+  const id = state.selected || state.returnTenant;
+  link.href = id ? PAGES_ORIGIN + "/?tenant=" + encodeURIComponent(id) : PAGES_ORIGIN + "/";
+}
+byId("tenant-select").addEventListener("change", function () {
+  if (!this.value) return;
+  selectTenant(this.value, true);
+});
+function renderTenant(tenant) {
+  const row = document.createElement("tr");
+  row.dataset.tenantId = tenant.id;
+  const nameCell = document.createElement("td"); nameCell.textContent = tenant.name; nameCell.title = String(tenant.name || ""); row.appendChild(nameCell);
+  const idCell = document.createElement("td"); idCell.textContent = tenant.id; idCell.title = String(tenant.id || ""); row.appendChild(idCell);
+  const lifecycle = tenantLifecycle(tenant);
+  const stateCell = document.createElement("td"); stateCell.textContent = lifecycle; stateCell.title = lifecycle; row.appendChild(stateCell);
+  const generationText = tenant.lifecycle_generation === null ? "none (legacy)" : String(tenant.lifecycle_generation);
+  const generationCell = document.createElement("td"); generationCell.textContent = generationText; generationCell.title = generationText; row.appendChild(generationCell);
+  const actions = document.createElement("td"); actions.className = "actions";
+  if (lifecycle === "active") {
+    actions.appendChild(actionButton("Reset tenant", tenant, "reset"));
+    actions.appendChild(actionButton("Delete tenant", tenant, "delete"));
+  } else if (lifecycle === "unsupported") {
+    const note = document.createElement("span"); note.className = "pending";
+    note.textContent = "legacy_tenant_cleanup_unsupported: this legacy tenant has no trustworthy lifecycle marker and no lifecycle actions are offered.";
+    note.title = note.textContent; actions.appendChild(note);
+  } else {
+    const note = document.createElement("span"); note.className = "pending";
+    note.textContent = "Cleanup in progress (" + lifecycle + "). Lifecycle actions are disabled until the owner state is active again.";
+    note.title = note.textContent; actions.appendChild(note);
+  }
+  row.appendChild(actions);
+  return row;
 }
 function actionButton(label, tenant, op) {
   const button = document.createElement("button");
@@ -143,8 +350,16 @@ async function submitConfirmed() {
     state.busy = false; await ambiguousFailure(pending.op, pending.tenant.id); return;
   }
   if (res.status === 204) {
+    const deleted = pending.op === "delete" ? pending.tenant.id : "";
     notifySameOrigin(pending.op, pending.tenant.id);
-    state.busy = false; state.me = null; await loadMe();
+    state.busy = false; state.me = null;
+    if (deleted) selectTenant("", true);
+    await loadMe();
+    if (deleted) {
+      const survivor = activeTenants(state.me ? state.me.tenants : [])[0];
+      state.returnTenant = survivor ? survivor.id : "";
+      updateReturnLink();
+    }
     byId("selection-note").hidden = false; setStatus(""); return;
   }
   state.busy = false; await reportedFailure(res, pending.op, pending.tenant.id);

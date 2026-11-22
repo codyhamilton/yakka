@@ -1,9 +1,9 @@
 import { decodeUrlState } from '../contract/url-state.js';
 import { resolveReadContext } from './core/read-context.js';
 import { createScheduler } from './core/request-scheduler.js';
-import { createTransport } from '../contract/transport.js';
+import { createTransport, isCollectorMode, resolvedBase } from '../contract/transport.js';
 import { legacyErrorMessage } from './core/legacy-error.js';
-import { sessionGateDecision, shouldRecoverTenant } from '../contract/session-gate.js';
+import { authorizedTenant, activeTenants, sessionGateDecision, shouldRecoverTenant, tenantOptionLabel } from '../contract/session-gate.js';
 import { renderIdentity } from './identity/flows.js';
 import { createRouter, isAccountRoute, loadExplorer } from './core/router.js';
 import { createFollow } from './core/follow.js';
@@ -12,18 +12,19 @@ import './charts/yk-bars.js';
 import './charts/yk-ranges.js';
 import './charts/yk-matrix.js';
 import { encodePanelSpec, writePanelSpec } from './core/view-spec.js';
+import { createScopeControls, panelOverridePlan, applyPromotions, resetPanelScope, TIME_OVERRIDE_FIELDS } from './core/scope-controls.js';
 import { assembleBoard } from './boards/board.js';
 import { createPanelFrame } from './panels/panel-frame.js';
 import './panels/index.js';
 import { currentBoardUrl, readBoards, saveBoard, deleteBoard, openBoard } from './core/saved-boards.js';
 import {
-  addFilterChip, createChips, legendFocusFilter, removeCohortChip, removeExcludeChip, removeFilterChip, stateUrl, withPick
+  addFilterChip, createChips, legendFocusFilter, removeCohortChip, removeExcludeChip, removeFilterChip, resetScopeState, stateUrl, withPick
 } from './core/chips.js';
 import { buildCohort, createSelectionTray, nextCohortSlot, openListDestination, writeCohort } from './core/selection-tray.js';
 import { createInspector } from './core/inspector.js';
 import { createCapabilityInspector } from './core/capability-inspector.js';
 import { unsupportedState } from './core/panel-state.js';
-import { decodePick, encodePick } from './core/selection-model.js';
+import { decodePick, encodePick, decodeCohort } from './core/selection-model.js';
 import { coverageSnapshot } from './panels/coverage.js';
 
 const root = document.querySelector('#app');
@@ -35,8 +36,15 @@ const scheduler = createScheduler({ onChange: ({ inFlight }) => {
 const transport = createTransport(scheduler);
 let activeBoardTeardown = null;
 let activeRouteTeardown = null;
+let activeScopeDestroy = null;
+let activeFollow = null;
 let boardFrameTeardown = [];
 let renderGeneration = 0;
+let lastMe = null;
+let lastMeStatus = 0;
+let lastRecord = null;
+let sessionFetchedAt = 0;
+const generationMismatch = new Set();
 
 function beginRender() {
   renderGeneration += 1;
@@ -49,18 +57,206 @@ function renderIsCurrent(generation) {
 }
 
 function teardownActiveRoute() {
+  if (activeFollow) { activeFollow.destroy(); activeFollow = null; }
+  if (activeScopeDestroy) { activeScopeDestroy(); activeScopeDestroy = null; }
   if (activeRouteTeardown) { activeRouteTeardown(); activeRouteTeardown = null; }
   if (activeBoardTeardown) { activeBoardTeardown(); activeBoardTeardown = null; }
   for (const destroy of boardFrameTeardown) destroy();
   boardFrameTeardown = [];
 }
+
+const tenantSelect = document.querySelector('#tenant-select');
+const tenantNote = document.querySelector('#tenant-note');
+
+function mountTenantHeader({ me = null, meStatus = 0, auth = null, state = {}, localMode = false, signedOut = false } = {}) {
+  tenantSelect.replaceChildren();
+  if (signedOut) {
+    const option = element('option', '', 'Sign in to select a tenant');
+    option.value = '';
+    option.selected = true;
+    tenantSelect.append(option);
+    tenantSelect.disabled = true;
+    tenantNote.hidden = true;
+    return;
+  }
+  const tenants = Array.isArray(me?.tenants) ? me.tenants : [];
+  let selected = auth?.tenant || state.tenant || '';
+  if (meStatus !== 200 && tenants.length === 0) {
+    const option = element('option', '', localMode ? 'Local collector' : 'Token-bound tenant');
+    option.value = '';
+    option.selected = true;
+    tenantSelect.append(option);
+    tenantSelect.disabled = true;
+    tenantNote.hidden = false;
+    tenantNote.textContent = localMode ? 'Local collector' : 'Token-bound tenant · Sign in to manage account';
+    return;
+  }
+  if (!tenants.length) {
+    const option = element('option', '', 'Create a tenant to view analytics');
+    option.value = '';
+    option.selected = true;
+    tenantSelect.append(option);
+    tenantSelect.disabled = true;
+    tenantNote.hidden = true;
+    return;
+  }
+  if (auth?.unavailable && selected) {
+    const option = element('option', '', `${selected} · unavailable`);
+    option.value = selected;
+    option.selected = true;
+    tenantSelect.append(option);
+  }
+  for (const tenant of tenants) {
+    const lifecycle = String(tenant.lifecycle_state || tenant.state || 'active');
+    const option = element('option', '', lifecycle === 'active' ? tenantOptionLabel(tenant) : `${tenantOptionLabel(tenant)} · ${lifecycle}`);
+    option.value = tenant.id;
+    option.selected = tenant.id === selected;
+    option.disabled = lifecycle !== 'active';
+    tenantSelect.append(option);
+  }
+  if (!selected) {
+    const first = activeTenants(me)[0];
+    if (first) { selected = first.id; tenantSelect.value = first.id; }
+  }
+  tenantSelect.disabled = false;
+  tenantNote.hidden = true;
+}
+
+function navPath(value) {
+  try { return new URL(value, globalThis.location.href).pathname.replace(/\/+$/, '') || '/'; } catch { return ''; }
+}
+
+const NAV_ALIASES = { '/artifact': '/ledger' };
+
+function markActiveNav(path, hash = '') {
+  const pathname = path.replace(/\/+$/, '') || '/';
+  const wanted = NAV_ALIASES[pathname] || pathname;
+  for (const link of document.querySelectorAll('.analytics-nav a')) {
+    const target = navPath(link.getAttribute('href') || '');
+    if (target === wanted || (target !== '/' && wanted.startsWith(`${target}/`))) link.setAttribute('aria-current', 'page');
+    else link.removeAttribute('aria-current');
+  }
+  for (const link of document.querySelectorAll('.account-nav a')) {
+    const raw = link.getAttribute('href') || '';
+    const target = navPath(raw);
+    const at = raw.indexOf('#');
+    const wantedHash = at === -1 ? '' : raw.slice(at + 1);
+    if (target === wanted && wantedHash && `#${wantedHash}` === hash) link.setAttribute('aria-current', 'location');
+    else if (target === wanted && !wantedHash) link.setAttribute('aria-current', 'location');
+    else link.removeAttribute('aria-current');
+  }
+}
+
+function committedScopeUrl(state, path = globalThis.location?.pathname || '/') {
+  return stateUrl(state, globalThis.location?.search || '', path);
+}
+
+function clearForTenantChange(state, tenant) {
+  const next = {
+    ...state,
+    tenant,
+    filters: {},
+    exclude: [],
+    cohorts: { ca: '', cb: '', cc: '', cd: '' },
+    pick: '', sel: '', hide: [],
+    panels: {},
+    panelSpecs: {}
+  };
+  for (const [key, spec] of Object.entries(state.panelSpecs || {})) {
+    const scope = { ...(spec.scope || {}) };
+    for (const field of TIME_OVERRIDE_FIELDS) delete scope[field];
+    const cleaned = { ...spec, scope };
+    next.panelSpecs[key] = cleaned;
+    next.panels[key] = encodePanelSpec(cleaned);
+  }
+  return next;
+}
+
+function parentListPath(record, state) {
+  if (record.kind !== 'explorer') return record.path;
+  if (record.explorer === 'sessions' && record.sessionId) return '/sessions';
+  if (record.explorer === 'plans' && record.plan) return '/plans';
+  if (record.explorer === 'artifact') {
+    const params = new URLSearchParams(state.search || record.search || '');
+    if (params.has('repo_id') || params.has('path')) return '/ledger';
+  }
+  return record.path;
+}
+
+async function changeTenant(nextTenant) {
+  if (!nextTenant) return;
+  const record = lastRecord || router.current();
+  const state = decodeUrlState(record.search);
+  if (state.tenant === nextTenant) return;
+  try { localStorage.setItem('yakka-analytics-tenant', nextTenant); } catch {}
+  generationMismatch.delete(nextTenant);
+  scheduler.supersedeAll();
+  teardownActiveRoute();
+  transport.invalidateTenant();
+  const target = parentListPath(record, { search: record.search });
+  const next = clearForTenantChange(state, nextTenant);
+  if (target !== record.path) { next.unknown = {}; next.pick = ''; next.sel = ''; }
+  router.push(stateUrl(next, record.search, target));
+}
+
+tenantSelect.addEventListener('change', () => { changeTenant(tenantSelect.value); });
 let sessionPromise;
+let pendingAccountFocus = '';
+function selectAccountTenant(id) {
+  if (!id) return;
+  pendingAccountFocus = id;
+  return changeTenant(id);
+}
+async function refreshAccountSession() {
+  sessionPromise = undefined;
+  const result = await loadSessionOnce();
+  lastMe = result.me;
+  lastMeStatus = result.status;
+  const state = decodeUrlState(globalThis.location?.search || '');
+  const auth = authorizedTenant({ me: result.me, urlTenant: state.tenant });
+  mountTenantHeader({ me: result.me, meStatus: result.status, auth, state });
+  return result.status === 200 ? result.me : null;
+}
+function focusAccountRow(id) {
+  const row = [...root.querySelectorAll('[data-account-tenant-row]')].find(el => el.dataset.accountTenantRow === id);
+  if (row) row.focus();
+}
 function loadSessionOnce() {
   if (!sessionPromise) sessionPromise = transport.request('me').then(result => {
     const valid = result.response.status !== 200 || (result.body && Array.isArray(result.body.tenants) && result.body.github_id !== undefined);
+    sessionFetchedAt = Date.now();
     return { me: result.body, status: valid ? result.response.status : 0 };
   }).catch(() => ({ me: null, status: 0 }));
   return sessionPromise;
+}
+
+function tenantOf(me, id) {
+  return (Array.isArray(me?.tenants) ? me.tenants : []).find(tenant => tenant.id === id) || null;
+}
+
+// S1 lifecycle revalidation: after sleep/reset or on focus, re-read /me before
+// trusting the selected tenant. A changed generation or a disappeared tenant
+// clears that selection; the shell then requires an explicit choice instead of
+// silently choosing another tenant.
+async function revalidateSession() {
+  const record = lastRecord;
+  if (!record || Date.now() - sessionFetchedAt < 30000) return;
+  const priorMe = lastMe;
+  const priorTenant = decodeUrlState(record.search).tenant || '';
+  sessionPromise = undefined;
+  const result = await loadSessionOnce();
+  const before = tenantOf(priorMe, priorTenant);
+  const after = tenantOf(result.me, priorTenant);
+  const beforeGeneration = String(before?.lifecycle_generation || '');
+  const afterGeneration = String(after?.lifecycle_generation || '');
+  const changed = Boolean(priorTenant && before && (!after || (beforeGeneration && afterGeneration && beforeGeneration !== afterGeneration)));
+  if (changed) {
+    generationMismatch.add(priorTenant);
+    scheduler.supersedeAll();
+    transport.invalidateTenant(priorTenant);
+    try { localStorage.removeItem('yakka-analytics-tenant'); } catch {}
+  }
+  render(router.current());
 }
 
 function panelHref(grain, measures, split, chart) {
@@ -72,21 +268,21 @@ function panelHref(grain, measures, split, chart) {
 // reason when /schema lacks what it needs. Later-phase destinations are named
 // and are never dead.
 export const QUESTION_PATHS = [
-  { group: 'Cost', label: 'Where did the money go this week against last?', href: '/b/cost?win=7d&cmp=period' },
-  { group: 'Cost', label: 'Which model gives the most output per dollar?', href: `/b/scatter?win=30d&${panelHref('session', ['cost_usd', 'commits'], 'session_model', 'scatter')}`, requires: ['entities_session'] },
-  { group: 'Cost', label: 'How much of my spend cannot be priced?', href: '/b/pulse?win=30d' },
-  { group: 'Quality', label: 'How do design, brief and report scores differ by harness?', href: `/b/quality?win=30d&${panelHref('content', ['score'], 'harness', 'ranges')}`, requires: ['scores_by_lens'] },
-  { group: 'Quality', label: 'Quality by model and by repo over time', href: `/b/quality?win=90d&${panelHref('content', ['score'], 'session_model', 'lines')}`, requires: ['scores_by_lens'] },
-  { group: 'Quality', label: 'Do expensive sessions write better artifacts?', href: `/b/scatter?win=30d&${panelHref('artifact', ['cost_usd', 'score'], 'session_model', 'scatter')}`, requires: ['entities_session', 'entities_artifact'] },
-  { group: 'Quality', label: 'Which artifacts scored lowest?', href: `/b/quality?win=30d&${panelHref('artifact', ['score'], 'kind', 'strip')}`, requires: ['entities_artifact', 'scores_by_lens'] },
-  { group: 'Quality', label: 'Am I better than my usual?', href: `/b/quality?win=30d&${panelHref('content', ['score'], 'kind', 'ranges')}`, requires: ['scores_by_lens'] },
-  { group: 'Plans', label: 'Which brief runs have no report or commit yet?', href: `/b/workflow?win=30d&${panelHref('execution', ['ts'], 'shape', 'bars')}`, requires: ['entities_execution'] },
-  { group: 'Plans', label: 'What did this plan contain, and how did the design change?', href: '/plans', requires: ['entities_plan'] },
-  { group: 'Plans', label: 'Which plans cost the most for what they produced?', href: `/b/scatter?win=30d&${panelHref('plan', ['associated_cost_usd', 'artifacts'], 'repo_id', 'scatter')}`, requires: ['entities_plan'] },
-  { group: 'Activity', label: 'What just happened?', href: '/b/pulse?win=1d', requires: ['activity'] },
-  { group: 'Activity', label: 'When do I work?', href: '/b/pulse?win=90d' },
-  { group: 'Activity', label: 'How do harnesses use tools?', href: '/b/tools?win=30d' },
-  { group: 'Health', label: 'What is unscored, unpriced, unattributed or rejected?', href: '/ops' }
+  { group: 'Cost', label: 'Where did the money go this week against last?', href: '/b/cost?win=7d&cmp=period', explanation: 'Cost board for seven days against the previous equal period.' },
+  { group: 'Cost', label: 'Which model gives the most output per dollar?', href: `/b/scatter?win=30d&${panelHref('session', ['cost_usd', 'commits'], 'session_model', 'scatter')}`, requires: ['entities_session'], explanation: 'Sessions plotted by priced spend and commits, coloured by session model.' },
+  { group: 'Cost', label: 'How much of my spend cannot be priced?', href: '/b/pulse?win=30d', explanation: 'Pulse window totals, including the unpriced-call count and its lower bound.' },
+  { group: 'Quality', label: 'How do design, brief and report scores differ by harness?', href: `/b/quality?win=30d&${panelHref('content', ['score'], 'harness', 'ranges')}`, requires: ['scores_by_lens'], explanation: 'Quality score ranges by harness for the selected document kind.' },
+  { group: 'Quality', label: 'Quality by model and by repo over time', href: `/b/quality?win=90d&${panelHref('content', ['score'], 'session_model', 'lines')}`, requires: ['scores_by_lens'], explanation: 'Quality score trend by session model over ninety days.' },
+  { group: 'Quality', label: 'Do expensive sessions write better artifacts?', href: `/b/scatter?win=30d&${panelHref('artifact', ['cost_usd', 'score'], 'session_model', 'scatter')}`, requires: ['entities_session', 'entities_artifact'], explanation: 'Artifact clarity plotted against its writing session’s priced spend.' },
+  { group: 'Quality', label: 'Which artifacts scored lowest?', href: `/b/quality?win=30d&${panelHref('artifact', ['score'], 'kind', 'strip')}`, requires: ['entities_artifact', 'scores_by_lens'], explanation: 'File-weighted score strips grouped by document kind.' },
+  { group: 'Quality', label: 'Am I better than my usual?', href: `/b/quality?win=30d&${panelHref('content', ['score'], 'kind', 'ranges')}`, requires: ['scores_by_lens'], explanation: 'Score ranges for the selected kind against the all-history baseline.' },
+  { group: 'Plans', label: 'Which brief runs have no report or commit yet?', href: `/b/workflow?win=30d&${panelHref('execution', ['ts'], 'shape', 'bars')}`, requires: ['entities_execution'], explanation: 'Workflow execution completion by plan, naming each shape.' },
+  { group: 'Plans', label: 'What did this plan contain, and how did the design change?', href: '/plans', requires: ['entities_plan'], explanation: 'Plans explorer with the plan’s artifacts, executions and events.' },
+  { group: 'Plans', label: 'Which plans cost the most for what they produced?', href: `/b/scatter?win=30d&${panelHref('plan', ['associated_cost_usd', 'artifacts'], 'repo_id', 'scatter')}`, requires: ['entities_plan'], explanation: 'Plans plotted by associated spend and artifact count.' },
+  { group: 'Activity', label: 'What just happened?', href: '/b/pulse?win=1d', requires: ['activity'], explanation: 'Pulse recent activity observations for the last twenty-four hours.' },
+  { group: 'Activity', label: 'When do I work?', href: '/b/pulse?win=90d', explanation: 'Pulse activity and daily calendar over ninety days.' },
+  { group: 'Activity', label: 'How do harnesses use tools?', href: '/b/tools?win=30d', explanation: 'Tools composition of hook events by tool category and harness.' },
+  { group: 'Health', label: 'What is unscored, unpriced, unattributed or rejected?', href: '/ops', explanation: 'Operations storage, coverage, unscored, unpriced, unattributed and rejection facts.' }
 ];
 
 export function featureAvailable(schema, name) {
@@ -168,35 +364,58 @@ function renderCoverageStrip(container, schema) {
   container.append(strip);
 }
 
-function renderQuestionPaths(container, schema) {
-  const intro = element('p', 'muted', 'Explore the analytics this server supports. Every path opens a configured board or explorer, or says why the server cannot answer it.');
-  container.append(intro);
-  const groups = new Map();
-  for (const path of QUESTION_PATHS) {
-    if (!groups.has(path.group)) groups.set(path.group, []);
-    groups.get(path.group).push(path);
-  }
-  for (const [group, paths] of groups) {
-    const section = element('section', 'question-group');
-    section.append(element('h2', '', group));
-    const list = element('ul', 'question-paths');
-    for (const path of paths) {
-      const item = element('li');
+function scopedHref(href, tenant) {
+  if (!tenant) return href;
+  try {
+    const url = new URL(href, globalThis.location?.href || 'http://localhost');
+    if (!url.searchParams.has('tenant')) url.searchParams.set('tenant', tenant);
+    return `${url.pathname}${url.search}${url.hash}`;
+  } catch { return href; }
+}
+
+export const QUESTION_GROUPS = ['Cost', 'Quality', 'Plans', 'Activity', 'Health'];
+
+function questionCell(tag, className, value) {
+  const cell = element(tag, className, value);
+  if (tag === 'th') cell.scope = 'col';
+  return cell;
+}
+
+// S-start: a full-width semantic table, Area then Question then Explanation,
+// with the fixed group order and the existing QUESTION_PATHS order inside each
+// group. A path the server cannot answer is disabled text plus the reason; it
+// is never a dead link, and every enabled link keeps the selected tenant.
+function renderQuestionPaths(container, schema, tenant = '') {
+  const table = element('table', 'question-paths');
+  table.append(element('caption', '', 'Question paths'));
+  const head = element('thead');
+  const headRow = element('tr');
+  headRow.append(questionCell('th', '', 'Area'), questionCell('th', '', 'Question'), questionCell('th', '', 'Explanation'));
+  head.append(headRow);
+  const body = element('tbody');
+  for (const group of QUESTION_GROUPS) {
+    for (const path of QUESTION_PATHS.filter(item => item.group === group)) {
+      const row = element('tr');
       const availability = pathAvailability(path, schema);
+      const question = element('td');
       if (availability.ok) {
         const link = element('a', '', path.label);
-        link.href = path.href;
-        item.append(link);
+        link.href = scopedHref(path.href, tenant);
+        question.append(link);
       } else {
         const label = element('span', 'disabled-path', path.label);
         label.setAttribute('aria-disabled', 'true');
-        item.append(label, element('span', 'disabled-reason', availability.reason));
+        question.append(label);
       }
-      list.append(item);
+      const explanation = availability.ok
+        ? (path.explanation || '')
+        : `${path.explanation || ''} ${availability.reason}`.trim();
+      row.append(element('td', '', group), question, element('td', '', explanation));
+      body.append(row);
     }
-    section.append(list);
-    container.append(section);
   }
+  table.append(head, body);
+  container.append(table);
 }
 
 function renderNamedDestination(container, record) {
@@ -205,47 +424,88 @@ function renderNamedDestination(container, record) {
   container.append(notice);
 }
 
-function renderNotFound(container, record) {
-  container.append(element('h1', '', 'Not found'));
-  container.append(element('p', 'notice', `No workspace route matches ${record.path}.`));
+function notFoundHref(path, search = '', tenant = '') {
+  const params = new URLSearchParams(search);
+  params.delete('tenant');
+  if (tenant) params.set('tenant', tenant);
+  const query = params.toString();
+  return query ? `${path}?${query}` : path;
+}
+
+function renderNotFound(container, record, tenant = '') {
+  container.append(element('h1', '', record.title || 'Not found'));
+  container.append(element('p', 'account-context', 'Account controls use the selected tenant. Time, repository and kind filters apply on analytics pages.'));
+  container.append(element('p', 'not-found-message', 'No page matches this address.'));
+  const pathLine = element('p', 'not-found-path');
+  pathLine.append(element('code', '', record.path));
+  container.append(pathLine);
   const nav = element('nav', 'not-found-routes');
-  nav.setAttribute('aria-label', 'Workspace routes');
-  for (const route of SHELL_ROUTES) {
-    const link = element('a', '', route);
-    link.href = route;
-    nav.append(link);
-  }
+  nav.setAttribute('aria-label', 'Not found navigation');
+  const start = element('a', '', 'Open Start');
+  start.href = notFoundHref('/', record.search, tenant);
+  const pulse = element('a', '', 'Open Pulse');
+  pulse.href = notFoundHref('/b/pulse', record.search, tenant);
+  nav.append(start, pulse);
   container.append(nav);
 }
 
 function mountSavedBoards(container, state) {
   const section = element('section', 'saved-boards');
   section.append(element('h2', '', 'Saved boards'));
-  const list = element('ul', 'saved-board-list');
-  const render = () => {
-    list.replaceChildren();
-    const boards = readBoards();
-    if (!boards.length) list.append(element('li', 'muted', 'No saved boards yet.'));
-    for (const board of boards) {
-      const item = element('li');
-      item.append(element('span', '', board.name), document.createTextNode(' '));
-      const open = element('button', '', 'Open');
-      open.type = 'button';
-      open.addEventListener('click', () => openBoard(board.name));
-      const remove = element('button', '', 'Delete');
-      remove.type = 'button';
-      remove.addEventListener('click', () => { deleteBoard(board.name); render(); });
-      item.append(open, remove);
-      list.append(item);
-    }
-  };
   const form = element('form', 'save-board');
   const input = element('input');
   input.name = 'board-name';
   input.placeholder = 'Board name';
   input.setAttribute('aria-label', 'Board name');
+  input.required = true;
   const save = element('button', '', 'Save current view');
   save.type = 'submit';
+  const table = element('table', 'saved-board-list');
+  table.append(element('caption', '', 'Saved boards'));
+  const head = element('thead');
+  const headRow = element('tr');
+  headRow.append(
+    questionCell('th', '', 'Name'),
+    questionCell('th', '', 'Open'),
+    questionCell('th', '', 'Delete'),
+    questionCell('th', '', 'URL summary')
+  );
+  head.append(headRow);
+  const body = element('tbody');
+  table.append(head, body);
+
+  const render = () => {
+    body.replaceChildren();
+    const boards = readBoards().slice().sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+    if (!boards.length) {
+      const row = element('tr');
+      const cell = element('td', 'muted', 'No saved boards yet.');
+      cell.colSpan = 4;
+      row.append(cell);
+      body.append(row);
+      return;
+    }
+    for (const board of boards) {
+      const row = element('tr');
+      const name = element('td', '', board.name);
+      name.title = board.name;
+      const openCell = element('td');
+      const open = element('button', '', 'Open');
+      open.type = 'button';
+      open.addEventListener('click', () => openBoard(board.name));
+      openCell.append(open);
+      const deleteCell = element('td');
+      const remove = element('button', '', 'Delete');
+      remove.type = 'button';
+      remove.addEventListener('click', () => { deleteBoard(board.name); render(); });
+      deleteCell.append(remove);
+      const summary = element('td', '', board.url);
+      summary.title = board.url;
+      row.append(name, openCell, deleteCell, summary);
+      body.append(row);
+    }
+  };
+
   form.addEventListener('submit', event => {
     event.preventDefault();
     const name = input.value.trim();
@@ -255,7 +515,7 @@ function mountSavedBoards(container, state) {
     render();
   });
   form.append(input, save);
-  section.append(form, list);
+  section.append(form, table);
   render();
   container.append(section);
 }
@@ -289,19 +549,67 @@ function currentState() {
   return decodeUrlState(globalThis.location?.search || '');
 }
 
-async function renderBoard(container, record, state, schema, context) {
+const COHORT_SLOTS = ['ca', 'cb', 'cc', 'cd'];
+
+function validCohortCount(state) {
+  return COHORT_SLOTS.filter(key => decodeCohort(state.cohorts?.[key])).length;
+}
+
+// The committed comparison is the URL `cmp` when it names a mode; an explicit
+// `off` is encoded as an absent URL key, so the per-panel override is the
+// durable signal that the board is not comparing.
+function currentComparison(state, board) {
+  if (state.cmp === 'cohorts') return 'cohorts';
+  if (state.cmp === 'period') return 'period';
+  const panelCmp = board.panels.find(entry => entry.spec?.scope?.cmp)?.spec.scope.cmp;
+  return panelCmp === 'off' || panelCmp === 'cohorts' ? panelCmp : 'period';
+}
+
+// S-compare: one labeled Comparison select before the grid. A change writes the
+// URL `cmp` and every panel's `pN.scope.cmp` in one push, because an explicit
+// `off` is not a URL key and each preset panel carries a default cmp=period.
+function mountComparison(container, state, board, router, path) {
+  const enough = validCohortCount(state) >= 2;
+  const group = element('div', 'compare-control');
+  const label = element('label', '', 'Comparison');
+  const select = element('select');
+  select.id = 'comparison-select';
+  label.htmlFor = 'comparison-select';
+  for (const [value, text] of [['period', 'Previous equal period'], ['off', 'No comparison'], ['cohorts', 'Saved cohorts']]) {
+    const option = element('option', '', text);
+    option.value = value;
+    if (value === 'cohorts' && !enough) option.disabled = true;
+    select.append(option);
+  }
+  select.value = currentComparison(state, board);
+  select.addEventListener('change', () => {
+    const next = currentState();
+    next.cmp = select.value;
+    for (const entry of board.panels) {
+      if (!entry.panel) continue;
+      const spec = entry.spec || {};
+      writePanelSpec(next, entry.key, { ...spec, scope: { ...(spec.scope || {}), cmp: select.value } });
+    }
+    router.pushScope(stateUrl(next, globalThis.location?.search || '', path));
+  });
+  group.append(label, select);
+  container.append(group);
+}
+
+async function renderBoard(container, record, state, schema, context, scopeControls = null, conflicts = []) {
   const tenant = context?.tenant || '';
-  renderScopeBar(container, state);
-  renderCoverageStrip(container, schema);
   const board = assembleBoard({ presetId: record.presetId, state });
   if (board.kind === 'named') { renderNamedDestination(container, { ...record, label: board.label, title: board.title, phase: board.phase }); return; }
-  if (board.kind !== 'board') { renderNotFound(container, record); container.append(element('p', 'notice', board.reason)); return; }
+  if (board.kind !== 'board') { renderNotFound(container, { ...record, title: 'Page not found' }, tenant); container.append(element('p', 'notice', board.reason)); return; }
+  container.append(element('h1', '', board.title));
+  if (scopeControls) container.append(scopeControls.element);
+  renderScopeBar(container, state);
+  if (record.path === '/b/compare') mountComparison(container, state, board, router, record.path);
   if (context?.window) {
     for (const entry of board.panels) {
       entry.scope = { ...entry.scope, from: context.window.from || '', to: context.window.to || '' };
     }
   }
-  container.append(element('h1', '', board.title));
   const grid = element('div', 'panel-grid');
 
   const runtime = { grain: '', unit: '', population: null, selection: null, unmapped: '', chips: [] };
@@ -357,10 +665,30 @@ async function renderBoard(container, record, state, schema, context) {
   }
 
   for (const entry of board.panels) {
+    const span = board.spans?.[entry.panelId] || '6';
+    if (conflicts.includes(entry.key)) {
+      const blocked = element('section', 'workspace-panel blocked-panel');
+      blocked.dataset.state = 'unsupported';
+      blocked.dataset.span = span;
+      blocked.append(
+        element('h2', '', entry.panelId),
+        element('p', 'disabled-reason', 'Saved panel scope conflicts with the global filters. Reset panel scope.')
+      );
+      const reset = element('button', '', 'Reset panel scope');
+      reset.type = 'button';
+      reset.addEventListener('click', () => {
+        const next = resetPanelScope(currentState(), conflicts);
+        router.pushScope(stateUrl(next, globalThis.location?.search || '', record.path));
+      });
+      blocked.append(reset);
+      grid.append(blocked);
+      continue;
+    }
     if (!entry.panel) {
       const missing = element('section', 'workspace-panel');
       missing.dataset.state = 'unsupported';
       missing.dataset.idle = 'true';
+      missing.dataset.span = span;
       missing.append(element('h2', '', entry.panelId), element('p', 'disabled-reason', entry.reason));
       grid.append(missing);
       continue;
@@ -379,7 +707,16 @@ async function renderBoard(container, record, state, schema, context) {
         }
       }
       : entry.panel;
-    const frame = createPanelFrame({ panel: wrappedPanel, spec: entry.spec, scope: entry.scope, transport, scheduler, tenant, schema });
+    const frame = createPanelFrame({
+      panel: wrappedPanel, spec: entry.spec, scope: entry.scope, transport, scheduler, tenant, schema,
+      editFilters: () => scopeControls?.focusFilters?.(),
+      onAllHistory: () => clearPanelCause({ kind: 'window' }),
+      onResetFilters: () => {
+        const next = resetScopeState(currentState());
+        if (record.path === '/b/compare') next.cmp = 'period';
+        router.pushScope(stateUrl(next, globalThis.location?.search || '', record.path));
+      }
+    });
     boardFrameTeardown.push(() => frame.destroy());
     const capability = createCapabilityInspector({ doc: document, panel: entry.panel, spec: entry.spec || {}, schema });
     frame.element.append(capability.element);
@@ -458,6 +795,7 @@ async function renderBoard(container, record, state, schema, context) {
         opener: (event.composedPath?.() || []).find(node => node?.dataset?.mark !== undefined)
           || event.target?.shadowRoot?.activeElement
           || event.target,
+        openerHost: event.target,
         url: globalThis.location?.href || ''
       });
     });
@@ -483,6 +821,7 @@ async function renderBoard(container, record, state, schema, context) {
     frame.element.addEventListener('open', () => router.push(openListDestination(entry.panel.grain)));
 
     const missingFeature = (entry.panel.requires || []).find(feature => !featureAvailable(schema, feature));
+    frame.element.dataset.span = span;
     grid.append(frame.element);
     if (missingFeature) {
       const source = entry.panel.capabilitySources?.[missingFeature]
@@ -498,7 +837,7 @@ async function renderBoard(container, record, state, schema, context) {
   layout.append(grid, inspector.element);
   container.append(layout, tray.element);
   updateTray();
-  mountFollow(container, schema, tenant);
+  activeFollow = mountFollow(container, schema, tenant);
   mountSavedBoards(container, state);
 }
 
@@ -540,13 +879,15 @@ async function renderExplorer(container, record, context) {
 async function render(record) {
   const generation = beginRender();
   const path = record.path;
-  const state = decodeUrlState(record.search);
+  let state = decodeUrlState(record.search);
+  lastRecord = record;
   teardownActiveRoute();
   root.replaceChildren();
   root.dataset.route = path;
   setShellState('loading', 'false');
+  markActiveNav(path, globalThis.location?.hash || '');
   const exempt = isAccountRoute(path);
-  const sessionExempt = ['/login', '/oauth/callback', '/settings'].includes(path);
+  const sessionExempt = ['/login', '/oauth/callback'].includes(path);
   let me = null, meStatus = 0, hint = '';
   if (!sessionExempt) {
     const result = await loadSessionOnce();
@@ -555,10 +896,28 @@ async function render(record) {
   }
   if (!renderIsCurrent(generation)) return;
   const decision = sessionGateDecision({ path, search: record.search, meStatus });
-  if (!decision.stay) { location.replace(decision.redirect); return; }
-  if (!exempt && meStatus !== 200) hint = decision.hint || '';
+  if (!decision.stay && record.kind !== 'not-found') { location.replace(decision.redirect); return; }
+  const noServer = meStatus !== 200;
+  const localMode = noServer && isCollectorMode() && !resolvedBase();
+  let bearer = '';
+  try { bearer = (localStorage.getItem('yakka-analytics-key') || '').trim(); } catch {}
+  const tokenBound = noServer && !isCollectorMode() && Boolean(bearer);
+
+  // A not-found path performs no analytics read, so it renders before the
+  // schema/facet/scope pipeline and without the signed-out data-route redirect.
+  if (record.kind === 'not-found') {
+    const authed = meStatus === 200 && Boolean(me);
+    const auth = authorizedTenant({ me, urlTenant: state.tenant });
+    mountTenantHeader({ me, meStatus, auth, state, localMode, signedOut: !authed && !tokenBound });
+    renderNotFound(root, record, auth.tenant);
+    setShellState('ready', 'true');
+    return;
+  }
+
+  if (!exempt && noServer && !localMode && !tokenBound) hint = decision.hint || '';
   if (hint) {
     root.dataset.route = path;
+    mountTenantHeader({ me, meStatus, state, localMode });
     root.append(element('h1', '', 'Connection'), element('p', '', hint));
     const link = element('a', '', 'Open Settings'); link.href = '/settings'; root.append(link);
     setShellState('ready', 'true');
@@ -566,6 +925,39 @@ async function render(record) {
   }
 
   if (exempt) {
+    const account = ['/profile', '/settings', '/device'].includes(path) ? {
+      api: transport,
+      me,
+      meStatus,
+      tenant: '',
+      onRefreshMe: refreshAccountSession,
+      onSelectTenant: selectAccountTenant,
+      onStatus: (text, error = false) => {
+        if (!text) { root.querySelector('[data-account-status]')?.remove(); return; }
+        let out = root.querySelector('[data-account-status]');
+        if (!out) { out = element('p', 'account-status', ''); out.dataset.accountStatus = ''; root.append(out); }
+        out.textContent = text;
+        out.classList.toggle('error', error);
+      }
+    } : null;
+    if (account) {
+      const auth = authorizedTenant({ me, urlTenant: state.tenant });
+      account.tenant = auth.tenant;
+      mountTenantHeader({ me, meStatus, auth, state, localMode });
+      if (path === '/profile' && !state.tenant && auth.tenant) {
+        const next = { ...state, tenant: auth.tenant };
+        globalThis.history.replaceState(null, '', stateUrl(next, record.search, path));
+        state = decodeUrlState(globalThis.location?.search || '');
+        try { localStorage.setItem('yakka-analytics-tenant', auth.tenant); } catch {}
+      }
+      root.append(element('h1', '', record.title));
+      await renderIdentity(root, path, transport, me, () => renderIsCurrent(generation), account);
+      if (!renderIsCurrent(generation)) return;
+      if (pendingAccountFocus) { const id = pendingAccountFocus; pendingAccountFocus = ''; focusAccountRow(id); }
+      setShellState('ready', 'true');
+      return;
+    }
+    mountTenantHeader({ me, meStatus, state, localMode, signedOut: true });
     root.append(element('h1', '', record.title));
     await renderIdentity(root, path, transport, me, () => renderIsCurrent(generation));
     if (!renderIsCurrent(generation)) return;
@@ -573,7 +965,52 @@ async function render(record) {
     return;
   }
 
-  const context = resolveReadContext({ me, state, now: Date.now() });
+  lastMe = me;
+  lastMeStatus = meStatus;
+  let auth = authorizedTenant({ me, urlTenant: state.tenant });
+  if (state.tenant && generationMismatch.has(state.tenant)) auth = { tenant: '', unavailable: true, source: 'lifecycle' };
+  mountTenantHeader({ me, meStatus, auth, state, localMode: localMode || tokenBound });
+  if (auth.unavailable) {
+    root.append(
+      element('h1', '', record.title || 'Tenant unavailable'),
+      element('p', 'tenant-unavailable', 'This tenant is unavailable to your account.')
+    );
+    const choose = element('button', '', 'Choose a tenant');
+    choose.type = 'button';
+    choose.addEventListener('click', () => { if (tenantSelect.disabled) globalThis.location.assign('/profile'); else tenantSelect.focus(); });
+    root.append(choose);
+    setShellState('ready', 'true');
+    return;
+  }
+  const tenants = Array.isArray(me?.tenants) ? me.tenants : [];
+  if (meStatus === 200 && !tenants.length) {
+    root.append(element('h1', '', record.title || 'Analytics'), element('p', '', 'Create a tenant to view analytics'));
+    const profile = element('a', '', 'Open Profile'); profile.href = '/profile';
+    root.append(profile);
+    setShellState('ready', 'true');
+    return;
+  }
+
+  // A missing initial tenant is canonicalized with replaceState; a later
+  // committed edit pushes exactly once through the router.
+  if (!state.tenant && auth.tenant) {
+    const next = { ...state, tenant: auth.tenant };
+    globalThis.history.replaceState(null, '', stateUrl(next, record.search, path));
+    state = decodeUrlState(globalThis.location?.search || '');
+  }
+  if (auth.tenant) { try { localStorage.setItem('yakka-analytics-tenant', auth.tenant); } catch {} }
+
+  // Unambiguous saved panel scope becomes visible global scope once. A global
+  // field always wins; disagreeing overrides block their panels.
+  const promotions = panelOverridePlan(state);
+  if (Object.keys(promotions.promotions).length) {
+    const promoted = applyPromotions(state, promotions.promotions);
+    globalThis.history.replaceState(null, '', stateUrl(promoted, globalThis.location?.search || '', path));
+    state = decodeUrlState(globalThis.location?.search || '');
+  }
+  const conflicts = panelOverridePlan(state).conflicts;
+
+  const context = resolveReadContext({ me, state, now: Date.now(), tenant: auth.tenant, generation });
   const tenant = context.tenant;
   let schema = null;
   try {
@@ -582,8 +1019,6 @@ async function render(record) {
     if (result.response.ok && !result.error) schema = result.body;
     else if (shouldRecoverTenant({ status: result.response.status, error: result.body?.error, me, path }) && path !== '/profile') { location.assign('/profile'); return; }
     else {
-      // The failure is named and a fresh read is offered; navigation and the
-      // current route stay rendered, and each panel settles on its own.
       const node = document.querySelector('#schema-status');
       const reason = result.error?.message || (result.response.status === 401
         ? 'Connection was rejected. Check the API base and bearer in Settings.'
@@ -608,20 +1043,44 @@ async function render(record) {
   }
   if (!renderIsCurrent(generation)) return;
 
+  const features = schema?.features || {};
+  const scopeControls = createScopeControls({
+    doc: document,
+    state,
+    schema,
+    transport,
+    readContext: context,
+    facetsFetch: Boolean(features.event_counts || features.record_filters || features.facets),
+    resetCmp: record.path === '/b/compare' ? 'period' : 'off',
+    onCommit: next => {
+      if (!renderIsCurrent(generation)) return;
+      router.pushScope(stateUrl(next, globalThis.location?.search || '', path));
+    },
+    onRefresh: () => router.resolve()
+  });
+  activeScopeDestroy = () => scopeControls.destroy();
+  scopeControls.update(state, { schema, context });
+
   if (record.kind === 'start') {
-    root.append(element('h1', '', 'Start'));
-    renderQuestionPaths(root, schema);
-    renderCoverageStrip(root, schema);
+    root.append(element('h1', '', 'Start'), scopeControls.element);
+    renderQuestionPaths(root, schema, tenant);
+    mountSavedBoards(root, state);
   } else if (record.kind === 'board') {
-    await renderBoard(root, record, state, schema, context);
+    await renderBoard(root, record, state, schema, context, scopeControls, conflicts);
   } else if (record.kind === 'named') {
+    root.append(element('h1', '', record.title), scopeControls.element);
     renderScopeBar(root, state);
     renderCoverageStrip(root, schema);
     renderNamedDestination(root, record);
   } else if (record.kind === 'explorer') {
     await renderExplorer(root, record, context);
+    if (!renderIsCurrent(generation)) return;
+    const heading = root.querySelector('h1');
+    if (heading?.after) heading.after(scopeControls.element);
+    else root.prepend(scopeControls.element);
+    scopeControls.update(state, { schema, context });
   } else {
-    renderNotFound(root, record);
+    renderNotFound(root, record, context?.tenant || '');
   }
   if (!renderIsCurrent(generation)) return;
   setShellState('ready', 'true');
@@ -635,5 +1094,12 @@ document.querySelector('#theme-toggle').addEventListener('click', () => {
   document.documentElement.dataset.themePreference = next;
   try { localStorage.setItem('yakka-analytics-theme', next); } catch {}
 });
+
+globalThis.addEventListener('hashchange', () => {
+  const record = lastRecord || router.current();
+  markActiveNav(record.path, globalThis.location?.hash || '');
+});
+globalThis.addEventListener('focus', () => { revalidateSession().catch(() => {}); });
+globalThis.addEventListener('pageshow', event => { if (event.persisted) revalidateSession().catch(() => {}); });
 
 router.resolve();

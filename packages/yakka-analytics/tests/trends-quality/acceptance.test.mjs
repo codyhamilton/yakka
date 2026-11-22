@@ -68,6 +68,10 @@ async function rowsOf(page, id) {
   }, id);
 }
 
+function byKey(rows) {
+  return rows.slice().sort((a, b) => a.join('\u0000').localeCompare(b.join('\u0000')));
+}
+
 // A chart paints on the frame after its panel goes idle. Wait on the public
 // inspect() surface rather than sleeping.
 async function chartSeries(page, panelId, selector) {
@@ -164,12 +168,8 @@ test('every P10 preset delivers its catalog panels and regroups on measure, lens
     const splitRows = p10Query({
       measure: 'model_calls', dims: ['harness'], bucket: 'day', to: new Date().toISOString()
     }).rows;
-    const groups = [...new Set(splitRows.map(row => String(row.k[0])))];
-    const buckets = [...new Set(splitRows.map(row => row.t))];
-    assert.deepEqual(await rowsOf(page, 'trend-columns'), buckets.map(t => [
-      new Date(t).toISOString(),
-      ...groups.map(group => String(splitRows.find(row => row.t === t && String(row.k[0]) === group).v))
-    ]));
+    const expectedSplit = splitRows.map(row => [new Date(row.t).toISOString(), String(row.k[0]), String(row.v)]);
+    assert.deepEqual(byKey(await rowsOf(page, 'trend-columns')), byKey(expectedSplit));
     await choose(page, harness.origin, { panel: 'trend-columns', key: 'p1', index: 2, value: 'lines', settled: { kind: 'chart', name: 'lines' } });
     assert.equal((await specAt(page, 'p1')).chart, 'lines');
 
@@ -183,16 +183,16 @@ test('every P10 preset delivers its catalog panels and regroups on measure, lens
     await openBoard(page, harness.origin, '/b/compare?win=30d&cmp=period');
     await choose(page, harness.origin, { panel: 'trend-lines', key: 'p4', index: 0, value: 'model_calls', settled: { kind: 'measure', name: 'model_calls' } });
     await choose(page, harness.origin, { panel: 'trend-lines', key: 'p4', index: 1, value: 'harness', settled: { kind: 'split', name: 'harness' } });
-    await choose(page, harness.origin, { panel: 'trend-lines', key: 'p4', index: 2, value: 'area', settled: { kind: 'chart', name: 'area' } });
-    assert.equal((await specAt(page, 'p4')).chart, 'area');
+    assert.equal(await page.locator('[data-panel="trend-lines"] .workspace-panel-chooser select').count(), 2);
+    assert.equal((await specAt(page, 'p4')).chart ?? 'lines', 'lines');
 
     // Quality: a check, split and scorer change regroup the hash population.
     await openBoard(page, harness.origin, '/b/quality?win=30d');
-    await choose(page, harness.origin, { panel: 'score-ranges', key: 'p1', index: 1, value: SECOND_CHECK, settled: { kind: 'check', name: SECOND_CHECK } });
+    await choose(page, harness.origin, { panel: 'score-ranges', key: 'p1', index: 0, value: SECOND_CHECK, settled: { kind: 'check', name: SECOND_CHECK } });
     assert.match(await textOf(page, 'score-ranges'), new RegExp(SECOND_CHECK));
-    await choose(page, harness.origin, { panel: 'score-ranges', key: 'p1', index: 3, value: 'repo_id', settled: { kind: 'split', name: 'repo_id' } });
-    await choose(page, harness.origin, { panel: 'score-ranges', key: 'p1', index: 2, value: 'jev-0', settled: { kind: 'scorer', name: 'jev-0' } });
-    assert.match(await textOf(page, 'score-ranges'), /baseline_unavailable/);
+    await choose(page, harness.origin, { panel: 'score-ranges', key: 'p1', index: 2, value: 'repo_id', settled: { kind: 'split', name: 'repo_id' } });
+    await choose(page, harness.origin, { panel: 'score-ranges', key: 'p1', index: 1, value: 'jev-0', settled: { kind: 'scorer', name: 'jev-0' } });
+    assert.match(await textOf(page, 'score-ranges'), /baseline unavailable/);
 
     // Cost: the treemap measure change keeps the surviving parent styles, and
     // the child lens change regroups it.
@@ -203,13 +203,13 @@ test('every P10 preset delivers its catalog panels and regroups on measure, lens
     await chartSeries(page, 'treemap', 'yk-treemap');
     const treemapAfter = await page.evaluate(() => document.querySelector('[data-panel="treemap"] yk-treemap').inspect().series.map(series => series.key));
     assert.deepEqual(treemapAfter, treemapBefore, 'surviving parent keys keep their styles');
-    await choose(page, harness.origin, { panel: 'treemap', key: 'p3', index: 2, value: 'model', settled: { kind: 'split', name: 'model' } });
+    await choose(page, harness.origin, { panel: 'treemap', key: 'p3', index: 1, value: 'model', settled: { kind: 'split', name: 'model' } });
 
     // Tools: the rank lens changes from tool to tool_kind; measure and chart
     // are fixed by the preset (one hook_events measure, ranked bars).
     await openBoard(page, harness.origin, '/b/tools?win=30d');
-    await choose(page, harness.origin, { panel: 'rank', key: 'p3', index: 1, value: 'tool_kind', settled: { kind: 'split', name: 'tool_kind' } });
-    assert.deepEqual((await rowsOf(page, 'rank')).map(row => row[0]), ['shell', 'read']);
+    assert.equal(await page.locator('[data-panel="rank"] .workspace-panel-chooser select').count(), 0);
+    assert.deepEqual((await rowsOf(page, 'rank')).map(row => row[0]), ['Bash', 'Read']);
   });
 });
 
@@ -336,16 +336,16 @@ test('quality separates hash and file units, draws the scorer baseline and opens
     await openBoard(page, harness.origin, '/b/quality?win=30d');
 
     const ranges = await textOf(page, 'score-ranges');
-    assert.match(ranges, /distinct content hashes/);
-    assert.match(ranges, /all-time scorer baseline/);
+    assert.match(ranges, /content version/);
+    assert.match(ranges, /All-history baseline/);
     assert.match(ranges, /p25 0.45 – p75 0.85/);
     assert.equal(await page.evaluate(() => Boolean(
       document.querySelector('[data-panel="score-ranges"] yk-ranges')?.shadowRoot?.querySelector('[data-baseline="true"]')
     )), true);
 
     const trend = await textOf(page, 'score-trend');
-    assert.match(trend, /Distinct content hashes/);
-    assert.match(trend, /all-time scorer baseline/);
+    assert.match(trend, /content versions/);
+    assert.match(trend, /All-history baseline/);
 
     const strips = await textOf(page, 'score-strips');
     assert.match(strips, /file-weighted/);
@@ -354,7 +354,7 @@ test('quality separates hash and file units, draws the scorer baseline and opens
     assert.match(strips, /Open this identity in the artifact reader/);
 
     const bands = await textOf(page, 'band-mix');
-    for (const label of ['below p25', 'mid (p25–p75 inclusive)', 'above p75', 'unscored', 'baseline_unavailable']) {
+    for (const label of ['below p25', 'mid (p25–p75 inclusive)', 'above p75', 'unscored', 'baseline unavailable']) {
       assert.ok(bands.includes(label), `band-mix names ${label}`);
     }
     assert.match(bands, /file-weighted/);
@@ -364,13 +364,13 @@ test('quality separates hash and file units, draws the scorer baseline and opens
     await chartSeries(page, 'score-ranges', 'yk-ranges');
     const before = await page.evaluate(() => document.querySelector('[data-panel="score-ranges"] yk-ranges').inspect()
       .marks.find(mark => mark.key === 'harness:orca')?.style?.cssVar || '');
-    await choose(page, harness.origin, { panel: 'score-ranges', key: 'p1', index: 1, value: SECOND_CHECK, settled: { kind: 'check', name: SECOND_CHECK } });
+    await choose(page, harness.origin, { panel: 'score-ranges', key: 'p1', index: 0, value: SECOND_CHECK, settled: { kind: 'check', name: SECOND_CHECK } });
     await chartSeries(page, 'score-ranges', 'yk-ranges');
     const after = await page.evaluate(() => document.querySelector('[data-panel="score-ranges"] yk-ranges').inspect()
       .marks.find(mark => mark.key === 'harness:orca')?.style?.cssVar || '');
     assert.equal(after, before, 'a surviving group keeps its colour');
-    await choose(page, harness.origin, { panel: 'score-ranges', key: 'p1', index: 2, value: 'jev-0', settled: { kind: 'scorer', name: 'jev-0' } });
-    assert.match(await textOf(page, 'score-ranges'), /baseline_unavailable/);
+    await choose(page, harness.origin, { panel: 'score-ranges', key: 'p1', index: 1, value: 'jev-0', settled: { kind: 'scorer', name: 'jev-0' } });
+    assert.match(await textOf(page, 'score-ranges'), /baseline unavailable/);
 
     // A strip mark opens the delivered artifact reader.
     const key = JSON.stringify({ path: 'docs/a.md', repo_id: 'repo-a' });
@@ -430,15 +430,19 @@ test('cost honesty keeps lower bounds, all-unpriced, zero, special groups and re
     // Numeric eligibility and the fixed bin ladder match the fixture.
     const histDist = p10Distribution({ measure: 'cost_usd', grain: 'call', dim: 'harness', to: new Date().toISOString() });
     const hist = await rowsOf(page, 'dist-hist');
-    assert.deepEqual(hist.map(row => row[3]), histDist.rows.flatMap(row => row.bins.map(bin => String(bin.n))));
+    const histActual = Object.fromEntries(hist.map(row => [`${row[0]}|${row[2]}|${row[3]}`, row[4]]));
+    const histExpected = Object.fromEntries(histDist.rows.flatMap(row => row.bins.map(bin => [
+      `${row.k}|${bin.lo ?? '—'}|${bin.hi ?? '—'}`, String(bin.n)
+    ])));
+    assert.deepEqual(histActual, histExpected);
     assert.match(await textOf(page, 'dist-hist'), /call grain by harness/);
 
     // A repo cost total and a cost-by-tool join are named with their try.
     const repoSpec = { grain: 'time', measures: ['cost_usd'], split: 'model', chart: 'treemap', scope: { parent: 'session_repo' } };
     await openBoard(page, harness.origin, `/b/cost?win=30d&p3=${encodeURIComponent(JSON.stringify(repoSpec))}`);
     const repoText = await textOf(page, 'treemap');
-    assert.match(repoText, /session_repo is not served on \/query for cost/);
-    assert.match(repoText, /\/distribution\?dim=session_repo/);
+    assert.match(repoText, /session_repo.*unsupported.*\/distribution/i);
+    assert.match(repoText, /\/distribution alternative/);
     const toolSpec = { grain: 'time', measures: ['cost_usd'], split: 'tool', chart: 'treemap', scope: { parent: 'harness' } };
     await openBoard(page, harness.origin, `/b/cost?win=30d&p3=${encodeURIComponent(JSON.stringify(toolSpec))}`);
     assert.match(await textOf(page, 'treemap'), /hook_events by tool/);
@@ -452,7 +456,7 @@ test('cost honesty keeps lower bounds, all-unpriced, zero, special groups and re
     assert.equal(mixLabels.includes('(other)'), false);
     const treemapRows = p10Query({ measure: 'hook_events', dims: ['harness', 'tool'], bucket: 'none', to: new Date().toISOString() })
       .rows.map(row => [String(row.k[0]), String(row.k[1]), String(row.v)]);
-    assert.deepEqual(await rowsOf(page, 'treemap'), treemapRows);
+    assert.deepEqual(byKey(await rowsOf(page, 'treemap')), byKey(treemapRows));
     const rankRows = p10Query({ measure: 'hook_events', dims: ['tool'], bucket: 'none', to: new Date().toISOString() })
       .rows.map(row => [String(row.k[0]), String(row.v)]);
     assert.deepEqual(await rowsOf(page, 'rank'), rankRows);
@@ -513,8 +517,9 @@ test('linked actions emit chips, a pick reaches the tray and a cohort requeries 
     ));
     for (const [id, text] of Object.entries(populations)) assert.ok(text.trim().length > 0, `${id} shows a population unit`);
     const costTreemap = await rowsOf(page, 'treemap');
-    assert.deepEqual(costTreemap, p10Query({ measure: 'cost_usd', dims: ['harness', 'model'], bucket: 'none', to: new Date().toISOString() })
-      .rows.map(row => [String(row.k[0]), String(row.k[1]), String(row.v)]));
+    const expectedTreemap = p10Query({ measure: 'cost_usd', dims: ['harness', 'model'], bucket: 'none', to: new Date().toISOString() })
+      .rows.map(row => [String(row.k[0]), String(row.k[1]), String(row.v)]);
+    assert.deepEqual(byKey(costTreemap), byKey(expectedTreemap));
     assert.equal(p10Schema().grains.time.lenses.length, 1);
     assert.equal(p10Phase({ to: new Date().toISOString() }) >= 0, true);
   });

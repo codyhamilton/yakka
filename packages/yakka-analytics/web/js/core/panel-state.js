@@ -69,8 +69,8 @@ export function cancelledState({ retry = null } = {}) {
   return { state: 'cancelled', retry };
 }
 
-export function unauthorizedState({ message = '', code = '', retry = null } = {}) {
-  return { state: 'unauthorized', message, code, retry };
+export function unauthorizedState({ message = '', code = '', status = 0, retry = null } = {}) {
+  return { state: 'unauthorized', message, code, status, retry };
 }
 
 export function busyState({ message = '', code = 'busy', retry = null, retryAfter = 0 } = {}) {
@@ -107,6 +107,7 @@ export function stateFromResponse({ status = 0, body = {} } = {}) {
     return unauthorizedState({
       message: message || (status === 401 ? 'Sign in again to read this tenant.' : 'This tenant is not authorized for this read.'),
       code: code || String(status),
+      status,
       retry
     });
   }
@@ -127,6 +128,21 @@ export function stateFromResponse({ status = 0, body = {} } = {}) {
 export function unsupportedState({ feature = '', grain = '', measure = '', lens = '', reason = '', source = '', nearest = null } = {}) {
   const missing = feature || [grain, measure, lens].filter(Boolean).join(' · ');
   return { state: 'unsupported', missing, reason, source, nearest };
+}
+
+// One applicability classification that reuses the unsupported state rather
+// than adding a second vocabulary. The exact refusal sentence is supplied by
+// the filter-applicability helper; the frame renders `message` verbatim.
+export function applicabilityState({ labels = [], message = '', filters = [] } = {}) {
+  const sorted = [...new Set(labels || [])].sort();
+  const text = message || `This chart cannot apply ${sorted.join(', ')}. Change the filters to view it.`;
+  return {
+    ...unsupportedState({ feature: sorted.join(', '), reason: 'active filter unsupported' }),
+    applicability: true,
+    labels: sorted,
+    unsupportedFilters: filters,
+    message: text
+  };
 }
 
 export function unsupportedText(result = {}) {

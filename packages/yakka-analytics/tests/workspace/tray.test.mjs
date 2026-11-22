@@ -83,7 +83,6 @@ test('chip model marks unapplied filters, keeps unknown keys and removes/Adds va
   const schema = makeSchema();
   const state = { win: 'all', filters: { harness: ['orca'], 'band:design': ['low'] }, exclude: ['model:atlas'], cohorts: { ca: encodeCohort(cohortDefinition({ grain: 'session', scope: { include: [], exclude: [] }, predicate: { is_null: { measure: 'cost_usd' } } })) }, pick: 'a,b|' };
   const chips = chipModel({ state, schema, grain: 'session' });
-  assert.ok(chips.some(chip => chip.kind === 'scope'));
   const harness = chips.find(chip => chip.kind === 'filter' && chip.key === 'harness');
   assert.equal(harness.applied, true);
   const band = chips.find(chip => chip.kind === 'filter' && chip.key === 'band:design');

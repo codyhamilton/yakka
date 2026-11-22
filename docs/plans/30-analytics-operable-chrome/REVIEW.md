@@ -1,36 +1,48 @@
-# Review — Plan 30 operable analytics chrome (design)
+# Plan 30 — automation review (PR #311)
 
-Verdict: **PASS_WITH_FOLLOWUPS**
+- **Reviewed SHA:** `eefdcfc1`
+- **Base:** `7c3e129d6e46fe2a12ede19968d3cabd33d33638`
+- **Verdict:** `PASS_WITH_FOLLOWUPS`
 
-Reviewed SHA: `05c89a64ecad58c6b287b1279bcbaf52727611f0` (PR #310).
+## Phase outcomes
 
-Plan sufficiency: the design is sufficient to judge intent, phase outcomes, ledger entries, and downstream QA. Screen contracts, ownership splits, capability-gated rollout, and stable-doc amendments are explicit. Builder altitude is intentionally prescriptive per user instruction.
-
-## Phase outcomes (design acceptance)
-
-| Phase | Assessment |
-| --- | --- |
-| 1 — Selected tenant and filter set with honest totals | **met** (as design). S1/N1, C1–C11, event-counts contract, retained-record predicate, and capability flags are observable. Shell/transport ownership is named. |
-| 2 — Boards and explorers in plain language | **met** (as design). Full G catalogue, F1–F6 applicability, P1–P10 captions, and 23 screen specs with acceptance IDs are complete. Mockup capture checks passed for all screens. |
-| 3 — Discoverable account operations | **met** (as design). A1–A6, lifecycle origin preservation, and nav restoration without IAM invention align with `07` and existing API-origin security. |
-
-## Intent and ledger
-
-Verbatim user intent is preserved. Ground citations to `packages/yakka-analytics/web/js/core/read-context.js` (30d default), display-only scope, and hidden profile/settings/device routes match the checkout at merge-base `313a34ca`. Activity vs retained-fact denominators are correctly separated. Nine ledger entries are closed with explicit “if wrong” paths; no open questions block sign-off.
+| Phase | Outcome | Evidence |
+| --- | --- | --- |
+| Phase 1 — tenant scope, filters, honest totals | **Met** | `go test` event-counts + `plan30`/`legacy-counts` unit suites; scope and event-counts JS units (31 pass). Terminal-review fixes present on branch. |
+| Phase 2 — captions, boards, applicability | **Met** | Filter-applicability and pulse-caption units; fix commit `eefdcfc1` for exclude/ignored_filters/Pulse kind-exclusion gating. |
+| Phase 3 — account console, lifecycle link | **Met** | Identity contract tests; lifecycle profile Go tests; `3b98d2ff` refuses silent tenant substitution on lifecycle page. |
 
 ## Findings
 
-### Follow-up (not blocking design sign-off)
+### Resolved in this review (committed on branch)
 
-- **low** — Assumption 8: production authenticated counts and exact API image provenance remain unverified at design time; executor must validate with a legitimate owner session during phase 1 close-out, not invent numbers in fixtures.
-- **low** — `record_filters` / shared retained-record predicate is a substantial store change; phase 1 refine should treat Explore alignment tests as the gate before any panel work (already named in N1).
-- **low** — Phase 3 outcome asks to “record API/Pages deployment evidence”; capture that in close-out alongside promoting additive contracts into `09-analytics-workspace-contracts.md` per the stable-doc note.
+| Sev | Finding | Resolution |
+| --- | --- | --- |
+| high | `exclude` query values treated as a synthetic filter name, refusing all applicable panels | `eefdcfc1` — excludes count as their dimension in applicability. |
+| high | Rhythm panel omitted `repo_id`, refusing repository-scoped heatmap | `eefdcfc1` — `repo_id` declared on rhythm measure. |
+| medium | Lifecycle page substituted another owned tenant when URL tenant was foreign/inactive | `3b98d2ff` — explicit refusal UI, no silent substitution. |
+| medium | Server-listed `ignored_filters` still drew marks client-side | `eefdcfc1` — those names refuse with literal caption. |
+| medium | Pulse kind *exclusion* did not gate priced/hook cells | `eefdcfc1` — gate on exclusion as well as include. |
+| low | Unapplicable exclude dimensions returned 500 on counts/explore | `3b98d2ff` — `400 unsupported_filter`. |
+| low | Event-count responses cacheable | `3b98d2ff` — `Cache-Control: private, no-store`. |
+| low | Lifecycle link accepted non-http(s) API base | `3b98d2ff` — http(s) only for reset/delete href. |
+| low | Mechanical dead branches / wrong guards in chrome modules | `5f0db01d` — scope, event-counts, account-console, artifact cleanup. |
 
-## Security lens
+### Follow-up (non-blocking)
 
-No weakening of lifecycle same-origin gate, bearer isolation, or tenant refusal semantics. Event-counts inherits existing tenant auth and deadlines. No new membership write surface or credential handling in mockups (synthetic preview only).
+| Sev | Finding | Tracking |
+| --- | --- | --- |
+| medium | `globalOverrideValue` treats multi-value repo/kind as absent; panel override can replace global filter | Brief for follow-up; behaviour edge case with workarounds (Apply bar). |
+| low | Some panels still omit HTTP status mapping for 401/403 | Existing issue backlog (#318–#330 family). |
+| low | Event-count cache key does not refetch on filter-only in-place panel update | Acceptable; generation bump on commit covers primary flow. |
+| low | Production signed-in gates, deploy, real lifecycle writes | Documented in plan record; not automatable here. |
+
+## Intent and ledger
+
+Implementation matches the collapsed plan record (`docs/plans/30-analytics-operable-chrome.md`): reserved tenant field, draft/Apply filters, capability-gated counts, caption registry with refusal not silent drop, account console on session APIs, lifecycle on API origin unchanged in authority.
+
+**Plan sufficiency:** Sufficient for review and QA; close-out promotion into `docs/design/09-analytics-workspace-contracts.md` is present.
 
 ## Residual risks
 
-- Three-phase build is large; phase ordering and capability-gated event-counts rollout (`Pages-first`) must be respected to avoid blank dashboards on older servers.
-- Prescriptive caption registry must stay synchronized with panel registry additions; P10 proof is the regression anchor.
+Pre-existing `tests/trends-quality/cost.test.mjs` failure and stale `tests/e2e/*.spec.ts` remain outside Plan 30 evidence. Chromium acceptance suites were not re-run in this VM (browser cache absent); unit and Go suites were re-run on `eefdcfc1`.

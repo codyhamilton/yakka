@@ -105,7 +105,9 @@ test('tool and tool_kind stay distinct and an unknown kind is never folded away'
   const labels = model.series.map(series => series.label);
   for (const label of ['Bash', 'Read']) assert.ok(labels.includes(label));
   assert.equal(labels.includes('(other)'), false);
-  assert.equal(mixTableRows(model).length, 4);
+  const tableRows = mixTableRows(model);
+  assert.equal(tableRows.length, 8, 'P10 stacked rows are one per group × series');
+  for (const row of tableRows) assert.equal(row.length, 3);
 });
 
 // ---------------------------------------------------------------------------
@@ -154,8 +156,11 @@ test('tools settles four panels, matches the fixture and names unsupported tool 
     const phase = p10Phase({ to: new Date().toISOString() });
     assert.equal(phase >= 0, true);
 
+    // The treemap table is P10 value DESC then parent/child identity ASC.
     const treemapRows = p10Query({ measure: 'hook_events', dims: ['harness', 'tool'], bucket: 'none', to: new Date().toISOString() })
-      .rows.map(row => [String(row.k[0]), String(row.k[1]), String(row.v)]);
+      .rows.map(row => [String(row.k[0]), String(row.k[1]), Number(row.v)])
+      .sort((a, b) => b[2] - a[2] || a[0].localeCompare(b[0]) || a[1].localeCompare(b[1]))
+      .map(row => [row[0], row[1], String(row[2])]);
     const rankRows = p10Query({ measure: 'hook_events', dims: ['tool'], bucket: 'none', to: new Date().toISOString() })
       .rows.map(row => [String(row.k[0]), String(row.v)]);
     const mixQuery = p10Query({ measure: 'hook_events', dims: ['tool_kind', 'harness'], bucket: 'none', to: new Date().toISOString() });
@@ -174,30 +179,13 @@ test('tools settles four panels, matches the fixture and names unsupported tool 
     });
     assert.equal(rhythm.chart, true);
     assert.equal(rhythm.rows, 7 * 24);
-    assert.match(rhythm.text, /weekday by hour_of_day|weekday and hour/i);
-    assert.match(rhythm.text, /Shared entity key/);
+    assert.match(rhythm.text, /Each square counts hook events for a weekday and hour in the selected timezone/);
 
-    const rankBefore = await page.evaluate(() => document.querySelector('[data-panel="rank"] yk-bars').inspect());
-
-    // Changing the rank split from tool to tool_kind regroups it; the
-    // surviving measure series keeps its key and style.
-    await page.evaluate(() => {
-      const selects = document.querySelectorAll('[data-panel="rank"] .workspace-panel-chooser select');
-      selects[1].value = 'tool_kind';
-      selects[1].dispatchEvent(new Event('change', { bubbles: true }));
-    });
-    await page.waitForFunction(() => {
-      const raw = new URLSearchParams(location.search).get('p3');
-      return raw && JSON.parse(raw).split === 'tool_kind';
-    });
-    await openBoard(page, harness.origin, page.url().replace(harness.origin, ''));
-    const rankAfter = await rowsOf(page, 'rank');
-    const expectedKinds = p10Query({ measure: 'hook_events', dims: ['tool_kind'], bucket: 'none', to: new Date().toISOString() })
-      .rows.map(row => [String(row.k[0]), String(row.v)]);
-    assert.deepEqual(rankAfter, expectedKinds);
-    assert.deepEqual(rankAfter.map(row => row[0]), ['shell', 'read']);
-    const rankAfterInspect = await page.evaluate(() => document.querySelector('[data-panel="rank"] yk-bars').inspect());
-    assert.deepEqual(rankAfterInspect.series.map(series => series.key), rankBefore.series.map(series => series.key));
+    // G-toolsrank is fixed hook_events/tool/rank: no measure or split chooser.
+    const rankChoosers = await page.evaluate(() => document.querySelectorAll('[data-panel="rank"] .workspace-panel-chooser select').length);
+    assert.equal(rankChoosers, 0);
+    const mixChoosers = await page.evaluate(() => document.querySelectorAll('[data-panel="mix"] .workspace-panel-chooser select').length);
+    assert.equal(mixChoosers, 0);
 
     // A fixture mix that returns both levels keeps unknown and (mixed) as
     // their own series, never folded into (other).
@@ -237,7 +225,7 @@ test('tools settles four panels, matches the fixture and names unsupported tool 
     // A cost-by-tool treemap is refused by the shared panel with the
     // hook_events-by-tool alternative; the Tools module's own refusal names
     // the measure mismatch exactly.
-    const costSpec = { grain: 'time', measures: ['cost_usd'], split: 'tool', chart: 'treemap', scope: { parent: 'harness' } };
+    const costSpec = { grain: 'time', measures: ['cost_usd'], split: 'tool', chart: 'treemap', scope: { parent: 'harness', captionKey: 'G-costmap' } };
     await page.goto(`${harness.origin}/b/tools?win=30d&cost=1&p2=${encodeURIComponent(JSON.stringify(costSpec))}`);
     await page.waitForFunction(() => document.querySelector('[data-panel="treemap"]')?.dataset.idle === 'true');
     assert.equal(await page.evaluate(() => document.querySelector('[data-panel="treemap"]').dataset.state), 'unsupported');

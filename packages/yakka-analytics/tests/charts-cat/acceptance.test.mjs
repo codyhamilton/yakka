@@ -345,6 +345,7 @@ test('every Phase 8 page proves the phase outcome in Chromium', async t => {
       await assertTargets('treemap-composition');
 
       // The accessible table is keyboard operable after clearing the selection.
+      await page.evaluate(() => { document.getElementById('treemap-composition').shadowRoot.querySelector('details.yk-chart-table').open = true; });
       await focusRoot('treemap-composition');
       await page.keyboard.press('Escape');
       assert.equal((await inspect('treemap-composition')).selection, null);

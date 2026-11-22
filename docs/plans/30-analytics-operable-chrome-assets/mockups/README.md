@@ -7,8 +7,8 @@ The PNGs are 1440×900 viewport captures, device scale 1, using headless Chromiu
 From repository root:
 
 ```bash
-python3 docs/plans/30-analytics-operable-chrome/mockups/src/generate.py
-node docs/plans/30-analytics-operable-chrome/mockups/src/capture.mjs
+python3 docs/plans/30-analytics-operable-chrome-assets/mockups/src/generate.py
+node docs/plans/30-analytics-operable-chrome-assets/mockups/src/capture.mjs
 ```
 
 capture.mjs uses the existing analytics test browser loader (playwright-core and the local Chromium cache), captures every HTML listed in src/screens.json, and checks dimensions, row density, surface colour, console errors and local filter interactions. No dependency installation is needed on this machine. It does not validate product implementation.

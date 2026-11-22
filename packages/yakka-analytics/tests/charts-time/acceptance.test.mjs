@@ -285,9 +285,9 @@ test('time-series gallery proves every mode, its table and stable entity colours
     const summary = page.locator('yk-chart#line .yk-chart-table > summary');
     await summary.focus();
     await page.keyboard.press('Enter');
-    assert.equal(await page.evaluate(() => document.querySelector('yk-chart#line').shadowRoot.querySelector('details.yk-chart-table').open), false);
-    await page.keyboard.press('Enter');
     assert.equal(await page.evaluate(() => document.querySelector('yk-chart#line').shadowRoot.querySelector('details.yk-chart-table').open), true);
+    await page.keyboard.press('Enter');
+    assert.equal(await page.evaluate(() => document.querySelector('yk-chart#line').shadowRoot.querySelector('details.yk-chart-table').open), false);
     assert.deepEqual(await tableRows(page, 'line', 1).then(list => list[0].values), SERIES.map(series => formatCount(rows[0].values[series.key])));
 
     await page.evaluate(() => { document.documentElement.dataset.theme = 'dark'; });
@@ -373,6 +373,7 @@ test('gestures gallery proves hover, inspect, selection, brush, zoom, pan, legen
     assert.deepEqual(subtracted.selection, { kind: 'entity', include: [rows[8].key], exclude: [rows[7].key] });
     assert.deepEqual((await inspectChart(page, 'gestures-a')).series, seriesBefore);
 
+    await page.locator('yk-chart#gestures-a .yk-chart-table > summary').click();
     await page.locator(`yk-chart#gestures-a input.yk-table-select[data-key="${rows[9].key}"]`).click();
     const afterCheckbox = await inspectChart(page, 'gestures-a');
     assert.deepEqual(afterCheckbox.selection.include, [rows[8].key, rows[9].key]);

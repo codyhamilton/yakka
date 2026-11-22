@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
-  applyOther, buildBarsModel, lollipopModel, percentRows, slopePairs, sortRanked, stackSegments
+  applyOther, buildBarsModel, horizontalStackRects, lollipopModel, percentRows, slopePairs, sortRanked, stackSegments
 } from '../../web/js/charts/yk-bars.js';
 import { FIXED_NEUTRALS } from '../../web/js/charts/colour-registry.js';
 import { formatValue } from '../../web/js/charts/formatters.js';
@@ -81,6 +81,32 @@ test('the bars model applies top and (other) and marks percent shares', () => {
     assert.ok(Math.abs(sum - 1) < 1e-9);
   }
   assert.ok(percent.series.every(item => item.kind === 'percent'));
+});
+
+test('horizontal stacked bars run segments left to right with categories on Y', () => {
+  const model = buildBarsModel({ spec: { type: 'stacked', orientation: 'horizontal', series: MEASURES }, data: stackedRows() });
+  assert.equal(model.orientation, 'horizontal');
+  assert.equal(model.spec.orientation, 'horizontal');
+  assert.deepEqual(model.series.map(series => series.key), MEASURES.map(series => series.key));
+  assert.deepEqual(model.tableRows.map(row => row.key), model.rows.map(row => row.key));
+
+  const rows = stackedRows().slice(0, 2);
+  const rects = horizontalStackRects(rows, MEASURES, { width: 400, height: 200 });
+  assert.equal(rects.length, 2);
+  const first = rects[0];
+  assert.ok(first.y < rects[1].y, 'categories run top to bottom');
+  for (let index = 0; index < first.segments.length; index += 1) {
+    const segment = first.segments[index];
+    assert.ok(segment.width > 0, 'each present segment has width');
+    if (index > 0) {
+      const previous = first.segments[index - 1];
+      assert.ok(Math.abs(previous.x + previous.width - segment.x) < 1e-9, 'segments touch without gaps');
+    }
+  }
+  const last = first.segments.at(-1);
+  assert.ok(last.x + last.width <= 400 + 1e-9, 'segments stay inside the plot');
+  assert.ok(Math.abs(last.x + last.width - first.totalPx) < 1e-9, 'the last segment ends at the row total');
+  assert.equal(first.segments.length, MEASURES.length, 'a null-free row has one segment per series');
 });
 
 test('the bars gallery proves every mode, table, interaction and both themes in Chromium', async t => {
@@ -309,6 +335,7 @@ test('the bars gallery proves every mode, table, interaction and both themes in 
     assert.ok(selection.selection.exclude.includes(thirdKey));
 
     // The row checkbox toggles the same include predicate.
+    await page.evaluate(() => { document.getElementById('bars-ranked').shadowRoot.querySelector('details.yk-chart-table').open = true; });
     await page.locator('yk-bars#bars-ranked .yk-table-select').nth(0).check();
     selection = await inspect('bars-ranked');
     assert.ok(selection.selection.include.includes(firstKey));
