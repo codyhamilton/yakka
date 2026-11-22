@@ -63,7 +63,56 @@ Called on all three reports and all three briefs. All six: state `delivered`, sc
 2. The browser tests need a short `TMPDIR` (Chromium `SingletonSocket` limit); `.scratch/t` under the worktree works. Not a code problem.
 3. `/sessions` was probed separately rather than added to the shared acceptance test; it uses the same shell contract and is covered structurally.
 
+## Phase 2 — Reset and delete name the scale of loss and need a second phrase
+
+Status: closed, 2026-11-22 (closing commit carries `Yakka-Phase: 31-legacy-tenant-adoption:2`).
+
+Run: `31-p2` (build orchestrator; refine log `/home/codyh/workspace/.briefs/yakka/logs/31-p2-refine.log`).
+
+Refine verdict: PROCEED, two units. Briefs in `briefs/`, Units list under Phase 2 in `DESIGN.md`, committed at `1ca363cf`. Unit 01 and 02 own disjoint paths but run in sequence because C1–C6 need 01's product code.
+
+Units:
+
+1. `phase2-01-lifecycle-dialog-guard` — landed `b616cb93`. Worker report `reports/phase2-01-lifecycle-dialog-guard.md`. New `RESET_EFFECT`/`DELETE_EFFECT` copy and `PHRASES`; `dialog [hidden]{display:none}`; `#op-scale` after `#op-effect`; `#phrase-label`/`#phrase-text`/`#typed-phrase`; `openConfirm` loading state and `loadScale`; `paintScale`; `updateConfirm` on both inputs; `submitConfirmed` phrase re-check; `close` listener drops `state.pending`. Request URL/method/headers/body unchanged. Both Go contract tests updated. Deviation: none; the mockup's scale-above-effect order and mockup-only danger/bold styling were not copied (DESIGN 2.1(2) is explicit). Closes C7.
+2. `phase2-02-browser-acceptance` — landed `3dc18983`. Worker report `reports/phase2-02-browser-acceptance.md`. `installLifecycleStub` gains `countRequests`/`counts` and a second route for `GET /v1/analytics/event-counts` (snapshot before an optional harness-only `gate`); `openDialogReady()` added after the four existing A6 dialog opens; real-browser C1–C6 groups added after the Phase 1 `analytics.splice(plan31Start)` line. Deviations: results group ids are `P2-C1`…`P2-C6` so the later Plan 30 `C1` groups cannot overwrite the Phase 2 evidence; `TMPDIR` is the canonical `.scratch/t` (the `../..` path is too long for Chromium). Closes C1–C6.
+
+### Verification (Phase 2)
+
+Phase outcome, verified against the real implementation at `/profile/lifecycle`:
+
+- Dialog for a tenant holding records: `op-scale` reads `This tenant holds 1,418,544 stored records (1,418,332 events, 212 rejected). Deleting erases all of them and cannot be undone.` (reset uses `Resetting`), `op-effect` is the 2.1(1) string, the phrase label reads `Type delete all data to confirm` / `Type reset all data to confirm`, Confirm is disabled until both the immutable id and phrase match exactly. Empty counts show `This tenant holds no stored records.` with the phrase box hidden; an unreadable count shows `The size of this tenant could not be read. Assume it holds data.` and requires the phrase. The request is still one `DELETE /v1/tenants/default` with `Content-Type: application/json`, `X-Yakka-UI: tenant-lifecycle` and `{"confirm_tenant_id":"default"}`.
+- Real Go (C7): `cd packages/yakka && go test ./internal/serve -run LifecycleProfile -count=1` → `ok … 0.009s`; `gofmt -l` on both changed Go test files → empty.
+- Real Chromium (C1–C6): `cd packages/yakka-analytics && TMPDIR=/home/codyh/workspace/yakka-build/31/.scratch/t PUBLIC_CANVAS_TEST_MODE=true NODE_OPTIONS=--max-old-space-size=8192 node --test tests/operable-chrome/phase3-acceptance.test.mjs` → `ok 1`, pass 1, fail 0; `results.json` failures `[]` with `P2-C1`…`P2-C6`, `A6`, `A7` and Plan 30 `C1` all `pass`.
+
+Per-check status:
+
+| ID | Result | Evidence |
+| --- | --- | --- |
+| C1 | pass | Real Chromium `P2-C1`: delete scale sentence, delete effect string and `Type delete all data to confirm`; reset shows `Resetting erases all of them and cannot be undone.` and `reset all data`. |
+| C2 | pass | Real Chromium `P2-C2`: disabled while counts load, id-only, phrase-only and phrase one character wrong; enabled only when both match; changing either disables again. |
+| C3 | pass | Real Chromium `P2-C3`: Cancel sends no destructive request; Confirm sends exactly one `DELETE /v1/tenants/default` with the JSON content type, `X-Yakka-UI: tenant-lifecycle` and `{"confirm_tenant_id":"default"}`. |
+| C4 | pass | Real Chromium `P2-C4`: zero counts → `This tenant holds no stored records.`, phrase label hidden, id-only enables Confirm. |
+| C5 | pass | Real Chromium `P2-C5`: network abort, 500 and non-numeric body each → `The size of this tenant could not be read. Assume it holds data.` and the phrase is required. |
+| C6 | pass | Real Chromium `P2-C6`: a cancelled dialog's late count result does not change the next dialog (held first count, stale-result guard). |
+| C7 | pass | Real Go: `go test ./internal/serve -run LifecycleProfile -count=1` ok with the updated copy constants and required substrings; `setTimeout` absent. |
+
+### Screens and mockup comparison
+
+Captured with the real app (Plan 30 Go lifecycle fixture + lifecycle stub, 1440×900) under the gitignored `.scratch/31-p2/`:
+
+- `lifecycle-confirm.png` vs `mockups/lifecycle-confirm.png`: MATCH on dialog title `Delete tenant`, `Display name: default`, `Immutable id: default`, the exact scale sentence with `1,418,544` / `1,418,332` / `212`, the 2.1(1) delete effect copy, the bold human-owner line, the typed-id label/input, `Type delete all data to confirm` with its input and the disabled Confirm. Differences all follow the written spec, which wins: the real dialog is the existing modal anchored at left 12px and 600px wide (the mockup draws it inline below the table); `#op-scale` follows `#op-effect` per DESIGN 2.1(2) (the mockup draws scale first); and the scale line uses the explicit `.effect` styling (the mockup's danger/bold `.scale` class is mockup-only and was not copied). Reset light capture confirms `Resetting erases all of them and cannot be undone.` and `reset all data`.
+
+### artifact_feedback
+
+Called on both Phase 2 reports and both briefs: all four `delivered`, screen `pass` by jev-1.13.0 (scoring off on the service).
+
+### Phase 2 — Carried
+
+1. Results group ids are `P2-C1`…`P2-C6` in `results.json`; they assert DESIGN C1–C6 exactly. The `P2-` prefix is only to avoid the later Plan 30 `C1` groups overwriting the evidence.
+2. The C6 stale-result check adds a harness-only `state.counts.gate` hook (snapshot status/body/abort before the gate). It is test scaffolding, not a product contract.
+3. The real dialog is a left-anchored 600px modal; the mockup renders the dialog inline. Future refinements should keep the existing modal and treat the inline rendering as a mockup-only choice.
+
 ## Gates
 
-- gate: signed-in production check of Cody's live `default` tenant in the deployed shell is not automatable (Yakka has no automated sign-in); Phase 1 is proven against fixtures only.
-- gate: YAKKA_ADOPT_UNMARKED_TENANTS stays off in fly.toml until Phase 2 has shipped (standing override, 22 Nov); Phase 1 touches no flag.
+- gate: signed-in production check of Cody's live `default` tenant in the deployed shell is not automatable (Yakka has no automated sign-in); Phases 1 and 2 are proven against fixtures only.
+- gate: YAKKA_ADOPT_UNMARKED_TENANTS stays off in fly.toml until Phase 2 has shipped (standing override, 22 Nov); Phases 1 and 2 touch no flag.
