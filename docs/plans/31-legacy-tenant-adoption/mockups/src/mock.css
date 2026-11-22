@@ -1,0 +1,25 @@
+/* Mockup-only layout helpers. Colours are the product tokens (--surface, --border, --text, --muted, --accent, --danger). */
+/* The lifecycle page defines only --yk-* tokens; alias the shell names for mock-only rules. */
+html { --bg: var(--yk-bg); --surface: var(--yk-surface); --text: var(--yk-text); --muted: var(--yk-muted); --border: var(--yk-border); --accent: var(--yk-focus); --danger: var(--yk-danger); }
+html, body { background: var(--bg); color: var(--text); }
+body { margin: 0; }
+main { width: 100%; padding: 8px 12px 30px; box-sizing: border-box; text-align: left; }
+h1 { font-size: 16px; margin: 6px 0; }
+.mock-reference { color: var(--muted); font-size: 11px; margin-right: 12px; }
+.mock-population { margin: 4px 0 6px; color: var(--text); }
+.mock-note { margin: 8px 0; color: var(--muted); max-width: 120ch; }
+.mock-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+.mock-table th, .mock-table td { height: 30px; padding: 0 6px; text-align: left; border-bottom: 1px solid var(--border); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mock-table th { background: var(--surface); }
+.mock-table td.num { font-variant-numeric: tabular-nums; }
+.mock-listbox { position: absolute; top: 40px; left: 76px; width: 262px; background: var(--surface); border: 1px solid var(--border); z-index: 5; }
+.mock-opt { height: 28px; line-height: 28px; padding: 0 8px; }
+.mock-opt.selected { background: var(--accent); color: #0b141c; }
+.mock-opt.disabled { color: var(--muted); }
+.mock-dialog { position: static; display: block; width: 600px; margin: 10px 0 0 0; background: var(--surface); color: var(--text); border: 1px solid var(--border); padding: 8px 12px; text-align: left; }
+.mock-dialog label { display: block; margin: 6px 0; }
+.mock-dialog input { width: 260px; min-height: 28px; }
+.mock-dialog .scale { color: var(--danger); font-weight: 700; }
+.mock-dialog h2 { font-size: 14px; margin: 4px 0; }
+.mock-dialog p { margin: 4px 0; }
+.mock-dialog .dialog-actions { display: flex; gap: 8px; margin-top: 8px; }
