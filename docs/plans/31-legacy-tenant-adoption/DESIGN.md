@@ -239,6 +239,13 @@ Units:
 - Approach: known
 - Depends on: Phase 1 (same file; the row copy and selection predicate are written there)
 
+Units:
+
+| Unit | Brief | Depends on | Runs alongside |
+| --- | --- | --- | --- |
+| 01 Lifecycle dialog names the scale of loss and needs a second phrase | `briefs/phase2-01-lifecycle-dialog-guard.md` | nothing | nothing (`phase2-02` has disjoint paths but needs this unit's product code at run time) |
+| 02 Phase 2 real-browser acceptance (C1–C6) | `briefs/phase2-02-browser-acceptance.md` | 01 (real-browser evidence) | nothing |
+
 ### Phase 3 — The server adopts every unmarked tenant once, behind a flag
 
 - Outcome: entry point: `yakka serve` start-up with `YAKKA_ADOPT_UNMARKED_TENANTS=true` and a `registry.json` holding owned tenants with no lifecycle record. Action: start, then `GET /v1/me` as the owner. Observable result: every previously unmarked tenant reports `lifecycle_state: "active"` with a 32-hex `lifecycle_generation`; already-marked tenants are byte-identical; a second start changes `registry.json` by zero bytes; with the flag unset the same registry reports `unmarked` with a null generation and still serves reads and mints tokens; reset/delete of an adopted tenant succeeds with the normal confirmations and is refused without them; no tenant-lifecycle text says "unsupported" except the retained error code.
