@@ -85,6 +85,18 @@ func TestLifecycleProfilePhase3Page(t *testing.T) {
 		"left anchored dialog":            "inset:12px auto auto 12px",
 		"dialog width":                    "width:min(600px,calc(100vw - 24px))",
 		"dialog fixed":                    "position:fixed",
+		"scale line":                      "op-scale",
+		"typed phrase input":              "typed-phrase",
+		"phrase label":                    "phrase-label",
+		"phrase constants":                "PHRASES",
+		"scale loader":                    "loadScale",
+		"scale endpoint":                  "/v1/analytics/event-counts?tenant=",
+		"scale timeout":                   "AbortSignal.timeout",
+		"scale loading copy":              "Checking how much data this tenant holds…",
+		"scale empty copy":                "This tenant holds no stored records.",
+		"scale unknown copy":              "The size of this tenant could not be read. Assume it holds data.",
+		"reset phrase":                    "reset all data",
+		"delete phrase":                   "delete all data",
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("lifecycle page missing %s (%q)", name, want)

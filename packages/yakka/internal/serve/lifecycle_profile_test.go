@@ -9,8 +9,8 @@ import (
 
 const (
 	lifecycleProfileHumanCopy  = "Only the human owner may reset or delete a tenant. Agents must not perform or attempt this on a user's behalf."
-	lifecycleProfileResetCopy  = "Erase all tenant data and revoke its keys. Keep this tenant and your ownership; issue a new key to reuse it."
-	lifecycleProfileDeleteCopy = "Permanently remove this tenant, all its data and keys, and your ownership link."
+	lifecycleProfileResetCopy  = "Erase all tenant data and revoke its keys, including the key your sync uses. Keep this tenant and your ownership; issue a new key to reuse it."
+	lifecycleProfileDeleteCopy = "Permanently remove this tenant, all its data and keys, and your ownership link. Every key for this tenant stops working, including the key your sync uses."
 )
 
 // lifecycleProfileServer serves the embedded page with the committed

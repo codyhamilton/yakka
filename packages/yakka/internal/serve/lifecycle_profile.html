@@ -95,6 +95,7 @@ dialog p{margin:4px 0}
 .human{font-weight:600}
 .effect{border-left:3px solid var(--yk-border);padding-left:8px;color:var(--yk-muted)}
 dialog label{display:block;margin-top:8px;color:var(--yk-muted)}
+dialog [hidden]{display:none}
 dialog input{width:100%;padding:0 6px;min-height:28px;color:var(--yk-text);background:var(--yk-surface-alt);border:1px solid var(--yk-border);border-radius:2px}
 .dialog-actions{display:flex;gap:8px;margin-top:8px}
 </style>
@@ -137,16 +138,19 @@ dialog input{width:100%;padding:0 6px;min-height:28px;color:var(--yk-text);backg
 <p id="op-name"></p>
 <p id="op-id"></p>
 <p id="op-effect" class="effect"></p>
+<p id="op-scale" class="effect" data-testid="op-scale"></p>
 <p class="human">Only the human owner may reset or delete a tenant. Agents must not perform or attempt this on a user's behalf.</p>
 <label>Type the immutable tenant id to confirm <input id="typed-id" data-testid="typed-id" autocomplete="off" spellcheck="false"></label>
+<label id="phrase-label" hidden>Type <code id="phrase-text"></code> to confirm <input id="typed-phrase" data-testid="typed-phrase" autocomplete="off" spellcheck="false"></label>
 <div class="dialog-actions"><button id="cancel-action" type="button">Cancel</button><button id="confirm-action" type="button" disabled>Confirm</button></div>
 </dialog>
 </main>
 <script>
 "use strict";
 const HUMAN = "Only the human owner may reset or delete a tenant. Agents must not perform or attempt this on a user's behalf.";
-const RESET_EFFECT = "Erase all tenant data and revoke its keys. Keep this tenant and your ownership; issue a new key to reuse it.";
-const DELETE_EFFECT = "Permanently remove this tenant, all its data and keys, and your ownership link.";
+const RESET_EFFECT = "Erase all tenant data and revoke its keys, including the key your sync uses. Keep this tenant and your ownership; issue a new key to reuse it.";
+const DELETE_EFFECT = "Permanently remove this tenant, all its data and keys, and your ownership link. Every key for this tenant stops working, including the key your sync uses.";
+const PHRASES = { reset: "reset all data", delete: "delete all data" };
 const SELECTION_KEY = "yakka-analytics-tenant", GENERATION_KEY = "yakka-analytics-tenant-generation";
 const INVALIDATED_KEY = "yakka-analytics-tenant-invalidated";
 const THEME_KEY = "yakka-analytics-theme";
@@ -321,23 +325,64 @@ function openConfirm(op, tenant) {
   byId("op-name").textContent = "Display name: " + tenant.name;
   byId("op-id").textContent = "Immutable id: " + tenant.id;
   byId("op-effect").textContent = op === "reset" ? RESET_EFFECT : DELETE_EFFECT;
-  byId("typed-id").value = ""; byId("confirm-action").disabled = true;
+  byId("op-scale").textContent = "Checking how much data this tenant holds…";
+  state.pending.scale = { status: "loading" };
+  byId("typed-id").value = ""; byId("typed-phrase").value = "";
+  byId("phrase-label").hidden = true;
+  byId("confirm-action").disabled = true;
   byId("confirm-dialog").showModal();
+  loadScale(state.pending);
 }
-byId("typed-id").addEventListener("input", function () {
+async function loadScale(pending) {
+  let scale = { status: "unknown" };
+  try {
+    const res = await fetch("/v1/analytics/event-counts?tenant=" + encodeURIComponent(pending.tenant.id),
+      { method: "GET", credentials: "include", headers: { "Accept": "application/json" }, signal: AbortSignal.timeout(15000) });
+    if (res.ok) {
+      const body = await res.json(); const t = body && body.tenant_total;
+      if (t && Number.isFinite(t.rows) && Number.isFinite(t.events) && Number.isFinite(t.rejections)) {
+        scale = { status: t.rows > 0 ? "ok" : "empty", rows: t.rows, events: t.events, rejections: t.rejections };
+      }
+    }
+  } catch (e) { /* unreadable: stay unknown */ }
+  if (state.pending !== pending) return;
+  pending.scale = scale; paintScale(pending); updateConfirm();
+}
+function paintScale(pending) {
+  const scale = pending.scale;
+  if (scale.status === "ok") {
+    const verb = pending.op === "reset" ? "Resetting" : "Deleting";
+    byId("op-scale").textContent = "This tenant holds " + scale.rows.toLocaleString("en-US") + " stored records (" + scale.events.toLocaleString("en-US") + " events, " + scale.rejections.toLocaleString("en-US") + " rejected). " + verb + " erases all of them and cannot be undone.";
+    byId("phrase-label").hidden = false;
+  } else if (scale.status === "empty") {
+    byId("op-scale").textContent = "This tenant holds no stored records.";
+    byId("phrase-label").hidden = true;
+  } else {
+    byId("op-scale").textContent = "The size of this tenant could not be read. Assume it holds data.";
+    byId("phrase-label").hidden = false;
+  }
+  byId("phrase-text").textContent = PHRASES[pending.op];
+}
+function updateConfirm() {
   const pending = state.pending;
-  const match = !!pending && this.value === pending.tenant.id;
-  byId("confirm-action").disabled = !match || state.busy || state.recoveryFailed;
-});
+  let ok = !!pending && !!pending.scale && pending.scale.status !== "loading" && !state.busy && !state.recoveryFailed;
+  if (ok && byId("typed-id").value !== pending.tenant.id) ok = false;
+  if (ok && (pending.scale.status === "ok" || pending.scale.status === "unknown") && byId("typed-phrase").value !== PHRASES[pending.op]) ok = false;
+  byId("confirm-action").disabled = !ok;
+}
+byId("typed-id").addEventListener("input", function () { updateConfirm(); });
+byId("typed-phrase").addEventListener("input", function () { updateConfirm(); });
 byId("cancel-action").addEventListener("click", function () {
   // Cancellation changes nothing: data, selection and recovery state stay as they were.
   state.pending = null; byId("confirm-dialog").close();
 });
+byId("confirm-dialog").addEventListener("close", function () { state.pending = null; });
 byId("confirm-action").addEventListener("click", function () { submitConfirmed(); });
 async function submitConfirmed() {
   const pending = state.pending;
   if (!pending || state.busy || state.recoveryFailed || !state.me) return;
   if (byId("typed-id").value !== pending.tenant.id) return;
+  if (pending.scale && (pending.scale.status === "ok" || pending.scale.status === "unknown") && byId("typed-phrase").value !== PHRASES[pending.op]) return;
   state.pending = null; byId("confirm-dialog").close(); state.busy = true; updateButtons();
   const id = encodeURIComponent(pending.tenant.id);
   const url = pending.op === "reset" ? "/v1/tenants/" + id + "/reset" : "/v1/tenants/" + id;
