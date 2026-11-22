@@ -380,12 +380,20 @@ test('plan30 phase 3 acceptance', { skip: SKIP }, async t => {
       await lifecyclePage.waitForFunction(() => document.querySelectorAll('#tenants tr[data-tenant-id]').length === 3);
     };
 
+    const openDialogReady = async () => {
+      await lifecyclePage.waitForFunction(() => {
+        const text = document.querySelector('#op-scale')?.textContent || '';
+        return text !== '' && !text.startsWith('Checking');
+      });
+    };
+
     await group('A6', async () => {
       await openLifecycle('t-a');
       const requestsBefore = lifecycle.state.requests.length;
       await lifecyclePage.locator('tr[data-tenant-id="t-a"]').getByRole('button', { name: 'Reset tenant' }).click();
       const dialog = lifecyclePage.locator('#confirm-dialog');
       await dialog.waitFor();
+      await openDialogReady();
       assert.equal(await lifecyclePage.locator('#typed-id').inputValue(), '');
       assert.equal(await lifecyclePage.locator('#confirm-action').isDisabled(), true);
       const box = await dialog.boundingBox();
@@ -398,6 +406,7 @@ test('plan30 phase 3 acceptance', { skip: SKIP }, async t => {
       assert.equal(await lifecyclePage.locator('#confirm-dialog').evaluate(node => node.open), false);
       assert.equal(lifecycle.state.requests.length, requestsBefore, 'Cancel issued a lifecycle request');
       await lifecyclePage.locator('tr[data-tenant-id="t-a"]').getByRole('button', { name: 'Reset tenant' }).click();
+      await openDialogReady();
       await lifecyclePage.locator('#typed-id').fill('t-a');
       assert.equal(await lifecyclePage.locator('#confirm-action').isDisabled(), false);
       await lifecyclePage.locator('#confirm-action').click();
@@ -417,6 +426,7 @@ test('plan30 phase 3 acceptance', { skip: SKIP }, async t => {
     await group('A6', async () => {
       await openLifecycle('t-a');
       await lifecyclePage.locator('tr[data-tenant-id="t-a"]').getByRole('button', { name: 'Delete tenant' }).click();
+      await openDialogReady();
       await lifecyclePage.locator('#typed-id').fill('t-a');
       await lifecyclePage.locator('#confirm-action').click();
       await lifecyclePage.waitForFunction(() => document.querySelectorAll('#tenants tr[data-tenant-id]').length === 2);
@@ -434,6 +444,7 @@ test('plan30 phase 3 acceptance', { skip: SKIP }, async t => {
       await openLifecycle('t-a');
       lifecycle.state.abort.reset = true;
       await lifecyclePage.locator('tr[data-tenant-id="t-a"]').getByRole('button', { name: 'Reset tenant' }).click();
+      await openDialogReady();
       await lifecyclePage.locator('#typed-id').fill('t-a');
       await lifecyclePage.locator('#confirm-action').click();
       await lifecyclePage.waitForFunction(() => (document.querySelector('#status')?.textContent || '').includes('completion unknown'));
@@ -552,6 +563,159 @@ test('plan30 phase 3 acceptance', { skip: SKIP }, async t => {
       assert.equal(await lifecyclePage.locator('#selection-note').isVisible(), true, 'foreign tenant kept the selection note hidden');
     }, 'A7 lifecycle default selected, unmarked/unsupported state, not-assigned generation, exact note, no buttons, foreign keeps selection note');
     analytics.splice(plan31Start);
+
+    // ----- Plan 31 Phase 2 C1-C6: scale line, typed phrase, stale count -----
+    // Group ids are prefixed P2- because this file already reports Plan 30's
+    // C1 checks; the DESIGN acceptance ids remain C1-C6.
+    const defaultActive = { id: 'default', name: 'default', lifecycle_state: 'active', lifecycle_generation: '3f9a0c1d7e22b4a65c80d1e9f2a7b304' };
+    const countsBody = tenant_total => ({
+      matched: { events: 0, rejections: 0, rows: 0 },
+      tenant_total,
+      unit: 'retained_record'
+    });
+    const openDefaultLifecycle = async tenantTotal => {
+      lifecycle.reset();
+      lifecycle.state.tenants = lifecycle.state.tenants.concat([defaultActive]);
+      lifecycle.state.counts.body = countsBody(tenantTotal);
+      await lifecyclePage.goto(harness.lifecycleUrl('default'));
+      await lifecyclePage.waitForFunction(() => document.querySelectorAll('#tenants tr[data-tenant-id]').length === 4);
+    };
+    const openDefaultOp = async op => {
+      await lifecyclePage.locator('tr[data-tenant-id="default"]').getByRole('button', { name: op === 'reset' ? 'Reset tenant' : 'Delete tenant' }).click();
+      await lifecyclePage.locator('#confirm-dialog').waitFor();
+      await openDialogReady();
+    };
+    const scaleText = async () => (await lifecyclePage.locator('#op-scale').textContent() || '').trim();
+    const phraseLabelText = async () => (await lifecyclePage.locator('#phrase-label').textContent() || '').replace(/\s+/g, ' ').trim();
+
+    await group('P2-C1', async () => {
+      await openDefaultLifecycle({ events: 1418332, rejections: 212, rows: 1418544 });
+      await openDefaultOp('delete');
+      assert.equal(await scaleText(), 'This tenant holds 1,418,544 stored records (1,418,332 events, 212 rejected). Deleting erases all of them and cannot be undone.');
+      assert.equal((await lifecyclePage.locator('#op-effect').textContent() || '').trim(), 'Permanently remove this tenant, all its data and keys, and your ownership link. Every key for this tenant stops working, including the key your sync uses.');
+      assert.equal(await phraseLabelText(), 'Type delete all data to confirm');
+      await lifecyclePage.locator('#cancel-action').click();
+      await openDefaultOp('reset');
+      assert.equal(await scaleText(), 'This tenant holds 1,418,544 stored records (1,418,332 events, 212 rejected). Resetting erases all of them and cannot be undone.');
+      assert.equal(await phraseLabelText(), 'Type reset all data to confirm');
+    }, 'C1 delete/reset name the exact scale, effect and phrase labels');
+
+    await group('P2-C2', async () => {
+      await openDefaultLifecycle({ events: 5, rejections: 0, rows: 5 });
+      let release;
+      let signalHeld;
+      const firstHeld = new Promise(resolve => { signalHeld = resolve; });
+      lifecycle.state.counts.gate = () => { signalHeld(); return new Promise(done => { release = done; }); };
+      await lifecyclePage.locator('tr[data-tenant-id="default"]').getByRole('button', { name: 'Delete tenant' }).click();
+      await lifecyclePage.locator('#confirm-dialog').waitFor();
+      await firstHeld;
+      await lifecyclePage.waitForFunction(() => (document.querySelector('#op-scale')?.textContent || '').startsWith('Checking'));
+      assert.equal(await lifecyclePage.locator('#confirm-action').isDisabled(), true, 'Confirm enabled while counts load');
+      release();
+      await openDialogReady();
+      const confirm = lifecyclePage.locator('#confirm-action');
+      const typedId = lifecyclePage.locator('#typed-id');
+      const typedPhrase = lifecyclePage.locator('#typed-phrase');
+      await typedId.fill('default');
+      assert.equal(await confirm.isDisabled(), true, 'enabled with only the id');
+      await typedId.fill('');
+      await typedPhrase.fill('delete all data');
+      assert.equal(await confirm.isDisabled(), true, 'enabled with only the phrase');
+      await typedId.fill('default');
+      await typedPhrase.fill('delete all dat');
+      assert.equal(await confirm.isDisabled(), true, 'enabled with a one-character-wrong phrase');
+      await typedPhrase.fill('delete all data');
+      assert.equal(await confirm.isDisabled(), false, 'disabled with both exact');
+      await typedPhrase.fill('delete all datax');
+      assert.equal(await confirm.isDisabled(), true, 'stayed enabled when the phrase changed');
+      await typedPhrase.fill('delete all data');
+      assert.equal(await confirm.isDisabled(), false, 'disabled after restoring the phrase');
+      await typedId.fill('defaul');
+      assert.equal(await confirm.isDisabled(), true, 'stayed enabled when the id changed');
+      await typedId.fill('default');
+      assert.equal(await confirm.isDisabled(), false, 'disabled after restoring the id');
+    }, 'C2 Confirm gated on the loaded count, exact id and exact phrase both ways');
+
+    await group('P2-C3', async () => {
+      await openDefaultLifecycle({ events: 5, rejections: 0, rows: 5 });
+      const requestsBefore = lifecycle.state.requests.length;
+      await openDefaultOp('delete');
+      await lifecyclePage.locator('#cancel-action').click();
+      assert.equal(lifecycle.state.requests.length, requestsBefore, 'Cancel issued a lifecycle request');
+      assert.equal(lifecycle.calls('/v1/tenants/default', 'DELETE').length, 0, 'Cancel issued a destructive request');
+      await openDefaultOp('delete');
+      await lifecyclePage.locator('#typed-id').fill('default');
+      await lifecyclePage.locator('#typed-phrase').fill('delete all data');
+      await lifecyclePage.locator('#confirm-action').click();
+      await lifecyclePage.waitForFunction(() => document.querySelectorAll('#tenants tr[data-tenant-id]').length === 3);
+      const deletes = lifecycle.calls('/v1/tenants/default', 'DELETE');
+      assert.equal(deletes.length, 1, `expected exactly one DELETE, got ${deletes.length}`);
+      assert.match(deletes[0].headers['content-type'] || '', /application\/json/);
+      assert.equal(deletes[0].headers['x-yakka-ui'], 'tenant-lifecycle');
+      assert.deepEqual(JSON.parse(deletes[0].body), { confirm_tenant_id: 'default' });
+    }, 'C3 Cancel sends nothing; Confirm sends exactly one unchanged DELETE');
+
+    await group('P2-C4', async () => {
+      await openDefaultLifecycle({ events: 0, rejections: 0, rows: 0 });
+      await openDefaultOp('delete');
+      assert.equal(await scaleText(), 'This tenant holds no stored records.');
+      assert.equal(await lifecyclePage.locator('#phrase-label').evaluate(node => node.hidden), true, 'phrase label shown for an empty tenant');
+      await lifecyclePage.locator('#typed-id').fill('default');
+      assert.equal(await lifecyclePage.locator('#confirm-action').isDisabled(), false);
+    }, 'C4 zero counts hide the phrase and ask only for the id');
+
+    await group('P2-C5', async () => {
+      const unreadable = 'The size of this tenant could not be read. Assume it holds data.';
+      const setups = [
+        () => { lifecycle.state.counts.abort = true; },
+        () => { lifecycle.state.counts.status = 500; },
+        () => { lifecycle.state.counts.body = countsBody({ events: 'x', rejections: 0, rows: 0 }); }
+      ];
+      for (const setup of setups) {
+        await openDefaultLifecycle({ events: 0, rejections: 0, rows: 0 });
+        setup();
+        await openDefaultOp('delete');
+        assert.equal(await scaleText(), unreadable);
+        assert.equal(await lifecyclePage.locator('#phrase-label').evaluate(node => node.hidden), false, 'phrase label hidden on an unreadable count');
+        await lifecyclePage.locator('#typed-id').fill('default');
+        assert.equal(await lifecyclePage.locator('#confirm-action').isDisabled(), true);
+        await lifecyclePage.locator('#typed-phrase').fill('delete all data');
+        assert.equal(await lifecyclePage.locator('#confirm-action').isDisabled(), false);
+        await lifecyclePage.locator('#cancel-action').click();
+      }
+    }, 'C5 network error, 500 and non-numeric body all assume data and require the phrase');
+
+    await group('P2-C6', async () => {
+      lifecycle.reset();
+      lifecycle.state.counts.body = countsBody({ events: 11, rejections: 1, rows: 12 });
+      let releaseFirst;
+      let signalHeld;
+      const firstHeld = new Promise(resolve => { signalHeld = resolve; });
+      lifecycle.state.counts.gate = entry => entry.search.includes('tenant=t-a')
+        ? (signalHeld(), new Promise(done => { releaseFirst = done; }))
+        : undefined;
+      await lifecyclePage.goto(harness.lifecycleUrl('t-a'));
+      await lifecyclePage.waitForFunction(() => document.querySelectorAll('#tenants tr[data-tenant-id]').length === 3);
+      await lifecyclePage.locator('tr[data-tenant-id="t-a"]').getByRole('button', { name: 'Reset tenant' }).click();
+      await lifecyclePage.locator('#confirm-dialog').waitFor();
+      await firstHeld;
+      await lifecyclePage.locator('#cancel-action').click();
+      lifecycle.state.counts.body = countsBody({ events: 22, rejections: 2, rows: 24 });
+      const firstResponse = lifecyclePage.waitForResponse(response => {
+        const url = new URL(response.url());
+        return url.pathname === '/v1/analytics/event-counts' && url.searchParams.get('tenant') === 't-a';
+      });
+      await lifecyclePage.locator('tr[data-tenant-id="t-b"]').getByRole('button', { name: 'Reset tenant' }).click();
+      await lifecyclePage.locator('#confirm-dialog').waitFor();
+      await openDialogReady();
+      const second = 'This tenant holds 24 stored records (22 events, 2 rejected). Resetting erases all of them and cannot be undone.';
+      assert.equal(await scaleText(), second);
+      releaseFirst();
+      await firstResponse;
+      await lifecyclePage.evaluate(() => new Promise(done => requestAnimationFrame(() => requestAnimationFrame(done))));
+      assert.equal(await scaleText(), second, 'stale t-a count replaced the t-b dialog scale');
+      assert.equal(await lifecyclePage.locator('#confirm-action').isDisabled(), true);
+    }, 'C6 a cancelled dialog\'s late count never touches the next dialog');
 
     // ----- F7 -----
     await group('F7', async () => {

@@ -5,12 +5,14 @@
 //    /v1/tenants, token revoke, /logout, /oauth/callback and the device routes.
 //    It matches the existing API field names and A1-A6 shapes exactly.
 //  - a lifecycle helper that opens the real Go template at the fixture's
-//    upstream origin and stubs only /v1/me plus the destructive reset/delete
-//    calls. Nothing analytics is ever intercepted.
+//    upstream origin and stubs /v1/me, the destructive reset/delete calls, and
+//    the lifecycle page's own GET /v1/analytics/event-counts read. Nothing else
+//    analytics is intercepted.
 //  - 1440x900 light/dark screenshots under gitignored .scratch/ and mockup
 //    PNG/source path helpers.
 //
-// No production fixture mode, no synthetic analytics response, no fixed sleeps.
+// No production fixture mode, no fixed sleeps. The event-counts reply is the
+// lifecycle page's confirmation read, not an analytics surface.
 
 import { mkdir } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
@@ -284,10 +286,23 @@ const initialLifecycleTenants = () => [
   { id: 't-p', name: 'Resetting', lifecycle_state: 'resetting', lifecycle_generation: 1 }
 ];
 
+const defaultCounts = () => ({
+  status: 200,
+  body: {
+    matched: { events: 0, rejections: 0, rows: 0 },
+    tenant_total: { events: 0, rejections: 0, rows: 0 },
+    unit: 'retained_record'
+  },
+  abort: false,
+  gate: null
+});
+
 export async function installLifecycleStub(page) {
   const state = {
     tenants: initialLifecycleTenants(),
     requests: [],
+    countRequests: [],
+    counts: defaultCounts(),
     status: { me: 200, reset: 204, delete: 204 },
     abort: { reset: false, delete: false }
   };
@@ -296,6 +311,8 @@ export async function installLifecycleStub(page) {
   const reset = () => {
     state.tenants = initialLifecycleTenants();
     state.requests.length = 0;
+    state.countRequests.length = 0;
+    state.counts = defaultCounts();
     state.status = { me: 200, reset: 204, delete: 204 };
     state.abort = { reset: false, delete: false };
   };
@@ -334,6 +351,16 @@ export async function installLifecycleStub(page) {
     return await route.continue();
   };
 
+  const countsHandler = async route => {
+    const request = route.request();
+    const entry = capture(state.countRequests, request, '');
+    const { status, body, abort } = state.counts;
+    if (typeof state.counts.gate === 'function') await state.counts.gate(entry);
+    if (abort) return await route.abort('failed');
+    return await route.fulfill({ status, headers: jsonHeaders(request), body: JSON.stringify(body) });
+  };
+
   await page.route(API_ROUTE, handler);
+  await page.route(/\/v1\/analytics\/event-counts/, countsHandler);
   return { state, reset, calls, hold };
 }
