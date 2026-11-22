@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Plan 31 · tenant selector · default selectable</title>
+<link rel="stylesheet" href="css/app.css">
+<link rel="stylesheet" href="css/workspace.css">
+<link rel="stylesheet" href="css/scope-controls.css">
+<link rel="stylesheet" href="css/charts.css">
+<link rel="stylesheet" href="css/account.css">
+<link rel="stylesheet" href="mock.css">
+</head>
+<body>
+<header class="top">
+      <div class="identity-row">
+        <a class="brand" href="/">Yakka <span>Analytics</span></a>
+        <label class="tenant-field">Tenant <select id="tenant-select" class="tenant-select" aria-label="Tenant"><option value="default" selected>default · default</option><option value="t-4f2a91c07b3d">Scratch · t-4f2a91c07b3d</option><option value="t-81c3e2d9a0b4" disabled>Old build · t-81c3e2d9a0b4 · resetting</option></select></label>
+        <span id="tenant-note" class="tenant-note" hidden></span>
+        <button id="theme-toggle" type="button">Theme</button><span class="mock-reference">DESIGN REFERENCE · Plan 31 · synthetic data</span>
+      </div>
+      <nav class="analytics-nav" aria-label="Analytics">
+        <a href="/">Start</a><a href="/b/pulse" aria-current="page">Pulse</a><a href="/b/trends">Trends</a><a href="/b/cost">Cost</a><a href="/b/quality">Quality</a><a href="/b/tools">Tools</a><a href="/b/workflow">Workflow</a><a href="/b/compare">Compare</a><a href="/b/scatter">Scatter</a><a href="/plans">Plans</a><a href="/sessions">Sessions</a><a href="/ledger">Ledger</a><a href="/ops">Operations</a>
+      </nav>
+      <nav class="account-nav" aria-label="Account">
+        <a href="/profile#tokens">Tokens</a><a href="/profile#tenants">Tenants</a><a href="/profile#membership">Membership</a><a href="/settings">Settings</a><a href="/device">Device approval</a>
+      </nav>
+    </header>
+<div class="mock-listbox" role="listbox" aria-label="Tenant options (expanded for the mockup)">
+  <div class="mock-opt selected" role="option" aria-selected="true">default · default</div>
+  <div class="mock-opt" role="option">Scratch · t-4f2a91c07b3d</div>
+  <div class="mock-opt disabled" role="option" aria-disabled="true">Old build · t-81c3e2d9a0b4 · resetting</div>
+</div>
+
+<main id="app" data-state="ready">
+<h1>Sessions</h1>
+<p class="mock-population">Tenant <strong>default</strong> (id <code>default</code>): 11,024 sessions retained · hook events 21 Jan 2026 4:28 PM to 22 Nov 2026 2:54 PM (Australia/Brisbane). This tenant has no lifecycle marker yet and is selectable.</p>
+<p class="mock-note">The list above is the native tenant select, drawn open. <strong>default · default</strong> is chosen and enabled with no state suffix. <strong>Old build</strong> is greyed because its reset is in progress.</p>
+<table class="mock-table"><thead><tr><th>Session</th><th>Repository</th><th>Harness</th><th>Started (Australia/Brisbane)</th><th>Events</th><th>Stage</th></tr></thead><tbody><tr><td>ses_9f3c21a0</td><td>codyhamilton/yakka</td><td>claude-code</td><td>22 Nov 2026 2:51 PM</td><td class=num>412</td><td>design</td></tr><tr><td>ses_9f3b77d4</td><td>codyhamilton/yakka</td><td>claude-code</td><td>22 Nov 2026 1:02 PM</td><td class=num>1,806</td><td>execute</td></tr><tr><td>ses_9f3a10c9</td><td>codyhamilton/yakka</td><td>cursor</td><td>22 Nov 2026 11:40 AM</td><td class=num>233</td><td>review</td></tr><tr><td>ses_9f38e2b1</td><td>codyhamilton/yakka</td><td>claude-code</td><td>21 Nov 2026 8:19 PM</td><td class=num>977</td><td>design</td></tr><tr><td>ses_9f37a55e</td><td>codyhamilton/ctzns-web</td><td>claude-code</td><td>21 Nov 2026 4:07 PM</td><td class=num>541</td><td>execute</td></tr><tr><td>ses_9f3622f0</td><td>codyhamilton/yakka</td><td>opencode</td><td>21 Nov 2026 9:33 AM</td><td class=num>88</td><td>refine</td></tr><tr><td>ses_9f3511aa</td><td>codyhamilton/yakka</td><td>claude-code</td><td>20 Nov 2026 6:45 PM</td><td class=num>1,204</td><td>execute</td></tr><tr><td>ses_9f34c0de</td><td>codyhamilton/ctzns-web</td><td>claude-code</td><td>20 Nov 2026 2:12 PM</td><td class=num>366</td><td>review</td></tr><tr><td>ses_9f33f1b7</td><td>codyhamilton/yakka</td><td>claude-code</td><td>19 Nov 2026 10:58 AM</td><td class=num>719</td><td>design</td></tr><tr><td>ses_9f3299c3</td><td>codyhamilton/yakka</td><td>cursor</td><td>18 Nov 2026 3:30 PM</td><td class=num>152</td><td>execute</td></tr></tbody></table>
+</main>
+<footer><span id="schema-status">Server capabilities checked.</span><span id="request-status">0 requests in flight</span></footer>
+</body></html>
