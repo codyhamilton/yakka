@@ -162,7 +162,7 @@ function renderTenants(view, context, me) {
     for (const tenant of list) {
       const row = node('tr', undefined, { tabindex: '-1', dataset: { accountTenantRow: String(tenant.id) } });
       const state = tenantState(tenant);
-      row.append(node('td', String(tenant.name || '')));
+      row.append(node('td', String(tenant.name || ''), { title: String(tenant.name || '') }));
       row.append(node('td', String(tenant.id || ''), { title: String(tenant.id || '') }));
       row.append(node('td', 'Owner'));
       row.append(node('td', stateLabel(state), { className: `account-state account-state-${state}` }));
@@ -353,7 +353,8 @@ function renderTokens(view, context, me) {
       const state = tokenState(token);
       const row = node('tr', undefined, { dataset: { tokenRow: String(token.id) } });
       row.append(node('td', String(token.name || 'token'), { title: String(token.name || 'token') }));
-      row.append(node('td', String(token.tenant_name || tenantName(token.tenant) || token.tenant || '')));
+      const tenantLabel = String(token.tenant_name || tenantName(token.tenant) || token.tenant || '');
+      row.append(node('td', tenantLabel, { title: tenantLabel }));
       row.append(node('td', scopeLabel(token.scope)));
       row.append(node('td', formatDate(token.created_at)));
       row.append(node('td', formatDate(token.expires_at)));
