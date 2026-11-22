@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { decodeUrlState, encodeUrlState } from '../../web/contract/url-state.js';
-import { authorizedTenant, activeTenants } from '../../web/contract/session-gate.js';
+import { authorizedTenant, selectableTenants } from '../../web/contract/session-gate.js';
 import { createScheduler } from '../../web/js/core/request-scheduler.js';
 import { advancedScopeRows, removeAdvancedRow, resetScopeState } from '../../web/js/core/chips.js';
 import {
@@ -14,7 +14,10 @@ const ME = {
   tenants: [
     { id: 'tenant-a', name: 'Alpha', lifecycle_state: 'active' },
     { id: 'tenant-b', name: 'Beta', lifecycle_state: 'active' },
-    { id: 'tenant-c', name: 'Gamma', lifecycle_state: 'pending' }
+    { id: 'tenant-c', name: 'Gamma', lifecycle_state: 'resetting' },
+    { id: 'tenant-u', name: 'Uniform', lifecycle_state: 'unsupported', lifecycle_generation: null },
+    { id: 'tenant-m', name: 'Mike', lifecycle_state: 'unmarked' },
+    { id: 'tenant-x', name: 'Xray' }
   ]
 };
 
@@ -42,8 +45,16 @@ test('collector precedence: URL, then remembered, then first active; foreign URL
     store.delete('yakka-analytics-tenant');
     assert.deepEqual(authorizedTenant({ me: ME, urlTenant: '' }), { tenant: 'tenant-a', unavailable: false, source: 'first' });
     assert.deepEqual(authorizedTenant({ me: ME, urlTenant: 'foreign' }), { tenant: '', unavailable: true, source: 'url' });
-    assert.deepEqual(authorizedTenant({ me: ME, urlTenant: 'tenant-c' }), { tenant: '', unavailable: true, source: 'url' });
-    assert.deepEqual(activeTenants(ME).map(tenant => tenant.id), ['tenant-a', 'tenant-b']);
+    assert.deepEqual(authorizedTenant({ me: ME, urlTenant: 'tenant-c' }), { tenant: '', unavailable: true, source: 'url', reason: 'cleanup' });
+    assert.deepEqual(authorizedTenant({ me: ME, urlTenant: 'tenant-u' }), { tenant: 'tenant-u', unavailable: false, source: 'url' });
+    assert.deepEqual(authorizedTenant({ me: ME, urlTenant: 'tenant-m' }), { tenant: 'tenant-m', unavailable: false, source: 'url' });
+    assert.deepEqual(authorizedTenant({ me: ME, urlTenant: 'tenant-x' }), { tenant: 'tenant-x', unavailable: false, source: 'url' });
+    assert.deepEqual(selectableTenants(ME).map(tenant => tenant.id), ['tenant-a', 'tenant-b', 'tenant-u', 'tenant-m', 'tenant-x']);
+    const ME_ONLY = { tenants: [{ id: 'default', name: 'default', lifecycle_state: 'unsupported', lifecycle_generation: null }] };
+    assert.deepEqual(authorizedTenant({ me: ME_ONLY }), { tenant: 'default', unavailable: false, source: 'first' });
+    store.set('yakka-analytics-tenant', 'default');
+    assert.deepEqual(authorizedTenant({ me: ME_ONLY }), { tenant: 'default', unavailable: false, source: 'remembered' });
+    store.delete('yakka-analytics-tenant');
   } finally {
     globalThis.localStorage = previous;
   }
